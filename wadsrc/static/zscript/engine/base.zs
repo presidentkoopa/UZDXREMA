@@ -191,7 +191,7 @@ struct Vector3
 }
 */
 
-struct _ native	// These are the global variables, the struct is only here to avoid extending the parser for this.
+struct _ native unsafe(internal)	// These are the global variables, the struct is only here to avoid extending the parser for this.
 {
 	native readonly Array<class> AllClasses;
     native internal readonly Map<Name , Service> AllServices;
@@ -699,6 +699,10 @@ struct CVar native
 	native int GetInt();
 	native double GetFloat();
 	native String GetString();
+	bool GetDefaultBool() { return GetDefaultInt(); }
+	native int GetDefaultInt();
+	native double GetDefaultFloat();
+	native String GetDefaultString();
 	void SetBool(bool b) { SetInt(b); }
 	native void SetInt(int v);
 	native void SetFloat(double v);
@@ -769,6 +773,9 @@ class Object native
 	private native static void HandleDeprecatedFlags(Object obj, bool set, int index);
 	private native static bool CheckDeprecatedFlags(Object obj, int index);
 	
+	native static Name ValidateNameIndex(int index);
+	static class<Object> FindClass(Name cls, class<Object> baseType = null) { return BuiltinNameToClass(cls, baseType); }
+
 	native static uint MSTime();
 	native static double MSTimeF();
 	native vararg static void ThrowAbortException(String fmt, ...);
@@ -889,6 +896,9 @@ struct Wads	// todo: make FileSystem an alias to 'Wads'
 	native static string GetLumpName(int lump);
 	native static string GetLumpFullName(int lump);
 	native static int GetLumpNamespace(int lump);
+	native static int GetLumpContainer(int lump);
+	native static string GetContainerName(int lump);
+	native static string GetLumpFullPath(int lump);
 }
 
 enum EmptyTokenType
@@ -899,7 +909,7 @@ enum EmptyTokenType
 
 // Although String is a builtin type, this is a convenient way to attach methods to it.
 // All of these methods are available on strings
-struct StringStruct native
+struct StringStruct native unsafe(internal)
 {
 	native static vararg String Format(String fmt, ...);
 	native vararg void AppendFormat(String fmt, ...);
@@ -948,7 +958,7 @@ struct Translation version("2.4")
 }
 
 // Convenient way to attach functions to Quat
-struct QuatStruct native
+struct QuatStruct native unsafe(internal)
 {
 	native static Quat SLerp(Quat from, Quat to, double t);
 	native static Quat NLerp(Quat from, Quat to, double t);

@@ -170,6 +170,7 @@ CVAR(Bool, am_showmonsters, true, CVAR_ARCHIVE);
 CVAR(Bool, am_showitems, false, CVAR_ARCHIVE);
 CVAR(Bool, am_showtime, true, CVAR_ARCHIVE);
 CVAR(Bool, am_showtotaltime, false, CVAR_ARCHIVE);
+CVAR(Bool, am_showlevelname, true, CVAR_ARCHIVE);
 CVAR(Int, am_colorset, 0, CVAR_ARCHIVE);
 CVAR(Bool, am_customcolors, true, CVAR_ARCHIVE);
 CVAR(Int, am_map_secrets, 1, CVAR_ARCHIVE);
@@ -2910,11 +2911,18 @@ void DAutomap::drawKeys ()
 	mpoint_t p;
 	DAngle	 angle;
 
-	auto it = Level->GetThinkerIterator<AActor>(NAME_Key);
+	auto it = Level->GetThinkerIterator<AActor>(NAME_Inventory);
 	AActor *key;
 
 	while ((key = it.Next()) != nullptr)
 	{
+		auto cls = key->GetClass();
+		if (cls->IsDescendantOf(NAME_DehackedPickup))
+		{
+			cls = cls->ActorInfo()->Replacee;
+		}
+		if (!cls->IsDescendantOf(NAME_Key)) continue;
+
 		DVector3 pos = key->PosRelative(MapPortalGroup);
 		p.x = pos.X;
 		p.y = pos.Y;

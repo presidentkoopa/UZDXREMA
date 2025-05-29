@@ -86,6 +86,7 @@ EXTERN_CVAR (Bool, am_showsecrets)
 EXTERN_CVAR (Bool, am_showitems)
 EXTERN_CVAR (Bool, am_showtime)
 EXTERN_CVAR (Bool, am_showtotaltime)
+EXTERN_CVAR (Bool, am_showlevelname)
 EXTERN_CVAR(Bool, inter_subtitles)
 EXTERN_CVAR(Bool, ui_screenborder_classic_scaling)
 
@@ -389,7 +390,7 @@ DBaseStatusBar::DBaseStatusBar ()
 	CompleteBorder = false;
 	Centering = false;
 	FixedOrigin = false;
-	CrosshairSize = 1.;
+	CrosshairSize = PrevCrosshairSize = 1.;
 	memset(Messages, 0, sizeof(Messages));
 	Displacement = 0;
 	CPlayer = NULL;
@@ -599,6 +600,8 @@ void DBaseStatusBar::DoDrawAutomapHUD(int crdefault, int highlight)
 	}
 
 	FormatMapName(primaryLevel, crdefault, &textbuffer);
+	if (textbuffer.IsEmpty())
+		return;
 
 	if (!generic_ui)
 	{
@@ -680,6 +683,8 @@ int DBaseStatusBar::GetPlayer ()
 
 void DBaseStatusBar::Tick ()
 {
+	PrevCrosshairSize = CrosshairSize;
+
 	for (size_t i = 0; i < countof(Messages); ++i)
 	{
 		DHUDMessageBase *msg = Messages[i];
@@ -989,7 +994,7 @@ void DBaseStatusBar::RefreshBackground () const
 //
 //---------------------------------------------------------------------------
 
-void DBaseStatusBar::DrawCrosshair ()
+void DBaseStatusBar::DrawCrosshair (double ticFrac)
 {
 	auto vrmode = VRMode::GetVRMode(true);
 	if (!crosshairon || vrmode->IsVR())
@@ -1012,7 +1017,8 @@ void DBaseStatusBar::DrawCrosshair ()
 	}
 	int health = Scale(CPlayer->health, 100, CPlayer->mo->GetDefault()->health);
 
-	ST_DrawCrosshair(health, viewwidth / 2 + viewwindowx, viewheight / 2 + viewwindowy, CrosshairSize);
+	const double size = PrevCrosshairSize * (1.0 - ticFrac) + CrosshairSize * ticFrac;
+	ST_DrawCrosshair(health, viewwidth / 2 + viewwindowx, viewheight / 2 + viewwindowy, size);
 }
 
 //---------------------------------------------------------------------------
@@ -1084,7 +1090,7 @@ void DBaseStatusBar::Draw (EHudState state, double ticFrac)
 	{
 		if (CPlayer && CPlayer->camera && CPlayer->camera->player)
 		{
-			DrawCrosshair ();
+			DrawCrosshair (ticFrac);
 		}
 	}
 	else if (automapactive)

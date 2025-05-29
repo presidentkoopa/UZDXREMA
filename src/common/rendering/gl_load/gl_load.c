@@ -204,7 +204,7 @@ static PROC WinGetProcAddress(const char *name)
 	#else
 		#if defined (__MOBILE__)
 			#define IntGetProcAddress(name) MOBILE_GetProcAddress((const char*)name)
-		#elif defined(__sgi) || defined(__sun) || defined(__unix__)
+		#elif defined(__sgi) || defined(__sun) || defined(__unix__) || defined(__HAIKU__)
 			void* SDL_GL_GetProcAddress(const char* proc);
 			#define IntGetProcAddress(name) SDL_GL_GetProcAddress((const char*)name)
 			//#define IntGetProcAddress(name) PosixGetProcAddress((const GLubyte*)name)

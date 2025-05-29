@@ -53,6 +53,14 @@ struct FLevelLocals;
 
 // [RH] Particle details
 
+enum EParticleStyle
+{
+	PT_DEFAULT	= -1, // Use gl_particles_style
+	PT_SQUARE	= 0,
+	PT_ROUND	= 1,
+	PT_SMOOTH	= 2,
+};
+
 enum EParticleFlags
 {
 	SPF_FULLBRIGHT				= 1 << 0,
@@ -70,6 +78,7 @@ enum EParticleFlags
 	SPF_NOFACECAMERA			= 1 << 12,
 	SPF_ROLLCENTER				= 1 << 13,
 	SPF_STRETCHPIXELS			= 1 << 14,
+	SPF_ALLOWSHADERS			= 1 << 15,
 };
 
 class DVisualThinker;

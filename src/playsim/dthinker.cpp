@@ -355,12 +355,12 @@ void FThinkerCollection::SerializeThinkers(FSerializer &arc, bool hubLoad)
 								else if (thinker->ObjectFlags & OF_JustSpawned)
 								{
 									FreshThinkers[i].AddTail(thinker);
-									thinker->PostSerialize();
+									thinker->CallPostSerialize();
 								}
 								else
 								{
 									Thinkers[i].AddTail(thinker);
-									thinker->PostSerialize();
+									thinker->CallPostSerialize();
 								}
 							}
 						}
@@ -773,6 +773,16 @@ void DThinker::PostSerialize()
 {
 }
 
+void DThinker::CallPostSerialize()
+{
+	PostSerialize();
+	IFOVERRIDENVIRTUALPTRNAME(this, NAME_Thinker, OnLoad)
+	{
+		VMValue params[] = { this };
+		VMCall(func, params, 1, nullptr, 0);
+	}
+}
+
 //==========================================================================
 //
 // 
@@ -810,11 +820,7 @@ DEFINE_ACTION_FUNCTION_NATIVE(DThinker, ChangeStatNum, ChangeStatNum)
 	PARAM_SELF_PROLOGUE(DThinker);
 	PARAM_INT(stat);
 
-	// do not allow ZScript to reposition thinkers in or out of particle ticking.
-	if (stat != STAT_VISUALTHINKER && !dynamic_cast<DVisualThinker*>(self))
-	{
-		ChangeStatNum(self, stat);
-	}
+	ChangeStatNum(self, stat);
 	return 0;
 }
 

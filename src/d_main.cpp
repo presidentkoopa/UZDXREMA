@@ -318,8 +318,6 @@ CUSTOM_CVAR(Int, I_FriendlyWindowTitle, 1, CVAR_GLOBALCONFIG|CVAR_ARCHIVE|CVAR_N
 }
 CVAR(Bool, cl_nointros, false, CVAR_ARCHIVE)
 
-
-bool hud_toggled = false;
 bool wantToRestart;
 bool DrawFSHUD;				// [RH] Draw fullscreen HUD?
 bool devparm;				// started game with -devparm
@@ -364,16 +362,18 @@ static int pagetic;
 //
 //==========================================================================
 
+CVAR(Int, saved_screenblocks, 10, CVAR_ARCHIVE)
+CVAR(Bool, saved_drawplayersprite, true, CVAR_ARCHIVE)
+CVAR(Bool, saved_showmessages, true, CVAR_ARCHIVE)
+CVAR(Bool, hud_toggled, false, CVAR_ARCHIVE)
+
 void D_ToggleHud()
 {
-	static int saved_screenblocks;
-	static bool saved_drawplayersprite, saved_showmessages;
-
 	if ((hud_toggled = !hud_toggled))
 	{
-		saved_screenblocks = screenblocks;
-		saved_drawplayersprite = r_drawplayersprites;
-		saved_showmessages = show_messages;
+		saved_screenblocks = *screenblocks;
+		saved_drawplayersprite = *r_drawplayersprites;
+		saved_showmessages = *show_messages;
 		screenblocks = 12;
 		r_drawplayersprites = false;
 		show_messages = false;
@@ -382,9 +382,9 @@ void D_ToggleHud()
 	}
 	else
 	{
-		screenblocks = saved_screenblocks;
-		r_drawplayersprites = saved_drawplayersprite;
-		show_messages = saved_showmessages;
+		screenblocks =*saved_screenblocks;
+		r_drawplayersprites = *saved_drawplayersprite;
+		show_messages = *saved_showmessages;
 	}
 }
 CCMD(togglehud)
@@ -1096,7 +1096,7 @@ void D_Display ()
 				if (DrawFSHUD || automapactive) StatusBar->DrawAltHUD();
 				if (players[consoleplayer].camera && players[consoleplayer].camera->player && !automapactive)
 				{
-					StatusBar->DrawCrosshair();
+					StatusBar->DrawCrosshair(vp.TicFrac);
 				}
 				StatusBar->CallDraw (HUD_AltHud, vp.TicFrac);
 				StatusBar->DrawTopStuff (HUD_AltHud);
@@ -3276,9 +3276,10 @@ static int D_InitGame(const FIWADInfo* iwad_info, std::vector<std::string>& allw
 
 	lfi.gameTypeFilter.push_back(LumpFilterIWAD.GetChars());
 	// Workaround for old Doom filter names.
-	if (LumpFilterIWAD.Compare("doom.id.doom") == 0)
+	if (LumpFilterIWAD.IndexOf("doom.id.doom") >= 0)
 	{
-		lfi.gameTypeFilter.push_back("doom.doom");
+		FString NewFilterName = (FString)"doom.doom" + LumpFilterIWAD.Mid(12); // "doom.id.doom" is 12 characters
+		lfi.gameTypeFilter.push_back(NewFilterName.GetChars());
 	}
 
 

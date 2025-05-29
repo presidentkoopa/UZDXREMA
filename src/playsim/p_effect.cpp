@@ -214,15 +214,13 @@ void P_FindParticleSubsectors (FLevelLocals *Level)
 	{
 		Level->subsectors[i].sprites.Clear();
 	}
-	// [MC] Not too happy about using an iterator for this but I can't think of another way to handle it.
-	// At least it's on its own statnum for maximum efficiency.
-	auto it = Level->GetThinkerIterator<DVisualThinker>(NAME_None, STAT_VISUALTHINKER);
-	DVisualThinker* sp;
-	while (sp = it.Next())
+	auto sp = Level->VisualThinkerHead;
+	while (sp != nullptr)
 	{
 		if (!sp->PT.subsector) sp->PT.subsector = Level->PointInRenderSubsector(sp->PT.Pos);
 
 		sp->PT.subsector->sprites.Push(sp);
+		sp = sp->GetNext();
 	}
 	// End VisualThinker hitching. Now onto the particles. 
 	if (Level->ParticlesInSubsec.Size() < Level->subsectors.Size())
@@ -1010,26 +1008,38 @@ void DVisualThinker::Construct()
 	cursector = nullptr;
 	PT.color = 0xffffff;
 	AnimatedTexture.SetNull();
-}
 
-DVisualThinker::DVisualThinker()
-{
-	Construct();
+	_prev = _next = nullptr;
+	if (Level->VisualThinkerHead != nullptr)
+	{
+		Level->VisualThinkerHead->_prev = this;
+		_next = Level->VisualThinkerHead;
+	}
+	Level->VisualThinkerHead = this;
 }
 
 void DVisualThinker::OnDestroy()
 {
+	if (_prev != nullptr)
+		_prev->_next = _next;
+	if (_next != nullptr)
+		_next->_prev = _prev;
+	if (Level->VisualThinkerHead == this)
+		Level->VisualThinkerHead = _next;
+
 	PT.alpha = 0.0; // stops all rendering.
 	Super::OnDestroy();
+}
+
+DVisualThinker* DVisualThinker::GetNext() const
+{
+	return _next;
 }
 
 DVisualThinker* DVisualThinker::NewVisualThinker(FLevelLocals* Level, PClass* type)
 {
 	if (type == nullptr)
-		return nullptr;
-	else if (type->bAbstract)
 	{
-		Printf("Attempt to spawn an instance of abstract VisualThinker class %s\n", type->TypeName.GetChars());
 		return nullptr;
 	}
 	else if (!type->IsDescendantOf(RUNTIME_CLASS(DVisualThinker)))
@@ -1037,9 +1047,24 @@ DVisualThinker* DVisualThinker::NewVisualThinker(FLevelLocals* Level, PClass* ty
 		Printf("Attempt to spawn class not inherent to VisualThinker: %s\n", type->TypeName.GetChars());
 		return nullptr;
 	}
+	else if (type->bAbstract)
+	{
+		Printf("Attempt to spawn an instance of abstract VisualThinker class %s\n", type->TypeName.GetChars());
+		return nullptr;
+	}
 
-	DVisualThinker *zs = static_cast<DVisualThinker*>(Level->CreateThinker(type, STAT_VISUALTHINKER));
+	auto zs = static_cast<DVisualThinker*>(Level->CreateThinker(type, DVisualThinker::DEFAULT_STAT));
 	zs->Construct();
+
+	IFOVERRIDENVIRTUALPTRNAME(zs, NAME_VisualThinker, BeginPlay)
+	{
+		VMValue params[] = { zs };
+		VMCall(func, params, 1, nullptr, 0);
+
+		if (zs->ObjectFlags & OF_EuthanizeMe)
+			return nullptr;
+	}
+
 	return zs;
 }
 
@@ -1086,7 +1111,8 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SpawnVisualThinker, SpawnVisualThink
 void DVisualThinker::UpdateSpriteInfo()
 {
 	PT.style = ERenderStyle(GetRenderStyle());
-	if((PT.flags & SPF_LOCAL_ANIM) && PT.texture != AnimatedTexture)
+
+	if ((PT.flags & SPF_LOCAL_ANIM) && PT.texture != AnimatedTexture)
 	{
 		AnimatedTexture = PT.texture;
 		TexAnim.InitStandaloneAnimation(PT.animData, PT.texture, Level->maptime);
@@ -1105,6 +1131,10 @@ DEFINE_ACTION_FUNCTION_NATIVE(DVisualThinker, UpdateSpriteInfo, UpdateSpriteInfo
 	return 0;
 }
 
+bool DVisualThinker::ValidTexture()
+{
+	return ((flags & VTF_IsParticle) || PT.texture.isValid());
+}
 
 // This runs just like Actor's, make sure to call Super.Tick() in ZScript.
 void DVisualThinker::Tick()
@@ -1112,10 +1142,8 @@ void DVisualThinker::Tick()
 	if (ObjectFlags & OF_EuthanizeMe)
 		return;
 
-	// There won't be a standard particle for this, it's only for graphics.
-	if (!PT.texture.isValid())
+	if (!ValidTexture())
 	{
-		Printf("No valid texture, destroyed");
 		Destroy();
 		return;
 	}
@@ -1134,7 +1162,6 @@ void DVisualThinker::Tick()
 	PT.Pos.X = newxy.X;
 	PT.Pos.Y = newxy.Y;
 	PT.Pos.Z += PT.Vel.Z;
-
 	subsector_t * ss = Level->PointInRenderSubsector(PT.Pos);
 
 	// Handle crossing a sector portal.
@@ -1224,7 +1251,33 @@ DEFINE_ACTION_FUNCTION_NATIVE(DVisualThinker, SetTranslation, SetTranslation)
 	return 0;
 }
 
-static int IsFrozen(DVisualThinker * self)
+int DVisualThinker::GetParticleType() const
+{
+	int flag = (flags & VTF_IsParticle);
+	switch (flag)
+	{
+	case VTF_ParticleSquare:
+		return PT_SQUARE;
+	case VTF_ParticleRound:
+		return PT_ROUND;
+	case VTF_ParticleSmooth:
+		return PT_SMOOTH;
+	}
+	return PT_DEFAULT;
+}
+
+static int GetParticleType(DVisualThinker* self)
+{
+	return self->GetParticleType();
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(DVisualThinker, GetParticleType, GetParticleType)
+{
+	PARAM_SELF_PROLOGUE(DVisualThinker);
+	ACTION_RETURN_INT(self->GetParticleType());
+}
+
+static int IsFrozen(DVisualThinker* self)
 {
 	return !!(self->Level->isFrozen() && !(self->PT.flags & SPF_NOTIMEFREEZE));
 }
@@ -1257,9 +1310,20 @@ DEFINE_ACTION_FUNCTION_NATIVE(DVisualThinker, SetRenderStyle, SetRenderStyle)
 	return 0;
 }
 
-int DVisualThinker::GetRenderStyle()
+int DVisualThinker::GetRenderStyle() const
 {
 	return PT.style;
+}
+
+static int GetRenderStyle(DVisualThinker* self)
+{
+	return self->GetRenderStyle();
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(DVisualThinker, GetRenderStyle, GetRenderStyle)
+{
+	PARAM_SELF_PROLOGUE(DVisualThinker);
+	ACTION_RETURN_INT(self->GetRenderStyle());
 }
 
 float DVisualThinker::GetOffset(bool y) const // Needed for the renderer.
@@ -1287,7 +1351,7 @@ void DVisualThinker::Serialize(FSerializer& arc)
 {
 	Super::Serialize(arc);
 
-	arc ("pos", PT.Pos)
+	arc("pos", PT.Pos)
 		("vel", PT.Vel)
 		("prev", Prev)
 		("scale", Scale)
@@ -1303,7 +1367,9 @@ void DVisualThinker::Serialize(FSerializer& arc)
 		("lightlevel", LightLevel)
 		("animData", PT.animData)
 		("flags", PT.flags)
-		("visualThinkerFlags", flags);
+		("visualThinkerFlags", flags)
+		("next", _next)
+		("prev", _prev);
     
     if(arc.isReading())
     {

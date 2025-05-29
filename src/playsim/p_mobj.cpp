@@ -185,7 +185,6 @@ IMPLEMENT_POINTERS_START(AActor)
 	IMPLEMENT_POINTER(alternative)
 	IMPLEMENT_POINTER(ViewPos)
 	IMPLEMENT_POINTER(modelData)
-	IMPLEMENT_POINTER(boneComponentData)
 IMPLEMENT_POINTERS_END
 
 //==========================================================================
@@ -225,7 +224,6 @@ void AActor::Serialize(FSerializer &arc)
 		A("angles", Angles)
 		A("frame", frame)
 		A("scale", Scale)
-		A("nolocalrender", NoLocalRender) // Note: This will probably be removed later since a better solution is needed
 		A("renderstyle", RenderStyle)
 		A("renderflags", renderflags)
 		A("renderflags2", renderflags2)
@@ -1726,7 +1724,7 @@ DEFINE_ACTION_FUNCTION(AActor, ExplodeMissile)
 }
 
 
-void AActor::PlayBounceSound(bool onfloor)
+void AActor::PlayBounceSound(bool onfloor, double volume)
 {
 	if (!onfloor && (BounceFlags & BOUNCE_NoWallSound))
 	{
@@ -1735,17 +1733,18 @@ void AActor::PlayBounceSound(bool onfloor)
 
 	if (!(BounceFlags & BOUNCE_Quiet))
 	{
+		volume = clamp(volume, 0.0, 1.0);
 		if (BounceFlags & BOUNCE_UseSeeSound)
 		{
-			S_Sound (this, CHAN_VOICE, 0, SeeSound, 1, ATTN_IDLE);
+			S_Sound (this, CHAN_VOICE, 0, SeeSound, (float)volume, ATTN_IDLE);
 		}
 		else if (onfloor || !WallBounceSound.isvalid())
 		{
-			S_Sound (this, CHAN_VOICE, 0, BounceSound, 1, ATTN_IDLE);
+			S_Sound (this, CHAN_VOICE, 0, BounceSound, (float)volume, ATTN_IDLE);
 		}
 		else
 		{
-			S_Sound (this, CHAN_VOICE, 0, WallBounceSound, 1, ATTN_IDLE);
+			S_Sound (this, CHAN_VOICE, 0, WallBounceSound, (float)volume, ATTN_IDLE);
 		}
 	}
 }
@@ -1761,7 +1760,7 @@ bool AActor::FloorBounceMissile (secplane_t &plane, bool is3DFloor)
 {
 	if (flags & MF_MISSILE)
 	{
-		switch (SpecialBounceHit(nullptr, nullptr, &plane))
+		switch (SpecialBounceHit(nullptr, nullptr, &plane, is3DFloor))
 		{
 			// This one is backwards for some reason...
 			case 1:		return false;
@@ -1842,7 +1841,8 @@ bool AActor::FloorBounceMissile (secplane_t &plane, bool is3DFloor)
 	if (BounceFlags & (BOUNCE_HereticType | BOUNCE_MBF))
 	{
 		Vel -= norm * dot;
-		AngleFromVel();
+		if (!(BounceFlags & BOUNCE_KeepAngle))
+			AngleFromVel();
 		if (!(BounceFlags & BOUNCE_MBF)) // Heretic projectiles die, MBF projectiles don't.
 		{
 			flags |= MF_INBOUNCE;
@@ -1856,10 +1856,14 @@ bool AActor::FloorBounceMissile (secplane_t &plane, bool is3DFloor)
 	{
 		// The reflected velocity keeps only about 70% of its original speed
 		Vel = (Vel - norm * dot) * bouncefactor;
-		AngleFromVel();
+		if (!(BounceFlags & BOUNCE_KeepAngle))
+			AngleFromVel();
 	}
 
-	PlayBounceSound(true);
+	if (BounceFlags & BOUNCE_ModifyPitch)
+		Angles.Pitch = -VecToAngle(Vel.XY().Length(), Vel.Z);
+
+	PlayBounceSound(true, 1.0);
 
 	// Set bounce state
 	if (BounceFlags & BOUNCE_UseBounceState)
@@ -2118,7 +2122,7 @@ double P_XYMovement (AActor *mo, DVector2 scroll)
 
 	if (move.isZero())
 	{
-		if (mo->flags & MF_SKULLFLY)
+		if ((mo->flags & MF_SKULLFLY) && !(mo->flags9 & MF9_NOAUTOOFFSKULLFLY))
 		{
 			// the skull slammed into something
 			mo->flags &= ~MF_SKULLFLY;
@@ -2339,7 +2343,7 @@ double P_XYMovement (AActor *mo, DVector2 scroll)
 					// Struck a wall
 					if (P_BounceWall (mo))
 					{
-						mo->PlayBounceSound(false);
+						mo->PlayBounceSound(false, 1.0);
 						return Oldfloorz;
 					}
 				}
@@ -3433,15 +3437,15 @@ int AActor::SpecialMissileHit (AActor *victim)
 }
 
 // This virtual method only exists on the script side.
-int AActor::SpecialBounceHit(AActor* bounceMobj, line_t* bounceLine, secplane_t* bouncePlane)
+int AActor::SpecialBounceHit(AActor* bounceMobj, line_t* bounceLine, secplane_t* bouncePlane, bool is3DFloor)
 {
 	IFVIRTUAL(AActor, SpecialBounceHit)
 	{
-		VMValue params[4] = { (DObject*)this, bounceMobj, bounceLine, bouncePlane };
+		VMValue params[] = { (DObject*)this, bounceMobj, bounceLine, bouncePlane, is3DFloor };
 		VMReturn ret;
 		int retval;
 		ret.IntAt(&retval);
-		VMCall(func, params, 4, &ret, 1);
+		VMCall(func, params, 5, &ret, 1);
 		return retval;
 	}
 	else return -1;
@@ -5744,8 +5748,10 @@ AActor *FLevelLocals::SpawnPlayer (FPlayerStart *mthing, int playernum, int flag
 
 	IFVIRTUALPTRNAME(p->mo, NAME_PlayerPawn, ResetAirSupply)
 	{
+		int drowning = 0;
 		VMValue params[] = { p->mo, false };
-		VMCall(func, params, 2, nullptr, 0);
+		VMReturn rets[] = { &drowning };
+		VMCall(func, params, 2, rets, 1);
 	}
 
 	for (int ii = 0; ii < MAXPLAYERS; ++ii)
@@ -5780,7 +5786,7 @@ AActor *FLevelLocals::SpawnPlayer (FPlayerStart *mthing, int playernum, int flag
 		IFVM(PlayerPawn, FilterCoopRespawnInventory)
 		{
 			VMValue params[] = { p->mo, oldactor, ((heldWeap == nullptr || (heldWeap->ObjectFlags & OF_EuthanizeMe)) ? nullptr : heldWeap) };
-			VMCall(func, params, 2, nullptr, 0);
+			VMCall(func, params, 3, nullptr, 0);
 		}
 	}
 	if (oldactor != NULL)
@@ -6399,9 +6405,9 @@ DEFINE_ACTION_FUNCTION(AActor, SpawnPuff)
 // 
 //---------------------------------------------------------------------------
 
-void P_SpawnBlood (const DVector3 &pos1, DAngle dir, int damage, AActor *originator)
+AActor *P_SpawnBlood (const DVector3 &pos1, DAngle dir, int damage, AActor *originator)
 {
-	AActor *th;
+	AActor *th = nullptr;
 	PClassActor *bloodcls = originator->GetBloodType();
 	DVector3 pos = pos1;
 	pos.Z += pr_spawnblood.Random2() / 64.;
@@ -6486,6 +6492,8 @@ void P_SpawnBlood (const DVector3 &pos1, DAngle dir, int damage, AActor *origina
 
 	if (bloodtype >= 1)
 		P_DrawSplash2 (originator->Level, 40, pos, dir, 2, originator->BloodColor);
+
+	return th;
 }
 
 DEFINE_ACTION_FUNCTION(AActor, SpawnBlood)
@@ -6496,8 +6504,7 @@ DEFINE_ACTION_FUNCTION(AActor, SpawnBlood)
 	PARAM_FLOAT(z);
 	PARAM_ANGLE(dir);
 	PARAM_INT(damage);
-	P_SpawnBlood(DVector3(x, y, z), dir, damage, self);
-	return 0;
+	ACTION_RETURN_OBJECT(P_SpawnBlood(DVector3(x, y, z), dir, damage, self));
 }
 
 

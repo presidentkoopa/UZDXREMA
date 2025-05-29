@@ -327,7 +327,7 @@ CCMD (turnspeeds)
 		}
 		if (i <= 4)
 		{
-			*angleturn[3] = *angleturn[2];
+			*angleturn[3] = **angleturn[2];
 		}
 	}
 }
@@ -1101,6 +1101,8 @@ bool G_Responder (event_t *ev)
 	if (gameaction == ga_nothing && 
 		(demoplayback || gamestate == GS_DEMOSCREEN || gamestate == GS_TITLELEVEL))
 	{
+		if (chatmodeon) chatmodeon = 0;
+
 		const char *cmd = Bindings.GetBind (ev->data1);
 
 		if (ev->type == EV_KeyDown)
@@ -1254,7 +1256,7 @@ void G_Ticker ()
 			}
 			if (players[i].playerstate == PST_REBORN || players[i].playerstate == PST_ENTER)
 			{
-				primaryLevel->DoReborn(i, false);
+				primaryLevel->DoReborn(i);
 			}
 		}
 	}
@@ -1868,7 +1870,7 @@ void FLevelLocals::QueueBody (AActor *body)
 // G_DoReborn
 //
 EXTERN_CVAR(Bool, sv_singleplayerrespawn)
-void FLevelLocals::DoReborn (int playernum, bool freshbot)
+void FLevelLocals::DoReborn (int playernum, bool force)
 {
 	if (!multiplayer && !(flags2 & LEVEL2_ALLOWRESPAWN) && !sv_singleplayerrespawn &&
 		!G_SkillProperty(SKILLP_PlayerRespawn))
@@ -1888,6 +1890,13 @@ void FLevelLocals::DoReborn (int playernum, bool freshbot)
 	}
 	else
 	{
+		// Check if the player should be allowed to actually respawn first.
+		if (!force && players[playernum].playerstate == PST_REBORN && !localEventManager->PlayerRespawning(playernum))
+		{
+			players[playernum].playerstate = PST_DEAD;
+			return;
+		}
+
 		bool isUnfriendly;
 
 		PlayerSpawnPickClass(playernum);
@@ -3224,10 +3233,10 @@ bool G_CheckDemoStatus (void)
 	return false; 
 }
 
-void G_StartSlideshow(FLevelLocals *Level, FName whichone)
+void G_StartSlideshow(FLevelLocals *Level, FName whichone, int state)
 {
 	auto SelectedSlideshow = whichone == NAME_None ? Level->info->slideshow : whichone;
-	auto slide = F_StartIntermission(SelectedSlideshow);
+	auto slide = F_StartIntermission(SelectedSlideshow, state);
 	RunIntermission(nullptr, nullptr, slide, nullptr, [](bool)
 	{
 		primaryLevel->SetMusic();
@@ -3242,7 +3251,7 @@ DEFINE_ACTION_FUNCTION(FLevelLocals, StartSlideshow)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
 	PARAM_NAME(whichone);
-	G_StartSlideshow(self, whichone);
+	G_StartSlideshow(self, whichone, FSTATE_InLevel);
 	return 0;
 }
 

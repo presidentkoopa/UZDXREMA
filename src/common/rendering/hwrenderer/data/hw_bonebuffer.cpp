@@ -75,6 +75,7 @@ void BoneBuffer::Clear()
 
 int BoneBuffer::UploadBones(const TArray<VSMatrix>& bones)
 {
+	Map();
 	int totalsize = bones.Size();
 	if (totalsize > (int)mMaxUploadSize)
 	{
@@ -92,11 +93,13 @@ int BoneBuffer::UploadBones(const TArray<VSMatrix>& bones)
 	{
 		memcpy(mBufferPointer + thisindex * BONE_SIZE, bones.Data(), totalsize * BONE_SIZE);
 		bonebuffer_curindex = thisindex;
+		Unmap();
 		return thisindex;
 	}
 	else
 	{
 		DPrintf(DMSG_WARNING, "We have run out of BUFFERS!, mIndex=%d\n", thisindex + totalsize);
+		Unmap();
 		return -1;	// Buffer is full. Since it is being used live at the point of the upload we cannot do much here but to abort.
 	}
 }
