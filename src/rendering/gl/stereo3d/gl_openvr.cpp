@@ -396,13 +396,13 @@ namespace s3d
 			return 0;
 		}
 
-		virtual void RenderFrame(FModelRenderer* renderer, FGameTexture* skin, int frame, int frame2, double inter, FTranslationID translation, const FTextureID* surfaceskinids, const TArray<VSMatrix>& boneData, int boneStartPosition) override
+		virtual void RenderFrame(FModelRenderer* renderer, FGameTexture* skin, int frame, int frame2, double inter, FTranslationID translation, const FTextureID* surfaceskinids, int boneStartPosition) override
 		{
 			if (!isLoaded())
 				return;
 			FMaterial* tex = FMaterial::ValidateTexture(pFTex, false, false);
 			auto vbuf = GetVertexBuffer(renderer->GetType());
-			renderer->SetupFrame(this, 0, 0, 0, {}, -1);
+			renderer->SetupFrame(this, 0, 0, 0, -1);
 			renderer->SetMaterial(pFTex, CLAMP_NONE, translation);
 			renderer->DrawElements(pModel->unTriangleCount * 3, 0);
 		}
