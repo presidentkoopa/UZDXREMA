@@ -1220,7 +1220,7 @@ class OptionMenuItemCommandInput : OptionMenuItemTextField
 		Super.Init(label, "");
 	}
 
-	private native static void DoCommand(String cmd, bool unsafe);
+	private native static void DoCommand(String cmd, bool is_unsafe);
 
 	override bool MenuEvent(int mkey, bool fromcontroller)
 	{
