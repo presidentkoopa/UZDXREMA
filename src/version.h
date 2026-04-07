@@ -41,31 +41,31 @@ const char *GetVersionString();
 
 /** Lots of different version numbers **/
 
-#define VERSIONSTR "4.14.2"
+#define VERSIONSTR "4.14.3"
 
 // The version as seen in the Windows resource
-#define RC_FILEVERSION 4,14,2,0
-#define RC_PRODUCTVERSION 4,14,2,0
+#define RC_FILEVERSION 4,14,3,0
+#define RC_PRODUCTVERSION 4,14,3,0
 #define RC_PRODUCTVERSION2 VERSIONSTR
 // These are for content versioning.
 #define VER_MAJOR 4
 #define VER_MINOR 14
-#define VER_REVISION 2
+#define VER_REVISION 3
 
-// This should always refer to the GZDoom version a derived port is based on and not reflect the derived port's version number!
+// This should always refer to the UZDoom version a derived port is based on and not reflect the derived port's version number!
 #define ENG_MAJOR 4
 #define ENG_MINOR 14
-#define ENG_REVISION 2
+#define ENG_REVISION 3
 
 // Version identifier for network games.
 // Bump it every time you do a release unless you're certain you
 // didn't change anything that will affect sync.
-#define NETGAMEVERSION 236
+#define NETGAMEVERSION 235
 
 // Version stored in the ini's [LastRun] section.
 // Bump it if you made some configuration change that you want to
 // be able to migrate in FGameConfigFile::DoGlobalSetup().
-#define LASTRUNVERSION "226"
+#define LASTRUNVERSION "228"
 
 // Protocol version used in demos.
 // Bump it if you change existing DEM_ commands or add new ones.
@@ -91,23 +91,28 @@ const char *GetVersionString();
 #define SAVEVER 4560
 
 // This is so that derivates can use the same savegame versions without worrying about engine compatibility
-#define GAMESIG "QZDOOM"
+#define GAMESIG "UZDOOM"
+
+#ifndef LOAD_GZDOOM_4142_SAVES
+#define LOAD_GZDOOM_4142_SAVES 1
+#endif
+
 #ifdef __ANDROID__
-#define BASEWAD "res/qzdoom.pk3"
-#define OPTIONALWAD "res/game_support.pk3"
+#define BASEWAD "res/uzdoom.pk3"
 #else
-#define BASEWAD "qzdoom.pk3"
+#define BASEWAD "uzdoom.pk3"
+#endif
 // Set OPTIONALWAD to "" (null) to disable searching for it
 #define OPTIONALWAD "game_support.pk3"
-#endif
 
 #define GZDOOM 1
 #define VR3D_ENABLED
 
 // More stuff that needs to be different for derivatives.
-#define GAMENAME "QZDoom"
-#define WGAMENAME L"QZDoom"
-#define GAMENAMELOWERCASE "qzdoom"
+#define GAMENAME "UZDoom"
+#define WGAMENAME L"UZDoom"
+#define GAMENAMELOWERCASE "uzdoom"
+#define APPID "org.zdoom.UZDoom"
 #define QUERYIWADDEFAULT true
 #define FORUM_URL "http://forum.zdoom.org/"
 #define BUGS_FORUM_URL	"http://forum.zdoom.org/viewforum.php?f=2"
@@ -118,16 +123,13 @@ const char *GetVersionString();
 #define GAME_DIR GAMENAME
 #elif defined(__HAIKU__)
 #define GAME_DIR "config/settings/" GAMENAME
-#else
-#define GAME_DIR ".config/" GAMENAMELOWERCASE
 #endif
 
-#define DEFAULT_DISCORD_APP_ID "951303644597325885"
+#define DEFAULT_DISCORD_APP_ID "1428620310302691349"
 
 const int SAVEPICWIDTH = 216;
 const int SAVEPICHEIGHT = 162;
 const int VID_MIN_WIDTH = 320;
 const int VID_MIN_HEIGHT = 200;
-
 
 #endif //__VERSION_H__
