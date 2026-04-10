@@ -1,9 +1,34 @@
-# Welcome to UZDoom!
+![Doom XR Edition](https://github.com/iAmErmac/DoomXR/blob/doomxr/branding/banner.png)
+# DoomXR is a VR port based on QuestZDoom and UZDoom!
 
-[![Continuous Integration](https://github.com/UZDoom/UZDoom/actions/workflows/continuous_integration.yml/badge.svg)](https://github.com/UZDoom/UZDoom/actions/workflows/continuous_integration.yml)
+[![Continuous Integration](https://github.com/iAmErmac/DoomXR/actions/workflows/continuous_integration.yml/badge.svg)](https://github.com/iAmErmac/DoomXR/actions/workflows/continuous_integration.yml)
 [![Translation status](https://hosted.weblate.org/widget/uzdoom/svg-badge.svg)](https://hosted.weblate.org/engage/uzdoom/)
 
-## UZDoom is a modder-friendly OpenGL and Vulkan source port based on the DOOM engine
+Built/tested on HP Reverb and Oculus Quest using Virtual Desktop but other VR setups should work as long they are compatible with OpenVR API.
+
+This build exposes OpenVR controller input for definition (you will need to define the controls). Both hands are tracked for the weapons.
+
+## Controller Info
+### Index Controllers
+To get the most out of your Index Controllers, choose the Community Binding "Index Controller Bindings" by gameflorist in SteamVR. It makes the maximum buttons available for binding in DoomXR.
+
+## Mods
+There are some optional mods tested for using with this fork
+
+- https://github.com/hh79/gz3doom/files/4378108/HDVRweapons.zip HD weapon pack made by ajantaju
+
+- https://github.com/ajantaju/br_vr weapon pack made for Brutal Doom
+
+- https://github.com/dxt121730/BD64Weapons weapon pack for Brutal Doom 64 by dxt121730
+
+- https://github.com/mmaulwurff/laser-sight/releases laser sight mod, you need this for aiming
+
+- https://github.com/iAmErmac/Virtual-Tactical-Vest adds a virtual vest with weapon slots by iAmErmac
+
+- https://www.moddb.com/downloads/doom-neural-upscale-2x texture upscale mod
+
+- https://forum.zdoom.org/download/file.php?id=30459&sid=df63736751c12c3ebb76230d1dc86543 blood color fixer mod
+---
 
 Copyright (c) 1998-2025 ZDoom + GZDoom + UZDoom teams, and contributors
 
@@ -34,3 +59,12 @@ Build For [Windows](https://github.com/UZDoom/UZDoom/wiki/Compilation#windows).
 - https://dsc.gg/zdoom - Discord Server
 
 [![Translation status](https://hosted.weblate.org/widget/uzdoom/open-graph.png)](https://hosted.weblate.org/engage/uzdoom/)
+
+---
+
+# Credits
+- [ZDoom + GZDoom + UZDoom teams](https://zdoom.org/) - The team behind the engine this based upon
+- [Emile Belanger](http://www.beloko.com/) - The developer behind the android port
+- [Team Beef](https://github.com/Team-Beef-Studios) - For the awesome work behind the VR port for the Oculus Quest device
+- [Emanuele Disco](https://github.com/emawind84) - QuestZDoom PCVR port and QoL performance/dual wielding/integrated mod loader and much more extended features on his QuestZDoom fork
+- [Ermac](https://github.com/iAmErmac/) - DoomXR port based on QuestZDoom fork by Emanuele Disco
