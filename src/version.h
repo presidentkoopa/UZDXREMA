@@ -98,9 +98,9 @@ const char *GetVersionString();
 #endif
 
 #ifdef __ANDROID__
-#define BASEWAD "res/uzdoom.pk3"
+#define BASEWAD "res/doomxr.pk3"
 #else
-#define BASEWAD "uzdoom.pk3"
+#define BASEWAD "doomxr.pk3"
 #endif
 // Set OPTIONALWAD to "" (null) to disable searching for it
 #define OPTIONALWAD "game_support.pk3"
@@ -109,10 +109,10 @@ const char *GetVersionString();
 #define VR3D_ENABLED
 
 // More stuff that needs to be different for derivatives.
-#define GAMENAME "UZDoom"
-#define WGAMENAME L"UZDoom"
-#define GAMENAMELOWERCASE "uzdoom"
-#define APPID "org.zdoom.UZDoom"
+#define GAMENAME "DoomXR"
+#define WGAMENAME L"DoomXR"
+#define GAMENAMELOWERCASE "doomxr"
+#define APPID "org.zdoom.DoomXR"
 #define QUERYIWADDEFAULT true
 #define FORUM_URL "http://forum.zdoom.org/"
 #define BUGS_FORUM_URL	"http://forum.zdoom.org/viewforum.php?f=2"
