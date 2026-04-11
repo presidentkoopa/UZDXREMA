@@ -60,7 +60,9 @@
 #include "hwrenderer/data/flatvertices.h"
 #include "hwrenderer/data/hw_viewpointbuffer.h"
 #include "texturemanager.h"
+#include "hwrenderer/scene/hw_weapon.h"
 #include "hwrenderer/scene/hw_drawinfo.h"
+#include "hwrenderer/data/hw_vrmodes.h"
 
 #include "gl_openvr.h"
 // #include "openvr_include.h"
@@ -239,6 +241,17 @@ EXTERN_CVAR(Float, vr_hud_rotate);
 EXTERN_CVAR(Bool, vr_hud_fixed_pitch);
 EXTERN_CVAR(Bool, vr_hud_fixed_roll);
 
+//Mounted HUD
+EXTERN_CVAR(Bool, vr_hud_mount);
+EXTERN_CVAR(Int, vr_hud_mount_pos);
+EXTERN_CVAR(Float, vr_hud_mount_scale);
+EXTERN_CVAR(Float, vr_hud_mount_xoffset);
+EXTERN_CVAR(Float, vr_hud_mount_yoffset);
+EXTERN_CVAR(Float, vr_hud_mount_zoffset);
+EXTERN_CVAR(Bool, vr_hud_mount_pitch);
+EXTERN_CVAR(Float, vr_hud_mount_yaw);
+EXTERN_CVAR(Bool, vr_hud_mount_roll);
+
 //Automap  control
 EXTERN_CVAR(Bool, vr_automap_use_hud);
 EXTERN_CVAR(Float, vr_automap_scale);
@@ -248,6 +261,18 @@ EXTERN_CVAR(Float, vr_automap_rotate);
 EXTERN_CVAR(Bool, vr_automap_fixed_pitch);
 EXTERN_CVAR(Bool, vr_automap_fixed_roll);
 
+//Mounted Automap
+EXTERN_CVAR(Bool, vr_automap_mount);
+EXTERN_CVAR(Int, vr_automap_mount_pos);
+EXTERN_CVAR(Float, vr_automap_mount_scale);
+EXTERN_CVAR(Float, vr_automap_mount_xoffset);
+EXTERN_CVAR(Float, vr_automap_mount_yoffset);
+EXTERN_CVAR(Float, vr_automap_mount_zoffset);
+EXTERN_CVAR(Bool, vr_automap_mount_pitch);
+EXTERN_CVAR(Float, vr_automap_mount_yaw);
+EXTERN_CVAR(Bool, vr_automap_mount_roll);
+EXTERN_CVAR(Int, vr_automap_border);
+EXTERN_CVAR(Color, vr_automap_border_color);
 
 const float DEAD_ZONE = 0.25f;
 
@@ -1039,9 +1064,13 @@ namespace s3d
 
 	void OpenVREyePose::AdjustHud() const
 	{
-		// Draw crosshair on a separate quad, before updating HUD matrix
+		// Keep the regular camera-mounted HUD path working for non-mounted mode.
 		const auto vrmode = VRMode::GetVRMode(true);
 		if (vrmode->mEyeCount == 1)
+		{
+			return;
+		}
+		if (VR_ShouldDrawMountedHud())
 		{
 			return;
 		}
@@ -1050,6 +1079,53 @@ namespace s3d
 		di->VPUniforms.mProjectionMatrix = getHUDProjection();
 		ApplyVPUniforms(di);
 		di->EndDrawInfo();
+	}
+
+	void OpenVRMode::DrawMountedHud(HWDrawInfo* di, FRenderState& state) const
+	{
+		if (!VR_ShouldDrawMountedHud() || di == nullptr)
+		{
+			return;
+		}
+
+		auto& surface = GetVRHudSurface();
+		VSMatrix mountTransform;
+		if (!VR_GetMountedHudTransform(mountTransform))
+		{
+			return;
+		}
+
+		// Use mode-specific scale to ensure quad aspect ratio is correct for HUD vs Map
+		const float mountScale = automapactive ? vr_automap_mount_scale : vr_hud_mount_scale;
+		const float pixelUnit = mountScale * 0.002f;
+		const float baseWidth = (float)surface.GetWidth() * pixelUnit;
+		const float baseHeight = (float)surface.GetHeight() * pixelUnit;
+
+		auto savedMatrix = state.mModelMatrix;
+		state.mModelMatrix = mountTransform;
+		state.EnableModelMatrix(true);
+		di->DrawHudQuad(state, surface.GetGameTexture(),
+			baseWidth,
+			baseHeight,
+			0.f, 0.f, // Matrix already contains the user-defined z-offset
+			(automapactive ? vr_automap_mount_pos : vr_hud_mount_pos) == 1,
+			automapactive);
+		if (automapactive && vr_automap_border > 0)
+		{
+			const PalEntry borderColor = (uint32_t)vr_automap_border_color;
+			float borderPadPx = (float)vr_automap_border;
+			if (borderPadPx < 1.0f) borderPadPx = 1.0f;
+			if (borderPadPx > 5.0f) borderPadPx = 5.0f;
+			borderPadPx *= 5.0f;
+			const float borderPadX = pixelUnit * borderPadPx;
+			const float borderPadY = pixelUnit * borderPadPx;
+			di->DrawVRHudBorder(state, baseWidth + (borderPadX * 2.0f), borderPadY, borderColor, 0.f, (baseHeight * 0.5f) + (borderPadY * 0.5f));
+			di->DrawVRHudBorder(state, baseWidth + (borderPadX * 2.0f), borderPadY, borderColor, 0.f, -((baseHeight * 0.5f) + (borderPadY * 0.5f)));
+			di->DrawVRHudBorder(state, borderPadX, baseHeight, borderColor, -((baseWidth * 0.5f) + (borderPadX * 0.5f)), 0.f);
+			di->DrawVRHudBorder(state, borderPadX, baseHeight, borderColor, (baseWidth * 0.5f) + (borderPadX * 0.5f), 0.f);
+		}
+		state.mModelMatrix = savedMatrix;
+		state.EnableModelMatrix(false);
 	}
 
 	void OpenVREyePose::AdjustBlend(HWDrawInfo* di) const

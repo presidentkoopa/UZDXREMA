@@ -381,6 +381,21 @@ sector_t* RenderView(player_t* player)
 				screen->RenderTextureView(canvas->Tex, [=](IntRect& bounds)
 					{
 						screen->SetViewportRects(&bounds);
+						// Translucent canvases (e.g. VR HUD, future UI surfaces) need the
+						// FBO cleared to transparent black so pixels with no HUD content
+						// carry alpha=0. This makes the texture correct on any surface
+						// that samples it (VR quad, model texture, world geometry)
+						// without needing per-consumer workarounds.
+						if (canvas->Tex->bTranslucentCanvas)
+						{
+							auto& rs = *screen->RenderState();
+							float savedClear[4];
+							memcpy(savedClear, screen->mSceneClearColor, sizeof(savedClear));
+							screen->mSceneClearColor[0] = screen->mSceneClearColor[1] =
+							screen->mSceneClearColor[2] = screen->mSceneClearColor[3] = 0.f;
+							rs.Clear(CT_Color);
+							memcpy(screen->mSceneClearColor, savedClear, sizeof(savedClear));
+						}
 						Draw2D(&canvas->Drawer, *screen->RenderState(), 0, 0, canvas->Tex->GetWidth(), canvas->Tex->GetHeight());
 						canvas->Drawer.Clear();
 					});
@@ -415,6 +430,9 @@ sector_t* RenderView(player_t* player)
 		{
 			fovratio = ratio;
 		}
+
+		auto vrmode = VRMode::GetVRMode(true);
+		VR_EnsureHudSurface(screen->GetWidth() * vrmode->mHorizontalViewportScale, screen->GetHeight() * vrmode->mVerticalViewportScale);
 
 		screen->ImageTransitionScene(true); // Only relevant for Vulkan.
 

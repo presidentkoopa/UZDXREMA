@@ -322,7 +322,13 @@ void FGLRenderState::ApplyMaterial(FMaterial *mat, int clampmode, int translatio
 {
 	if (mat->Source()->isHardwareCanvas())
 	{
-		mTempTM = TM_OPAQUE;
+		// Most hardware canvases (camera textures, 3D scene views) render fully
+		// opaque content so TM_OPAQUE is the right default. However, UI/HUD
+		// canvases that need alpha transparency on any surface they are applied
+		// to (VR quad, model textures, world geometry) can opt out via the
+		// bTranslucentCanvas flag.
+		auto* canvasTex = static_cast<FCanvasTexture*>(mat->Source()->GetTexture());
+		mTempTM = (canvasTex && canvasTex->bTranslucentCanvas) ? TM_NORMAL : TM_OPAQUE;
 	}
 	else
 	{

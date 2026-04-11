@@ -112,6 +112,7 @@ public:
 
 	virtual void SetupOverlay() override;
 	virtual void UpdateOverlaySettings() const override;
+	virtual void DrawMountedHud(HWDrawInfo* di, FRenderState& state) const override;
 	
 	virtual bool GetHandTransform(int hand, VSMatrix* out) const override;
 	virtual bool RenderPlayerSpritesCrossed() const { return true; }

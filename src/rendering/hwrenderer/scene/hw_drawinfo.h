@@ -211,6 +211,8 @@ private:
 	int SetupLightsForOtherPlane(subsector_t * sub, FDynLightData &lightdata, const secplane_t *plane);
 	int CreateOtherPlaneVertices(subsector_t *sub, const secplane_t *plane);
 	void DrawPSprite(HUDSprite *huds, FRenderState &state);
+	void DrawHudQuad(FRenderState &state, FGameTexture* texture, float width, float height, float xoffset = 0.f, float yoffset = 0.f, bool flipX = false, bool depthMask = false);
+	void DrawVRHudBorder(FRenderState& state, float width, float height, PalEntry color, float xoffset = 0.f, float yoffset = 0.f);
 	WeaponLighting GetWeaponLighting(sector_t *viewsector, const DVector3 &pos, int cm, area_t in_area, const DVector3 &playerpos);
 
 	void PreparePlayerSprites2D(sector_t * viewsector, area_t in_area);

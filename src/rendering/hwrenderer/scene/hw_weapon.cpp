@@ -238,6 +238,77 @@ void HWDrawInfo::DrawPSprite(HUDSprite *huds, FRenderState &state)
 	state.EnableBrightmap(false);
 }
 
+void HWDrawInfo::DrawHudQuad(FRenderState& state, FGameTexture* texture, float width, float height, float xoffset, float yoffset, bool flipX, bool depthMask)
+{
+	if (texture == nullptr || width <= 0.0f || height <= 0.0f)
+	{
+		return;
+	}
+
+	texture->SetTranslucent(true);
+
+	state.SetLightIndex(-1);
+	state.SetRenderStyle(STYLE_Translucent);
+	state.AlphaFunc(Alpha_Greater, 0.0f);
+	state.SetTextureMode(TM_NORMAL);
+	state.SetObjectColor(0xffffffff);
+	state.SetAddColor(0);
+	state.EnableBrightmap(false);
+	state.EnableDepthTest(true);
+	state.SetDepthMask(depthMask);
+	state.SetMaterial(texture, UF_Sprite, CTF_Expand, CLAMP_XY_NOMIP, 0, -1);
+
+	screen->mVertexData->Map();
+	auto vert = screen->mVertexData->AllocVertices(4);
+	auto vp = vert.first;
+	const float halfWidth = width * 0.5f;
+	const float halfHeight = height * 0.5f;
+	float u0 = flipX ? 1.0f : 0.0f;
+	float u1 = flipX ? 0.0f : 1.0f;
+	vp[0].Set(xoffset - halfWidth, yoffset - halfHeight, 0.0f, u0, 0.0f);
+	vp[1].Set(xoffset + halfWidth, yoffset - halfHeight, 0.0f, u1, 0.0f);
+	vp[2].Set(xoffset - halfWidth, yoffset + halfHeight, 0.0f, u0, 1.0f);
+	vp[3].Set(xoffset + halfWidth, yoffset + halfHeight, 0.0f, u1, 1.0f);
+	screen->mVertexData->Unmap();
+
+	state.Draw(DT_TriangleStrip, vert.second, 4);
+}
+
+void HWDrawInfo::DrawVRHudBorder(FRenderState& state, float width, float height, PalEntry color, float xoffset, float yoffset)
+{
+	if (width <= 0.0f || height <= 0.0f)
+	{
+		return;
+	}
+
+	state.SetLightIndex(-1);
+	state.SetRenderStyle(STYLE_Source);
+	state.SetTextureMode(TM_NORMAL);
+	state.SetColor(color);
+	state.SetObjectColor(0xffffffff);
+	state.SetAddColor(0);
+	state.EnableBrightmap(false);
+	state.EnableDepthTest(false);
+	state.SetDepthMask(false);
+	state.EnableTexture(false);
+
+	screen->mVertexData->Map();
+	auto vert = screen->mVertexData->AllocVertices(4);
+	auto vp = vert.first;
+	const float halfWidth = width * 0.5f;
+	const float halfHeight = height * 0.5f;
+	vp[0].Set(xoffset - halfWidth, yoffset - halfHeight, 0.0f, 0.0f, 0.0f);
+	vp[1].Set(xoffset + halfWidth, yoffset - halfHeight, 0.0f, 1.0f, 0.0f);
+	vp[2].Set(xoffset - halfWidth, yoffset + halfHeight, 0.0f, 0.0f, 1.0f);
+	vp[3].Set(xoffset + halfWidth, yoffset + halfHeight, 0.0f, 1.0f, 1.0f);
+	screen->mVertexData->Unmap();
+
+	state.Draw(DT_TriangleStrip, vert.second, 4);
+	state.EnableTexture(true);
+	state.SetDepthMask(true);
+	state.EnableDepthTest(true);
+}
+
 //==========================================================================
 //
 // R_DrawPlayerSprites

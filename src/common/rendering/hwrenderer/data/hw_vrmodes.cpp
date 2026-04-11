@@ -17,6 +17,25 @@
 **    notice, this list of conditions and the following disclaimer in the
 **    documentation and/or other materials provided with the distribution.
 ** 3. The name of the author may not be used to endorse or promote products
+/*
+** hw_vrmodes.cpp
+** Matrix handling for stereo 3D rendering
+**
+**---------------------------------------------------------------------------
+** Copyright 2015 Christopher Bruns
+** Copyright 2016-2021 Christoph Oelckers
+** All rights reserved.
+**
+** Redistribution and use in source and binary forms, with or without
+** modification, are permitted provided that the following conditions
+** are met:
+**
+** 1. Redistributions of source code must retain the above copyright
+**    notice, this list of conditions and the following disclaimer.
+** 2. Redistributions in binary form must reproduce the above copyright
+**    notice, this list of conditions and the following disclaimer in the
+**    documentation and/or other materials provided with the distribution.
+** 3. The name of the author may not be used to endorse or promote products
 **    derived from this software without specific prior written permission.
 **
 ** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
@@ -42,15 +61,186 @@
 #include "i_interface.h"
 #include "menu.h"
 #include "gl_load/gl_system.h"
+
 #include "gl_renderer.h"
 #include "d_player.h"
 #include "actorinlines.h"
 #include "LSMatrix.h"
 #include "gl/stereo3d/gl_openvr.h"
 #include "gl/stereo3d/gl_openxrdevice.h"
+#include "textures.h"
+#include "gametexture.h"
+#include "common/2d/v_2ddrawer.h"
+#include <algorithm>
+#include "c_console.h"
 
 using namespace OpenGLRenderer;
 
+EXTERN_CVAR(Bool, vr_hud_mount);
+EXTERN_CVAR(Int, vr_hud_mount_pos);
+EXTERN_CVAR(Float, vr_hud_mount_scale);
+EXTERN_CVAR(Float, vr_hud_mount_xoffset);
+EXTERN_CVAR(Float, vr_hud_mount_yoffset);
+EXTERN_CVAR(Float, vr_hud_mount_zoffset);
+EXTERN_CVAR(Float, vr_hud_mount_pitch);
+EXTERN_CVAR(Float, vr_hud_mount_yaw);
+EXTERN_CVAR(Bool, vr_hud_mount_roll);
+EXTERN_CVAR(Bool, vr_automap_mount);
+EXTERN_CVAR(Int, vr_automap_mount_pos);
+EXTERN_CVAR(Float, vr_automap_mount_scale);
+EXTERN_CVAR(Float, vr_automap_mount_xoffset);
+EXTERN_CVAR(Float, vr_automap_mount_yoffset);
+EXTERN_CVAR(Float, vr_automap_mount_zoffset);
+EXTERN_CVAR(Float, vr_automap_mount_pitch);
+EXTERN_CVAR(Float, vr_automap_mount_yaw);
+EXTERN_CVAR(Bool, vr_automap_mount_roll);
+
+extern float weaponangles[3];
+extern float offhandangles[3];
+
+VRHudSurface::VRHudSurface() = default;
+
+VRHudSurface::~VRHudSurface()
+{
+	Clear();
+}
+
+void VRHudSurface::Clear()
+{
+	if (Canvas != nullptr)
+	{
+		Canvas->Tex = nullptr;
+		auto idx = AllCanvases.Find(Canvas);
+		if (idx != -1)
+		{
+			AllCanvases.Delete(idx);
+		}
+		Canvas = nullptr;
+	}
+	GameTexture = nullptr;
+	Texture = nullptr;
+}
+
+void VRHudSurface::EnsureSize(int width, int height)
+{
+	if (width <= 0 || height <= 0)
+	{
+		return;
+	}
+	if (Texture && Texture->GetWidth() == width && Texture->GetHeight() == height)
+	{
+		return;
+	}
+	Clear();
+	Texture = new FCanvasTexture(width, height);
+	// Mark this canvas as translucent so the render loop clears the FBO to
+	// transparent black before Draw2D, and ApplyMaterial uses TM_NORMAL
+	// instead of TM_OPAQUE. This propagates automatically to all surfaces
+	// that sample this texture: VR quad, world geometry, model textures.
+	Texture->bTranslucentCanvas = true;
+	GameTexture = MakeGameTexture(Texture, nullptr, ETextureType::Wall);
+	Canvas = Create<FCanvas>();
+	Texture->Canvas = Canvas;
+	Canvas->Tex = Texture;
+	Canvas->Drawer.SetSize(width, height);
+	AllCanvases.Push(Canvas);
+}
+
+void VRHudSurface::BeginUpdate()
+{
+	if (Canvas != nullptr)
+	{
+		Canvas->Drawer.Clear();
+	}
+}
+
+void VRHudSurface::EndUpdate()
+{
+	MarkDirty();
+}
+
+void VRHudSurface::MarkDirty()
+{
+	if (Texture != nullptr)
+	{
+		Texture->NeedUpdate();
+	}
+}
+
+VRHudSurface& GetVRHudSurface()
+{
+	static VRHudSurface surface;
+	return surface;
+}
+
+void VR_EnsureHudSurface(int width, int height)
+{
+	GetVRHudSurface().EnsureSize(width, height);
+}
+
+bool VR_ShouldDrawMountedHud()
+{
+	if (!vr_hud_mount && !vr_automap_mount)
+	{
+		return false;
+	}
+
+	// [MR] Hide mounted HUD/Map when menu or console is active to allow facial overlay restoration
+	if (menuactive || ConsoleState != c_up)
+	{
+		return false;
+	}
+
+	// [MR] Only draw if the respective feature is active
+	if (automapactive && !vr_automap_mount) return false;
+	if (!automapactive && !vr_hud_mount) return false;
+
+	auto& surface = GetVRHudSurface();
+	return surface.HasGameTexture() && surface.GetWidth() > 0 && surface.GetHeight() > 0;
+}
+
+bool VR_GetMountedHudTransform(VSMatrix& out)
+{
+	if (!vr_hud_mount && !vr_automap_mount)
+	{
+		return false;
+	}
+
+	VSMatrix mountTransform;
+	int mountedHand;
+	if (automapactive && vr_automap_mount)
+	{
+		mountedHand = vr_automap_mount_pos == 0 ? VR_MAINHAND : VR_OFFHAND;
+		if (!VRMode::GetVRMode(true)->GetWeaponTransform(&mountTransform, mountedHand)) return false;
+
+		const float handSign = mountedHand == VR_MAINHAND ? -1.f : 1.f;
+		mountTransform.translate(-vr_automap_mount_xoffset * handSign, -vr_automap_mount_zoffset, -vr_automap_mount_yoffset);
+		mountTransform.rotate(vr_automap_mount_yaw * handSign, 0, 1, 0);
+		mountTransform.rotate(-vr_automap_mount_pitch, 1, 0, 0);
+		if (!vr_automap_mount_roll)
+		{
+			const float controllerRoll = mountedHand == VR_MAINHAND ? weaponangles[2] : offhandangles[2];
+			mountTransform.rotate(-controllerRoll, 0, 0, 1);
+		}
+	}
+	else
+	{
+		mountedHand = vr_hud_mount_pos == 0 ? VR_MAINHAND : VR_OFFHAND;
+		if (!VRMode::GetVRMode(true)->GetWeaponTransform(&mountTransform, mountedHand)) return false;
+
+		const float handSign = mountedHand == VR_MAINHAND ? -1.f : 1.f;
+		mountTransform.translate(-vr_hud_mount_xoffset * handSign, -vr_hud_mount_zoffset, -vr_hud_mount_yoffset);
+		mountTransform.rotate(vr_hud_mount_yaw * handSign, 0, 1, 0);
+		mountTransform.rotate(-vr_hud_mount_pitch, 1, 0, 0);
+		if (!vr_hud_mount_roll)
+		{
+			const float controllerRoll = mountedHand == VR_MAINHAND ? weaponangles[2] : offhandangles[2];
+			mountTransform.rotate(-controllerRoll, 0, 0, 1);
+		}
+	}
+	out = mountTransform;
+	return true;
+}
 // Set up 3D-specific console variables:
 CUSTOM_CVAR(Int, vr_mode, 0, CVAR_GLOBALCONFIG|CVAR_ARCHIVE)
 {
@@ -133,6 +323,15 @@ CVAR(Float, vr_hud_distance, 1.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_hud_rotate, 10.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_hud_fixed_pitch, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_hud_fixed_roll, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, vr_hud_mount, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, vr_hud_mount_pos, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_hud_mount_xoffset, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_hud_mount_yoffset, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_hud_mount_zoffset, -0.20f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_hud_mount_scale, 0.15f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_hud_mount_pitch, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_hud_mount_yaw, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, vr_hud_mount_roll, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 //AutoMap control
 CVAR(Bool, vr_automap_use_hud, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -142,6 +341,18 @@ CVAR(Float, vr_automap_distance, 1.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_automap_rotate, 13.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_automap_fixed_pitch, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_automap_fixed_roll, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, vr_automap_mount, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, vr_automap_mount_pos, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_automap_mount_scale, 0.15f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_automap_mount_xoffset, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_automap_mount_yoffset, 0.15f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_automap_mount_zoffset, -0.05f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_automap_mount_pitch, 45.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_automap_mount_yaw, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, vr_automap_mount_roll, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, vr_automap_border, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Color, vr_automap_border_color, 0x636363, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
 
 CVARD(Bool, vr_override_weap_pos, false, 0, "Only used for testing VR environment on PC");
 CVARD(Bool, vr_render_weap_in_scene, false, 0, "Only used for testing VR environment on PC");
@@ -500,12 +711,12 @@ double normalizeAngle(double angle) {
 	return angle;
 }
 
-extern vec3_t weaponoffset;
-extern vec3_t weaponangles;
-extern vec3_t offhandoffset;
-extern vec3_t offhandangles;
-extern vec3_t hmdorientation;
-extern vec3_t hmdPosition;
+extern float weaponoffset[3];
+extern float weaponangles[3];
+extern float offhandoffset[3];
+extern float offhandangles[3];
+extern float hmdorientation[3];
+extern float hmdPosition[3];
 
 ADD_STAT(vrstats)
 {

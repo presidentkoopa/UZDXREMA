@@ -2837,6 +2837,12 @@ OptionMenu CinemaModeOptions protected
 	SafeCommand "$OPTMNU_DEFAULTS",				"resetcvar vr_overlayscreen vr_overlayscreen_always vr_overlayscreen_size vr_overlayscreen_dist vr_overlayscreen_vpos vr_overlayscreen_bg"
 }
 
+OptionValue "HUDMountOption"
+{
+	0, "Main Hand"
+	1, "Off-Hand"
+}
+
 OptionMenu VRHUDOptions protected
 {
 	Title "VR HUD OPTIONS"
@@ -2851,10 +2857,20 @@ OptionMenu VRHUDOptions protected
 	Slider "VR HUD Stereo Effect",		"vr_hud_stereo", 0.0, 5.0, 0.1, 2
 	Slider "$VRHUDMNU_HUDDISTANCE",		"vr_hud_distance", 0.4, 3, 0.05, 2
 	Slider "VR HUD Pitch Rotate",		"vr_hud_rotate", 0.0, 50.0, 1.0, 2
-	Option "VR HUD Fix Pitch",		    "vr_hud_fixed_pitch", "OnOff"
-	Option "VR HUD Fix Roll",		    "vr_hud_fixed_roll", "OnOff"
+	Option "VR HUD Fix Pitch",		"vr_hud_fixed_pitch", "OnOff"
+	Option "VR HUD Fix Roll",		"vr_hud_fixed_roll", "OnOff"
 	StaticText ""
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_hud_scale hud_scale hud_althudscale vr_hud_stereo vr_hud_distance vr_hud_rotate vr_hud_fixed_pitch vr_hud_fixed_roll"
+	Option "Portable HUD",			"vr_hud_mount", "OnOff"
+	Option "Mount HUD on",			"vr_hud_mount_pos", "HUDMountOption", "vr_hud_mount"
+	Slider "Portable HUD Scale",		"vr_hud_mount_scale", 0.05, 1.0, 0.05, 2, "vr_hud_mount"
+	Slider "Portable HUD Distance",		"vr_hud_mount_yoffset", -1.0, 1.0, 0.05, 2, "vr_hud_mount"
+	Slider "horizontal Offset",		"vr_hud_mount_xoffset", -1.0, 1.0, 0.05, 2, "vr_hud_mount"
+	Slider "Vertical Offset",		"vr_hud_mount_zoffset", -1.0, 1.0, 0.05, 2, "vr_hud_mount"
+	Slider "Portable HUD pitch",		"vr_hud_mount_pitch", -180, 180, 5, 0, "vr_hud_mount"
+	Slider "Portable HUD angle",		"vr_hud_mount_yaw", -180, 180, 1, 0, "vr_hud_mount"
+	Option "Roll with controller",		"vr_hud_mount_roll", "OnOff", "vr_hud_mount"
+	StaticText ""
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_hud_scale hud_scale hud_althudscale vr_hud_stereo vr_hud_distance vr_hud_rotate vr_hud_fixed_pitch vr_hud_fixed_roll vr_hud_mount vr_hud_mount_pos vr_hud_mount_scale vr_hud_mount_yoffset vr_hud_mount_xoffset vr_hud_mount_zoffset vr_hud_mount_pitch vr_hud_mount_yaw vr_hud_mount_roll"
 
 	StaticText ""
 	StaticText "Automap", gold
@@ -2868,7 +2884,19 @@ OptionMenu VRHUDOptions protected
 	Option "VR Automap Fix Pitch",		    "vr_automap_fixed_pitch", "OnOff"
 	Option "VR Automap Fix Roll",		    "vr_automap_fixed_roll", "OnOff"
 	StaticText ""
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_automap_use_hud vr_automap_scale vr_automap_stereo vr_automap_distance vr_automap_rotate vr_automap_fixed_pitch vr_automap_fixed_roll"
+	Option "Portable Automap",		"vr_automap_mount", "OnOff"
+	Option "Mount Map on",			"vr_automap_mount_pos", "HUDMountOption", "vr_automap_mount"
+	Slider "Portable Map Scale",		"vr_automap_mount_scale", 0.05, 1.0, 0.05, 2, "vr_automap_mount"
+	Slider "Portable Map Distance",		"vr_automap_mount_yoffset", -1.0, 1.0, 0.05, 2, "vr_automap_mount"
+	Slider "horizontal Offset",		"vr_automap_mount_xoffset", -1.0, 1.0, 0.05, 2, "vr_automap_mount"
+	Slider "Vertical Offset",		"vr_automap_mount_zoffset", -1.0, 1.0, 0.05, 2, "vr_automap_mount"
+	Slider "Portable Map pitch",		"vr_automap_mount_pitch", -180, 180, 1, 0, "vr_automap_mount"
+	Slider "Portable Map angle",		"vr_automap_mount_yaw", -180, 180, 1, 0, "vr_automap_mount"
+	Option "Roll with controller",		"vr_automap_mount_roll", "OnOff", "vr_automap_mount"
+	Slider "Portable Map Border",		"vr_automap_border", 0, 5, 1, 0, "vr_automap_mount"
+	ColorPicker "Map Border Color",		"vr_automap_border_color", "vr_automap_mount"
+	StaticText ""
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_automap_use_hud vr_automap_scale vr_automap_stereo vr_automap_distance vr_automap_rotate vr_automap_fixed_pitch vr_automap_fixed_roll vr_automap_border vr_automap_border_color vr_automap_mount vr_automap_mount_pos vr_automap_mount_scale vr_automap_mount_yoffset vr_automap_mount_xoffset vr_automap_mount_zoffset vr_automap_mount_pitch vr_automap_mount_yaw vr_automap_mount_roll"
 }
 
 OptionMenu VRWeaponOptions protected

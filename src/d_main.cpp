@@ -98,6 +98,7 @@
 #include "types.h"
 #include "i_system.h"
 #include "g_cvars.h"
+#include "c_console.h"
 #include "r_data/r_vanillatrans.h"
 #include "s_music.h"
 #include "swrenderer/r_swcolormaps.h"
@@ -131,6 +132,14 @@ using namespace FileSys;
 
 EXTERN_CVAR(Bool, hud_althud)
 EXTERN_CVAR(Int, vr_mode)
+EXTERN_CVAR(Bool, vr_hud_mount)
+EXTERN_CVAR(Float, vr_hud_mount_scale)
+EXTERN_CVAR(Float, vr_hud_mount_zoffset)
+EXTERN_CVAR(Bool, vr_automap_mount)
+EXTERN_CVAR(Float, vr_automap_mount_scale)
+EXTERN_CVAR(Float, vr_automap_mount_zoffset)
+EXTERN_CVAR(Int, vid_aspect);
+EXTERN_CVAR(Int, uiscale);
 EXTERN_CVAR(Bool, cl_customizeinvulmap)
 EXTERN_CVAR(Bool, log_vgafont)
 EXTERN_CVAR(Bool, dlg_vgafont)
@@ -927,6 +936,134 @@ static void DrawOverlays()
 		FStat::PrintStat (twod);
 }
 
+static void DrawHudToSurface(const FRenderViewpoint& vp)
+{
+	if ((!vr_hud_mount && !vr_automap_mount) || hud_toggled || StatusBar == nullptr)
+	{
+		return;
+	}
+
+	// If the automap is not mounted, keep the regular automap/HUD screen path untouched.
+	if (automapactive && !vr_automap_mount)
+	{
+		return;
+	}
+
+	// If menu or console is open, we want the HUD on the camera, not on the controller.
+	if (menuactive || ConsoleState != c_up)
+	{
+		return;
+	}
+
+	auto& surface = GetVRHudSurface();
+	auto& mutableSurface = const_cast<VRHudSurface&>(surface);
+	auto* hudTexture = surface.GetTexture();
+	auto* hudCanvas = surface.GetCanvas();
+	if (!surface.IsValid() || hudCanvas == nullptr || hudTexture == nullptr)
+	{
+		return;
+	}
+	const int hudWidth = surface.GetWidth();
+	const int hudHeight = surface.GetHeight();
+	if (hudWidth <= 0 || hudHeight <= 0)
+	{
+		return;
+	}
+
+	mutableSurface.BeginUpdate();
+	auto* savedtwod = twod;
+	twod = &hudCanvas->Drawer;
+	twod->Begin(hudWidth, hudHeight);
+	ScaleOverrider so(twod);
+
+	// Diagnostic: Fill the whole area with red and draw two diagonal lines to check scaling.
+	// [START TEST BLOCK]
+	//twod->AddColorOnlyQuad(0, 0, hudWidth, hudHeight, 0xFFFF0000); // Red
+	//twod->AddLine({ 0, 0 }, { (double)hudWidth, (double)hudHeight }, nullptr, 0xFFFFFFFF); // White diagonal
+	//twod->AddLine({ 0, (double)hudHeight }, { (double)hudWidth, 0 }, nullptr, 0xFFFFFFFF); // White diagonal
+	// [END TEST BLOCK]
+
+	// Temporarily override global view dimensions so the status bar code thinks it's rendering to a full-screen display of the eye's size.
+	int saved_vw = viewwidth;
+	int saved_vh = viewheight;
+	int saved_vx = viewwindowx;
+	int saved_vy = viewwindowy;
+	int saved_sb = screenblocks;
+	int saved_sw = screen->GetWidth();
+	int saved_sh = screen->GetHeight();
+	int saved_aspect = vid_aspect;
+	int saved_uiscale = uiscale;
+
+	// Use a virtual screen size for everything during this pass
+	screen->SetVirtualSize(hudWidth, hudHeight);
+	vid_aspect = 0;
+	uiscale = 0;
+
+	// No longer need sx/sy factors because screen dimensions are now 1920.
+	// just restore the original view logic relative to the new 1920 width.
+	viewwidth = (int)(saved_vw * hudWidth / saved_sw);
+	viewheight = (int)(saved_vh * hudHeight / saved_sh);
+	viewwindowx = (int)(saved_vx * hudWidth / saved_sw);
+	viewwindowy = (int)(saved_vy * hudHeight / saved_sh);
+	screenblocks = saved_sb;
+
+	// Force the status bar to update its internal scaling for the current twod
+	StatusBar->CallScreenSizeChanged();
+
+	if (automapactive && vr_automap_mount)
+	{
+		// Draw the full automap stack to the surface.
+		twod->ClearClipRect();
+		primaryLevel->automap->Drawer(viewheight);
+		StatusBar->DrawBottomStuff(HUD_AltHud);
+		StatusBar->DrawAltHUD();
+		StatusBar->CallDraw(HUD_AltHud, vp.TicFrac);
+		StatusBar->DrawTopStuff(HUD_AltHud);
+	}
+	else if (hud_althud && saved_vh == saved_sh && saved_sb > 10)
+	{
+		StatusBar->DrawBottomStuff(HUD_AltHud);
+		if (DrawFSHUD || automapactive) StatusBar->DrawAltHUD();
+		StatusBar->CallDraw(HUD_AltHud, vp.TicFrac);
+		StatusBar->DrawTopStuff(HUD_AltHud);
+	}
+	else if (saved_vh == saved_sh && (viewactive || automapactive) && saved_sb > 10)
+	{
+		EHudState state = (DrawFSHUD || automapactive) ? HUD_Fullscreen : HUD_None;
+		if (state == HUD_None) StatusBar->RefreshBackground();
+		StatusBar->DrawBottomStuff(state);
+		StatusBar->CallDraw(state, vp.TicFrac);
+		StatusBar->DrawTopStuff(state);
+	}
+	else
+	{
+		StatusBar->RefreshBackground();
+		if (!automapactive || viewactive)
+		{
+			StatusBar->RefreshViewBorder();
+		}
+		StatusBar->DrawBottomStuff(HUD_StatusBar);
+		StatusBar->CallDraw(HUD_StatusBar, vp.TicFrac);
+		StatusBar->DrawTopStuff(HUD_StatusBar);
+	}
+
+	viewwidth = saved_vw;
+	viewheight = saved_vh;
+	viewwindowx = saved_vx;
+	viewwindowy = saved_vy;
+	screenblocks = saved_sb;
+	vid_aspect = saved_aspect;
+	uiscale = saved_uiscale;
+	screen->SetVirtualSize(saved_sw, saved_sh);
+
+	// Restore original scaling
+	StatusBar->CallScreenSizeChanged();
+
+	twod->End();
+	twod = savedtwod;
+	mutableSurface.EndUpdate();
+}
+
 static void End2DAndUpdate()
 {
 	twod->End();
@@ -1065,6 +1202,8 @@ void D_Display ()
 		//E_RenderFrame();
 		//
 		
+		DrawHudToSurface(vp);
+
 		D_Render([&]()
 		{
 			viewsec = RenderView(&players[consoleplayer]);
@@ -1077,20 +1216,28 @@ void D_Display ()
 			{
 				V_DrawBlend(viewsec);
 			}
-			if (automapactive)
+
+			// Keep HUD and automap toggles independent.
+			const bool drawMountedHud = vr_hud_mount && !menuactive && ConsoleState == c_up && !automapactive;
+			const bool drawMountedMap = vr_automap_mount && automapactive && !menuactive && ConsoleState == c_up;
+			const bool drawFaceMap = automapactive && !drawMountedMap;
+			const bool drawFaceHud = (!drawMountedHud && !drawMountedMap) || drawFaceMap;
+
+			if (drawMountedMap)
 			{
-				primaryLevel->automap->Drawer ((hud_althud && viewheight == SCREENHEIGHT) ? viewheight : StatusBar->GetTopOfStatusbar());
+				// Mounted automap is drawn through the VR quad path.
+			}
+			else if (drawFaceMap)
+			{
+				primaryLevel->automap->Drawer(viewheight);
 			}
 			
-			// for timing the statusbar code.
-			//cycle_t stb;
-			//stb.Reset();
-			//stb.Clock();
-			if (!automapactive || viewactive)
+			if (drawFaceHud && (automapactive || viewactive))
 			{
 				StatusBar->RefreshViewBorder ();
 			}
-			if (hud_althud && viewheight == SCREENHEIGHT && screenblocks > 10)
+
+			if (drawFaceHud && (hud_althud || automapactive) && viewheight == SCREENHEIGHT && screenblocks > 10)
 			{
 				StatusBar->DrawBottomStuff (HUD_AltHud);
 				if (DrawFSHUD || automapactive) StatusBar->DrawAltHUD();
@@ -1101,21 +1248,20 @@ void D_Display ()
 				StatusBar->CallDraw (HUD_AltHud, vp.TicFrac);
 				StatusBar->DrawTopStuff (HUD_AltHud);
 			}
-			else if (viewheight == SCREENHEIGHT && viewactive && screenblocks > 10)
+			else if (drawFaceHud && viewheight == SCREENHEIGHT && (viewactive || automapactive) && screenblocks > 10)
 			{
-				EHudState state = DrawFSHUD ? HUD_Fullscreen : HUD_None;
+				EHudState state = (DrawFSHUD || automapactive) ? HUD_Fullscreen : HUD_None;
 				StatusBar->DrawBottomStuff (state);
 				StatusBar->CallDraw (state, vp.TicFrac);
 				StatusBar->DrawTopStuff (state);
 			}
-			else
+			else if (drawFaceHud)
 			{
+				StatusBar->RefreshBackground();
 				StatusBar->DrawBottomStuff (HUD_StatusBar);
 				StatusBar->CallDraw (HUD_StatusBar, vp.TicFrac);
 				StatusBar->DrawTopStuff (HUD_StatusBar);
 			}
-			//stb.Unclock();
-			//Printf("Stbar = %f\n", stb.TimeMS());
 		}
 	}
 	else
@@ -1146,7 +1292,10 @@ void D_Display ()
 	}
 	if (!hud_toggled)
 	{
-		CT_Drawer ();
+		if (!vr_hud_mount || automapactive || menuactive || ConsoleState != c_up)
+		{
+			CT_Drawer ();
+		}
 
 		// draw pause pic
 		if ((paused || pauseext) && menuactive == MENU_Off && StatusBar != nullptr)

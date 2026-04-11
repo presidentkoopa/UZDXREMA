@@ -4,6 +4,9 @@
 #include "matrix.h"
 
 class DFrameBuffer;
+class FCanvasTexture;
+class FCanvas;
+class FGameTexture;
 
 enum
 {
@@ -29,6 +32,31 @@ enum
 };
 
 struct HWDrawInfo;
+
+struct VRHudSurface
+{
+	// Shared texture-backed HUD surface for VR, and later canvas/model texture reuse.
+	VRHudSurface();
+	~VRHudSurface();
+
+	void Clear();
+	void EnsureSize(int width, int height);
+	void BeginUpdate();
+	void EndUpdate();
+	void MarkDirty();
+	bool IsValid() const { return Texture != nullptr; }
+	bool HasGameTexture() const { return GameTexture != nullptr; }
+	int GetWidth() const { return Texture != nullptr ? Texture->GetWidth() : 0; }
+	int GetHeight() const { return Texture != nullptr ? Texture->GetHeight() : 0; }
+	FCanvasTexture* GetTexture() const { return Texture; }
+	FGameTexture* GetGameTexture() const { return GameTexture; }
+	FCanvas* GetCanvas() const { return Canvas; }
+
+private:
+	FCanvasTexture* Texture = nullptr;
+	FGameTexture* GameTexture = nullptr;
+	FCanvas* Canvas = nullptr;
+};
 
 struct VREyeInfo
 {
@@ -83,6 +111,7 @@ struct VRMode
 	virtual void SetupOverlay() {}
 	virtual void UpdateOverlaySettings() const {}
 	virtual void DrawControllerModels(HWDrawInfo* di, FRenderState& state) const {}
+	virtual void DrawMountedHud(HWDrawInfo* di, FRenderState& state) const {}
 	
 	virtual void Present() const;
 
@@ -98,3 +127,8 @@ void VR_HapticEvent(const char* event, int position, int intensity, float angle,
 void QzDoom_GetScreenRes(uint32_t *width, uint32_t *height);
 
 extern bool weaponStabilised;
+
+VRHudSurface& GetVRHudSurface();
+void VR_EnsureHudSurface(int width, int height);
+bool VR_ShouldDrawMountedHud();
+bool VR_GetMountedHudTransform(VSMatrix& out);

@@ -348,6 +348,12 @@ protected:
 public:
 	bool bFirstUpdate = true;
 	float aspectRatio;
+	// When true, the renderer will use TM_NORMAL instead of TM_OPAQUE when
+	// binding this canvas as a material, and will clear the FBO to transparent
+	// black before each Draw2D pass. Use this for HUD/UI canvases that need
+	// alpha transparency on any surface they are applied to (VR quad,
+	// world geometry, model textures, etc.).
+	bool bTranslucentCanvas = false;
 
 	friend struct FCanvasTextureInfo;
 	friend class FTextureAnimator;
