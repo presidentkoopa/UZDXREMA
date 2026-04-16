@@ -39,10 +39,10 @@ public:
 	void DrawPresentTexture(const IntRect &box, bool applyGamma, bool screenshot);
 
 	int GetCurrentPipelineImage() const { return mCurrentPipelineImage; }
-
-private:
+	void SetCurrentPipelineImage(int index);
 	void NextEye(int eyeCount);
 
+private:
 	VulkanRenderDevice* fb = nullptr;
 
 	int mCurrentPipelineImage = 0;

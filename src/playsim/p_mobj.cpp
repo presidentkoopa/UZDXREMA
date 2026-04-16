@@ -939,7 +939,7 @@ bool P_GiveBody(AActor *actor, int num, int max)
 				if (player == &players[consoleplayer])
 				{
 					float level = (float)(0.4 + (0.6 * (num / 100.0)));
-					auto vrmode = VRMode::GetVRMode(true);
+					auto vrmode = VRMode::GetVRModeCached(true);
 					vrmode->Vibrate(100, 0, level); // left
 					vrmode->Vibrate(100, 1, level); // right
 
@@ -7551,7 +7551,7 @@ AActor *P_SpawnPlayerMissile (AActor *source, double x, double y, double z,
 			//Haptics
 			long rightHanded = vr_control_scheme < 10;
 			rightHanded = (aimflags & ALF_ISOFFHAND) ? 1 - rightHanded : rightHanded;
-			auto vrmode = VRMode::GetVRMode(true);
+			auto vrmode = VRMode::GetVRModeCached(true);
 			vrmode->Vibrate(150, rightHanded ? 1 : 0, 0.8);
 			VR_HapticEvent("fire_weapon", rightHanded ? 2 : 1, 100 * C_GetExternalHapticLevelValue("fire_weapon"), 0, 0);
 			if (weaponStabilised)

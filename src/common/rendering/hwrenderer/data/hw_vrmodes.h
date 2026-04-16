@@ -94,6 +94,7 @@ struct VRMode
 	virtual ~VRMode() {}
 
 	static const VRMode *GetVRMode(bool toscreen = true);
+	static const VRMode *GetVRModeCached(bool toscreen = true);
 	virtual void AdjustViewport(DFrameBuffer *fb) const;
 	VSMatrix GetHUDSpriteProjection() const;
 
@@ -114,6 +115,10 @@ struct VRMode
 	virtual void DrawMountedHud(HWDrawInfo* di, FRenderState& state) const {}
 	
 	virtual void Present() const;
+	virtual void PollXREvents() const {}
+	virtual bool BeginXRFrame() const { return true; }
+	virtual bool AcquireXRSwapchain() const { return true; }
+	virtual bool SubmitFrame() const { return true; }
 
 	virtual bool GetHandTransform(int hand, VSMatrix* out) const { return false; }
 	virtual bool GetWeaponTransform(VSMatrix* out, int hand = 0) const;

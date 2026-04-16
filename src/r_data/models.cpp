@@ -219,7 +219,7 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	// but we need to position it correctly in the world for light to work properly.
 	VSMatrix objectToWorldMatrix = renderer->GetViewToWorldMatrix();
 	int hand = psp->GetCaller() == playermo->player->OffhandWeapon ? 1 : 0;
-	auto vrmode = VRMode::GetVRMode(true);
+	auto vrmode = VRMode::GetVRModeCached(true);
 	if (vrmode->GetWeaponTransform(&objectToWorldMatrix, hand))
 	{
 		float scale = 0.01f;

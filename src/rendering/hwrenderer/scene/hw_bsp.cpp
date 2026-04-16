@@ -38,6 +38,7 @@
 #include "hwrenderer/scene/hw_clipper.h"
 #include "hwrenderer/scene/hw_drawstructs.h"
 #include "hwrenderer/scene/hw_drawinfo.h"
+#include "hwrenderer/data/hw_vrmodes.h"
 #include "hwrenderer/scene/hw_portal.h"
 #include "hw_clock.h"
 #include "flatvertices.h"
@@ -1057,7 +1058,8 @@ void HWDrawInfo::RenderBSP(void *node, bool drawpsprites)
 
 	validcount++;	// used for processing sidedefs only once by the renderer.
 
-	multithread = gl_multithread;
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	multithread = gl_multithread && !vrmode->IsVR();
 	if (multithread)
 	{
 		jobQueue.ReleaseAll();

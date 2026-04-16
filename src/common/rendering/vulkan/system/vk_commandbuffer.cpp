@@ -29,6 +29,7 @@
 #include "vulkan/renderer/vk_postprocess.h"
 #include "hw_clock.h"
 #include "v_video.h"
+#include "doomtype.h" // Printf
 
 extern int rendered_commandbuffers;
 int current_rendered_commandbuffers;
@@ -167,6 +168,7 @@ void VkCommandBufferManager::WaitForCommands(bool finish, bool uploadOnly)
 		Finish.Clock();
 
 		fb->GetFramebufferManager()->AcquireImage();
+
 	}
 
 	FlushCommands(finish, true, uploadOnly);
@@ -175,6 +177,7 @@ void VkCommandBufferManager::WaitForCommands(bool finish, bool uploadOnly)
 	{
 		if (!fb->GetVSync())
 			fb->FPSLimit();
+
 		fb->GetFramebufferManager()->QueuePresent();
 	}
 

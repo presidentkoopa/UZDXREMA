@@ -57,7 +57,7 @@ void QzDoom_GetScreenRes(uint32_t *width, uint32_t *height)
 
 float QzDoom_GetFOV()
 {
-	const auto vrmode = VRMode::GetVRMode(true);
+	const auto vrmode = VRMode::GetVRModeCached(true);
 	if (vrmode->IsVR()) return 90.;
 	return fov;
 }

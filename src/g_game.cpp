@@ -676,7 +676,7 @@ ticcmd_t* G_BaseTiccmd()
 //
 void G_BuildTiccmd (ticcmd_t *cmd)
 {
-	auto vrmode = VRMode::GetVRMode(true);
+	auto vrmode = VRMode::GetVRModeCached(true);
 
 	int 		strafe;
 	int 		speed;

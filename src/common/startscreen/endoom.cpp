@@ -129,7 +129,7 @@ FEndoomScreen::FEndoomScreen(int loading_lump)
 
 void FEndoomScreen::Update()
 {
-	auto vrmode = VRMode::GetVRMode(true);
+	auto vrmode = VRMode::GetVRModeCached(true);
 	if (vrmode->IsVR() || (blinking && I_msTime() > lastUpdateTime + BLINK_PERIOD))
 	{
 		lastUpdateTime = I_msTime();

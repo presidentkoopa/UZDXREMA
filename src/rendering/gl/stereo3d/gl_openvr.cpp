@@ -936,8 +936,6 @@ namespace s3d
 			//clear and hide overlay when not in use
 			vrOverlay->ClearOverlayTexture(overlayHandle);
 			vrOverlay->HideOverlay(overlayHandle);
-
-			// this is where we set the screen texture for HMD
 			vrCompositor->Submit(EVREye(eye), eyeTexture, &tBounds, EVRSubmitFlags_Submit_Default);
 		}
 		else {
@@ -972,13 +970,10 @@ namespace s3d
 				delete[] emptyData;
 			}
 				
-			// set blank texture for compositor so it draws solid color background behind the overlay
-			// without compositor background the game goes in/out of steamvr and gets glitchy
-			vrCompositor->Submit(EVREye(eye), blankTexture, &tBounds, EVRSubmitFlags_Submit_Default);
-
 			//static VRTextureBounds_t oBounds = { 0, 0.05, 0.8, 0.95 }; // screen texture crop for overlay
 
 			// set screen texture on overly instead of compositor
+			vrCompositor->Submit(EVREye(eye), blankTexture, &tBounds, EVRSubmitFlags_Submit_Default);
 			vrOverlay->SetOverlayTexture(overlayHandle, eyeTexture);
 			vrOverlay->SetOverlayTextureBounds(overlayHandle, &tBounds);
 			vrOverlay->SetOverlayWidthInMeters(overlayHandle, 1 + vr_overlayscreen_size);
@@ -1065,7 +1060,7 @@ namespace s3d
 	void OpenVREyePose::AdjustHud() const
 	{
 		// Keep the regular camera-mounted HUD path working for non-mounted mode.
-		const auto vrmode = VRMode::GetVRMode(true);
+		const auto vrmode = VRMode::GetVRModeCached(true);
 		if (vrmode->mEyeCount == 1)
 		{
 			return;
@@ -1703,7 +1698,7 @@ namespace s3d
 			pSecondaryTrackedRemoteOld = pOffTrackedRemoteOld;
 		}
 
-		const auto vrmode = VRMode::GetVRMode(true);
+		const auto vrmode = VRMode::GetVRModeCached(true);
 
 		//All this to allow stick and button switching!
 		uint64_t primaryButtonsNew;
@@ -2406,28 +2401,23 @@ namespace s3d
 		
 		static TrackedDevicePose_t poses[k_unMaxTrackedDeviceCount];
 		
-		if (gamestate != GS_TITLELEVEL) {
-			// TODO: Draw a more interesting background behind the 2D screen
-			const int eyeCount = mEyeCount;
-			GLRenderer->mBuffers->CurrentEye() = 0;  // always begin at zero, in case eye count changed
-			for (int eye_ix = 0; eye_ix < eyeCount; ++eye_ix)
-			{
-				const auto& eye = mEyes[GLRenderer->mBuffers->CurrentEye()];
+		// Keep the HMD fed on title/menu screens as well as in-game.
+		// The menu lives in GS_TITLELEVEL, so skipping this block makes VR appear to freeze.
+		const int eyeCount = mEyeCount;
+		GLRenderer->mBuffers->CurrentEye() = 0;  // always begin at zero, in case eye count changed
+		for (int eye_ix = 0; eye_ix < eyeCount; ++eye_ix)
+		{
+			GLRenderer->mBuffers->BindCurrentFB();
+			glClearColor(0.f, 0.f, 0.f, 1.0f);
+			glClear(GL_COLOR_BUFFER_BIT);
+			GLRenderer->mBuffers->NextEye(eyeCount);
+		}
 
-				GLRenderer->mBuffers->BindCurrentFB();
-				glClearColor(0.f, 0.f, 0.f, 1.0f);
-				glClear(GL_COLOR_BUFFER_BIT);
-				//if (eyeCount - eye_ix > 1)
-					GLRenderer->mBuffers->NextEye(eyeCount);
-			}
-			//GLRenderer->mBuffers->BlitToEyeTexture(GLRenderer->mBuffers->CurrentEye(), false);
-			
-			if (vrCompositor != nullptr) {
-				vrCompositor->WaitGetPoses(
-					poses, k_unMaxTrackedDeviceCount, // current pose
-					nullptr, 0 // future pose?
-				);
-			}
+		if (vrCompositor != nullptr) {
+			vrCompositor->WaitGetPoses(
+				poses, k_unMaxTrackedDeviceCount, // current pose
+				nullptr, 0 // future pose?
+			);
 		}
 
 		TrackedDevicePose_t& hmdPose0 = poses[k_unTrackedDeviceIndex_Hmd];
@@ -2694,6 +2684,14 @@ namespace s3d
 			else
 				forceDisableOverlay = false;
 #endif
+			if (VR_UseScreenLayer())
+			{
+				forceDisableOverlay = false;
+			}
+			if (VR_UseScreenLayer() || gamestate == GS_TITLELEVEL || menuactive != MENU_Off)
+			{
+				UpdateOverlaySettings();
+			}
 		}  // hmdPose0.bPoseIsValid
 
 		I_StartupOpenVR();

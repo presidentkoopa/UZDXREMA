@@ -132,7 +132,7 @@ void V_AddPlayerBlend (player_t *CPlayer, float blend[4], float maxinvalpha, int
 
 		//Super short haptic blip on pickup
 		if (vr_pickup_haptic_level > 0.0) {
-			auto vrmode = VRMode::GetVRMode(true);
+			auto vrmode = VRMode::GetVRModeCached(true);
 			vrmode->Vibrate(50, 0, vr_pickup_haptic_level); // left
 			vrmode->Vibrate(50, 1, vr_pickup_haptic_level); // right
 

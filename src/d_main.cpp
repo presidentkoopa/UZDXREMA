@@ -1108,7 +1108,7 @@ void D_Display ()
 	{
 		players[consoleplayer].camera = players[consoleplayer].mo;
 	}
-	auto vrmode = VRMode::GetVRMode(true);
+	auto vrmode = VRMode::GetVRModeCached(true);
     auto &vp = r_viewpoint;
 	if (viewactive)
 	{

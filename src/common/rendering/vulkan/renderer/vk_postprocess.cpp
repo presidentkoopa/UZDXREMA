@@ -54,6 +54,7 @@ VkPostprocess::~VkPostprocess()
 
 void VkPostprocess::SetActiveRenderTarget()
 {
+	Printf("OpenXR: SetActiveRenderTarget mCurrentPipelineImage=%d\n", mCurrentPipelineImage);
 	auto buffers = fb->GetBuffers();
 
 	VkImageTransition()
@@ -83,8 +84,6 @@ void VkPostprocess::BlitSceneToPostprocess()
 
 	auto buffers = fb->GetBuffers();
 	auto cmdbuffer = fb->GetCommands()->GetDrawCommands();
-
-	mCurrentPipelineImage = 0;
 
 	VkImageTransition()
 		.AddImage(&buffers->SceneColor, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
@@ -259,7 +258,7 @@ void VkPostprocess::BlurScene(float gameinfobluramount)
 
 	VkPPRenderState renderstate(fb);
 
-	auto vrmode = VRMode::GetVRMode(true);
+	auto vrmode = VRMode::GetVRModeCached(true);
 	int eyeCount = vrmode->mEyeCount;
 	for (int i = 0; i < eyeCount; ++i)
 	{
@@ -290,4 +289,21 @@ void VkPostprocess::UpdateShadowMap()
 
 void VkPostprocess::NextEye(int eyeCount)
 {
+	int oldImage = mCurrentPipelineImage;
+	if (eyeCount > 1)
+		mCurrentPipelineImage = (mCurrentPipelineImage + 1) % VkRenderBuffers::NumPipelineImages;
+	Printf("OpenXR: NextEye eyeCount=%d oldImage=%d newImage=%d\n",
+		eyeCount, oldImage, mCurrentPipelineImage);
+}
+
+void VkPostprocess::SetCurrentPipelineImage(int index)
+{
+	int count = VkRenderBuffers::NumPipelineImages;
+	if (count <= 0)
+	{
+		mCurrentPipelineImage = 0;
+		return;
+	}
+
+	mCurrentPipelineImage = ((index % count) + count) % count;
 }

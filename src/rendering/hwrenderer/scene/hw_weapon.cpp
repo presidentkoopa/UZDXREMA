@@ -110,7 +110,7 @@ void HWDrawInfo::DrawPSprite(HUDSprite *huds, FRenderState &state)
 	}
 	else
 	{
-		auto vrmode = VRMode::GetVRMode(true);
+		auto vrmode = VRMode::GetVRModeCached(true);
 		float thresh = (huds->texture->GetTranslucency() || huds->OverrideShader != -1) && !vrmode->IsVR() ? 0.f : gl_mask_sprite_threshold;
 		state.AlphaFunc(Alpha_GEqual, thresh);
 		FTranslationID trans = huds->weapon->GetTranslation();
@@ -317,7 +317,7 @@ void HWDrawInfo::DrawVRHudBorder(FRenderState& state, float width, float height,
 
 void HWDrawInfo::DrawPlayerSprites(bool hudModelStep, FRenderState &state)
 {
-	auto vrmode = VRMode::GetVRMode(true);
+	auto vrmode = VRMode::GetVRModeCached(true);
 	
 	auto oldlightmode = lightmode;
 	for (auto &hudsprite : hudsprites)

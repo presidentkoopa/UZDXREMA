@@ -217,8 +217,18 @@ void VulkanRenderDevice::Update()
 
 	Flush3D.Clock();
 
-	GetPostprocess()->SetActiveRenderTarget();
-
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	bool xrFrameBegan = false;
+	if (vrmode != nullptr && vrmode->IsVR())
+	{
+		vrmode->SetUp();
+		xrFrameBegan = vrmode->BeginXRFrame();
+	}
+	auto* postprocess = GetPostprocess();
+	if (postprocess)
+	{
+		postprocess->SetActiveRenderTarget();
+	}
 	Draw2D();
 	twod->Clear();
 
@@ -229,6 +239,11 @@ void VulkanRenderDevice::Update()
 
 	mCommands->WaitForCommands(true);
 	mCommands->UpdateGpuStats();
+
+	if (vrmode != nullptr && vrmode->IsVR() && xrFrameBegan)
+	{
+		vrmode->AcquireXRSwapchain();
+	}
 
 	Super::Update();
 }
@@ -439,6 +454,18 @@ void VulkanRenderDevice::SetActiveRenderTarget()
 	mPostprocess->SetActiveRenderTarget();
 }
 
+void VulkanRenderDevice::FirstEye()
+{
+	if (mPostprocess)
+		mPostprocess->SetCurrentPipelineImage(0);
+}
+
+void VulkanRenderDevice::NextEye(int eyecount)
+{
+	if (mPostprocess)
+		mPostprocess->NextEye(eyecount);
+}
+
 TArray<uint8_t> VulkanRenderDevice::GetScreenshotBuffer(int &pitch, ESSType &color_type, float &gamma)
 {
 	int w = SCREENWIDTH;
@@ -463,10 +490,20 @@ TArray<uint8_t> VulkanRenderDevice::GetScreenshotBuffer(int &pitch, ESSType &col
 void VulkanRenderDevice::BeginFrame()
 {
 	SetViewportRects(nullptr);
+	if (mSceneViewport.width == 0 || mSceneViewport.height == 0)
+	{
+		mSceneViewport.width = mScreenViewport.width;
+		mSceneViewport.height = mScreenViewport.height;
+		mSceneViewport.left = 0;
+		mSceneViewport.top = 0;
+	}
+
 	mViewpoints->Clear();
 	mCommands->BeginFrame();
 	mTextureManager->BeginFrame();
-	mScreenBuffers->BeginFrame(screen->mScreenViewport.width, screen->mScreenViewport.height, screen->mSceneViewport.width, screen->mSceneViewport.height);
+	mScreenBuffers->BeginFrame(
+		mScreenViewport.width, mScreenViewport.height,
+		mSceneViewport.width, mSceneViewport.height);
 	mSaveBuffers->BeginFrame(SAVEPICWIDTH, SAVEPICHEIGHT, SAVEPICWIDTH, SAVEPICHEIGHT);
 	mRenderState->BeginFrame();
 	mDescriptorSetManager->BeginFrame();

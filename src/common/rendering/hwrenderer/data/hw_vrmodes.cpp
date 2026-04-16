@@ -68,13 +68,20 @@
 #include "LSMatrix.h"
 #include "gl/stereo3d/gl_openvr.h"
 #include "gl/stereo3d/gl_openxrdevice.h"
+#include "vulkan/stereo3d/vk_openxrdevice.h"
+
 #include "textures.h"
 #include "gametexture.h"
 #include "common/2d/v_2ddrawer.h"
 #include <algorithm>
+#include <functional>
+#include <thread>
 #include "c_console.h"
+#include "common/scripting/jit/jit.h"
 
 using namespace OpenGLRenderer;
+
+extern thread_local bool isWorkerThread;
 
 EXTERN_CVAR(Bool, vr_hud_mount);
 EXTERN_CVAR(Int, vr_hud_mount_pos);
@@ -94,6 +101,7 @@ EXTERN_CVAR(Float, vr_automap_mount_zoffset);
 EXTERN_CVAR(Float, vr_automap_mount_pitch);
 EXTERN_CVAR(Float, vr_automap_mount_yaw);
 EXTERN_CVAR(Bool, vr_automap_mount_roll);
+EXTERN_CVAR(Int, vr_mode);
 
 extern float weaponangles[3];
 extern float offhandangles[3];
@@ -211,7 +219,7 @@ bool VR_GetMountedHudTransform(VSMatrix& out)
 	if (automapactive && vr_automap_mount)
 	{
 		mountedHand = vr_automap_mount_pos == 0 ? VR_MAINHAND : VR_OFFHAND;
-		if (!VRMode::GetVRMode(true)->GetWeaponTransform(&mountTransform, mountedHand)) return false;
+		if (!VRMode::GetVRModeCached(true)->GetWeaponTransform(&mountTransform, mountedHand)) return false;
 
 		const float handSign = mountedHand == VR_MAINHAND ? -1.f : 1.f;
 		mountTransform.translate(-vr_automap_mount_xoffset * handSign, -vr_automap_mount_zoffset, -vr_automap_mount_yoffset);
@@ -226,7 +234,7 @@ bool VR_GetMountedHudTransform(VSMatrix& out)
 	else
 	{
 		mountedHand = vr_hud_mount_pos == 0 ? VR_MAINHAND : VR_OFFHAND;
-		if (!VRMode::GetVRMode(true)->GetWeaponTransform(&mountTransform, mountedHand)) return false;
+		if (!VRMode::GetVRModeCached(true)->GetWeaponTransform(&mountTransform, mountedHand)) return false;
 
 		const float handSign = mountedHand == VR_MAINHAND ? -1.f : 1.f;
 		mountTransform.translate(-vr_hud_mount_xoffset * handSign, -vr_hud_mount_zoffset, -vr_hud_mount_yoffset);
@@ -241,17 +249,57 @@ bool VR_GetMountedHudTransform(VSMatrix& out)
 	out = mountTransform;
 	return true;
 }
+
+const VRMode *VRMode::GetVRModeCached(bool toscreen)
+{
+	if (isWorkerThread)
+	{
+		static VREyeInfo safeMonoEyes[2] = { VREyeInfo(0.f, 1.f), VREyeInfo(0.f, 0.f) };
+		static VRMode safeMono(1, 1.f, 1.f, 1.f, safeMonoEyes);
+		return &safeMono;
+	}
+
+	struct CacheEntry
+	{
+		bool valid = false;
+		uint64_t frameTime = 0;
+		int vrMode = 0;
+		int backend = 0;
+		bool disableTextureFilter = false;
+		const VRMode* mode = nullptr;
+	};
+
+	thread_local CacheEntry cache[2];
+	auto& entry = cache[toscreen ? 1 : 0];
+	const uint64_t frameTime = screen != nullptr ? screen->FrameTime : 0;
+	const int currentVrMode = (int)vr_mode;
+	const int currentBackend = V_GetBackend();
+	const bool currentDisableTextureFilter = sysCallbacks.DisableTextureFilter && sysCallbacks.DisableTextureFilter();
+
+	if (entry.valid &&
+		entry.frameTime == frameTime &&
+		entry.vrMode == currentVrMode &&
+		entry.backend == currentBackend &&
+		entry.disableTextureFilter == currentDisableTextureFilter)
+	{
+		return entry.mode;
+	}
+
+	entry.valid = true;
+	entry.frameTime = frameTime;
+	entry.vrMode = currentVrMode;
+	entry.backend = currentBackend;
+	entry.disableTextureFilter = currentDisableTextureFilter;
+	entry.mode = GetVRMode(toscreen);
+	return entry.mode;
+}
 // Set up 3D-specific console variables:
 CUSTOM_CVAR(Int, vr_mode, 0, CVAR_GLOBALCONFIG|CVAR_ARCHIVE)
 {
-#ifdef USE_OPENXR
-	if (self != 15)
-		self = 15;
-#endif
-#if 0 //def USE_OPENVR
-	if (self != 10)
-		self = 10;
-#endif
+	// Keep the selected VR mode stable across renderers.
+	// OpenGL can use OpenVR (10), Vulkan can use OpenXR (15).
+	if (self < 0)
+		self = 0;
 }
 
 #define PITCH 0
@@ -459,14 +507,22 @@ const VRMode *VRMode::GetVRMode(bool toscreen)
 		return &vrmi_checker;
 #ifdef USE_OPENVR
 	case VR_OPENVR:
+	{
 		// When calling a function of this class, ensure that you are using a pointer or reference to the derived class
-		const VRMode &vrmode =  s3d::OpenVRMode::getInstance();
+		const VRMode &vrmode = s3d::OpenVRMode::getInstance();
 		return vrmode.IsInitialized() ? &vrmode : &vrmi_mono;
 		//return vrmi_openvr.IsInitialized() ? &vrmi_openvr : &vrmi_mono;
+	}
 #endif
 #ifdef USE_OPENXR
 	case VR_OPENXR_MOBILE:
-		return &s3d::OpenXRDeviceMode::getInstance();
+		if (V_GetBackend() == 1)
+		{
+			Printf("VRMode select: choosing Vulkan/OpenXR mode 15.\n");
+			return &s3d::VKOpenXRDeviceMode::getInstance();
+		}
+		Printf("VRMode select: Vulkan/OpenXR requested but backend is not Vulkan.\n");
+		return &vrmi_mono;
 #endif
 	}
 }
@@ -503,6 +559,7 @@ VREyeInfo::VREyeInfo(float shiftFactor, float scaleFactor)
 {
 	mShiftFactor = shiftFactor;
 	mScaleFactor = scaleFactor;
+	m_isActive = false;
 }
 
 float VREyeInfo::getShift() const
@@ -583,7 +640,7 @@ DVector3 VREyeInfo::GetViewShift(FRenderViewpoint& vp) const
 static DVector3 MapWeaponDir(AActor* actor, DAngle yaw, DAngle pitch, int hand = 0)
 {
 	LSMatrix44 mat;
-	auto vrmode = VRMode::GetVRMode(true);
+	auto vrmode = VRMode::GetVRModeCached(true);
 	if (!vrmode->GetWeaponTransform(&mat, hand))
 	{
 		double pc = pitch.Cos();

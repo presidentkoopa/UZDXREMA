@@ -1421,7 +1421,7 @@ static int DamageMobj (AActor *target, AActor *inflictor, AActor *source, int da
 		{
 			//Haptic feedback when hurt - level indicates amount of damage
 			float level = (float)(0.4 + (0.6 * (temp / 100.0)));
-			auto vrmode = VRMode::GetVRMode(true);
+			auto vrmode = VRMode::GetVRModeCached(true);
 			vrmode->Vibrate(200, 0, level);
 			vrmode->Vibrate(200, 1, level);
 #ifdef __MOBILE__
@@ -1908,7 +1908,7 @@ void P_PoisonDamage (player_t *player, AActor *source, int damage, bool playPain
 		//Haptic feedback when hurt - level indicates amount of damage
 		float temp = damage < 100 ? damage : 100;
 		float level = (float)(0.4 + (0.6 * (temp / 100.0)));
-		auto vrmode = VRMode::GetVRMode(true);
+		auto vrmode = VRMode::GetVRModeCached(true);
 		vrmode->Vibrate(500, 0, level); // left
 		vrmode->Vibrate(500, 1, level); // right
 

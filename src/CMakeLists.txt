@@ -492,6 +492,50 @@ if (ENABLE_OPENVR)
 	endif()
 endif()
 
+option( ENABLE_OPENXR "Enable OpenXR virtual reality mode" NO )
+if (ENABLE_OPENXR)
+	add_definitions("-DUSE_OPENXR")
+	find_path(OPENXR_SDK_PATH
+		NAMES
+			include/openxr/openxr.h
+		HINTS
+			${OPENXR_DIR}
+			ENV OPENXR_DIR
+			ENV PROGRAMFILES
+			ENV HOME
+			ENV USERPROFILE
+		PATH_SUFFIXES
+			openxr-sdk
+			openxr
+	)
+	if(OPENXR_SDK_PATH)
+		message(STATUS "Found OpenXR SDK at ${OPENXR_SDK_PATH}")
+		include_directories("${OPENXR_SDK_PATH}/include")
+	else()
+		message(WARNING "OpenXR SDK not found, please set OPENXR_DIR environment variable")
+	endif()
+
+	option( DYN_OPENXR "Dynamically load OpenXR" ON )
+	if (DYN_OPENXR)
+		add_definitions( -DDYN_OPENXR )
+		find_program(OPENXR_SHARED_LIBRARY
+			NAMES openxr_loader.dll libopenxr_loader.so libopenxr_loader.dylib
+			HINTS "${OPENXR_SDK_PATH}/bin" "${OPENXR_SDK_PATH}/x64/bin" "${OPENXR_SDK_PATH}/x64/bin/common_runtime"
+		)
+	endif()
+	
+	set(OPENXR_SOURCES
+		common/rendering/stereo3d/openxr/oxr_loader.cpp
+	)
+	if (HAVE_VULKAN)
+		set(OPENXR_SOURCES ${OPENXR_SOURCES}
+			common/rendering/vulkan/stereo3d/vk_openxrdevice.cpp
+		)
+	endif()
+	set(PLAT_WIN32_SOURCES ${OPENXR_SOURCES} ${PLAT_WIN32_SOURCES})
+endif()
+
+
 if (HAVE_VULKAN)
 	list (APPEND PLAT_WIN32_SOURCES common/platform/win32/win32vulkanvideo.cpp )
 endif()
@@ -994,7 +1038,6 @@ set (PCH_SOURCES
 	rendering/hwrenderer/scene/hw_drawlistadd.cpp
 	rendering/hwrenderer/scene/hw_setcolor.cpp
 	QzDoom/qzdoom_common.cpp
-	gl/stereo3d/gl_openxrdevice.cpp
 	maploader/edata.cpp
 	maploader/specials.cpp
 	maploader/maploader.cpp
@@ -1564,6 +1607,11 @@ if(OPENVR_SHARED_LIBRARY)
 		DESTINATION ${INSTALL_PATH}
 		COMPONENT "Shared_Libraries")
 endif()
+if(OPENXR_SHARED_LIBRARY)
+	install(PROGRAMS ${OPENXR_SHARED_LIBRARY} 
+		DESTINATION ${INSTALL_PATH}
+		COMPONENT "Shared_Libraries")
+endif()
 
 source_group("Audio Files" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/sound/.+")
 source_group("Game Data" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/gamedata/.+")
@@ -1581,6 +1629,9 @@ source_group("Rendering\\2D" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/re
 source_group("Rendering\\Hardware Renderer" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/gl/.+")
 source_group("Rendering\\Hardware Renderer\\Scene" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/rendering/hwrenderer/scene/.+")
 source_group("OpenGL Renderer\\Stereo3D" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/gl/stereo3d/.+")
+source_group("Vulkan Renderer\\Stereo3D" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/vulkan/stereo3d/.+")
+source_group("Common\\Stereo3D\\OpenXR" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/common/rendering/stereo3d/openxr/.+")
+
 source_group("Rendering\\Software Renderer" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/rendering/swrenderer/.+")
 source_group("Rendering\\Software Renderer\\Drawers" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/rendering/swrenderer/drawers/.+")
 source_group("Rendering\\Software Renderer\\Scene" REGULAR_EXPRESSION "^${CMAKE_CURRENT_SOURCE_DIR}/rendering/swrenderer/scene/.+")

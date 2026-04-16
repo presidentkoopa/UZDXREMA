@@ -1086,7 +1086,7 @@ void R_SetupFrame(FRenderViewpoint& viewPoint, const FViewWindow& viewWindow, AA
 				double left = QuakePower(vr_quake_haptic_level, jiggers.Intensity.X, jiggers.Offset.X);
 				double right = QuakePower(vr_quake_haptic_level, jiggers.Intensity.Y, jiggers.Offset.Y);
 
-				auto vrmode = VRMode::GetVRMode(true);
+				auto vrmode = VRMode::GetVRModeCached(true);
 				vrmode->Vibrate(10, 0, (float)left); // left
 				vrmode->Vibrate(10, 1, (float)right); // right
 

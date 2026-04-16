@@ -399,7 +399,7 @@ void OpenGLFrameBuffer::SetViewportRects(IntRect *bounds)
 	Super::SetViewportRects(bounds);
 	if (!bounds)
 	{
-		auto vrmode = VRMode::GetVRMode(true);
+		auto vrmode = VRMode::GetVRModeCached(true);
 		vrmode->AdjustViewport(this);
 	}
 }

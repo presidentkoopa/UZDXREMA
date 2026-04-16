@@ -139,14 +139,18 @@ sector_t* RenderViewpoint(FRenderViewpoint& mainvp, AActor* camera, IntRect* bou
 
 	// Render (potentially) multiple views for stereo 3d
 	// Fixme. The view offsetting should be done with a static table and not require setup of the entire render state for the mode.
-	auto vrmode = VRMode::GetVRMode(mainview && toscreen);
+	auto vrmode = VRMode::GetVRModeCached(mainview && toscreen);
 	vrmode->SetUp();
 	const int eyeCount = vrmode->mEyeCount;
 	screen->FirstEye();
 	for (int eye_ix = 0; eye_ix < eyeCount; ++eye_ix)
 	{
 		flatVerticesPerEye = wallVerticesPerEye = portalsPerEye = lightsFlatPerEye = lightsWallPerEye = 0;
-		const auto& eye = vrmode->mEyes[eye_ix];
+		const auto eye = vrmode->mEyes[eye_ix];
+		if (eye == nullptr)
+		{
+			continue;
+		}
 		eye->SetUp();
 		screen->SetViewportRects(bounds);
 
@@ -431,7 +435,7 @@ sector_t* RenderView(player_t* player)
 			fovratio = ratio;
 		}
 
-		auto vrmode = VRMode::GetVRMode(true);
+		auto vrmode = VRMode::GetVRModeCached(true);
 		VR_EnsureHudSurface(screen->GetWidth() * vrmode->mHorizontalViewportScale, screen->GetHeight() * vrmode->mVerticalViewportScale);
 
 		screen->ImageTransitionScene(true); // Only relevant for Vulkan.
@@ -441,4 +445,3 @@ sector_t* RenderView(player_t* player)
 	All.Unclock();
 	return retsec;
 }
-

@@ -734,7 +734,7 @@ void ReadBindings(int lump, bool override)
 
 void C_SetDefaultKeys(const char* baseconfig)
 {
-	auto vrmode = VRMode::GetVRMode(true);
+	auto vrmode = VRMode::GetVRModeCached(true);
 	auto commonbinds = "engine/commonbinds.txt";
 	if (vrmode->IsVR())
 		commonbinds = "engine/vr/commonbinds.txt";

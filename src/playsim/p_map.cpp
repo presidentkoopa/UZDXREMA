@@ -4753,7 +4753,7 @@ AActor *P_LineAttack(AActor *t1, DAngle angle, double distance,
 	direction = { pc * angle.Cos(), pc * angle.Sin(), -pitch.Sin() };
 	shootz = t1->Center() - t1->Floorclip + t1->AttackOffset();
 
-	auto vrmode = VRMode::GetVRMode(true);
+	auto vrmode = VRMode::GetVRModeCached(true);
 
 	if (t1->player != NULL)
 	{
@@ -5693,7 +5693,7 @@ void P_RailAttack(FRailParams *p)
 			//Haptics
 			long rightHanded = vr_control_scheme < 10;
 			rightHanded = (p->flags & RAF_ISOFFHAND) ? 1 - rightHanded : rightHanded;
-			auto vrmode = VRMode::GetVRMode(true);
+			auto vrmode = VRMode::GetVRModeCached(true);
 			vrmode->Vibrate(150, rightHanded ? 1 : 0, 0.8);
 			VR_HapticEvent("fire_weapon", rightHanded ? 2 : 1, 100 * C_GetExternalHapticLevelValue("fire_weapon"), 0, 0);
 

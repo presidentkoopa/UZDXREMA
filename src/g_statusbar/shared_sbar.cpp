@@ -996,7 +996,7 @@ void DBaseStatusBar::RefreshBackground () const
 
 void DBaseStatusBar::DrawCrosshair (double ticFrac)
 {
-	auto vrmode = VRMode::GetVRMode(true);
+	auto vrmode = VRMode::GetVRModeCached(true);
 	if (!crosshairon || vrmode->IsVR())
 	{
 		return;

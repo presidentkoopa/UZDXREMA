@@ -93,7 +93,7 @@ void FGLRenderer::BlurScene(float gameinfobluramount)
 
 	GLPPRenderState renderstate(mBuffers);
 
-	auto vrmode = VRMode::GetVRMode(true);
+	auto vrmode = VRMode::GetVRModeCached(true);
 	int eyeCount = vrmode->mEyeCount;
 	for (int i = 0; i < eyeCount; ++i)
 	{
@@ -115,7 +115,7 @@ void FGLRenderer::ClearTonemapPalette()
 
 void FGLRenderer::Flush()
 {
-	auto vrmode = VRMode::GetVRMode(true);
+	auto vrmode = VRMode::GetVRModeCached(true);
 	if (vrmode->mEyeCount == 1)
 	{
 		CopyToBackbuffer(nullptr, true);
