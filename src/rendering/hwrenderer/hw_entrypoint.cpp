@@ -187,6 +187,7 @@ sector_t* RenderViewpoint(FRenderViewpoint& mainvp, AActor* camera, IntRect* bou
 		di->SetupView(RenderState, vp.Pos.X, vp.Pos.Y, vp.Pos.Z, false, false);
 
 		di->ProcessScene(toscreen);
+		eye->AdjustHud();
 
 		if (mainview)
 		{
@@ -199,9 +200,20 @@ sector_t* RenderViewpoint(FRenderViewpoint& mainvp, AActor* camera, IntRect* bou
 				RenderState.EnableDrawBuffers(1);
 			}
 
-			screen->PostProcessScene(false, cm, flash, [&]() { di->DrawEndScene2D(mainvp.sector, RenderState); });
+			const int eyeIndex = eye_ix;
+			Printf("hw_entrypoint: About to render 2D for eye %d, active pipeline image should be %d\n",
+				eyeIndex, eyeIndex);
+			screen->PostProcessScene(false, cm, flash, [&]() {
+				Printf("hw_entrypoint: Inside DrawEndScene2D callback for eye %d\n", eyeIndex);
+				di->DrawEndScene2D(mainvp.sector, RenderState);
+				Printf("hw_entrypoint: Finished DrawEndScene2D for eye %d\n", eyeIndex);
+			});
+			Printf("hw_entrypoint: After PostProcessScene for eye %d\n", eye_ix);
 
-			eye->AdjustBlend(di);
+			if (!vrmode->IsVR())
+			{
+				eye->AdjustBlend(di);
+			}
 			V_DrawBlend(mainvp.sector);
 			PostProcess.Unclock();
 		}

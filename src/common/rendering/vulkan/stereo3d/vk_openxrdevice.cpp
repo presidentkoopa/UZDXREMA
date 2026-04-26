@@ -306,24 +306,39 @@ static void ApplyVPUniforms(HWDrawInfo* di)
 
 void VKOpenXRDeviceEyePose::AdjustHud() const
 {
-	Printf("OpenXR: AdjustHud eye=%d\n", eye);
-	if (r_viewpoint.ViewLevel == nullptr)
+	const VKOpenXRDeviceMode* vrmode = static_cast<const VKOpenXRDeviceMode*>(VRMode::GetVRModeCached(true));
+	if (vrmode == nullptr || r_viewpoint.ViewLevel == nullptr)
 		return;
 
-	const VKOpenXRDeviceMode& mode = (const VKOpenXRDeviceMode&)VKOpenXRDeviceMode::getInstance();
-	if (mode.mEyeCount == 1) return;
+	Printf("OpenXR: AdjustHud START eye=%d\n", eye);
+	VSMatrix hudProj = vrmode->getHUDProjection(eye);
+	const FLOATTYPE* hudm = hudProj.get();
+	Printf("OpenXR: AdjustHud eye=%d hudProj row3col0=%f\n", eye, (double)hudm[3 * 4 + 0]);
 
 	auto* di = HWDrawInfo::StartDrawInfo(r_viewpoint.ViewLevel, nullptr, r_viewpoint, nullptr);
-	di->VPUniforms.mViewMatrix.loadIdentity();
-	di->VPUniforms.mProjectionMatrix = mode.getHUDProjection(eye);
-	ApplyVPUniforms(di);
-	di->EndDrawInfo();
+	if (di)
+	{
+		int oldVpIndex = di->vpIndex;
+		di->VPUniforms.mProjectionMatrix = hudProj;
+		di->ProjectionMatrix2 = hudProj;
+		di->VPUniforms.CalcDependencies();
+		if (screen->mViewpoints)
+		{
+			ApplyVPUniforms(di);
+			Printf("OpenXR: AdjustHud eye=%d - set vpIndex=%d (was %d)\n", eye, di->vpIndex, oldVpIndex);
+		}
+		di->EndDrawInfo();
+	}
+
+	Printf("OpenXR: AdjustHud END eye=%d\n", eye);
 }
 
 void VKOpenXRDeviceEyePose::AdjustBlend(HWDrawInfo* di) const
 {
 	if (r_viewpoint.ViewLevel == nullptr)
 		return;
+
+	Printf("OpenXR: AdjustBlend START eye=%d - current vpIndex=%d\n", eye, di != nullptr ? di->vpIndex : -1);
 
 	bool new_di = false;
 	if (di == nullptr)
@@ -334,13 +349,16 @@ void VKOpenXRDeviceEyePose::AdjustBlend(HWDrawInfo* di) const
 
 	auto& renderState = *screen->RenderState();
 	const VSMatrix eyeProjection = BuildOpenXREyeProjection(currentFov, (float)screen->GetZNear(), (float)screen->GetZFar(), eye);
+	const FLOATTYPE* eyeProjM = eyeProjection.get();
+	Printf("OpenXR: AdjustBlend eye=%d - eyeProjection row3col0=%f\n", eye, (double)eyeProjM[3 * 4 + 0]);
 	di->VPUniforms.mProjectionMatrix = eyeProjection;
 	di->ProjectionMatrix2 = eyeProjection;
 	di->VPUniforms.CalcDependencies();
 	if (screen->mViewpoints)
 	{
+		int oldIndex = di->vpIndex;
 		di->vpIndex = screen->mViewpoints->SetViewpoint(renderState, &di->VPUniforms);
-		Printf("OpenXR: AdjustBlend eye=%d bound viewpoint index=%d with eyeProjection\n", eye, di->vpIndex);
+		Printf("OpenXR: AdjustBlend eye=%d bound viewpoint index=%d (was %d) with eyeProjection\n", eye, di->vpIndex, oldIndex);
 	}
 	else
 	{
@@ -348,22 +366,24 @@ void VKOpenXRDeviceEyePose::AdjustBlend(HWDrawInfo* di) const
 	}
 
 	VSMatrix finalMatrix = projection;
+	const FLOATTYPE* finalM = finalMatrix.get();
+	Printf("OpenXR: AdjustBlend eye=%d finalMatrix row3col0=%f\n", eye, (double)finalM[3 * 4 + 0]);
 	di->VPUniforms.mProjectionMatrix = finalMatrix;
 	di->ProjectionMatrix2 = finalMatrix;
 	di->VPUniforms.CalcDependencies();
 	if (screen->mViewpoints)
 	{
+		int oldIndex = di->vpIndex;
 		di->vpIndex = screen->mViewpoints->SetViewpoint(renderState, &di->VPUniforms);
-		Printf("OpenXR: AdjustBlend eye=%d rebound viewpoint index=%d with finalMatrix\n", eye, di->vpIndex);
+		Printf("OpenXR: AdjustBlend eye=%d rebound viewpoint index=%d (was %d) with finalMatrix\n", eye, di->vpIndex, oldIndex);
 	}
 	{
-		const FLOATTYPE* m = finalMatrix.get();
 		Printf("OpenXR: AdjustBlend eye=%d finalMatrix[row3col0=%.6f] matrix=[%.6f %.6f %.6f %.6f | %.6f %.6f %.6f %.6f | %.6f %.6f %.6f %.6f | %.6f %.6f %.6f %.6f]\n",
-			eye, (double)m[3 * 4 + 0],
-			(double)m[0], (double)m[1], (double)m[2], (double)m[3],
-			(double)m[4], (double)m[5], (double)m[6], (double)m[7],
-			(double)m[8], (double)m[9], (double)m[10], (double)m[11],
-			(double)m[12], (double)m[13], (double)m[14], (double)m[15]);
+			eye, (double)finalM[3 * 4 + 0],
+			(double)finalM[0], (double)finalM[1], (double)finalM[2], (double)finalM[3],
+			(double)finalM[4], (double)finalM[5], (double)finalM[6], (double)finalM[7],
+			(double)finalM[8], (double)finalM[9], (double)finalM[10], (double)finalM[11],
+			(double)finalM[12], (double)finalM[13], (double)finalM[14], (double)finalM[15]);
 	}
 	ApplyVPUniforms(di);
 
@@ -371,6 +391,8 @@ void VKOpenXRDeviceEyePose::AdjustBlend(HWDrawInfo* di) const
 	{
 		di->EndDrawInfo();
 	}
+
+	Printf("OpenXR: AdjustBlend END eye=%d - final vpIndex=%d\n", eye, di->vpIndex);
 }
 
 VKOpenXRDeviceMode::VKOpenXRDeviceMode()
@@ -402,40 +424,58 @@ static TYPE& getHUDValue(TYPE& automap, TYPE& hud)
 
 VSMatrix VKOpenXRDeviceMode::getHUDProjection(int eye) const
 {
-	Printf("OpenXR: getHUDProjection called for eye %d\n", eye);
-	VSMatrix new_projection;
-	new_projection.loadIdentity();
+	(void)eye;
 
-	float stereo_separation = (vr_ipd * 0.5f) * vr_vunits_per_meter * getHUDValue<FFloatCVarRef>(vr_automap_stereo, vr_hud_stereo) * (eye == 1 ? -1.0f : 1.0f);
-	new_projection.translate(stereo_separation, 0, 0);
+	VSMatrix hudProjection;
+	hudProjection.loadIdentity();
 
-	new_projection.scale(-vr_vunits_per_meter, vr_vunits_per_meter, -vr_vunits_per_meter);
-	double pixelstretch = r_viewpoint.ViewLevel ? r_viewpoint.ViewLevel->pixelstretch : 1.2;
-	new_projection.scale(1.0, pixelstretch, 1.0);
+	const float hudStereo = getHUDValue<FFloatCVarRef>(vr_automap_stereo, vr_hud_stereo);
+	XrVector3f posePosition = { 0.0f, 0.0f, 0.0f };
+	XrQuaternionf poseOrientation = { 0.0f, 0.0f, 0.0f, 1.0f };
+	if (eye >= 0 && (size_t)eye < xrViews.size())
+	{
+		posePosition = xrViews[(size_t)eye].pose.position;
+		poseOrientation = xrViews[(size_t)eye].pose.orientation;
+	}
+	const float poseX = -posePosition.z * hudStereo;
+	const float poseY = -posePosition.x * hudStereo;
+	const float poseZ = posePosition.y * hudStereo;
+
+	// Compose the HUD from the current eye pose first, then apply the same
+	// scale/rotate/distance stack the OpenVR path uses.
+	hudProjection.translate(poseX, poseY, poseZ);
+	hudProjection.scale(-vr_vunits_per_meter, vr_vunits_per_meter, -vr_vunits_per_meter);
+
+	const double pixelstretch = r_viewpoint.ViewLevel ? r_viewpoint.ViewLevel->pixelstretch : 1.2;
+	hudProjection.scale(1.0, (FLOATTYPE)pixelstretch, 1.0);
+
+	float pitch = 0.0f;
+	float yaw = 0.0f;
+	float roll = 0.0f;
+	QuaternionToEuler(poseOrientation, pitch, yaw, roll);
+	(void)yaw;
 
 	if (getHUDValue<FBoolCVarRef>(vr_automap_fixed_roll, vr_hud_fixed_roll))
 	{
-		new_projection.rotate(-hmdorientation[2], 0, 0, 1);
+		hudProjection.rotate(-roll, 0, 0, 1);
 	}
 
-	new_projection.rotate(getHUDValue<FFloatCVarRef>(vr_automap_rotate, vr_hud_rotate), 1, 0, 0);
+	hudProjection.rotate(getHUDValue<FFloatCVarRef>(vr_automap_rotate, vr_hud_rotate), 1, 0, 0);
 
 	if (getHUDValue<FBoolCVarRef>(vr_automap_fixed_pitch, vr_hud_fixed_pitch))
 	{
-		new_projection.rotate(-hmdorientation[0], 1, 0, 0);
+		hudProjection.rotate(-pitch, 1, 0, 0);
 	}
 
-	double distance = getHUDValue<FFloatCVarRef>(vr_automap_distance, vr_hud_distance);
-	new_projection.translate(0.0, 0.0, distance);
-	double vr_scale = getHUDValue<FFloatCVarRef>(vr_automap_scale, vr_hud_scale);
-	new_projection.scale(-vr_scale, vr_scale, -vr_scale);
+	hudProjection.translate(0.0f, 0.0f, getHUDValue<FFloatCVarRef>(vr_automap_distance, vr_hud_distance));
+	const float hudScale = getHUDValue<FFloatCVarRef>(vr_automap_scale, vr_hud_scale);
+	hudProjection.scale(-hudScale, hudScale, -hudScale);
 
-	new_projection.translate(-1.0, 1.0, 0);
-	new_projection.scale(2.0f / (float)SCREENWIDTH, -2.0f / (float)SCREENHEIGHT, -1.0f);
-
-	VSMatrix proj = mEyes[eye]->projection;
-	proj.multMatrix(new_projection);
-	return proj;
+	const float screenWidth = (float)screen->GetWidth();
+	const float screenHeight = (float)screen->GetHeight();
+	hudProjection.translate(-1.0f, 1.0f, 0.0f);
+	hudProjection.scale(2.0f / screenWidth, -2.0f / screenHeight, -1.0f);
+	return hudProjection;
 }
 
 bool VKOpenXRDeviceMode::InitializeOpenXR() const
@@ -1111,10 +1151,12 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 	for (uint32_t layer = 0; layer < xrViewCount; ++layer)
 	{
 		int eyePipelineImage = (int)layer;
-		// Use Eye 0 for 2D-only states (boot/main menu) where 3D scene doesn't render.
-		if (gamestate != GS_LEVEL)
+		if (eyePipelineImage < 0 || eyePipelineImage >= VkRenderBuffers::NumPipelineImages || buffers->PipelineImage[eyePipelineImage].Image == nullptr)
 		{
-			eyePipelineImage = 0;
+			if (buffers->PipelineImage[0].Image != nullptr)
+			{
+				eyePipelineImage = 0;
+			}
 		}
 		if (eyePipelineImage < 0 || eyePipelineImage >= VkRenderBuffers::NumPipelineImages || buffers->PipelineImage[eyePipelineImage].Image == nullptr)
 		{

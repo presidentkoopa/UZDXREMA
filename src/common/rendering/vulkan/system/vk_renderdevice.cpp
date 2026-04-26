@@ -227,10 +227,27 @@ void VulkanRenderDevice::Update()
 	auto* postprocess = GetPostprocess();
 	if (postprocess)
 	{
-		postprocess->SetActiveRenderTarget();
+		if (vrmode != nullptr && vrmode->IsVR())
+		{
+			const int eyeCount = vrmode->mEyeCount > 0 ? vrmode->mEyeCount : 1;
+			FirstEye();
+			for (int eye_ix = 0; eye_ix < eyeCount; ++eye_ix)
+			{
+				postprocess->SetActiveRenderTarget();
+				Draw2D(true);
+				Draw2D(false);
+				if (eye_ix + 1 < eyeCount)
+					NextEye(eyeCount);
+			}
+			twod->Clear();
+		}
+		else
+		{
+			postprocess->SetActiveRenderTarget();
+			Draw2D();
+			twod->Clear();
+		}
 	}
-	Draw2D();
-	twod->Clear();
 
 	mRenderState->EndRenderPass();
 	mRenderState->EndFrame();
@@ -451,6 +468,11 @@ void VulkanRenderDevice::CopyScreenToBuffer(int w, int h, uint8_t *data)
 
 void VulkanRenderDevice::SetActiveRenderTarget()
 {
+	if (mPostprocess)
+	{
+		Printf("VulkanRenderDevice: SetActiveRenderTarget switched to pipeline image %d\n",
+			mPostprocess->GetCurrentPipelineImage());
+	}
 	mPostprocess->SetActiveRenderTarget();
 }
 
