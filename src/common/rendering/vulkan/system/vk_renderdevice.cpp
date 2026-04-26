@@ -229,15 +229,18 @@ void VulkanRenderDevice::Update()
 	{
 		if (vrmode != nullptr && vrmode->IsVR())
 		{
-			const int eyeCount = vrmode->mEyeCount > 0 ? vrmode->mEyeCount : 1;
-			FirstEye();
-			for (int eye_ix = 0; eye_ix < eyeCount; ++eye_ix)
+			if (!vrmode->RenderVirtualScreen())
 			{
-				postprocess->SetActiveRenderTarget();
-				Draw2D(true);
-				Draw2D(false);
-				if (eye_ix + 1 < eyeCount)
-					NextEye(eyeCount);
+				const int eyeCount = vrmode->mEyeCount > 0 ? vrmode->mEyeCount : 1;
+				FirstEye();
+				for (int eye_ix = 0; eye_ix < eyeCount; ++eye_ix)
+				{
+					postprocess->SetActiveRenderTarget();
+					Draw2D(true);
+					Draw2D(false);
+					if (eye_ix + 1 < eyeCount)
+						NextEye(eyeCount);
+				}
 			}
 			twod->Clear();
 		}

@@ -7,6 +7,9 @@ class DFrameBuffer;
 class FCanvasTexture;
 class FCanvas;
 class FGameTexture;
+class VulkanRenderDevice;
+class VulkanImage;
+class VkTextureImage;
 
 enum
 {
@@ -113,6 +116,8 @@ struct VRMode
 	virtual void UpdateOverlaySettings() const {}
 	virtual void DrawControllerModels(HWDrawInfo* di, FRenderState& state) const {}
 	virtual void DrawMountedHud(HWDrawInfo* di, FRenderState& state) const {}
+	virtual bool RenderVirtualScreen() const { return false; }
+	virtual bool RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage* dstImage) const { return false; }
 	
 	virtual void Present() const;
 	virtual void PollXREvents() const {}

@@ -168,6 +168,11 @@ void VkFramebufferManager::AcquireImage()
 					blitEye(rightSource, rightHalf);
 				}
 
+				if (vrmode->RenderDesktopMirror(fb, dstImage))
+				{
+					// OpenXR virtual screen composed directly into the desktop mirror.
+				}
+
 				VkImageTransition()
 					.AddImage(leftSource, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false)
 					.Execute(cmdbuffer);

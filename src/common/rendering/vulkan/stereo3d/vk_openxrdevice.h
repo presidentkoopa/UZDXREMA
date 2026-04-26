@@ -8,6 +8,8 @@
 #include <vector>
 #include <memory>
 
+class VkTextureImage;
+
 namespace s3d {
 
 class VKOpenXRDeviceEyePose : public VREyeInfo
@@ -49,6 +51,8 @@ public:
 	virtual bool AcquireXRSwapchain() const override;
 	virtual bool SubmitFrame() const override;
 	virtual void AdjustViewport(DFrameBuffer* screen) const override;
+	virtual bool RenderVirtualScreen() const override;
+	virtual bool RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage* dstImage) const override;
 	
 	virtual bool GetHandTransform(int hand, VSMatrix* out) const override;
 	virtual bool RenderPlayerSpritesInScene() const { return true; }
@@ -63,9 +67,15 @@ protected:
 	void updateHmdPose(FRenderViewpoint& vp) const;
 	bool InitializeOpenXR() const;
 	bool CreateSwapchain() const;
+	bool CreateVirtualScreenSwapchain(uint32_t width, uint32_t height) const;
+	bool CreateVirtualScreenBackdropSwapchain(uint32_t width, uint32_t height) const;
+	void DestroyVirtualScreenSwapchain() const;
+	void DestroyVirtualScreenBackdropSwapchain() const;
 	void DestroyOpenXR() const;
 
 	VSMatrix getHUDProjection(int eye) const;
+	void updateVirtualScreenLayer() const;
+	bool ShouldRenderVirtualScreen() const;
 
 	std::unique_ptr<VKOpenXRDeviceEyePose> mEyes[2];
 
@@ -97,11 +107,27 @@ protected:
 	mutable std::vector<XrView> xrViews;
 	mutable std::vector<XrCompositionLayerProjectionView> xrProjectionViews;
 	mutable std::vector<XrSwapchainImageVulkanKHR> xrSwapchainImages;
+	mutable std::vector<XrSwapchainImageVulkanKHR> xrVirtualScreenSwapchainImages;
+	mutable std::vector<XrSwapchainImageVulkanKHR> xrVirtualScreenBackdropSwapchainImages;
+	mutable std::vector<VkTextureImage> xrVirtualScreenTextures;
+	mutable std::vector<VkTextureImage> xrVirtualScreenBackdropTextures;
 	mutable uint32_t xrViewCount = 0;
 	mutable int xrCurrentImageIndex = -1;
+	mutable int xrVirtualScreenImageIndex = -1;
+	mutable int xrVirtualScreenBackdropImageIndex = -1;
+	mutable uint32_t xrVirtualScreenWidth = 0;
+	mutable uint32_t xrVirtualScreenHeight = 0;
 	mutable int64_t xrSwapchainFormat = VK_FORMAT_UNDEFINED;
+	mutable XrSwapchain xrVirtualScreenSwapchain = XR_NULL_HANDLE;
+	mutable XrSwapchain xrVirtualScreenBackdropSwapchain = XR_NULL_HANDLE;
+	mutable XrCompositionLayerQuad xrVirtualScreenLayer{ XR_TYPE_COMPOSITION_LAYER_QUAD };
+	mutable XrCompositionLayerQuad xrVirtualScreenBackdropLayer{ XR_TYPE_COMPOSITION_LAYER_QUAD };
+	mutable XrPosef xrVirtualScreenPose{};
+	mutable XrPosef xrVirtualScreenBackdropPose{};
 	mutable XrFrameState xrFrameState = { XR_TYPE_FRAME_STATE };
 	mutable bool xrFrameInProgress = false;
+	mutable bool xrVirtualScreenVisible = false;
+	mutable bool xrVirtualScreenBackdropVisible = false;
 	mutable bool mSetUpInProgress = false;
 	mutable uint64_t xrFrameCounter = 0;
     

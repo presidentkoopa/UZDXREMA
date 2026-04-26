@@ -6,7 +6,9 @@
 #include "vulkan/system/vk_renderdevice.h"
 #include "vulkan/system/vk_commandbuffer.h"
 #include "vulkan/textures/vk_framebuffer.h"
+#include "vulkan/textures/vk_imagetransition.h"
 #include "vulkan/textures/vk_renderbuffers.h"
+#include "vulkan/renderer/vk_renderstate.h"
 #include "vulkan/renderer/vk_postprocess.h"
 #include "zvulkan/vulkanbuilders.h"
 #include "zvulkan/vulkancompatibledevice.h"
@@ -17,6 +19,7 @@
 #include "doomdef.h"
 #include "rendering/hwrenderer/scene/hw_drawinfo.h"
 #include "common/rendering/hwrenderer/data/hw_viewpointbuffer.h"
+#include "v_draw.h"
 
 #include <cstring>
 #include <cmath>
@@ -58,6 +61,12 @@ EXTERN_CVAR(Bool, vr_hud_fixed_roll);
 EXTERN_CVAR(Bool, vr_automap_fixed_pitch);
 EXTERN_CVAR(Bool, vr_hud_fixed_pitch);
 EXTERN_CVAR(Bool, vr_automap_use_hud);
+EXTERN_CVAR(Int, vr_overlayscreen);
+EXTERN_CVAR(Bool, vr_overlayscreen_always);
+EXTERN_CVAR(Float, vr_overlayscreen_size);
+EXTERN_CVAR(Float, vr_overlayscreen_dist);
+EXTERN_CVAR(Float, vr_overlayscreen_vpos);
+EXTERN_CVAR(Int, vr_overlayscreen_bg);
 EXTERN_CVAR(Int, vr_control_scheme);
 
 namespace s3d {
@@ -77,6 +86,53 @@ PFN_xrGetVulkanGraphicsDeviceKHR_t xrGetVulkanGraphicsDeviceKHR_inst = nullptr;
 static float DEG2RAD(float deg)
 {
 	return deg * (float)(M_PI / 180.0);
+}
+
+static XrVector3f RotateVector(const XrQuaternionf& q, const XrVector3f& v)
+{
+	XrVector3f result;
+
+	const float qx = q.x;
+	const float qy = q.y;
+	const float qz = q.z;
+	const float qw = q.w;
+
+	const float tx = 2.0f * (qy * v.z - qz * v.y);
+	const float ty = 2.0f * (qz * v.x - qx * v.z);
+	const float tz = 2.0f * (qx * v.y - qy * v.x);
+
+	result.x = v.x + qw * tx + (qy * tz - qz * ty);
+	result.y = v.y + qw * ty + (qz * tx - qx * tz);
+	result.z = v.z + qw * tz + (qx * ty - qy * tx);
+	return result;
+}
+
+static XrVector3f AddVector(const XrVector3f& a, const XrVector3f& b)
+{
+	return { a.x + b.x, a.y + b.y, a.z + b.z };
+}
+
+static XrVector3f ScaleVector(const XrVector3f& v, float scale)
+{
+	return { v.x * scale, v.y * scale, v.z * scale };
+}
+
+static XrQuaternionf MultiplyQuaternion(const XrQuaternionf& a, const XrQuaternionf& b)
+{
+	return {
+		a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+		a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+		a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+		a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z
+	};
+}
+
+static XrQuaternionf MakeAxisAngleQuaternion(const XrVector3f& axis, float angleRadians)
+{
+	const float halfAngle = angleRadians * 0.5f;
+	const float s = std::sin(halfAngle);
+	const float c = std::cos(halfAngle);
+	return { axis.x * s, axis.y * s, axis.z * s, c };
 }
 
 static int mAngleFromRadians(double radians)
@@ -153,6 +209,21 @@ void QuaternionToEuler(const XrQuaternionf& q, float& pitch, float& yaw, float& 
 	pitch = (float)(outPitch * (180.0 / M_PI));
 	yaw = (float)(outYaw * (180.0 / M_PI));
 	roll = (float)(outRoll * (180.0 / M_PI));
+}
+
+static const float overlayBG[6][3] = {
+	{ 0.0f, 0.0f, 0.0f },
+	{ 0.11f, 0.0f, 0.01f },
+	{ 0.0f, 0.11f, 0.02f },
+	{ 0.0f, 0.02f, 0.11f },
+	{ 0.0f, 0.11f, 0.10f },
+	{ 0.10f, 0.10f, 0.10f }
+};
+
+static XrVector3f GetVirtualScreenBackgroundColor()
+{
+	const int idx = clamp<int>(vr_overlayscreen_bg, 0, 5);
+	return { overlayBG[idx][0], overlayBG[idx][1], overlayBG[idx][2] };
 }
 
 }
@@ -710,8 +781,180 @@ bool VKOpenXRDeviceMode::CreateSwapchain() const
 	return true;
 }
 
+bool VKOpenXRDeviceMode::CreateVirtualScreenSwapchain(uint32_t width, uint32_t height) const
+{
+	if (xrSession == XR_NULL_HANDLE || xrVkDevice == nullptr || xrSwapchainFormat == VK_FORMAT_UNDEFINED || width == 0 || height == 0)
+		return false;
+	if (xrVirtualScreenSwapchain != XR_NULL_HANDLE &&
+		xrVirtualScreenWidth == width &&
+		xrVirtualScreenHeight == height &&
+		!xrVirtualScreenTextures.empty())
+	{
+		return true;
+	}
+
+	DestroyVirtualScreenSwapchain();
+
+	XrSwapchainCreateInfo swapchainInfo{ XR_TYPE_SWAPCHAIN_CREATE_INFO };
+	swapchainInfo.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
+	swapchainInfo.format = xrSwapchainFormat;
+	swapchainInfo.sampleCount = 1;
+	swapchainInfo.width = width;
+	swapchainInfo.height = height;
+	swapchainInfo.faceCount = 1;
+	swapchainInfo.arraySize = 1;
+	swapchainInfo.mipCount = 1;
+
+	if (XR_FAILED(xrCreateSwapchain(xrSession, &swapchainInfo, &xrVirtualScreenSwapchain)))
+	{
+		Printf("OpenXR: failed to create virtual screen swapchain %ux%u.\n", width, height);
+		xrVirtualScreenVisible = false;
+		return false;
+	}
+
+	uint32_t imageCount = 0;
+	if (XR_FAILED(xrEnumerateSwapchainImages(xrVirtualScreenSwapchain, 0, &imageCount, nullptr)) || imageCount == 0)
+	{
+		DestroyVirtualScreenSwapchain();
+		xrVirtualScreenVisible = false;
+		return false;
+	}
+
+	xrVirtualScreenSwapchainImages.resize(imageCount);
+	for (auto& image : xrVirtualScreenSwapchainImages)
+		image.type = XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR;
+	if (XR_FAILED(xrEnumerateSwapchainImages(xrVirtualScreenSwapchain, imageCount, &imageCount,
+		reinterpret_cast<XrSwapchainImageBaseHeader*>(xrVirtualScreenSwapchainImages.data()))))
+	{
+		DestroyVirtualScreenSwapchain();
+		xrVirtualScreenVisible = false;
+		return false;
+	}
+	xrVirtualScreenSwapchainImages.resize(imageCount);
+
+	xrVirtualScreenTextures.resize(imageCount);
+	for (uint32_t i = 0; i < imageCount; ++i)
+	{
+		auto& texture = xrVirtualScreenTextures[i];
+		texture.Layout = VK_IMAGE_LAYOUT_UNDEFINED;
+		texture.AspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		texture.Image = std::make_unique<VulkanImage>(xrVkDevice.get(), xrVirtualScreenSwapchainImages[i].image, nullptr,
+			(int)width, (int)height, 1, 1);
+		texture.View = ImageViewBuilder()
+			.Type(VK_IMAGE_VIEW_TYPE_2D)
+			.Image(texture.Image.get(), (VkFormat)xrSwapchainFormat)
+			.DebugName("OpenXR.VirtualScreenView")
+			.Create(xrVkDevice.get());
+	}
+
+	xrVirtualScreenWidth = width;
+	xrVirtualScreenHeight = height;
+	Printf("OpenXR: created virtual screen swapchain %ux%u with %u images.\n", width, height, imageCount);
+	return true;
+}
+
+bool VKOpenXRDeviceMode::CreateVirtualScreenBackdropSwapchain(uint32_t width, uint32_t height) const
+{
+	if (xrSession == XR_NULL_HANDLE || xrVkDevice == nullptr || xrSwapchainFormat == VK_FORMAT_UNDEFINED || width == 0 || height == 0)
+		return false;
+	if (xrVirtualScreenBackdropSwapchain != XR_NULL_HANDLE &&
+		xrVirtualScreenWidth == width &&
+		xrVirtualScreenHeight == height &&
+		!xrVirtualScreenBackdropTextures.empty())
+	{
+		return true;
+	}
+
+	DestroyVirtualScreenBackdropSwapchain();
+
+	XrSwapchainCreateInfo swapchainInfo{ XR_TYPE_SWAPCHAIN_CREATE_INFO };
+	swapchainInfo.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
+	swapchainInfo.format = xrSwapchainFormat;
+	swapchainInfo.sampleCount = 1;
+	swapchainInfo.width = width;
+	swapchainInfo.height = height;
+	swapchainInfo.faceCount = 1;
+	swapchainInfo.arraySize = 1;
+	swapchainInfo.mipCount = 1;
+
+	if (XR_FAILED(xrCreateSwapchain(xrSession, &swapchainInfo, &xrVirtualScreenBackdropSwapchain)))
+	{
+		Printf("OpenXR: failed to create virtual screen backdrop swapchain %ux%u.\n", width, height);
+		xrVirtualScreenBackdropVisible = false;
+		return false;
+	}
+
+	uint32_t imageCount = 0;
+	if (XR_FAILED(xrEnumerateSwapchainImages(xrVirtualScreenBackdropSwapchain, 0, &imageCount, nullptr)) || imageCount == 0)
+	{
+		DestroyVirtualScreenBackdropSwapchain();
+		xrVirtualScreenBackdropVisible = false;
+		return false;
+	}
+
+	xrVirtualScreenBackdropSwapchainImages.resize(imageCount);
+	for (auto& image : xrVirtualScreenBackdropSwapchainImages)
+		image.type = XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR;
+	if (XR_FAILED(xrEnumerateSwapchainImages(xrVirtualScreenBackdropSwapchain, imageCount, &imageCount,
+		reinterpret_cast<XrSwapchainImageBaseHeader*>(xrVirtualScreenBackdropSwapchainImages.data()))))
+	{
+		DestroyVirtualScreenBackdropSwapchain();
+		xrVirtualScreenBackdropVisible = false;
+		return false;
+	}
+	xrVirtualScreenBackdropSwapchainImages.resize(imageCount);
+
+	xrVirtualScreenBackdropTextures.resize(imageCount);
+	for (uint32_t i = 0; i < imageCount; ++i)
+	{
+		auto& texture = xrVirtualScreenBackdropTextures[i];
+		texture.Layout = VK_IMAGE_LAYOUT_UNDEFINED;
+		texture.AspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		texture.Image = std::make_unique<VulkanImage>(xrVkDevice.get(), xrVirtualScreenBackdropSwapchainImages[i].image, nullptr,
+			(int)width, (int)height, 1, 1);
+		texture.View = ImageViewBuilder()
+			.Type(VK_IMAGE_VIEW_TYPE_2D)
+			.Image(texture.Image.get(), (VkFormat)xrSwapchainFormat)
+			.DebugName("OpenXR.VirtualScreenBackdropView")
+			.Create(xrVkDevice.get());
+	}
+
+	xrVirtualScreenBackdropVisible = true;
+	return true;
+}
+
+void VKOpenXRDeviceMode::DestroyVirtualScreenSwapchain() const
+{
+	xrVirtualScreenVisible = false;
+	xrVirtualScreenImageIndex = -1;
+	xrVirtualScreenTextures.clear();
+	xrVirtualScreenSwapchainImages.clear();
+	if (xrVirtualScreenSwapchain != XR_NULL_HANDLE)
+	{
+		xrDestroySwapchain(xrVirtualScreenSwapchain);
+		xrVirtualScreenSwapchain = XR_NULL_HANDLE;
+	}
+	xrVirtualScreenWidth = 0;
+	xrVirtualScreenHeight = 0;
+}
+
+void VKOpenXRDeviceMode::DestroyVirtualScreenBackdropSwapchain() const
+{
+	xrVirtualScreenBackdropVisible = false;
+	xrVirtualScreenBackdropImageIndex = -1;
+	xrVirtualScreenBackdropTextures.clear();
+	xrVirtualScreenBackdropSwapchainImages.clear();
+	if (xrVirtualScreenBackdropSwapchain != XR_NULL_HANDLE)
+	{
+		xrDestroySwapchain(xrVirtualScreenBackdropSwapchain);
+		xrVirtualScreenBackdropSwapchain = XR_NULL_HANDLE;
+	}
+}
+
 void VKOpenXRDeviceMode::DestroyOpenXR() const
 {
+	DestroyVirtualScreenSwapchain();
+	DestroyVirtualScreenBackdropSwapchain();
 	if (xrSwapchain != XR_NULL_HANDLE)
 	{
 		xrDestroySwapchain(xrSwapchain);
@@ -988,6 +1231,10 @@ bool VKOpenXRDeviceMode::BeginXRFrame() const
 	}
 
 	updateHmdPose(r_viewpoint);
+	xrVirtualScreenVisible = false;
+	xrVirtualScreenBackdropVisible = false;
+	xrVirtualScreenImageIndex = -1;
+	xrVirtualScreenBackdropImageIndex = -1;
 	xrFrameInProgress = true;
 	return true;
 }
@@ -1286,11 +1533,41 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		xrProjectionViews[i].subImage.imageRect.extent = { (int32_t)xrViewConfigs[i].recommendedImageRectWidth, (int32_t)xrViewConfigs[i].recommendedImageRectHeight };
 	}
 
-	const XrCompositionLayerBaseHeader* layers[] = { (const XrCompositionLayerBaseHeader*)&layer };
+	XrCompositionLayerQuad backdropLayer{ XR_TYPE_COMPOSITION_LAYER_QUAD };
+	XrCompositionLayerQuad quadLayer{ XR_TYPE_COMPOSITION_LAYER_QUAD };
+	bool submitVirtualScreen = xrVirtualScreenVisible && xrVirtualScreenSwapchain != XR_NULL_HANDLE && xrVirtualScreenImageIndex >= 0;
+	bool submitBackdrop = submitVirtualScreen && xrVirtualScreenBackdropVisible && xrVirtualScreenBackdropSwapchain != XR_NULL_HANDLE && xrVirtualScreenBackdropImageIndex >= 0;
+
+	const XrCompositionLayerBaseHeader* layers[3];
+	int layerIndex = 0;
+	if (!submitVirtualScreen)
+	{
+		layers[layerIndex++] = (const XrCompositionLayerBaseHeader*)&layer;
+	}
+	else
+	{
+		if (submitBackdrop)
+		{
+			backdropLayer = xrVirtualScreenBackdropLayer;
+			backdropLayer.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
+			backdropLayer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+			backdropLayer.subImage.swapchain = xrVirtualScreenBackdropSwapchain;
+			backdropLayer.subImage.imageArrayIndex = 0;
+			layers[layerIndex++] = (const XrCompositionLayerBaseHeader*)&backdropLayer;
+		}
+
+		quadLayer = xrVirtualScreenLayer;
+		quadLayer.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
+		quadLayer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+		quadLayer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+		quadLayer.subImage.swapchain = xrVirtualScreenSwapchain;
+		quadLayer.subImage.imageArrayIndex = 0;
+		layers[layerIndex++] = (const XrCompositionLayerBaseHeader*)&quadLayer;
+	}
 	XrFrameEndInfo endInfo{ XR_TYPE_FRAME_END_INFO };
 	endInfo.displayTime = xrFrameState.predictedDisplayTime;
 	endInfo.environmentBlendMode = environmentBlendMode;
-	endInfo.layerCount = 1;
+	endInfo.layerCount = layerIndex;
 	endInfo.layers = layers;
 	XrResult endResult = xrEndFrame(xrSession, &endInfo);
 	xrFrameInProgress = false;
@@ -1312,6 +1589,376 @@ void VKOpenXRDeviceMode::AdjustViewport(DFrameBuffer* screen) const
 	screen->mSceneViewport.height = sceneHeight;
 	screen->mSceneViewport.left = 0;
 	screen->mSceneViewport.top = 0;
+}
+
+void VKOpenXRDeviceMode::updateVirtualScreenLayer() const
+{
+	if (xrViewCount == 0 || xrViews.size() < xrViewCount)
+		return;
+
+	XrVector3f center{ 0.0f, 0.0f, 0.0f };
+	for (uint32_t i = 0; i < xrViewCount; ++i)
+	{
+		center.x += xrViews[i].pose.position.x;
+		center.y += xrViews[i].pose.position.y;
+		center.z += xrViews[i].pose.position.z;
+	}
+	center.x /= xrViewCount;
+	center.y /= xrViewCount;
+	center.z /= xrViewCount;
+
+	const XrQuaternionf headOrientation = xrViews[0].pose.orientation;
+	const XrVector3f forward = RotateVector(headOrientation, { 0.0f, 0.0f, -1.0f });
+	const XrVector3f up = RotateVector(headOrientation, { 0.0f, 1.0f, 0.0f });
+
+	const float distance = std::max(0.25f, 2.5f + vr_overlayscreen_dist);
+	const float screenWidth = std::max(0.1f, 1.0f + vr_overlayscreen_size);
+	const float aspect = (xrVirtualScreenHeight > 0) ? (float)xrVirtualScreenWidth / (float)xrVirtualScreenHeight : 1.0f;
+	const float screenHeight = std::max(0.1f, screenWidth / std::max(aspect, 0.01f));
+	const XrQuaternionf flipRotation = MakeAxisAngleQuaternion({ 0.0f, 0.0f, 1.0f }, (float)M_PI);
+
+	// Keep the quad aligned with the headset and apply only the in-plane
+	// correction that the original overlay path used.
+	xrVirtualScreenPose.orientation = MultiplyQuaternion(headOrientation, flipRotation);
+	xrVirtualScreenPose.position = AddVector(center, ScaleVector(forward, distance));
+	xrVirtualScreenPose.position = AddVector(xrVirtualScreenPose.position, ScaleVector(up, vr_overlayscreen_vpos));
+
+	xrVirtualScreenLayer.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
+	xrVirtualScreenLayer.layerFlags = 0;
+	xrVirtualScreenLayer.space = xrSpace;
+	xrVirtualScreenLayer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+	xrVirtualScreenLayer.pose = xrVirtualScreenPose;
+	xrVirtualScreenLayer.size = { screenWidth, screenHeight };
+	xrVirtualScreenLayer.subImage.swapchain = xrVirtualScreenSwapchain;
+	xrVirtualScreenLayer.subImage.imageArrayIndex = 0;
+	xrVirtualScreenLayer.subImage.imageRect.offset = { 0, 0 };
+	xrVirtualScreenLayer.subImage.imageRect.extent = { (int32_t)xrVirtualScreenWidth, (int32_t)xrVirtualScreenHeight };
+
+	xrVirtualScreenBackdropPose.orientation = MultiplyQuaternion(headOrientation, flipRotation);
+	xrVirtualScreenBackdropPose.position = AddVector(center, ScaleVector(forward, distance + 0.15f));
+	xrVirtualScreenBackdropLayer.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
+	xrVirtualScreenBackdropLayer.layerFlags = 0;
+	xrVirtualScreenBackdropLayer.space = xrSpace;
+	xrVirtualScreenBackdropLayer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+	xrVirtualScreenBackdropLayer.pose = xrVirtualScreenBackdropPose;
+	xrVirtualScreenBackdropLayer.size = { screenWidth * 6.0f, screenHeight * 6.0f };
+	xrVirtualScreenBackdropLayer.subImage.swapchain = xrVirtualScreenBackdropSwapchain;
+	xrVirtualScreenBackdropLayer.subImage.imageArrayIndex = 0;
+	xrVirtualScreenBackdropLayer.subImage.imageRect.offset = { 0, 0 };
+	xrVirtualScreenBackdropLayer.subImage.imageRect.extent = { (int32_t)xrVirtualScreenWidth, (int32_t)xrVirtualScreenHeight };
+
+}
+
+bool VKOpenXRDeviceMode::ShouldRenderVirtualScreen() const
+{
+	return (gamestate != GS_LEVEL || menuactive != MENU_Off || cinemamode) && (vr_overlayscreen || vr_overlayscreen_always);
+}
+
+bool VKOpenXRDeviceMode::RenderVirtualScreen() const
+{
+	auto* vkfb = dynamic_cast<VulkanRenderDevice*>(screen);
+	if (!vkfb || !xrFrameInProgress || xrSession == XR_NULL_HANDLE || xrVkDevice == nullptr || xrVkCommandBuffer == nullptr)
+	{
+		xrVirtualScreenVisible = false;
+		return false;
+	}
+	if (!ShouldRenderVirtualScreen())
+	{
+		xrVirtualScreenVisible = false;
+		return false;
+	}
+
+	const bool allowBlankOverlay = vr_overlayscreen_always || cinemamode || gamestate != GS_LEVEL;
+	if (twod == nullptr || (twod->DrawCount() == 0 && !allowBlankOverlay))
+	{
+		xrVirtualScreenVisible = false;
+		xrVirtualScreenImageIndex = -1;
+		return false;
+	}
+
+	const uint32_t screenWidth = std::max(1, screen->mScreenViewport.width);
+	const uint32_t screenHeight = std::max(1, screen->mScreenViewport.height);
+	if (!CreateVirtualScreenSwapchain(screenWidth, screenHeight))
+	{
+		xrVirtualScreenVisible = false;
+		return false;
+	}
+	if (!CreateVirtualScreenBackdropSwapchain(screenWidth, screenHeight))
+	{
+		xrVirtualScreenVisible = false;
+		xrVirtualScreenBackdropVisible = false;
+		return false;
+	}
+	if (xrVirtualScreenSwapchain == XR_NULL_HANDLE || xrVirtualScreenTextures.empty())
+	{
+		xrVirtualScreenVisible = false;
+		return false;
+	}
+	if (xrVirtualScreenBackdropSwapchain == XR_NULL_HANDLE || xrVirtualScreenBackdropTextures.empty())
+	{
+		xrVirtualScreenVisible = false;
+		xrVirtualScreenBackdropVisible = false;
+		return false;
+	}
+
+	XrSwapchainImageAcquireInfo acquireInfo{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
+	uint32_t imageIndex = 0;
+	XrResult xrResult = xrAcquireSwapchainImage(xrVirtualScreenSwapchain, &acquireInfo, &imageIndex);
+	if (XR_FAILED(xrResult))
+	{
+		Printf("OpenXR: virtual screen acquire failed (%d).\n", (int)xrResult);
+		xrVirtualScreenVisible = false;
+		return false;
+	}
+
+	XrSwapchainImageWaitInfo waitInfo{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
+	waitInfo.timeout = 20 * 1000 * 1000;
+	xrResult = xrWaitSwapchainImage(xrVirtualScreenSwapchain, &waitInfo);
+	if (XR_FAILED(xrResult))
+	{
+		XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
+		xrReleaseSwapchainImage(xrVirtualScreenSwapchain, &releaseInfo);
+		Printf("OpenXR: virtual screen wait failed (%d).\n", (int)xrResult);
+		xrVirtualScreenVisible = false;
+		return false;
+	}
+
+	xrVirtualScreenImageIndex = (int)imageIndex;
+	auto& target = xrVirtualScreenTextures[imageIndex];
+	const bool useSceneBackdrop = gamestate == GS_LEVEL && menuactive != MENU_Off && !cinemamode;
+
+	if (useSceneBackdrop)
+	{
+		vkfb->GetPostprocess()->BlitCurrentToImage(&target, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		VkImageTransition()
+			.AddImage(&target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, false)
+			.Execute(vkfb->GetCommands()->GetDrawCommands());
+	}
+	else
+	{
+		VkImageTransition()
+			.AddImage(&target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, false)
+			.Execute(vkfb->GetCommands()->GetDrawCommands());
+	}
+
+	float savedClear[4];
+	memcpy(savedClear, screen->mSceneClearColor, sizeof(savedClear));
+	if (useSceneBackdrop)
+	{
+		screen->mSceneClearColor[0] = 0.0f;
+		screen->mSceneClearColor[1] = 0.0f;
+		screen->mSceneClearColor[2] = 0.0f;
+		screen->mSceneClearColor[3] = 0.0f;
+	}
+	else
+	{
+		const XrVector3f bg = GetVirtualScreenBackgroundColor();
+		screen->mSceneClearColor[0] = bg.x;
+		screen->mSceneClearColor[1] = bg.y;
+		screen->mSceneClearColor[2] = bg.z;
+		screen->mSceneClearColor[3] = 1.0f;
+	}
+
+	auto* renderState = vkfb->GetRenderState();
+	renderState->SetRenderTarget(&target, nullptr, (int)screenWidth, (int)screenHeight, (VkFormat)xrSwapchainFormat, VK_SAMPLE_COUNT_1_BIT);
+	if (!useSceneBackdrop)
+		renderState->Clear(CT_Color);
+	if (!useSceneBackdrop)
+		screen->Draw2D(true);
+	screen->Draw2D(false);
+	renderState->EndRenderPass();
+
+	memcpy(screen->mSceneClearColor, savedClear, sizeof(savedClear));
+
+	auto* cmdbuffer = vkfb->GetCommands()->GetDrawCommands();
+	auto& bounce = vkfb->GetBuffers()->PipelineImage[0];
+	VkImageTransition()
+		.AddImage(&target, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
+		.AddImage(&bounce, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, false)
+		.Execute(cmdbuffer);
+	VkImageBlit blit = {};
+	blit.srcOffsets[0] = { 0, 0, 0 };
+	blit.srcOffsets[1] = { (int32_t)screenWidth, (int32_t)screenHeight, 1 };
+	blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+	blit.dstOffsets[0] = { (int32_t)screenWidth, 0, 0 };
+	blit.dstOffsets[1] = { 0, (int32_t)screenHeight, 1 };
+	blit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+	cmdbuffer->blitImage(target.Image->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		bounce.Image->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		1, &blit, VK_FILTER_NEAREST);
+	VkImageTransition()
+		.AddImage(&bounce, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
+		.AddImage(&target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, false)
+		.Execute(cmdbuffer);
+	VkImageBlit blitBack = {};
+	blitBack.srcOffsets[0] = { 0, 0, 0 };
+	blitBack.srcOffsets[1] = { (int32_t)screenWidth, (int32_t)screenHeight, 1 };
+	blitBack.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+	blitBack.dstOffsets[0] = { 0, 0, 0 };
+	blitBack.dstOffsets[1] = { (int32_t)screenWidth, (int32_t)screenHeight, 1 };
+	blitBack.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+	cmdbuffer->blitImage(bounce.Image->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		target.Image->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		1, &blitBack, VK_FILTER_NEAREST);
+	VkImageTransition()
+		.AddImage(&target, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false)
+		.AddImage(&bounce, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false)
+		.Execute(cmdbuffer);
+
+	XrSwapchainImageAcquireInfo backdropAcquireInfo{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
+	uint32_t backdropIndex = 0;
+	xrResult = xrAcquireSwapchainImage(xrVirtualScreenBackdropSwapchain, &backdropAcquireInfo, &backdropIndex);
+	if (XR_FAILED(xrResult))
+	{
+		Printf("OpenXR: virtual screen backdrop acquire failed (%d).\n", (int)xrResult);
+		xrVirtualScreenVisible = false;
+		xrVirtualScreenBackdropVisible = false;
+		return false;
+	}
+
+	XrSwapchainImageWaitInfo backdropWaitInfo{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
+	backdropWaitInfo.timeout = 20 * 1000 * 1000;
+	xrResult = xrWaitSwapchainImage(xrVirtualScreenBackdropSwapchain, &backdropWaitInfo);
+	if (XR_FAILED(xrResult))
+	{
+		XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
+		xrReleaseSwapchainImage(xrVirtualScreenBackdropSwapchain, &releaseInfo);
+		Printf("OpenXR: virtual screen backdrop wait failed (%d).\n", (int)xrResult);
+		xrVirtualScreenVisible = false;
+		xrVirtualScreenBackdropVisible = false;
+		return false;
+	}
+
+	xrVirtualScreenBackdropImageIndex = (int)backdropIndex;
+	auto& backdropTarget = xrVirtualScreenBackdropTextures[backdropIndex];
+
+	VkImageTransition()
+		.AddImage(&backdropTarget, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, false)
+		.Execute(vkfb->GetCommands()->GetDrawCommands());
+
+	const XrVector3f bgColor = GetVirtualScreenBackgroundColor();
+	float savedBackdropClear[4];
+	memcpy(savedBackdropClear, screen->mSceneClearColor, sizeof(savedBackdropClear));
+	screen->mSceneClearColor[0] = bgColor.x;
+	screen->mSceneClearColor[1] = bgColor.y;
+	screen->mSceneClearColor[2] = bgColor.z;
+	screen->mSceneClearColor[3] = 1.0f;
+
+	auto* backdropState = vkfb->GetRenderState();
+	backdropState->SetRenderTarget(&backdropTarget, nullptr, (int)screenWidth, (int)screenHeight, (VkFormat)xrSwapchainFormat, VK_SAMPLE_COUNT_1_BIT);
+	backdropState->Clear(CT_Color);
+	backdropState->EndRenderPass();
+
+	memcpy(screen->mSceneClearColor, savedBackdropClear, sizeof(savedBackdropClear));
+
+	VkImageTransition()
+		.AddImage(&backdropTarget, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false)
+		.Execute(vkfb->GetCommands()->GetDrawCommands());
+
+	XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
+	xrResult = xrReleaseSwapchainImage(xrVirtualScreenBackdropSwapchain, &releaseInfo);
+	if (XR_FAILED(xrResult))
+	{
+		Printf("OpenXR: virtual screen backdrop release failed (%d).\n", (int)xrResult);
+		xrVirtualScreenVisible = false;
+		xrVirtualScreenBackdropVisible = false;
+		return false;
+	}
+
+	releaseInfo = { XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
+	xrResult = xrReleaseSwapchainImage(xrVirtualScreenSwapchain, &releaseInfo);
+	if (XR_FAILED(xrResult))
+	{
+		Printf("OpenXR: virtual screen release failed (%d).\n", (int)xrResult);
+		xrVirtualScreenVisible = false;
+		xrVirtualScreenBackdropVisible = false;
+		return false;
+	}
+
+	updateVirtualScreenLayer();
+	xrVirtualScreenVisible = true;
+	xrVirtualScreenBackdropVisible = true;
+	return true;
+}
+
+bool VKOpenXRDeviceMode::RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage* dstImage) const
+{
+	if (!fb || !dstImage || !xrVirtualScreenVisible || xrVirtualScreenImageIndex < 0 || xrVirtualScreenImageIndex >= (int)xrVirtualScreenTextures.size())
+		return false;
+
+	const bool hasBackdrop = xrVirtualScreenBackdropVisible &&
+		xrVirtualScreenBackdropImageIndex >= 0 &&
+		xrVirtualScreenBackdropImageIndex < (int)xrVirtualScreenBackdropTextures.size();
+	auto* cmdbuffer = fb->GetCommands()->GetDrawCommands();
+
+	if (hasBackdrop)
+	{
+		auto& backdropSource = xrVirtualScreenBackdropTextures[xrVirtualScreenBackdropImageIndex];
+		VkImageTransition()
+			.AddImage(&backdropSource, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
+			.Execute(cmdbuffer);
+	}
+
+	auto& contentSource = xrVirtualScreenTextures[xrVirtualScreenImageIndex];
+	VkImageTransition()
+		.AddImage(&contentSource, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
+		.Execute(cmdbuffer);
+
+	VkImageMemoryBarrier dstBarrier = {};
+	dstBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	dstBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+	dstBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+	dstBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	dstBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	dstBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	dstBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	dstBarrier.image = dstImage->image;
+	dstBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+	cmdbuffer->pipelineBarrier(
+		VK_PIPELINE_STAGE_TRANSFER_BIT,
+		VK_PIPELINE_STAGE_TRANSFER_BIT,
+		0, 0, nullptr, 0, nullptr, 1, &dstBarrier);
+
+	const IntRect mirrorBox = fb->mOutputLetterbox;
+	auto blitImage = [&](VkTextureImage* source)
+	{
+		VkImageBlit blit = {};
+		blit.srcOffsets[0] = { (int32_t)source->Image->width, (int32_t)source->Image->height, 0 };
+		blit.srcOffsets[1] = { 0, 0, 1 };
+		blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		blit.srcSubresource.mipLevel = 0;
+		blit.srcSubresource.baseArrayLayer = 0;
+		blit.srcSubresource.layerCount = 1;
+		blit.dstOffsets[0] = { mirrorBox.left, mirrorBox.top, 0 };
+		blit.dstOffsets[1] = { mirrorBox.left + mirrorBox.width, mirrorBox.top + mirrorBox.height, 1 };
+		blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		blit.dstSubresource.mipLevel = 0;
+		blit.dstSubresource.baseArrayLayer = 0;
+		blit.dstSubresource.layerCount = 1;
+		cmdbuffer->blitImage(
+			source->Image->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			dstImage->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			1, &blit, VK_FILTER_LINEAR);
+	};
+
+	if (hasBackdrop)
+	{
+		blitImage(&xrVirtualScreenBackdropTextures[xrVirtualScreenBackdropImageIndex]);
+	}
+	blitImage(&contentSource);
+
+	VkImageTransition()
+		.AddImage(&contentSource, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false)
+		.Execute(cmdbuffer);
+	if (hasBackdrop)
+	{
+		auto& backdropSource = xrVirtualScreenBackdropTextures[xrVirtualScreenBackdropImageIndex];
+		VkImageTransition()
+			.AddImage(&backdropSource, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false)
+			.Execute(cmdbuffer);
+	}
+
+	return true;
 }
 
 bool VKOpenXRDeviceMode::GetHandTransform(int hand, VSMatrix* mat) const
