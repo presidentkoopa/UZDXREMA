@@ -324,12 +324,16 @@ CVAR(Float, vr_overlayscreen_size, 1., CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_overlayscreen_dist, 0., CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_overlayscreen_vpos, 0., CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, vr_overlayscreen_bg, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-
 CVAR(Float, vr_kill_momentum, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 // default conversion between (vertical) DOOM units and meters
 CVAR(Float, vr_vunits_per_meter, 34.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // METERS
 CVAR(Float, vr_height_adjust, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // METERS
+CVAR(Float, vr_openxr_fov_adjust_deg, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // DEGREES PER SIDE
+CVAR(Float, vr_openxr_eye_shift_scale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, vr_debug_projection_compare, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, vr_openxr_debug_sizes, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, vr_openxr_debug_present, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CUSTOM_CVAR(Int, vr_control_scheme, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL)
 {
 	M_ResetButtonStates();
@@ -509,6 +513,7 @@ const VRMode *VRMode::GetVRMode(bool toscreen)
 	case VR_OPENVR:
 	{
 		// When calling a function of this class, ensure that you are using a pointer or reference to the derived class
+		Printf("VRMode select: choosing OpenVR mode 10.\n");
 		const VRMode &vrmode = s3d::OpenVRMode::getInstance();
 		return vrmode.IsInitialized() ? &vrmode : &vrmi_mono;
 		//return vrmi_openvr.IsInitialized() ? &vrmi_openvr : &vrmi_mono;
@@ -615,6 +620,15 @@ VSMatrix VREyeInfo::GetProjection(float fov, float aspectRatio, float fovRatio, 
 		fmat.frustum((float)left, (float)right, (float)bottom, (float)top, (float)zNear, (float)zFar);
 		return fmat;
 	}
+}
+
+VSMatrix VREyeInfo::GetHUDProjection() const
+{
+	VSMatrix mat;
+	int w = screen->GetWidth();
+	int h = screen->GetHeight();
+	mat.ortho(0.f, (float)w, (float)h, 0.f, -1.0f, 1.0f);
+	return mat;
 }
 
 

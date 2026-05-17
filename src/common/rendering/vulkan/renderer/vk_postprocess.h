@@ -16,6 +16,7 @@ class VkPPShader;
 class VkPPTexture;
 class PipelineBarrier;
 class VulkanRenderDevice;
+class VulkanCommandBuffer;
 
 class VkPostprocess
 {
@@ -37,6 +38,7 @@ public:
 	void BlitSceneToPostprocess();
 	void BlitCurrentToImage(VkTextureImage *image, VkImageLayout finallayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	void DrawPresentTexture(const IntRect &box, bool applyGamma, bool screenshot);
+	void DrawPresentTextureToImage(VkTextureImage *image, VkFormat outputFormat, const IntRect &box, bool applyGamma, bool screenshot, float sourceScaleX, float sourceScaleY, float sourceOffsetX, float sourceOffsetY, VulkanCommandBuffer *cmdbuffer);
 
 	int GetCurrentPipelineImage() const { return mCurrentPipelineImage; }
 	void SetCurrentPipelineImage(int index);

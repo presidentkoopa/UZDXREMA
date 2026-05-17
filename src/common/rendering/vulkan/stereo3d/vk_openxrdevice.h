@@ -20,6 +20,7 @@ public:
 	VKOpenXRDeviceEyePose(int eye);
 	virtual ~VKOpenXRDeviceEyePose() override;
 	virtual VSMatrix GetProjection(FLOATTYPE fov, FLOATTYPE aspectRatio, FLOATTYPE fovRatio, bool iso_ortho) const override;
+	virtual VSMatrix GetHUDProjection() const override;
 	DVector3 GetViewShift(FRenderViewpoint& vp) const override;
 	virtual void SetUp() const override;
 	virtual void TearDown() const override;
@@ -45,6 +46,7 @@ public:
 	virtual void SetUp() const override;
 	virtual void TearDown() const override;
 	virtual bool IsVR() const override { return true; }
+	virtual VSMatrix GetHUDProjection() const override;
 	virtual void Present() const override;
 	virtual void PollXREvents() const override;
 	virtual bool BeginXRFrame() const override;
@@ -52,6 +54,7 @@ public:
 	virtual bool SubmitFrame() const override;
 	virtual void AdjustViewport(DFrameBuffer* screen) const override;
 	virtual bool RenderVirtualScreen() const override;
+	virtual void FinalizeEyeImage(VulkanRenderDevice* fb, int eyeIndex) const override;
 	virtual bool RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage* dstImage) const override;
 	
 	virtual bool GetHandTransform(int hand, VSMatrix* out) const override;
@@ -67,13 +70,13 @@ protected:
 	void updateHmdPose(FRenderViewpoint& vp) const;
 	bool InitializeOpenXR() const;
 	bool CreateSwapchain() const;
+	bool CreatePresentTextures(VulkanRenderDevice* fb) const;
 	bool CreateVirtualScreenSwapchain(uint32_t width, uint32_t height) const;
 	bool CreateVirtualScreenBackdropSwapchain(uint32_t width, uint32_t height) const;
 	void DestroyVirtualScreenSwapchain() const;
 	void DestroyVirtualScreenBackdropSwapchain() const;
 	void DestroyOpenXR() const;
 
-	VSMatrix getHUDProjection(int eye) const;
 	void updateVirtualScreenLayer() const;
 	bool ShouldRenderVirtualScreen() const;
 
@@ -86,10 +89,14 @@ protected:
 	mutable bool mInVRSceneRender = false;
 	mutable uint32_t sceneWidth = 0;
 	mutable uint32_t sceneHeight = 0;
+	mutable int cachedScreenBlocks = 0;
 	mutable XrInstance xrInstance = XR_NULL_HANDLE;
 	mutable XrSystemId xrSystemId = XR_NULL_SYSTEM_ID;
 	mutable XrSession xrSession = XR_NULL_HANDLE;
 	mutable XrSpace xrSpace = XR_NULL_HANDLE;
+	mutable bool xrUsingStageSpace = false;
+	mutable bool xrHasLocalHeightAnchor = false;
+	mutable float xrLocalHeightAnchor = 0.0f;
 	mutable XrSwapchain xrSwapchain = XR_NULL_HANDLE;
 	mutable std::shared_ptr<VulkanInstance> xrVkInstance;
 	mutable std::shared_ptr<VulkanDevice> xrVkDevice;
@@ -107,6 +114,8 @@ protected:
 	mutable std::vector<XrView> xrViews;
 	mutable std::vector<XrCompositionLayerProjectionView> xrProjectionViews;
 	mutable std::vector<XrSwapchainImageVulkanKHR> xrSwapchainImages;
+	mutable std::vector<VkTextureImage> xrSwapchainTextures;
+	mutable std::vector<VkTextureImage> xrPresentTextures;
 	mutable std::vector<XrSwapchainImageVulkanKHR> xrVirtualScreenSwapchainImages;
 	mutable std::vector<XrSwapchainImageVulkanKHR> xrVirtualScreenBackdropSwapchainImages;
 	mutable std::vector<VkTextureImage> xrVirtualScreenTextures;
@@ -117,6 +126,8 @@ protected:
 	mutable int xrVirtualScreenBackdropImageIndex = -1;
 	mutable uint32_t xrVirtualScreenWidth = 0;
 	mutable uint32_t xrVirtualScreenHeight = 0;
+	mutable uint32_t xrPresentWidth = 0;
+	mutable uint32_t xrPresentHeight = 0;
 	mutable int64_t xrSwapchainFormat = VK_FORMAT_UNDEFINED;
 	mutable XrSwapchain xrVirtualScreenSwapchain = XR_NULL_HANDLE;
 	mutable XrSwapchain xrVirtualScreenBackdropSwapchain = XR_NULL_HANDLE;
@@ -128,8 +139,10 @@ protected:
 	mutable bool xrFrameInProgress = false;
 	mutable bool xrVirtualScreenVisible = false;
 	mutable bool xrVirtualScreenBackdropVisible = false;
+	mutable bool xrLoggedDesktopViewportMismatch = false;
 	mutable bool mSetUpInProgress = false;
 	mutable uint64_t xrFrameCounter = 0;
+	mutable bool xrHasFBColorSpace = false;
     
 private:
 	typedef VRMode super;

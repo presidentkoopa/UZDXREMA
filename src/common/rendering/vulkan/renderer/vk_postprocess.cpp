@@ -43,6 +43,9 @@
 #include "r_videoscale.h"
 
 EXTERN_CVAR(Int, gl_dither_bpc)
+EXTERN_CVAR(Bool, vr_debug_projection_compare)
+EXTERN_CVAR(Bool, vr_openxr_debug_sizes)
+EXTERN_CVAR(Bool, vr_openxr_debug_present)
 
 VkPostprocess::VkPostprocess(VulkanRenderDevice* fb) : fb(fb)
 {
@@ -238,6 +241,68 @@ void VkPostprocess::DrawPresentTexture(const IntRect &box, bool applyGamma, bool
 		renderstate.SetOutputSwapChain();
 	renderstate.SetNoBlend();
 	renderstate.Draw();
+}
+
+void VkPostprocess::DrawPresentTextureToImage(VkTextureImage *image, VkFormat outputFormat, const IntRect &box, bool applyGamma, bool screenshot, float sourceScaleX, float sourceScaleY, float sourceOffsetX, float sourceOffsetY, VulkanCommandBuffer *cmdbuffer)
+{
+	(void)outputFormat;
+	VkPPRenderState renderstate(fb);
+
+	if (!screenshot)
+		hw_postprocess.customShaders.Run(&renderstate, "screen");
+
+	PresentUniforms uniforms;
+	if (!applyGamma)
+	{
+		uniforms.InvGamma = 1.0f;
+		uniforms.Contrast = 1.0f;
+		uniforms.Brightness = 0.0f;
+		uniforms.Saturation = 1.0f;
+	}
+	else
+	{
+		uniforms.InvGamma = 1.0f / clamp<float>(vid_gamma, 0.1f, 4.f);
+		uniforms.Contrast = clamp<float>(vid_contrast, 0.1f, 3.f);
+		uniforms.Brightness = clamp<float>(vid_brightness, -0.8f, 0.8f);
+		uniforms.Saturation = clamp<float>(vid_saturation, -15.0f, 15.f);
+		uniforms.GrayFormula = static_cast<int>(gl_satformula);
+	}
+	uniforms.ColorScale = (gl_dither_bpc == -1) ? 255.0f : (float)((1 << gl_dither_bpc) - 1);
+
+	if (vr_debug_projection_compare || vr_openxr_debug_present)
+	{
+		auto* buffers = fb->GetBuffers();
+		Printf("XR_PRESENT_MAP toImage box=%dx%d srcVP=%dx%d sceneVP=%dx%d src=%dx%d dst=%dx%d scale=(%.4f,%.4f) offset=(%.4f,%.4f) applyGamma=%d screenshot=%d\n",
+			box.width, box.height,
+			screen ? screen->mScreenViewport.width : -1,
+			screen ? screen->mScreenViewport.height : -1,
+			screen ? screen->mSceneViewport.width : -1,
+			screen ? screen->mSceneViewport.height : -1,
+			buffers ? buffers->GetWidth() : -1,
+			buffers ? buffers->GetHeight() : -1,
+			image ? image->Image->width : -1,
+			image ? image->Image->height : -1,
+			(double)sourceScaleX,
+			(double)sourceScaleY,
+			(double)sourceOffsetX,
+			(double)sourceOffsetY,
+			applyGamma ? 1 : 0,
+			screenshot ? 1 : 0);
+	}
+
+	uniforms.Scale = { sourceScaleX, sourceScaleY };
+	uniforms.Offset = { sourceOffsetX, sourceOffsetY };
+
+	uniforms.HdrMode = 0;
+
+	renderstate.Clear();
+	renderstate.Shader = &hw_postprocess.present.Present;
+	renderstate.Uniforms.Set(uniforms);
+	renderstate.Viewport = box;
+	renderstate.SetInputCurrent(0, ViewportLinearScale() ? PPFilterMode::Linear : PPFilterMode::Nearest);
+	renderstate.SetInputTexture(1, &hw_postprocess.present.Dither, PPFilterMode::Nearest, PPWrapMode::Repeat);
+	renderstate.SetNoBlend();
+	renderstate.DrawToImage(image, outputFormat, cmdbuffer);
 }
 
 void VkPostprocess::AmbientOccludeScene(float m5)

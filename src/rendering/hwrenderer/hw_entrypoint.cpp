@@ -182,8 +182,8 @@ sector_t* RenderViewpoint(FRenderViewpoint& mainvp, AActor* camera, IntRect* bou
 		di->VPUniforms.mProjectionMatrix = eye->GetProjection(fov, ratio, fovratio * inv_iso_dist, iso_ortho);
 		di->ProjectionMatrix2 = eye->GetProjection(fov, ratio, fovratio, false); // Regular ol' perspective projection matrix
 
-		// Stereo mode specific viewpoint adjustment
-		vp.Pos += eye->GetViewShift(vp);
+		const DVector3 eyeShift = eye->GetViewShift(vp);
+		vp.Pos += eyeShift;
 		di->SetupView(RenderState, vp.Pos.X, vp.Pos.Y, vp.Pos.Z, false, false);
 
 		di->ProcessScene(toscreen);
@@ -200,15 +200,9 @@ sector_t* RenderViewpoint(FRenderViewpoint& mainvp, AActor* camera, IntRect* bou
 				RenderState.EnableDrawBuffers(1);
 			}
 
-			const int eyeIndex = eye_ix;
-			Printf("hw_entrypoint: About to render 2D for eye %d, active pipeline image should be %d\n",
-				eyeIndex, eyeIndex);
 			screen->PostProcessScene(false, cm, flash, [&]() {
-				Printf("hw_entrypoint: Inside DrawEndScene2D callback for eye %d\n", eyeIndex);
 				di->DrawEndScene2D(mainvp.sector, RenderState);
-				Printf("hw_entrypoint: Finished DrawEndScene2D for eye %d\n", eyeIndex);
 			});
-			Printf("hw_entrypoint: After PostProcessScene for eye %d\n", eye_ix);
 
 			if (!vrmode->IsVR())
 			{

@@ -9,6 +9,7 @@ class VkPPShader;
 class VkPPTexture;
 class VkTextureImage;
 class VulkanRenderDevice;
+class VulkanCommandBuffer;
 
 class VkPPRenderState : public PPRenderState
 {
@@ -19,9 +20,10 @@ public:
 	void PopGroup() override;
 
 	void Draw() override;
+	void DrawToImage(VkTextureImage *image, VkFormat outputFormat, VulkanCommandBuffer *cmdbuffer);
 
 private:
-	void RenderScreenQuad(VkPPRenderPassSetup *passSetup, VulkanDescriptorSet *descriptorSet, VulkanFramebuffer *framebuffer, int framebufferWidth, int framebufferHeight, int x, int y, int width, int height, const void *pushConstants, uint32_t pushConstantsSize, bool stencilTest);
+	void RenderScreenQuad(VulkanCommandBuffer *cmdbuffer, VkPPRenderPassSetup *passSetup, VulkanDescriptorSet *descriptorSet, VulkanFramebuffer *framebuffer, int framebufferWidth, int framebufferHeight, int x, int y, int width, int height, const void *pushConstants, uint32_t pushConstantsSize, bool stencilTest);
 
 	VulkanRenderDevice* fb = nullptr;
 };

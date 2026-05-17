@@ -968,7 +968,7 @@ void HWDrawInfo::DrawEndScene2D(sector_t * viewsector, FRenderState &state)
 
 	HWViewpointUniforms vp = VPUniforms;
 	vp.mViewMatrix.loadIdentity();
-	vp.mProjectionMatrix = vrmode->GetHUDSpriteProjection();
+	vp.mProjectionMatrix = vrmode->GetHUDProjection();
 	screen->mViewpoints->SetViewpoint(state, &vp);
 	state.EnableDepthTest(false);
 	state.EnableMultisampling(false);

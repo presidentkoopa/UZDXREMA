@@ -995,7 +995,7 @@ namespace s3d
 		return (automapactive && !vr_automap_use_hud) ? automap : hud;
 	}
 
-	VSMatrix OpenVREyePose::getHUDProjection() const
+	VSMatrix OpenVREyePose::GetHUDProjection() const
 	{
 		VSMatrix new_projection;
 		new_projection.loadIdentity();
@@ -1057,6 +1057,18 @@ namespace s3d
 		return new_projection;
 	}
 
+	VSMatrix OpenVRMode::GetHUDProjection() const
+	{
+		for (int i = 0; i < mEyeCount; ++i)
+		{
+			if (mEyes[i] != nullptr && mEyes[i]->isActive())
+			{
+				return mEyes[i]->GetHUDProjection();
+			}
+		}
+		return GetHUDSpriteProjection();
+	}
+
 	void OpenVREyePose::AdjustHud() const
 	{
 		// Keep the regular camera-mounted HUD path working for non-mounted mode.
@@ -1071,7 +1083,7 @@ namespace s3d
 		}
 		auto* di = HWDrawInfo::StartDrawInfo(r_viewpoint.ViewLevel, nullptr, r_viewpoint, nullptr);
 
-		di->VPUniforms.mProjectionMatrix = getHUDProjection();
+		di->VPUniforms.mProjectionMatrix = GetHUDProjection();
 		ApplyVPUniforms(di);
 		di->EndDrawInfo();
 	}

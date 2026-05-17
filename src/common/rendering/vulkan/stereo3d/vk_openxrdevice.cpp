@@ -17,6 +17,7 @@
 #include "g_game.h"
 #include "g_levellocals.h"
 #include "doomdef.h"
+#include "c_console.h"
 #include "rendering/hwrenderer/scene/hw_drawinfo.h"
 #include "common/rendering/hwrenderer/data/hw_viewpointbuffer.h"
 #include "v_draw.h"
@@ -44,10 +45,17 @@ extern bool resetDoomYaw;
 extern bool resetPreviousPitch;
 extern bool automapactive;
 extern bool cinemamode;
+void QzDoom_setUseScreenLayer(bool use);
 
 EXTERN_CVAR(Float, vr_ipd);
 EXTERN_CVAR(Float, vr_vunits_per_meter);
 EXTERN_CVAR(Float, vr_height_adjust);
+EXTERN_CVAR(Float, vr_openxr_fov_adjust_deg);
+EXTERN_CVAR(Float, vr_openxr_eye_shift_scale);
+EXTERN_CVAR(Bool, vr_debug_projection_compare);
+EXTERN_CVAR(Bool, vr_openxr_debug_sizes);
+EXTERN_CVAR(Bool, vr_openxr_debug_present);
+EXTERN_CVAR(Int, screenblocks);
 EXTERN_CVAR(Float, vr_automap_stereo);
 EXTERN_CVAR(Float, vr_hud_stereo);
 EXTERN_CVAR(Float, vr_automap_rotate);
@@ -60,6 +68,8 @@ EXTERN_CVAR(Bool, vr_automap_fixed_roll);
 EXTERN_CVAR(Bool, vr_hud_fixed_roll);
 EXTERN_CVAR(Bool, vr_automap_fixed_pitch);
 EXTERN_CVAR(Bool, vr_hud_fixed_pitch);
+EXTERN_CVAR(Int, vr_desktop_view);
+EXTERN_CVAR(Bool, vr_swap_eyes);
 EXTERN_CVAR(Bool, vr_automap_use_hud);
 EXTERN_CVAR(Int, vr_overlayscreen);
 EXTERN_CVAR(Bool, vr_overlayscreen_always);
@@ -82,6 +92,45 @@ using PFN_xrGetVulkanGraphicsDeviceKHR_t = XrResult (XRAPI_PTR *)(XrInstance, Xr
 
 PFN_xrGetVulkanGraphicsRequirementsKHR_t xrGetVulkanGraphicsRequirementsKHR_inst = nullptr;
 PFN_xrGetVulkanGraphicsDeviceKHR_t xrGetVulkanGraphicsDeviceKHR_inst = nullptr;
+
+static bool HasOpenXRExtension(const char* extensionName)
+{
+	uint32_t extensionCount = 0;
+	if (XR_FAILED(xrEnumerateInstanceExtensionProperties(nullptr, 0, &extensionCount, nullptr)) || extensionCount == 0)
+		return false;
+
+	std::vector<XrExtensionProperties> extensions(extensionCount, { XR_TYPE_EXTENSION_PROPERTIES });
+	if (XR_FAILED(xrEnumerateInstanceExtensionProperties(nullptr, extensionCount, &extensionCount, extensions.data())))
+		return false;
+
+	for (const auto& extension : extensions)
+	{
+		if (strcmp(extension.extensionName, extensionName) == 0)
+			return true;
+	}
+
+	return false;
+}
+
+static XrColorSpaceFB SelectPreferredColorSpace(const std::vector<XrColorSpaceFB>& supportedColorSpaces)
+{
+	const XrColorSpaceFB preferredOrder[] = {
+		XR_COLOR_SPACE_RIFT_S_FB,
+		XR_COLOR_SPACE_REC709_FB,
+		XR_COLOR_SPACE_P3_FB,
+		XR_COLOR_SPACE_QUEST_FB,
+		XR_COLOR_SPACE_REC2020_FB,
+		XR_COLOR_SPACE_UNMANAGED_FB
+	};
+
+	for (XrColorSpaceFB preferred : preferredOrder)
+	{
+		if (std::find(supportedColorSpaces.begin(), supportedColorSpaces.end(), preferred) != supportedColorSpaces.end())
+			return preferred;
+	}
+
+	return supportedColorSpaces.empty() ? XR_COLOR_SPACE_UNMANAGED_FB : supportedColorSpaces.front();
+}
 
 static float DEG2RAD(float deg)
 {
@@ -140,12 +189,89 @@ static int mAngleFromRadians(double radians)
 	return (int)std::round(radians * 65536.0 / (2.0 * M_PI));
 }
 
+static float GetRawHmdHeightInMapUnit()
+{
+	const double pixelstretch = level.info ? level.info->pixelstretch : 1.2;
+	return (float)(((double)hmdPosition[1] + (double)vr_height_adjust) * (double)vr_vunits_per_meter / pixelstretch);
+}
+
+static float GetHmdAdjustedHeightInMapUnit(bool applyLocalAnchor, float localHeightAnchor)
+{
+	const float rawHeight = GetRawHmdHeightInMapUnit();
+	return applyLocalAnchor ? (rawHeight + localHeightAnchor) : rawHeight;
+}
+
+static float GetHmdAdjustedHeightInMapUnit()
+{
+	return GetHmdAdjustedHeightInMapUnit(false, 0.0f);
+}
+
+static float GetDoomPlayerHeightWithoutCrouch(const player_t* player)
+{
+	static float cachedHeight = 0.0f;
+	if (cachedHeight == 0.0f && player != nullptr)
+	{
+		cachedHeight = player->DefaultViewHeight();
+	}
+	return cachedHeight != 0.0f ? cachedHeight : GetHmdAdjustedHeightInMapUnit();
+}
+
+static float GetViewpointYaw()
+{
+	if (cinemamode)
+		return (float)r_viewpoint.Angles.Yaw.Degrees();
+	return doomYaw;
+}
+
+static void AngleVectors(const float angles[3], float* forward, float* right, float* up)
+{
+	const float pitch = (float)(angles[0] * (M_PI / 180.0f));
+	const float yaw = (float)(angles[1] * (M_PI / 180.0f));
+	const float roll = (float)(angles[2] * (M_PI / 180.0f));
+
+	const float sp = std::sin(pitch);
+	const float cp = std::cos(pitch);
+	const float sy = std::sin(yaw);
+	const float cy = std::cos(yaw);
+	const float sr = std::sin(roll);
+	const float cr = std::cos(roll);
+
+	if (forward != nullptr)
+	{
+		forward[0] = cp * cy;
+		forward[1] = cp * sy;
+		forward[2] = -sp;
+	}
+
+	if (right != nullptr)
+	{
+		right[0] = (-sr * sp * cy) + (cr * sy);
+		right[1] = (-sr * sp * sy) - (cr * cy);
+		right[2] = -sr * cp;
+	}
+
+	if (up != nullptr)
+	{
+		up[0] = (cr * sp * cy) + (sr * sy);
+		up[1] = (cr * sp * sy) - (sr * cy);
+		up[2] = cr * cp;
+	}
+}
+
 static VSMatrix BuildOpenXREyeProjection(const XrFovf& fov, float nearZ, float farZ, int eye)
 {
-	const float tanLeft = std::tan(fov.angleLeft);
-	const float tanRight = std::tan(fov.angleRight);
-	const float tanUp = std::tan(fov.angleUp);
-	const float tanDown = std::tan(fov.angleDown);
+	const float fovAdjust = DEG2RAD(clamp<float>(vr_openxr_fov_adjust_deg, -30.0f, 30.0f));
+	const XrFovf adjustedFov = {
+		std::max(fov.angleLeft - fovAdjust, (float)(-0.5 * M_PI + 0.001)),
+		std::min(fov.angleRight + fovAdjust, (float)(0.5 * M_PI - 0.001)),
+		std::min(fov.angleUp + fovAdjust, (float)(0.5 * M_PI - 0.001)),
+		std::max(fov.angleDown - fovAdjust, (float)(-0.5 * M_PI + 0.001))
+	};
+
+	const float tanLeft = std::tan(adjustedFov.angleLeft);
+	const float tanRight = std::tan(adjustedFov.angleRight);
+	const float tanUp = std::tan(adjustedFov.angleUp);
+	const float tanDown = std::tan(adjustedFov.angleDown);
 
 	const float left = nearZ * tanLeft;
 	const float right = nearZ * tanRight;
@@ -155,18 +281,6 @@ static VSMatrix BuildOpenXREyeProjection(const XrFovf& fov, float nearZ, float f
 	const float tanHeight = tanUp - tanDown;
 	const float skewX = -(tanRight + tanLeft) / tanWidth;
 	const float skewY = (tanUp + tanDown) / tanHeight;
-	// The frustum already carries the asymmetry in skewX; keep the center shift small in NDC space.
-	const float centerOffsetNDC = std::fabs(skewX) * 0.1f;
-	const float eyeOffsetX = (eye == 0) ? -centerOffsetNDC : centerOffsetNDC;
-
-	Printf("OpenXR: BuildOpenXREyeProjection fov[L=%.6f R=%.6f U=%.6f D=%.6f] tan[L=%.6f R=%.6f U=%.6f D=%.6f] near=%.6f far=%.6f\n",
-		(double)fov.angleLeft, (double)fov.angleRight, (double)fov.angleUp, (double)fov.angleDown,
-		(double)tanLeft, (double)tanRight, (double)tanUp, (double)tanDown,
-		(double)nearZ, (double)farZ);
-	Printf("OpenXR: BuildOpenXREyeProjection width=%.6f height=%.6f skewX=%.6f skewY=%.6f\n",
-		(double)tanWidth, (double)tanHeight, (double)skewX, (double)skewY);
-	Printf("OpenXR: BuildOpenXREyeProjection eye=%d skewX=%.6f centerOffsetNDC=%.6f eyeOffsetX=%.6f row3col0=%.6f\n",
-		eye, (double)skewX, (double)centerOffsetNDC, (double)eyeOffsetX, (double)eyeOffsetX);
 
 	FLOATTYPE m[16];
 	memset(m, 0, sizeof(m));
@@ -176,21 +290,11 @@ static VSMatrix BuildOpenXREyeProjection(const XrFovf& fov, float nearZ, float f
 	m[2 * 4 + 1] = skewY;
 	m[2 * 4 + 2] = - (farZ + nearZ) / (farZ - nearZ);
 	m[2 * 4 + 3] = -1.0f;
-	m[3 * 4 + 0] = eyeOffsetX;
 	m[3 * 4 + 2] = - 2.0f * farZ * nearZ / (farZ - nearZ);
 	m[3 * 4 + 3] = 0.0f;
 
 	VSMatrix matrix;
 	matrix.loadMatrix(m);
-	Printf("OpenXR: BuildOpenXREyeProjection MATRIX DETAIL eye=%d\n", eye);
-	Printf("  projection[0][0] (X scale) = %.6f\n", (double)m[0 * 4 + 0]);
-	Printf("  projection[1][1] (Y scale) = %.6f\n", (double)m[1 * 4 + 1]);
-	Printf("  projection[2][0] (X skew)  = %.6f\n", (double)m[2 * 4 + 0]);
-	Printf("  projection[2][1] (Y skew)  = %.6f\n", (double)m[2 * 4 + 1]);
-	Printf("  projection[2][2] (Z near)  = %.6f\n", (double)m[2 * 4 + 2]);
-	Printf("  projection[2][3] (W)       = %.6f\n", (double)m[2 * 4 + 3]);
-	Printf("  projection[3][0] (X trans) = %.6f\n", (double)m[3 * 4 + 0]);
-	Printf("  projection[3][2] (Z trans) = %.6f\n", (double)m[3 * 4 + 2]);
 	return matrix;
 }
 
@@ -252,6 +356,20 @@ static int64_t SelectSwapchainFormat(const std::vector<int64_t>& runtimeFormats,
 	return runtimeFormats.empty() ? (int64_t)VK_FORMAT_B8G8R8A8_UNORM : runtimeFormats[0];
 }
 
+static bool IsSRGBSwapchainFormat(VkFormat format)
+{
+	return format == VK_FORMAT_B8G8R8A8_SRGB || format == VK_FORMAT_R8G8B8A8_SRGB;
+}
+
+static VkFormat GetPresentIntermediateFormat(VkFormat format)
+{
+	if (format == VK_FORMAT_B8G8R8A8_SRGB)
+		return VK_FORMAT_B8G8R8A8_UNORM;
+	if (format == VK_FORMAT_R8G8B8A8_SRGB)
+		return VK_FORMAT_R8G8B8A8_UNORM;
+	return format;
+}
+
 static VREyeInfo* GetDummyOpenXREyes()
 {
 	static VREyeInfo eyes[2] = { VREyeInfo(0.0f, 1.0f), VREyeInfo(0.0f, 0.0f) };
@@ -265,10 +383,6 @@ VKOpenXRDeviceEyePose::~VKOpenXRDeviceEyePose() {}
 
 VSMatrix VKOpenXRDeviceEyePose::GetProjection(FLOATTYPE fov, FLOATTYPE aspectRatio, FLOATTYPE fovRatio, bool iso_ortho) const
 {
-	Printf("OpenXR: GetProjection eye=%d fov=%.1f aspect=%.3f iso=%d rawFov[L=%.6f R=%.6f U=%.6f D=%.6f]\n",
-		eye, (double)fov, (double)aspectRatio, (int)iso_ortho,
-		(double)currentFov.angleLeft, (double)currentFov.angleRight,
-		(double)currentFov.angleUp, (double)currentFov.angleDown);
 	(void)fov;
 	(void)aspectRatio;
 	(void)fovRatio;
@@ -283,50 +397,57 @@ VSMatrix VKOpenXRDeviceEyePose::GetProjection(FLOATTYPE fov, FLOATTYPE aspectRat
 DVector3 VKOpenXRDeviceEyePose::GetViewShift(FRenderViewpoint& vp) const
 {
 	auto& mode = const_cast<VKOpenXRDeviceMode&>((const VKOpenXRDeviceMode&)VKOpenXRDeviceMode::getInstance());
-
-	XrVector3f center = { 0, 0, 0 };
-	if (mode.xrViewCount > 0)
-	{
-		for (uint32_t i = 0; i < mode.xrViewCount; ++i)
-		{
-			center.x += mode.xrViews[i].pose.position.x;
-			center.y += mode.xrViews[i].pose.position.y;
-			center.z += mode.xrViews[i].pose.position.z;
-		}
-		center.x /= mode.xrViewCount;
-		center.y /= mode.xrViewCount;
-		center.z /= mode.xrViewCount;
-	}
-
-	const float localX = currentEyePose.position.x - center.x;
-	const float localY = currentEyePose.position.y - center.y;
-	const float localZ = currentEyePose.position.z - center.z;
-
-	// Convert OpenXR local offset to Doom local unrotated space.
-	const float doomLocalX = -localZ * vr_vunits_per_meter;
-	const float doomLocalY = -localX * vr_vunits_per_meter;
-	const float doomLocalZ = localY * vr_vunits_per_meter;
-
-	const float yaw = (float)(vp.Angles.Yaw.Degrees() * (M_PI / 180.0));
-	const float sy = std::sin(yaw);
-	const float cy = std::cos(yaw);
+	const float hmdHeight = GetHmdAdjustedHeightInMapUnit(mode.xrUsingStageSpace ? false : mode.xrHasLocalHeightAnchor, mode.xrLocalHeightAnchor);
+	const float playerHeight = (r_viewpoint.camera && r_viewpoint.camera->player) ? GetDoomPlayerHeightWithoutCrouch(r_viewpoint.camera->player) : hmdHeight;
 
 	DVector3 shift;
-	shift.X = doomLocalX * cy - doomLocalY * sy;
-	shift.Y = doomLocalX * sy + doomLocalY * cy;
-	shift.Z = doomLocalZ;
+	if (eye >= 0)
+	{
+		const XrVector3f& eyePos = currentEyePose.position;
+		const float dx = (float)(eyePos.x - hmdPosition[0]);
+		const float dy = (float)(eyePos.y - hmdPosition[1]);
+		const float dz = (float)(eyePos.z - hmdPosition[2]);
+		const float scale = vr_vunits_per_meter * clamp<float>(vr_openxr_eye_shift_scale, 0.0f, 4.0f);
 
-	Printf("OpenXR: GetViewShift eye=%d center[x=%.6f y=%.6f z=%.6f] local[x=%.6f y=%.6f z=%.6f] shift[x=%.6f y=%.6f z=%.6f]\n",
-		eye, (double)center.x, (double)center.y, (double)center.z,
-		(double)localX, (double)localY, (double)localZ,
-		shift.X, shift.Y, shift.Z);
+		shift.X = dx * scale;
+		shift.Y = -dz * scale;
+		shift.Z = dy * scale + (hmdHeight - playerHeight);
+	}
+	else
+	{
+		float angles[3];
+		angles[0] = vp.HWAngles.Pitch.Degrees();
+		angles[1] = GetViewpointYaw();
+		angles[2] = vp.HWAngles.Roll.Degrees();
+
+		float v_forward[3], v_right[3], v_up[3];
+		AngleVectors(angles, v_forward, v_right, v_up);
+
+		const float stereoSeparation = (vr_ipd * 0.5f) * vr_vunits_per_meter * (eye == 0 ? -1.0f : 1.0f);
+		shift.X = v_right[0] * stereoSeparation;
+		shift.Y = v_right[1] * stereoSeparation;
+		shift.Z = v_right[2] * stereoSeparation;
+		shift.Z += hmdHeight - playerHeight;
+	}
+
+	if (vr_debug_projection_compare)
+	{
+		static bool loggedShift[2] = { false, false };
+		if (eye >= 0 && eye < 2 && !loggedShift[eye])
+		{
+			Printf("VR_PROJ OpenXR eye=%d shift=(%.3f, %.3f, %.3f) hmdPos=(%.3f, %.3f, %.3f) hmdHeight=%.3f playerHeight=%.3f stage=%d\n",
+				eye, (double)shift.X, (double)shift.Y, (double)shift.Z,
+				(double)hmdPosition[0], (double)hmdPosition[1], (double)hmdPosition[2],
+				hmdHeight, playerHeight, mode.xrUsingStageSpace ? 1 : 0);
+			loggedShift[eye] = true;
+		}
+	}
+
 	return shift;
 }
 
 void VKOpenXRDeviceEyePose::SetUp() const
 {
-	Printf("OpenXR: SetUp called for eye=%d gamestate=%d menuactive=%d\n",
-		eye, (int)gamestate, (int)menuactive);
 	volatile int breakpoint = eye;
 	(void)breakpoint;
 	static thread_local bool inSetUp = false;
@@ -350,6 +471,33 @@ void VKOpenXRDeviceEyePose::SetUp() const
 		currentEyePose = mode.xrViews[(size_t)eye].pose;
 		currentFov = mode.xrViews[(size_t)eye].fov;
 		projection = BuildOpenXREyeProjection(currentFov, (float)screen->GetZNear(), (float)screen->GetZFar(), eye);
+
+		static bool loggedEye[2] = { false, false };
+		if (vr_debug_projection_compare && eye >= 0 && eye < 2 && !loggedEye[eye])
+		{
+			const float tanLeft = std::tan(currentFov.angleLeft);
+			const float tanRight = std::tan(currentFov.angleRight);
+			const float tanUp = std::tan(currentFov.angleUp);
+			const float tanDown = std::tan(currentFov.angleDown);
+			const float horizontalFovDeg = (float)((currentFov.angleRight - currentFov.angleLeft) * (180.0 / M_PI));
+			const float verticalFovDeg = (float)((currentFov.angleUp - currentFov.angleDown) * (180.0 / M_PI));
+			Printf("VR_PROJ OpenXR eye=%d fovL=%.3f fovR=%.3f fovU=%.3f fovD=%.3f hFov=%.3f vFov=%.3f\n",
+				eye,
+				currentFov.angleLeft * (180.0f / (float)M_PI),
+				currentFov.angleRight * (180.0f / (float)M_PI),
+				currentFov.angleUp * (180.0f / (float)M_PI),
+				currentFov.angleDown * (180.0f / (float)M_PI),
+				horizontalFovDeg,
+				verticalFovDeg);
+			Printf("VR_PROJ OpenXR eye=%d tan=[%.6f %.6f %.6f %.6f] proj=[%.6f %.6f %.6f %.6f | %.6f %.6f %.6f %.6f | %.6f %.6f %.6f %.6f]\n",
+				eye,
+				tanLeft, tanRight, tanUp, tanDown,
+				projection.get()[0], projection.get()[1], projection.get()[2], projection.get()[3],
+				projection.get()[4], projection.get()[5], projection.get()[6], projection.get()[7],
+				projection.get()[8], projection.get()[9], projection.get()[10], projection.get()[11],
+				projection.get()[12], projection.get()[13], projection.get()[14], projection.get()[15]);
+			loggedEye[eye] = true;
+		}
 	}
 
 	VREyeInfo::SetUp();
@@ -377,39 +525,34 @@ static void ApplyVPUniforms(HWDrawInfo* di)
 
 void VKOpenXRDeviceEyePose::AdjustHud() const
 {
-	const VKOpenXRDeviceMode* vrmode = static_cast<const VKOpenXRDeviceMode*>(VRMode::GetVRModeCached(true));
-	if (vrmode == nullptr || r_viewpoint.ViewLevel == nullptr)
+	if (r_viewpoint.ViewLevel == nullptr)
 		return;
-
-	Printf("OpenXR: AdjustHud START eye=%d\n", eye);
-	VSMatrix hudProj = vrmode->getHUDProjection(eye);
-	const FLOATTYPE* hudm = hudProj.get();
-	Printf("OpenXR: AdjustHud eye=%d hudProj row3col0=%f\n", eye, (double)hudm[3 * 4 + 0]);
+	if (VR_ShouldDrawMountedHud())
+		return;
+	VSMatrix hudProj = GetHUDProjection();
+	const float hudStereo = (automapactive && !vr_automap_use_hud) ? (float)vr_automap_stereo : (float)vr_hud_stereo;
+	const float orthoWidth = 2.0f;
+	const float stereoSeparation = (eye == 0 ? 1.0f : -1.0f) * vr_ipd * hudStereo * 0.1f * orthoWidth;
 
 	auto* di = HWDrawInfo::StartDrawInfo(r_viewpoint.ViewLevel, nullptr, r_viewpoint, nullptr);
 	if (di)
 	{
-		int oldVpIndex = di->vpIndex;
+		di->VPUniforms.mViewMatrix.translate(stereoSeparation, 0.0f, 0.0f);
 		di->VPUniforms.mProjectionMatrix = hudProj;
 		di->ProjectionMatrix2 = hudProj;
 		di->VPUniforms.CalcDependencies();
 		if (screen->mViewpoints)
 		{
 			ApplyVPUniforms(di);
-			Printf("OpenXR: AdjustHud eye=%d - set vpIndex=%d (was %d)\n", eye, di->vpIndex, oldVpIndex);
 		}
 		di->EndDrawInfo();
 	}
-
-	Printf("OpenXR: AdjustHud END eye=%d\n", eye);
 }
 
 void VKOpenXRDeviceEyePose::AdjustBlend(HWDrawInfo* di) const
 {
 	if (r_viewpoint.ViewLevel == nullptr)
 		return;
-
-	Printf("OpenXR: AdjustBlend START eye=%d - current vpIndex=%d\n", eye, di != nullptr ? di->vpIndex : -1);
 
 	bool new_di = false;
 	if (di == nullptr)
@@ -420,41 +563,21 @@ void VKOpenXRDeviceEyePose::AdjustBlend(HWDrawInfo* di) const
 
 	auto& renderState = *screen->RenderState();
 	const VSMatrix eyeProjection = BuildOpenXREyeProjection(currentFov, (float)screen->GetZNear(), (float)screen->GetZFar(), eye);
-	const FLOATTYPE* eyeProjM = eyeProjection.get();
-	Printf("OpenXR: AdjustBlend eye=%d - eyeProjection row3col0=%f\n", eye, (double)eyeProjM[3 * 4 + 0]);
 	di->VPUniforms.mProjectionMatrix = eyeProjection;
 	di->ProjectionMatrix2 = eyeProjection;
 	di->VPUniforms.CalcDependencies();
 	if (screen->mViewpoints)
 	{
-		int oldIndex = di->vpIndex;
 		di->vpIndex = screen->mViewpoints->SetViewpoint(renderState, &di->VPUniforms);
-		Printf("OpenXR: AdjustBlend eye=%d bound viewpoint index=%d (was %d) with eyeProjection\n", eye, di->vpIndex, oldIndex);
-	}
-	else
-	{
-		Printf("OpenXR: AdjustBlend eye=%d viewpoint buffer unavailable\n", eye);
 	}
 
 	VSMatrix finalMatrix = projection;
-	const FLOATTYPE* finalM = finalMatrix.get();
-	Printf("OpenXR: AdjustBlend eye=%d finalMatrix row3col0=%f\n", eye, (double)finalM[3 * 4 + 0]);
 	di->VPUniforms.mProjectionMatrix = finalMatrix;
 	di->ProjectionMatrix2 = finalMatrix;
 	di->VPUniforms.CalcDependencies();
 	if (screen->mViewpoints)
 	{
-		int oldIndex = di->vpIndex;
 		di->vpIndex = screen->mViewpoints->SetViewpoint(renderState, &di->VPUniforms);
-		Printf("OpenXR: AdjustBlend eye=%d rebound viewpoint index=%d (was %d) with finalMatrix\n", eye, di->vpIndex, oldIndex);
-	}
-	{
-		Printf("OpenXR: AdjustBlend eye=%d finalMatrix[row3col0=%.6f] matrix=[%.6f %.6f %.6f %.6f | %.6f %.6f %.6f %.6f | %.6f %.6f %.6f %.6f | %.6f %.6f %.6f %.6f]\n",
-			eye, (double)finalM[3 * 4 + 0],
-			(double)finalM[0], (double)finalM[1], (double)finalM[2], (double)finalM[3],
-			(double)finalM[4], (double)finalM[5], (double)finalM[6], (double)finalM[7],
-			(double)finalM[8], (double)finalM[9], (double)finalM[10], (double)finalM[11],
-			(double)finalM[12], (double)finalM[13], (double)finalM[14], (double)finalM[15]);
 	}
 	ApplyVPUniforms(di);
 
@@ -462,8 +585,6 @@ void VKOpenXRDeviceEyePose::AdjustBlend(HWDrawInfo* di) const
 	{
 		di->EndDrawInfo();
 	}
-
-	Printf("OpenXR: AdjustBlend END eye=%d - final vpIndex=%d\n", eye, di->vpIndex);
 }
 
 VKOpenXRDeviceMode::VKOpenXRDeviceMode()
@@ -493,49 +614,30 @@ static TYPE& getHUDValue(TYPE& automap, TYPE& hud)
 	return (automapactive && !vr_automap_use_hud) ? automap : hud;
 }
 
-VSMatrix VKOpenXRDeviceMode::getHUDProjection(int eye) const
+VSMatrix VKOpenXRDeviceEyePose::GetHUDProjection() const
 {
-	(void)eye;
-
 	VSMatrix hudProjection;
 	hudProjection.loadIdentity();
 
 	const float hudStereo = getHUDValue<FFloatCVarRef>(vr_automap_stereo, vr_hud_stereo);
-	XrVector3f posePosition = { 0.0f, 0.0f, 0.0f };
-	XrQuaternionf poseOrientation = { 0.0f, 0.0f, 0.0f, 1.0f };
-	if (eye >= 0 && (size_t)eye < xrViews.size())
-	{
-		posePosition = xrViews[(size_t)eye].pose.position;
-		poseOrientation = xrViews[(size_t)eye].pose.orientation;
-	}
-	const float poseX = -posePosition.z * hudStereo;
-	const float poseY = -posePosition.x * hudStereo;
-	const float poseZ = posePosition.y * hudStereo;
+	const float orthoWidth = 2.0f;
+	const float stereoSeparation = (eye == 0 ? 1.0f : -1.0f) * vr_ipd * hudStereo * 0.1f * orthoWidth;
 
-	// Compose the HUD from the current eye pose first, then apply the same
-	// scale/rotate/distance stack the OpenVR path uses.
-	hudProjection.translate(poseX, poseY, poseZ);
 	hudProjection.scale(-vr_vunits_per_meter, vr_vunits_per_meter, -vr_vunits_per_meter);
 
 	const double pixelstretch = r_viewpoint.ViewLevel ? r_viewpoint.ViewLevel->pixelstretch : 1.2;
 	hudProjection.scale(1.0, (FLOATTYPE)pixelstretch, 1.0);
 
-	float pitch = 0.0f;
-	float yaw = 0.0f;
-	float roll = 0.0f;
-	QuaternionToEuler(poseOrientation, pitch, yaw, roll);
-	(void)yaw;
-
 	if (getHUDValue<FBoolCVarRef>(vr_automap_fixed_roll, vr_hud_fixed_roll))
 	{
-		hudProjection.rotate(-roll, 0, 0, 1);
+		hudProjection.rotate(-hmdorientation[2], 0, 0, 1);
 	}
 
 	hudProjection.rotate(getHUDValue<FFloatCVarRef>(vr_automap_rotate, vr_hud_rotate), 1, 0, 0);
 
 	if (getHUDValue<FBoolCVarRef>(vr_automap_fixed_pitch, vr_hud_fixed_pitch))
 	{
-		hudProjection.rotate(-pitch, 1, 0, 0);
+		hudProjection.rotate(-hmdorientation[0], 1, 0, 0);
 	}
 
 	hudProjection.translate(0.0f, 0.0f, getHUDValue<FFloatCVarRef>(vr_automap_distance, vr_hud_distance));
@@ -546,7 +648,26 @@ VSMatrix VKOpenXRDeviceMode::getHUDProjection(int eye) const
 	const float screenHeight = (float)screen->GetHeight();
 	hudProjection.translate(-1.0f, 1.0f, 0.0f);
 	hudProjection.scale(2.0f / screenWidth, -2.0f / screenHeight, -1.0f);
-	return hudProjection;
+
+	VSMatrix projection;
+	projection.loadIdentity();
+	const float hudOrthoScale = 1.0f;
+	projection.ortho(-hudOrthoScale, hudOrthoScale, -hudOrthoScale, hudOrthoScale, 0.5f, 65536.0f);
+
+	VSMatrix finalProjection(projection);
+	return finalProjection;
+}
+
+VSMatrix VKOpenXRDeviceMode::GetHUDProjection() const
+{
+	for (int i = 0; i < 2; ++i)
+	{
+		if (mEyes[i] != nullptr && mEyes[i]->isActive())
+		{
+			return mEyes[i]->GetHUDProjection();
+		}
+	}
+	return GetHUDSpriteProjection();
 }
 
 bool VKOpenXRDeviceMode::InitializeOpenXR() const
@@ -577,6 +698,11 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	std::vector<const char*> extensions = {
 		XR_KHR_VULKAN_ENABLE_EXTENSION_NAME
 	};
+	xrHasFBColorSpace = HasOpenXRExtension(XR_FB_COLOR_SPACE_EXTENSION_NAME);
+	if (xrHasFBColorSpace)
+	{
+		extensions.push_back(XR_FB_COLOR_SPACE_EXTENSION_NAME);
+	}
 	XrApplicationInfo appInfo{};
 	appInfo.apiVersion = XR_API_VERSION_1_0;
 	appInfo.applicationVersion = 1;
@@ -676,10 +802,45 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 		}
 	}
 
+	if (xrHasFBColorSpace && xrEnumerateColorSpacesFB && xrSetColorSpaceFB)
+	{
+		uint32_t colorSpaceCount = 0;
+		if (XR_SUCCEEDED(xrEnumerateColorSpacesFB(xrSession, 0, &colorSpaceCount, nullptr)) && colorSpaceCount > 0)
+		{
+			std::vector<XrColorSpaceFB> supportedColorSpaces(colorSpaceCount);
+			if (XR_SUCCEEDED(xrEnumerateColorSpacesFB(xrSession, colorSpaceCount, &colorSpaceCount, supportedColorSpaces.data())))
+			{
+				const XrColorSpaceFB requestedColorSpace = SelectPreferredColorSpace(supportedColorSpaces);
+				if (XR_SUCCEEDED(xrSetColorSpaceFB(xrSession, requestedColorSpace)))
+				{
+					Printf("OpenXR: requested FB color space %d.\n", (int)requestedColorSpace);
+				}
+			}
+		}
+	}
+
 	XrReferenceSpaceCreateInfo spaceInfo{ XR_TYPE_REFERENCE_SPACE_CREATE_INFO };
-	spaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
 	spaceInfo.poseInReferenceSpace = XrPosef{ {0,0,0,1}, {0,0,0} };
-	if (XR_FAILED(xrCreateReferenceSpace(xrSession, &spaceInfo, &xrSpace)))
+	xrUsingStageSpace = false;
+	xrSpace = XR_NULL_HANDLE;
+
+	spaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE;
+	if (XR_SUCCEEDED(xrCreateReferenceSpace(xrSession, &spaceInfo, &xrSpace)))
+	{
+		xrUsingStageSpace = true;
+		Printf("OpenXR: using STAGE reference space.\n");
+	}
+	else
+	{
+		spaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
+		if (XR_FAILED(xrCreateReferenceSpace(xrSession, &spaceInfo, &xrSpace)))
+		{
+			return fail();
+		}
+		Printf("OpenXR: using LOCAL reference space fallback.\n");
+	}
+
+	if (xrSpace == XR_NULL_HANDLE)
 	{
 		return fail();
 	}
@@ -777,6 +938,77 @@ bool VKOpenXRDeviceMode::CreateSwapchain() const
 		image.type = XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR;
 	xrEnumerateSwapchainImages(xrSwapchain, imageCount, &imageCount,
 		reinterpret_cast<XrSwapchainImageBaseHeader*>(xrSwapchainImages.data()));
+
+	xrSwapchainTextures.resize(imageCount * xrViewCount);
+	for (uint32_t imageIndex = 0; imageIndex < imageCount; ++imageIndex)
+	{
+		for (uint32_t layer = 0; layer < xrViewCount; ++layer)
+		{
+			auto& texture = xrSwapchainTextures[imageIndex * xrViewCount + layer];
+			texture.Layout = VK_IMAGE_LAYOUT_UNDEFINED;
+			texture.AspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			texture.Image = std::make_unique<VulkanImage>(xrVkDevice.get(), xrSwapchainImages[imageIndex].image, nullptr,
+				(int)cfg.recommendedImageRectWidth, (int)cfg.recommendedImageRectHeight, 1, (int)xrViewCount);
+			texture.View = ImageViewBuilder()
+				.Image(texture.Image.get(), (VkFormat)xrSwapchainFormat, VK_IMAGE_ASPECT_COLOR_BIT, 0, (int)layer, 1, 1)
+				.DebugName("OpenXRSwapchainLayerView")
+				.Create(xrVkDevice.get());
+		}
+	}
+
+	if (!xrPresentTextures.empty() && xrPresentTextures[0].Image != nullptr)
+	{
+		xrPresentWidth = (uint32_t)xrPresentTextures[0].Image->width;
+		xrPresentHeight = (uint32_t)xrPresentTextures[0].Image->height;
+	}
+
+	return true;
+}
+
+bool VKOpenXRDeviceMode::CreatePresentTextures(VulkanRenderDevice* vkfb) const
+{
+	if (!vkfb || xrSwapchainFormat == VK_FORMAT_UNDEFINED || xrViewCount == 0)
+		return false;
+
+	const uint32_t width = xrViewConfigs.empty() ? 0 : xrViewConfigs[0].recommendedImageRectWidth;
+	const uint32_t height = xrViewConfigs.empty() ? 0 : xrViewConfigs[0].recommendedImageRectHeight;
+	if (width == 0 || height == 0)
+		return false;
+
+	if (xrPresentTextures.size() == xrViewCount && xrPresentWidth == width && xrPresentHeight == height)
+		return true;
+
+	for (auto& texture : xrPresentTextures)
+		texture.Reset(vkfb);
+	xrPresentTextures.clear();
+
+	xrPresentTextures.resize(xrViewCount);
+	xrPresentWidth = width;
+	xrPresentHeight = height;
+
+	const VkFormat presentFormat = GetPresentIntermediateFormat((VkFormat)xrSwapchainFormat);
+	for (uint32_t i = 0; i < xrViewCount; ++i)
+	{
+		auto& texture = xrPresentTextures[i];
+		texture.Layout = VK_IMAGE_LAYOUT_UNDEFINED;
+		texture.AspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		texture.Image = ImageBuilder()
+			.Format(presentFormat)
+			.Size(width, height)
+			.Usage(VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+			.DebugName("OpenXRPresentTexture")
+			.Create(vkfb->device.get());
+		texture.View = ImageViewBuilder()
+			.Image(texture.Image.get(), presentFormat)
+			.DebugName("OpenXRPresentTextureView")
+			.Create(vkfb->device.get());
+	}
+
+	if (!xrPresentTextures.empty() && xrPresentTextures[0].Image != nullptr)
+	{
+		xrPresentWidth = (uint32_t)xrPresentTextures[0].Image->width;
+		xrPresentHeight = (uint32_t)xrPresentTextures[0].Image->height;
+	}
 
 	return true;
 }
@@ -994,19 +1226,28 @@ void VKOpenXRDeviceMode::DestroyOpenXR() const
 	xrSessionState = XR_SESSION_STATE_UNKNOWN;
 	xrFrameInProgress = false;
 	isSetup = false;
+	xrHasFBColorSpace = false;
+	xrUsingStageSpace = false;
+	xrHasLocalHeightAnchor = false;
+	xrLocalHeightAnchor = 0.0f;
 	xrPoseAction = XR_NULL_HANDLE;
 	xrSelectAction = XR_NULL_HANDLE;
 	xrMenuAction = XR_NULL_HANDLE;
 	xrSwapchainImages.clear();
+	xrSwapchainTextures.clear();
+	xrPresentTextures.clear();
 	xrViewConfigs.clear();
 	xrViews.clear();
 	xrProjectionViews.clear();
 	xrViewCount = 0;
 	xrCurrentImageIndex = -1;
 	xrSwapchainFormat = VK_FORMAT_UNDEFINED;
+	xrPresentWidth = 0;
+	xrPresentHeight = 0;
 	xrFrameState = { XR_TYPE_FRAME_STATE };
 	sceneWidth = 0;
 	sceneHeight = 0;
+	xrLoggedDesktopViewportMismatch = false;
 	xrVkSubmitFence.reset();
 	xrVkCommandBuffer.reset();
 	xrVkCommandPool.reset();
@@ -1056,6 +1297,17 @@ void VKOpenXRDeviceMode::SetUp() const
 
 	if (xrSession == XR_NULL_HANDLE) return;
 	PollXREvents();
+
+	if (gamestate == GS_LEVEL && menuactive == MENU_Off)
+	{
+		cachedScreenBlocks = screenblocks;
+		screenblocks = 12;
+		QzDoom_setUseScreenLayer(false);
+	}
+	else
+	{
+		QzDoom_setUseScreenLayer(true);
+	}
 
 	if (isSessionRunning)
 	{
@@ -1126,8 +1378,28 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 	hmdorientation[1] = -y;
 	hmdorientation[2] = -r;
 
+	if (!xrUsingStageSpace && !xrHasLocalHeightAnchor && r_viewpoint.camera && r_viewpoint.camera->player)
+	{
+		xrLocalHeightAnchor = GetDoomPlayerHeightWithoutCrouch(r_viewpoint.camera->player) - GetRawHmdHeightInMapUnit();
+		xrHasLocalHeightAnchor = true;
+	}
+
 	if (gamestate != GS_LEVEL || menuactive != MENU_Off || r_viewpoint.camera == nullptr || r_viewpoint.ViewLevel == nullptr)
 		return;
+
+	if (vr_debug_projection_compare)
+	{
+		const float pixelstretch = r_viewpoint.ViewLevel ? (float)r_viewpoint.ViewLevel->pixelstretch : 1.2f;
+		const player_t* player = r_viewpoint.camera->player;
+		const double playerHeight = player ? GetDoomPlayerHeightWithoutCrouch(player) : 0.0;
+		const double rawHeight = GetRawHmdHeightInMapUnit();
+		const double adjustedHeight = GetHmdAdjustedHeightInMapUnit(xrUsingStageSpace ? false : xrHasLocalHeightAnchor, xrLocalHeightAnchor);
+		Printf("VR_PROJ OpenXR pose: hmdY=%.3f rawHmd=%.3f adjHmd=%.3f anchor=%.3f playerHeight=%.3f vupm=%.3f eyeShiftScale=%.3f pixelstretch=%.3f vpPos=(%.3f, %.3f, %.3f) yaw=%.3f pitch=%.3f roll=%.3f stage=%d\n",
+			hmdPosition[1], rawHeight, adjustedHeight, (double)xrLocalHeightAnchor, playerHeight, (double)vr_vunits_per_meter, (double)vr_openxr_eye_shift_scale, pixelstretch,
+			vp.Pos.X, vp.Pos.Y, vp.Pos.Z,
+			vp.Angles.Yaw.Degrees(), vp.HWAngles.Pitch.Degrees(), vp.HWAngles.Roll.Degrees(),
+			xrUsingStageSpace ? 1 : 0);
+	}
 
 	static float previousHmdYaw = 0;
 	static bool havePreviousYaw = false;
@@ -1154,7 +1426,14 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 	}
 }
 
-void VKOpenXRDeviceMode::TearDown() const {}
+void VKOpenXRDeviceMode::TearDown() const
+{
+	if (cachedScreenBlocks != 0 && gamestate == GS_LEVEL && menuactive == MENU_Off && !paused)
+	{
+		screenblocks = cachedScreenBlocks;
+		cachedScreenBlocks = 0;
+	}
+}
 
 bool VKOpenXRDeviceMode::SubmitFrame() const
 {
@@ -1225,6 +1504,9 @@ bool VKOpenXRDeviceMode::BeginXRFrame() const
 		XrResult endResult = xrEndFrame(xrSession, &endInfo);
 		xrFrameInProgress = false;
 		return false;
+	}
+	for (uint32_t i = 0; i < viewCount; ++i)
+	{
 	}
 	if ((viewState.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT) == 0 || (viewState.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT) == 0)
 	{
@@ -1351,15 +1633,14 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		return XR_SUCCEEDED(endResult);
 	}
 
-	VkImage dstImage = xrSwapchainImages[imageIndex].image;
-	int32_t srcW = (int32_t)vkfb->mScreenViewport.width;
-	int32_t srcH = (int32_t)vkfb->mScreenViewport.height;
-	int32_t dstW = (int32_t)xrViewConfigs[0].recommendedImageRectWidth;
-	int32_t dstH = (int32_t)xrViewConfigs[0].recommendedImageRectHeight;
-	if (srcW <= 0 || srcH <= 0 || dstW <= 0 || dstH <= 0)
+	const uint32_t recommendedW = xrViewConfigs.empty() ? 0 : xrViewConfigs[0].recommendedImageRectWidth;
+	const uint32_t recommendedH = xrViewConfigs.empty() ? 0 : xrViewConfigs[0].recommendedImageRectHeight;
+	const uint32_t dstW = xrPresentWidth != 0 ? xrPresentWidth : recommendedW;
+	const uint32_t dstH = xrPresentHeight != 0 ? xrPresentHeight : recommendedH;
+	if (dstW == 0 || dstH == 0)
 	{
-		Printf("OpenXR frame %llu: blit skipped - invalid image dimensions src=%dx%d dst=%dx%d.\n",
-			(unsigned long long)xrFrameCounter, srcW, srcH, dstW, dstH);
+		Printf("OpenXR frame %llu: blit skipped - invalid XR destination dimensions present=%ux%u recommended=%ux%u.\n",
+			(unsigned long long)xrFrameCounter, dstW, dstH, recommendedW, recommendedH);
 		XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
 		xrReleaseSwapchainImage(xrSwapchain, &releaseInfo);
 
@@ -1368,18 +1649,47 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		endInfo.environmentBlendMode = environmentBlendMode;
 		endInfo.layerCount = 0;
 		endInfo.layers = nullptr;
-		Printf("OpenXR frame %llu: Before xrEndFrame (invalid dimensions).\n", (unsigned long long)xrFrameCounter);
+		Printf("OpenXR frame %llu: Before xrEndFrame (invalid XR destination dimensions).\n", (unsigned long long)xrFrameCounter);
 		XrResult endResult = xrEndFrame(xrSession, &endInfo);
 		Printf("OpenXR frame %llu: After xrEndFrame (%d).\n", (unsigned long long)xrFrameCounter, (int)endResult);
 		xrFrameInProgress = false;
 		return XR_SUCCEEDED(endResult);
 	}
-	Printf("OpenXR frame %llu: about to blit XR layers to dstImage=%p\n",
-		(unsigned long long)xrFrameCounter, (void*)dstImage);
+
+	if (vr_openxr_debug_sizes)
+	{
+		Printf("XR_SIZES frame=%llu desktopVP=%dx%d screenVP=%dx%d sceneVP=%dx%d fb=%dx%d present=%ux%u recommended=%ux%u\n",
+			(unsigned long long)xrFrameCounter,
+			vkfb->mOutputLetterbox.width, vkfb->mOutputLetterbox.height,
+			vkfb->mScreenViewport.width, vkfb->mScreenViewport.height,
+			vkfb->mSceneViewport.width, vkfb->mSceneViewport.height,
+			buffers->GetWidth(), buffers->GetHeight(),
+			dstW, dstH,
+			recommendedW, recommendedH);
+	}
+
+	if (!xrLoggedDesktopViewportMismatch)
+	{
+		const bool desktopDiffers = (vkfb->mOutputLetterbox.width != (int)dstW) || (vkfb->mOutputLetterbox.height != (int)dstH);
+		const bool screenDiffers = (vkfb->mScreenViewport.width != (int)dstW) || (vkfb->mScreenViewport.height != (int)dstH);
+		if (desktopDiffers || screenDiffers)
+		{
+			Printf("OpenXR: desktop viewport differs from XR sizing desktopVP=%dx%d screenVP=%dx%d sceneVP=%dx%d present=%ux%u recommended=%ux%u (XR blits stay on XR sizes)\n",
+				vkfb->mOutputLetterbox.width, vkfb->mOutputLetterbox.height,
+				vkfb->mScreenViewport.width, vkfb->mScreenViewport.height,
+				vkfb->mSceneViewport.width, vkfb->mSceneViewport.height,
+				dstW, dstH,
+				recommendedW, recommendedH);
+			xrLoggedDesktopViewportMismatch = true;
+		}
+	}
+	Printf("OpenXR frame %llu: about to draw XR layers to swapchain image %u.\n",
+		(unsigned long long)xrFrameCounter, imageIndex);
 
 	vkResetCommandPool(xrVkDevice->device, xrVkCommandPool->pool, 0);
 	xrVkCommandBuffer->begin();
 
+	VkImage dstImage = xrSwapchainImages[imageIndex].image;
 	VkImageMemoryBarrier dstBarrier{};
 	dstBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 	dstBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -1390,93 +1700,77 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 	dstBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	dstBarrier.image = dstImage;
 	dstBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, xrViewCount };
-	vkCmdPipelineBarrier(xrVkCommandBuffer->buffer,
+	vkCmdPipelineBarrier(
+		xrVkCommandBuffer->buffer,
 		VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
 		VK_PIPELINE_STAGE_TRANSFER_BIT,
 		0, 0, nullptr, 0, nullptr, 1, &dstBarrier);
 
 	for (uint32_t layer = 0; layer < xrViewCount; ++layer)
 	{
-		int eyePipelineImage = (int)layer;
-		if (eyePipelineImage < 0 || eyePipelineImage >= VkRenderBuffers::NumPipelineImages || buffers->PipelineImage[eyePipelineImage].Image == nullptr)
+		// Intentional eye-order correction for this Vulkan/OpenXR bridge.
+		const uint32_t sourceEye = xrViewCount - 1 - layer;
+		if (sourceEye >= xrPresentTextures.size() || xrPresentTextures[sourceEye].Image == nullptr)
 		{
-			if (buffers->PipelineImage[0].Image != nullptr)
-			{
-				eyePipelineImage = 0;
-			}
-		}
-		if (eyePipelineImage < 0 || eyePipelineImage >= VkRenderBuffers::NumPipelineImages || buffers->PipelineImage[eyePipelineImage].Image == nullptr)
-		{
-			Printf("OpenXR frame %llu: Skipping eye %u - invalid pipeline image %d\n",
-				(unsigned long long)xrFrameCounter, layer, eyePipelineImage);
+			Printf("OpenXR frame %llu: Skipping eye %u - missing prepared eye image %u\n",
+				(unsigned long long)xrFrameCounter, layer, sourceEye);
 			continue;
 		}
 
-		VkTextureImage& eyeSourceImage = buffers->PipelineImage[eyePipelineImage];
-		VkImage srcImage = eyeSourceImage.Image->image;
+		auto& preparedEyeImage = xrPresentTextures[sourceEye];
+		const auto* preparedEyeTexture = preparedEyeImage.Image.get();
+		const int32_t srcW = preparedEyeTexture ? preparedEyeTexture->width : 0;
+		const int32_t srcH = preparedEyeTexture ? preparedEyeTexture->height : 0;
+		if (srcW <= 0 || srcH <= 0)
+		{
+			Printf("OpenXR frame %llu: Skipping eye %u - invalid prepared eye image %u extent=%dx%d\n",
+				(unsigned long long)xrFrameCounter, layer, sourceEye, srcW, srcH);
+			continue;
+		}
 
-		VkImageMemoryBarrier srcBarrier{};
-		srcBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-		srcBarrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-		srcBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-		srcBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-		srcBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-		srcBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		srcBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		srcBarrier.image = srcImage;
-		srcBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-		vkCmdPipelineBarrier(xrVkCommandBuffer->buffer,
-			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-			VK_PIPELINE_STAGE_TRANSFER_BIT,
-			0, 0, nullptr, 0, nullptr, 1, &srcBarrier);
+		if (vr_openxr_debug_present)
+		{
+			Printf("XR_PRESENT_MAP eye=%u sourceEye=%u srcExtent=%dx%d dstExtent=%ux%u\n",
+				layer, sourceEye, srcW, srcH, dstW, dstH);
+		}
 
-		Printf("OpenXR frame %llu: eye %u blitting from pipeline image %d (%p)\n",
-			(unsigned long long)xrFrameCounter, layer, eyePipelineImage, (void*)srcImage);
+		VkImageTransition()
+			.AddImage(&preparedEyeImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
+			.Execute(xrVkCommandBuffer.get());
 
 		VkImageBlit blitRegion{};
 		blitRegion.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-		blitRegion.srcOffsets[0] = { 0, srcH, 0 };
-		blitRegion.srcOffsets[1] = { srcW, 0, 1 };
+		blitRegion.srcOffsets[0] = { 0, 0, 0 };
+		blitRegion.srcOffsets[1] = { srcW, srcH, 1 };
 		blitRegion.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, layer, 1 };
 		blitRegion.dstOffsets[0] = { 0, 0, 0 };
-		blitRegion.dstOffsets[1] = { dstW, dstH, 1 };
-		vkCmdBlitImage(xrVkCommandBuffer->buffer,
-			srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		blitRegion.dstOffsets[1] = { (int32_t)dstW, (int32_t)dstH, 1 };
+		vkCmdBlitImage(
+			xrVkCommandBuffer->buffer,
+			preparedEyeImage.Image->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 			dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 			1, &blitRegion, VK_FILTER_LINEAR);
 
-		VkImageMemoryBarrier srcRestoreBarrier{};
-		srcRestoreBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-		srcRestoreBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-		srcRestoreBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-		srcRestoreBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-		srcRestoreBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-		srcRestoreBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		srcRestoreBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		srcRestoreBarrier.image = srcImage;
-		srcRestoreBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-		vkCmdPipelineBarrier(xrVkCommandBuffer->buffer,
-			VK_PIPELINE_STAGE_TRANSFER_BIT,
-			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-			0, 0, nullptr, 0, nullptr, 1, &srcRestoreBarrier);
-
-		eyeSourceImage.Layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		VkImageTransition()
+			.AddImage(&preparedEyeImage, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, false)
+			.Execute(xrVkCommandBuffer.get());
 	}
 
-	VkImageMemoryBarrier dstFinalBarrier{};
-	dstFinalBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-	dstFinalBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-	dstFinalBarrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-	dstFinalBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-	dstFinalBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
-	dstFinalBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	dstFinalBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	dstFinalBarrier.image = dstImage;
-	dstFinalBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, xrViewCount };
-	vkCmdPipelineBarrier(xrVkCommandBuffer->buffer,
+	VkImageMemoryBarrier dstRestoreBarrier{};
+	dstRestoreBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	dstRestoreBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+	dstRestoreBarrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+	dstRestoreBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	dstRestoreBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+	dstRestoreBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	dstRestoreBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	dstRestoreBarrier.image = dstImage;
+	dstRestoreBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, xrViewCount };
+	vkCmdPipelineBarrier(
+		xrVkCommandBuffer->buffer,
 		VK_PIPELINE_STAGE_TRANSFER_BIT,
 		VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-		0, 0, nullptr, 0, nullptr, 1, &dstFinalBarrier);
+		0, 0, nullptr, 0, nullptr, 1, &dstRestoreBarrier);
 
 	xrVkCommandBuffer->end();
 
@@ -1522,7 +1816,7 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 
 	for (uint32_t i = 0; i < xrViewCount; ++i)
 	{
-		const uint32_t viewIndex = (i == 0) ? 1 : 0;
+		const uint32_t viewIndex = i;
 		const uint32_t arrayIndex = i;
 		xrProjectionViews[i].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
 		xrProjectionViews[i].pose = xrViews[viewIndex].pose;
@@ -1581,7 +1875,6 @@ void VKOpenXRDeviceMode::Present() const
 
 void VKOpenXRDeviceMode::AdjustViewport(DFrameBuffer* screen) const
 {
-	Printf("OpenXR: AdjustViewport called screen=%p sceneWidth=%u sceneHeight=%u inVRScene=%d\n", (void*)screen, sceneWidth, sceneHeight, (int)mInVRSceneRender);
 	if (screen == nullptr) return;
 	if (sceneWidth == 0 || sceneHeight == 0) return;
 	if (!mInVRSceneRender) return;
@@ -1589,6 +1882,10 @@ void VKOpenXRDeviceMode::AdjustViewport(DFrameBuffer* screen) const
 	screen->mSceneViewport.height = sceneHeight;
 	screen->mSceneViewport.left = 0;
 	screen->mSceneViewport.top = 0;
+	screen->mScreenViewport.width = sceneWidth;
+	screen->mScreenViewport.height = sceneHeight;
+	screen->mScreenViewport.left = 0;
+	screen->mScreenViewport.top = 0;
 }
 
 void VKOpenXRDeviceMode::updateVirtualScreenLayer() const
@@ -1651,7 +1948,7 @@ void VKOpenXRDeviceMode::updateVirtualScreenLayer() const
 
 bool VKOpenXRDeviceMode::ShouldRenderVirtualScreen() const
 {
-	return (gamestate != GS_LEVEL || menuactive != MENU_Off || cinemamode) && (vr_overlayscreen || vr_overlayscreen_always);
+	return (gamestate != GS_LEVEL || menuactive != MENU_Off || cinemamode || ConsoleState != c_up) && (vr_overlayscreen || vr_overlayscreen_always);
 }
 
 bool VKOpenXRDeviceMode::RenderVirtualScreen() const
@@ -1668,16 +1965,32 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 		return false;
 	}
 
+	const bool forceOverlay = gamestate != GS_LEVEL || menuactive != MENU_Off || cinemamode || ConsoleState != c_up;
 	const bool allowBlankOverlay = vr_overlayscreen_always || cinemamode || gamestate != GS_LEVEL;
-	if (twod == nullptr || (twod->DrawCount() == 0 && !allowBlankOverlay))
+	if (twod == nullptr || (twod->DrawCount() == 0 && !allowBlankOverlay && !forceOverlay))
 	{
 		xrVirtualScreenVisible = false;
 		xrVirtualScreenImageIndex = -1;
 		return false;
 	}
 
-	const uint32_t screenWidth = std::max(1, screen->mScreenViewport.width);
-	const uint32_t screenHeight = std::max(1, screen->mScreenViewport.height);
+	uint32_t screenWidth = vkfb->GetBuffers() != nullptr ? (uint32_t)vkfb->GetBuffers()->GetWidth() : 0;
+	uint32_t screenHeight = vkfb->GetBuffers() != nullptr ? (uint32_t)vkfb->GetBuffers()->GetHeight() : 0;
+	if (screenWidth == 0 || screenHeight == 0)
+	{
+		screenWidth = xrPresentWidth;
+		screenHeight = xrPresentHeight;
+	}
+	if (screenWidth == 0 || screenHeight == 0)
+	{
+		if (!xrViewConfigs.empty())
+		{
+			screenWidth = xrViewConfigs[0].recommendedImageRectWidth;
+			screenHeight = xrViewConfigs[0].recommendedImageRectHeight;
+		}
+	}
+	screenWidth = std::max(1u, screenWidth);
+	screenHeight = std::max(1u, screenHeight);
 	if (!CreateVirtualScreenSwapchain(screenWidth, screenHeight))
 	{
 		xrVirtualScreenVisible = false;
@@ -1727,6 +2040,15 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 	auto& target = xrVirtualScreenTextures[imageIndex];
 	const bool useSceneBackdrop = gamestate == GS_LEVEL && menuactive != MENU_Off && !cinemamode;
 
+	if (vr_openxr_debug_sizes)
+	{
+		Printf("XR_VSCREEN visible=%d swapchain=%ux%u draw=%ux%u backdrop=%d\n",
+			1,
+			xrVirtualScreenWidth, xrVirtualScreenHeight,
+			screenWidth, screenHeight,
+			useSceneBackdrop ? 1 : 0);
+	}
+
 	if (useSceneBackdrop)
 	{
 		vkfb->GetPostprocess()->BlitCurrentToImage(&target, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -1761,10 +2083,14 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 
 	auto* renderState = vkfb->GetRenderState();
 	renderState->SetRenderTarget(&target, nullptr, (int)screenWidth, (int)screenHeight, (VkFormat)xrSwapchainFormat, VK_SAMPLE_COUNT_1_BIT);
+	// Render the virtual-screen texture as a regular 2D target. The VR layer
+	// compositor will handle the actual head-locked presentation.
+	screen->mViewpoints->Set2D(*renderState, (int)screenWidth, (int)screenHeight);
 	if (!useSceneBackdrop)
+	{
 		renderState->Clear(CT_Color);
-	if (!useSceneBackdrop)
-		screen->Draw2D(true);
+	}
+	screen->Draw2D(true);
 	screen->Draw2D(false);
 	renderState->EndRenderPass();
 
@@ -1772,16 +2098,20 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 
 	auto* cmdbuffer = vkfb->GetCommands()->GetDrawCommands();
 	auto& bounce = vkfb->GetBuffers()->PipelineImage[0];
+	const int32_t targetWidth = target.Image != nullptr ? target.Image->width : 0;
+	const int32_t targetHeight = target.Image != nullptr ? target.Image->height : 0;
+	const int32_t bounceWidth = bounce.Image != nullptr ? bounce.Image->width : 0;
+	const int32_t bounceHeight = bounce.Image != nullptr ? bounce.Image->height : 0;
 	VkImageTransition()
 		.AddImage(&target, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
 		.AddImage(&bounce, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, false)
 		.Execute(cmdbuffer);
 	VkImageBlit blit = {};
 	blit.srcOffsets[0] = { 0, 0, 0 };
-	blit.srcOffsets[1] = { (int32_t)screenWidth, (int32_t)screenHeight, 1 };
+	blit.srcOffsets[1] = { targetWidth, targetHeight, 1 };
 	blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-	blit.dstOffsets[0] = { (int32_t)screenWidth, 0, 0 };
-	blit.dstOffsets[1] = { 0, (int32_t)screenHeight, 1 };
+	blit.dstOffsets[0] = { bounceWidth, 0, 0 };
+	blit.dstOffsets[1] = { 0, bounceHeight, 1 };
 	blit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
 	cmdbuffer->blitImage(target.Image->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 		bounce.Image->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -1792,10 +2122,10 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 		.Execute(cmdbuffer);
 	VkImageBlit blitBack = {};
 	blitBack.srcOffsets[0] = { 0, 0, 0 };
-	blitBack.srcOffsets[1] = { (int32_t)screenWidth, (int32_t)screenHeight, 1 };
+	blitBack.srcOffsets[1] = { bounceWidth, bounceHeight, 1 };
 	blitBack.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
 	blitBack.dstOffsets[0] = { 0, 0, 0 };
-	blitBack.dstOffsets[1] = { (int32_t)screenWidth, (int32_t)screenHeight, 1 };
+	blitBack.dstOffsets[1] = { targetWidth, targetHeight, 1 };
 	blitBack.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
 	cmdbuffer->blitImage(bounce.Image->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 		target.Image->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -1881,15 +2211,95 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 	return true;
 }
 
+void VKOpenXRDeviceMode::FinalizeEyeImage(VulkanRenderDevice* vkfb, int eyeIndex) const
+{
+	if (!vkfb || eyeIndex < 0 || xrSession == XR_NULL_HANDLE || xrSwapchainFormat == VK_FORMAT_UNDEFINED)
+		return;
+	if ((uint32_t)eyeIndex >= xrViewCount)
+		return;
+	if (!CreatePresentTextures(vkfb))
+		return;
+
+	auto* postprocess = vkfb->GetPostprocess();
+	if (!postprocess)
+		return;
+	const int pipelineImageIndex = postprocess->GetCurrentPipelineImage();
+
+	if (vr_debug_projection_compare || vr_openxr_debug_present)
+	{
+		auto* buffers = vkfb->GetBuffers();
+		const auto* sourceTexture = (buffers && pipelineImageIndex >= 0 && pipelineImageIndex < 2)
+			? buffers->PipelineImage[pipelineImageIndex].Image.get()
+			: nullptr;
+		const auto* targetTexture = (eyeIndex >= 0 && eyeIndex < (int)xrPresentTextures.size())
+			? xrPresentTextures[eyeIndex].Image.get()
+			: nullptr;
+		const int sourceWidth = sourceTexture ? sourceTexture->width : -1;
+		const int sourceHeight = sourceTexture ? sourceTexture->height : -1;
+		const int targetWidth = targetTexture ? targetTexture->width : (int)xrPresentWidth;
+		const int targetHeight = targetTexture ? targetTexture->height : (int)xrPresentHeight;
+		Printf("XR_PRESENT_MAP finalize eye=%d sourceImage=%d srcExtent=%dx%d dstExtent=%ux%u fb=%dx%d present=%ux%u\n",
+			eyeIndex,
+			postprocess->GetCurrentPipelineImage(),
+			sourceWidth,
+			sourceHeight,
+			targetWidth,
+			targetHeight,
+			buffers ? buffers->GetWidth() : -1,
+			buffers ? buffers->GetHeight() : -1,
+			xrPresentWidth,
+			xrPresentHeight);
+	}
+
+	postprocess->SetCurrentPipelineImage(pipelineImageIndex);
+
+	IntRect targetBox;
+	targetBox.left = 0;
+	targetBox.top = 0;
+	targetBox.width = (int)xrPresentWidth;
+	targetBox.height = (int)xrPresentHeight;
+
+	postprocess->DrawPresentTextureToImage(
+		&xrPresentTextures[eyeIndex],
+		GetPresentIntermediateFormat((VkFormat)xrSwapchainFormat),
+		targetBox,
+		true,
+		false,
+		1.0f,
+		-1.0f,
+		0.0f,
+		1.0f,
+		vkfb->GetCommands()->GetDrawCommands());
+}
+
 bool VKOpenXRDeviceMode::RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage* dstImage) const
 {
-	if (!fb || !dstImage || !xrVirtualScreenVisible || xrVirtualScreenImageIndex < 0 || xrVirtualScreenImageIndex >= (int)xrVirtualScreenTextures.size())
+	if (!fb || !dstImage)
+		return false;
+
+	auto* cmdbuffer = fb->GetCommands()->GetDrawCommands();
+	const bool sideBySide = vr_desktop_view != 1 && vr_desktop_view != 2;
+	const int leftSourceIndex = vr_swap_eyes ? 1 : 0;
+	const int rightSourceIndex = vr_swap_eyes ? 0 : 1;
+
+	if (xrPresentTextures.empty() || xrPresentTextures[leftSourceIndex].Image == nullptr || (sideBySide && xrPresentTextures[rightSourceIndex].Image == nullptr))
 		return false;
 
 	const bool hasBackdrop = xrVirtualScreenBackdropVisible &&
 		xrVirtualScreenBackdropImageIndex >= 0 &&
 		xrVirtualScreenBackdropImageIndex < (int)xrVirtualScreenBackdropTextures.size();
-	auto* cmdbuffer = fb->GetCommands()->GetDrawCommands();
+
+	VkTextureImage* leftEyeSource = &xrPresentTextures[leftSourceIndex];
+	VkTextureImage* rightEyeSource = &xrPresentTextures[rightSourceIndex];
+	VkImageTransition()
+		.AddImage(leftEyeSource, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
+		.Execute(cmdbuffer);
+	if ((sideBySide || vr_desktop_view == 2) && rightEyeSource != leftEyeSource)
+	{
+		VkImageTransition()
+			.AddImage(rightEyeSource, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
+			.Execute(cmdbuffer);
+	}
 
 	if (hasBackdrop)
 	{
@@ -1898,11 +2308,6 @@ bool VKOpenXRDeviceMode::RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage
 			.AddImage(&backdropSource, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
 			.Execute(cmdbuffer);
 	}
-
-	auto& contentSource = xrVirtualScreenTextures[xrVirtualScreenImageIndex];
-	VkImageTransition()
-		.AddImage(&contentSource, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
-		.Execute(cmdbuffer);
 
 	VkImageMemoryBarrier dstBarrier = {};
 	dstBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -1920,7 +2325,27 @@ bool VKOpenXRDeviceMode::RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage
 		0, 0, nullptr, 0, nullptr, 1, &dstBarrier);
 
 	const IntRect mirrorBox = fb->mOutputLetterbox;
-	auto blitImage = [&](VkTextureImage* source)
+	auto blitImage = [&](VkTextureImage* source, const IntRect& rect)
+	{
+		VkImageBlit blit = {};
+		blit.srcOffsets[0] = { 0, 0, 0 };
+		blit.srcOffsets[1] = { (int32_t)source->Image->width, (int32_t)source->Image->height, 1 };
+		blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		blit.srcSubresource.mipLevel = 0;
+		blit.srcSubresource.baseArrayLayer = 0;
+		blit.srcSubresource.layerCount = 1;
+		blit.dstOffsets[0] = { rect.left, rect.top, 0 };
+		blit.dstOffsets[1] = { rect.left + rect.width, rect.top + rect.height, 1 };
+		blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		blit.dstSubresource.mipLevel = 0;
+		blit.dstSubresource.baseArrayLayer = 0;
+		blit.dstSubresource.layerCount = 1;
+		cmdbuffer->blitImage(
+			source->Image->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			dstImage->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			1, &blit, VK_FILTER_LINEAR);
+	};
+	auto blitOverlayImage = [&](VkTextureImage* source, const IntRect& rect)
 	{
 		VkImageBlit blit = {};
 		blit.srcOffsets[0] = { (int32_t)source->Image->width, (int32_t)source->Image->height, 0 };
@@ -1929,8 +2354,8 @@ bool VKOpenXRDeviceMode::RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage
 		blit.srcSubresource.mipLevel = 0;
 		blit.srcSubresource.baseArrayLayer = 0;
 		blit.srcSubresource.layerCount = 1;
-		blit.dstOffsets[0] = { mirrorBox.left, mirrorBox.top, 0 };
-		blit.dstOffsets[1] = { mirrorBox.left + mirrorBox.width, mirrorBox.top + mirrorBox.height, 1 };
+		blit.dstOffsets[0] = { rect.left, rect.top, 0 };
+		blit.dstOffsets[1] = { rect.left + rect.width, rect.top + rect.height, 1 };
 		blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		blit.dstSubresource.mipLevel = 0;
 		blit.dstSubresource.baseArrayLayer = 0;
@@ -1941,20 +2366,64 @@ bool VKOpenXRDeviceMode::RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage
 			1, &blit, VK_FILTER_LINEAR);
 	};
 
+	if (vr_desktop_view == 1)
+	{
+		blitImage(leftEyeSource, mirrorBox);
+	}
+	else if (vr_desktop_view == 2)
+	{
+		blitImage(rightEyeSource, mirrorBox);
+	}
+	else
+	{
+		IntRect leftHalf = mirrorBox;
+		leftHalf.width = mirrorBox.width / 2;
+		IntRect rightHalf = mirrorBox;
+		rightHalf.width = mirrorBox.width - leftHalf.width;
+		rightHalf.left += leftHalf.width;
+
+		blitImage(leftEyeSource, leftHalf);
+		blitImage(rightEyeSource, rightHalf);
+	}
+
 	if (hasBackdrop)
 	{
-		blitImage(&xrVirtualScreenBackdropTextures[xrVirtualScreenBackdropImageIndex]);
+		auto& backdropSource = xrVirtualScreenBackdropTextures[xrVirtualScreenBackdropImageIndex];
+		VkImageTransition()
+			.AddImage(&backdropSource, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
+			.Execute(cmdbuffer);
+		blitOverlayImage(&backdropSource, mirrorBox);
 	}
-	blitImage(&contentSource);
+	if (xrVirtualScreenVisible && xrVirtualScreenImageIndex >= 0 && xrVirtualScreenImageIndex < (int)xrVirtualScreenTextures.size())
+	{
+		auto& contentSource = xrVirtualScreenTextures[xrVirtualScreenImageIndex];
+		VkImageTransition()
+			.AddImage(&contentSource, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
+			.Execute(cmdbuffer);
+		blitOverlayImage(&contentSource, mirrorBox);
+	}
 
-	VkImageTransition()
-		.AddImage(&contentSource, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false)
-		.Execute(cmdbuffer);
 	if (hasBackdrop)
 	{
 		auto& backdropSource = xrVirtualScreenBackdropTextures[xrVirtualScreenBackdropImageIndex];
 		VkImageTransition()
 			.AddImage(&backdropSource, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false)
+			.Execute(cmdbuffer);
+	}
+	if (xrVirtualScreenVisible && xrVirtualScreenImageIndex >= 0 && xrVirtualScreenImageIndex < (int)xrVirtualScreenTextures.size())
+	{
+		auto& contentSource = xrVirtualScreenTextures[xrVirtualScreenImageIndex];
+		VkImageTransition()
+			.AddImage(&contentSource, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false)
+			.Execute(cmdbuffer);
+	}
+	VkImageTransition()
+		.AddImage(leftEyeSource, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false)
+		.Execute(cmdbuffer);
+	if ((sideBySide || vr_desktop_view == 2) && rightEyeSource != leftEyeSource)
+	{
+		VkImageTransition()
+			.AddImage(rightEyeSource, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false)
 			.Execute(cmdbuffer);
 	}
 

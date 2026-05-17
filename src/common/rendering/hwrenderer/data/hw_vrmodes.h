@@ -71,6 +71,7 @@ struct VREyeInfo
 	virtual ~VREyeInfo() {}
 
 	virtual VSMatrix GetProjection(float fov, float aspectRatio, float fovRatio, bool iso_ortho) const;
+	virtual VSMatrix GetHUDProjection() const;
 	virtual DVector3 GetViewShift(FRenderViewpoint& vp) const;
 	virtual void SetUp() const { m_isActive = true; }
 	virtual void TearDown() const { m_isActive = false; }
@@ -100,6 +101,7 @@ struct VRMode
 	static const VRMode *GetVRModeCached(bool toscreen = true);
 	virtual void AdjustViewport(DFrameBuffer *fb) const;
 	VSMatrix GetHUDSpriteProjection() const;
+	virtual VSMatrix GetHUDProjection() const { return GetHUDSpriteProjection(); }
 
 	/* hooks for setup and cleanup operations for each stereo mode */
 	virtual void SetUp() const;
@@ -117,6 +119,7 @@ struct VRMode
 	virtual void DrawControllerModels(HWDrawInfo* di, FRenderState& state) const {}
 	virtual void DrawMountedHud(HWDrawInfo* di, FRenderState& state) const {}
 	virtual bool RenderVirtualScreen() const { return false; }
+	virtual void FinalizeEyeImage(VulkanRenderDevice* fb, int eyeIndex) const {}
 	virtual bool RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage* dstImage) const { return false; }
 	
 	virtual void Present() const;

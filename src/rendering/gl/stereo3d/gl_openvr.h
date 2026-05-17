@@ -51,6 +51,7 @@ public:
 	OpenVREyePose(int eye, float shiftFactor, float scaleFactor);
 	virtual ~OpenVREyePose() override;
 	virtual VSMatrix GetProjection(FLOATTYPE fov, FLOATTYPE aspectRatio, FLOATTYPE fovRatio, bool iso_ortho) const override;
+	virtual VSMatrix GetHUDProjection() const override;
 	DVector3 GetViewShift(FRenderViewpoint& vp) const override;
 	virtual void AdjustHud() const override;
 	virtual void AdjustBlend(HWDrawInfo* di) const override;
@@ -69,7 +70,6 @@ protected:
 	int eye;
 
 	mutable const openvr::TrackedDevicePose_t * currentPose;
-	VSMatrix getHUDProjection() const;
 };
 
 class OpenVRHaptics
@@ -103,6 +103,7 @@ public:
 	virtual void SetUp() const override; // called immediately before rendering a scene frame
 	virtual void TearDown() const override; // called immediately after rendering a scene frame
 	virtual bool IsVR() const override { return true; }
+	virtual VSMatrix GetHUDProjection() const override;
 	virtual void Present() const override;
 	virtual void AdjustViewport(DFrameBuffer* screen) const override;
 	virtual void AdjustPlayerSprites(FRenderState &state, int hand = 0) const override;

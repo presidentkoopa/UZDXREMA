@@ -77,127 +77,48 @@ void VkFramebufferManager::AcquireImage()
 		auto vrmode = VRMode::GetVRModeCached(true);
 		if (vrmode != nullptr && vrmode->IsVR() && vr_desktop_view != -1)
 		{
-			auto buffers = fb->GetBuffers();
 			auto cmdbuffer = fb->GetCommands()->GetDrawCommands();
 			auto dstImage = SwapChain->GetImage(PresentImageIndex);
 			auto clearColorImage = &dstImage->image;
-			auto leftSourceIndex = vr_swap_eyes ? 1 : 0;
-			auto rightSourceIndex = vr_swap_eyes ? 0 : 1;
-			auto leftSource = &buffers->PipelineImage[leftSourceIndex];
-			auto rightSource = &buffers->PipelineImage[rightSourceIndex];
-			bool sideBySide = vr_desktop_view != 1 && vr_desktop_view != 2;
+			VkImageMemoryBarrier dstBarrier = {};
+			dstBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+			dstBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+			dstBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+			dstBarrier.srcAccessMask = 0;
+			dstBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			dstBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			dstBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			dstBarrier.image = *clearColorImage;
+			dstBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+			cmdbuffer->pipelineBarrier(
+				VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+				VK_PIPELINE_STAGE_TRANSFER_BIT,
+				0, 0, nullptr, 0, nullptr, 1, &dstBarrier);
 
-			if (leftSource->Image == nullptr || (sideBySide && rightSource->Image == nullptr))
+			VkClearColorValue clearValue = {};
+			VkImageSubresourceRange clearRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+			cmdbuffer->clearColorImage(*clearColorImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearValue, 1, &clearRange);
+
+			if (!vrmode->RenderDesktopMirror(fb, dstImage))
 			{
-				Printf("Vulkan present: missing eye source image, falling back to single-eye mirror.\n");
+				Printf("Vulkan present: desktop mirror composition failed, falling back to default present.\n");
 				fb->GetPostprocess()->DrawPresentTexture(fb->mOutputLetterbox, true, false);
 			}
-			else
-			{
-				Printf("Vulkan present: vr_desktop_view=%d leftEyeSource=%d rightEyeSource=%d sideBySide=%d\n",
-					(int)vr_desktop_view, leftSourceIndex, rightSourceIndex, sideBySide ? 1 : 0);
 
-				VkImageTransition()
-					.AddImage(leftSource, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
-					.Execute(cmdbuffer);
-				if (sideBySide && rightSource != leftSource)
-				{
-					VkImageTransition()
-						.AddImage(rightSource, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
-						.Execute(cmdbuffer);
-				}
-
-				VkImageMemoryBarrier dstBarrier = {};
-				dstBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-				dstBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-				dstBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-				dstBarrier.srcAccessMask = 0;
-				dstBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-				dstBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-				dstBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-				dstBarrier.image = *clearColorImage;
-				dstBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-				cmdbuffer->pipelineBarrier(
-					VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-					VK_PIPELINE_STAGE_TRANSFER_BIT,
-					0, 0, nullptr, 0, nullptr, 1, &dstBarrier);
-
-				VkClearColorValue clearValue = {};
-				VkImageSubresourceRange clearRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-				cmdbuffer->clearColorImage(*clearColorImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearValue, 1, &clearRange);
-
-				auto blitEye = [&](VkTextureImage* source, const IntRect& rect)
-				{
-					VkImageBlit blit = {};
-					blit.srcOffsets[0] = { 0, (int32_t)source->Image->height, 0 };
-					blit.srcOffsets[1] = { (int32_t)source->Image->width, 0, 1 };
-					blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-					blit.srcSubresource.mipLevel = 0;
-					blit.srcSubresource.baseArrayLayer = 0;
-					blit.srcSubresource.layerCount = 1;
-					blit.dstOffsets[0] = { rect.left, rect.top, 0 };
-					blit.dstOffsets[1] = { rect.left + rect.width, rect.top + rect.height, 1 };
-					blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-					blit.dstSubresource.mipLevel = 0;
-					blit.dstSubresource.baseArrayLayer = 0;
-					blit.dstSubresource.layerCount = 1;
-					cmdbuffer->blitImage(
-						source->Image->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-						*clearColorImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-						1, &blit, VK_FILTER_LINEAR);
-				};
-
-				IntRect mirrorBox = fb->mOutputLetterbox;
-				if (vr_desktop_view == 1)
-				{
-					blitEye(leftSource, mirrorBox);
-				}
-				else if (vr_desktop_view == 2)
-				{
-					blitEye(rightSource, mirrorBox);
-				}
-				else
-				{
-					IntRect leftHalf = mirrorBox;
-					leftHalf.width = mirrorBox.width / 2;
-					IntRect rightHalf = mirrorBox;
-					rightHalf.width = mirrorBox.width - leftHalf.width;
-					rightHalf.left += leftHalf.width;
-
-					blitEye(leftSource, leftHalf);
-					blitEye(rightSource, rightHalf);
-				}
-
-				if (vrmode->RenderDesktopMirror(fb, dstImage))
-				{
-					// OpenXR virtual screen composed directly into the desktop mirror.
-				}
-
-				VkImageTransition()
-					.AddImage(leftSource, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false)
-					.Execute(cmdbuffer);
-				if (sideBySide && rightSource != leftSource)
-				{
-					VkImageTransition()
-						.AddImage(rightSource, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false)
-						.Execute(cmdbuffer);
-				}
-
-				VkImageMemoryBarrier dstFinalBarrier = {};
-				dstFinalBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-				dstFinalBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-				dstFinalBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-				dstFinalBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-				dstFinalBarrier.dstAccessMask = 0;
-				dstFinalBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-				dstFinalBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-				dstFinalBarrier.image = *clearColorImage;
-				dstFinalBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-				cmdbuffer->pipelineBarrier(
-					VK_PIPELINE_STAGE_TRANSFER_BIT,
-					VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-					0, 0, nullptr, 0, nullptr, 1, &dstFinalBarrier);
-			}
+			VkImageMemoryBarrier dstFinalBarrier = {};
+			dstFinalBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+			dstFinalBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+			dstFinalBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+			dstFinalBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			dstFinalBarrier.dstAccessMask = 0;
+			dstFinalBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			dstFinalBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			dstFinalBarrier.image = *clearColorImage;
+			dstFinalBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+			cmdbuffer->pipelineBarrier(
+				VK_PIPELINE_STAGE_TRANSFER_BIT,
+				VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+				0, 0, nullptr, 0, nullptr, 1, &dstFinalBarrier);
 		}
 		else
 		{
