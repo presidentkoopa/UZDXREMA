@@ -64,21 +64,23 @@ VkSampleCountFlagBits VkRenderBuffers::GetBestSampleCount()
 void VkRenderBuffers::BeginFrame(int width, int height, int sceneWidth, int sceneHeight)
 {
 	VkSampleCountFlagBits samples = GetBestSampleCount();
+	const int pipelineWidth = std::max(width, sceneWidth);
+	const int pipelineHeight = std::max(height, sceneHeight);
 
-	if (width != mWidth || height != mHeight || mSamples != samples)
+	if (pipelineWidth != mWidth || pipelineHeight != mHeight || mSamples != samples)
 	{
 		fb->GetCommands()->WaitForCommands(false);
 		fb->GetRenderPassManager()->RenderBuffersReset();
 	}
 
-	if (width != mWidth || height != mHeight)
-		CreatePipeline(width, height);
+	if (pipelineWidth != mWidth || pipelineHeight != mHeight)
+		CreatePipeline(pipelineWidth, pipelineHeight);
 
-	if (width != mWidth || height != mHeight || mSamples != samples)
-		CreateScene(width, height, samples);
+	if (sceneWidth != mSceneWidth || sceneHeight != mSceneHeight || mSamples != samples)
+		CreateScene(sceneWidth, sceneHeight, samples);
 
-	mWidth = width;
-	mHeight = height;
+	mWidth = pipelineWidth;
+	mHeight = pipelineHeight;
 	mSamples = samples;
 	mSceneWidth = sceneWidth;
 	mSceneHeight = sceneHeight;

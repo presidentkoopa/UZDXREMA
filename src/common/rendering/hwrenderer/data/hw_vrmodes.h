@@ -118,6 +118,7 @@ struct VRMode
 	virtual void UpdateOverlaySettings() const {}
 	virtual void DrawControllerModels(HWDrawInfo* di, FRenderState& state) const {}
 	virtual void DrawMountedHud(HWDrawInfo* di, FRenderState& state) const {}
+	virtual bool IsRenderingVirtualScreen() const { return false; }
 	virtual bool RenderVirtualScreen() const { return false; }
 	virtual void FinalizeEyeImage(VulkanRenderDevice* fb, int eyeIndex) const {}
 	virtual bool RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage* dstImage) const { return false; }

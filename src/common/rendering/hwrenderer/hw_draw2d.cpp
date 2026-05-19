@@ -69,13 +69,14 @@ void Draw2D(F2DDrawer* drawer, FRenderState& state, int x, int y, int width, int
 	const bool isVRHudCanvas = vrmode->IsVR() &&
 		GetVRHudSurface().IsValid() &&
 		(drawer == &GetVRHudSurface().GetCanvas()->Drawer);
+	const bool isVirtualScreenPass = vrmode->IsVR() && vrmode->IsRenderingVirtualScreen();
 	if (!isVRHudCanvas)
 	{
 		state.SetViewport(x, y, width, height);
 		// Match the OpenGL VR path: regular HUD/menu rendering keeps the
 		// eye-aware projection prepared by AdjustHud(), while mounted HUD
 		// canvases still get their own explicit 2D setup.
-		if (!vrmode->IsVR())
+		if (!vrmode->IsVR() || isVirtualScreenPass)
 		{
 			screen->mViewpoints->Set2D(state, drawer->GetWidth(), drawer->GetHeight());
 		}

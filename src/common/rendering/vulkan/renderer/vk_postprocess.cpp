@@ -39,6 +39,7 @@
 #include "hwrenderer/postprocessing/hw_postprocess.h"
 #include "hwrenderer/postprocessing/hw_postprocess_cvars.h"
 #include "hw_vrmodes.h"
+#include "common/rendering/stereo3d/openxr/oxr_loader.h"
 #include "flatvertices.h"
 #include "r_videoscale.h"
 
@@ -46,6 +47,10 @@ EXTERN_CVAR(Int, gl_dither_bpc)
 EXTERN_CVAR(Bool, vr_debug_projection_compare)
 EXTERN_CVAR(Bool, vr_openxr_debug_sizes)
 EXTERN_CVAR(Bool, vr_openxr_debug_present)
+EXTERN_CVAR(Float, vr_openxr_present_gamma_bias)
+EXTERN_CVAR(Float, vr_openxr_present_contrast_bias)
+EXTERN_CVAR(Float, vr_openxr_present_brightness_bias)
+EXTERN_CVAR(Float, vr_openxr_present_saturation_bias)
 
 VkPostprocess::VkPostprocess(VulkanRenderDevice* fb) : fb(fb)
 {
@@ -245,8 +250,8 @@ void VkPostprocess::DrawPresentTexture(const IntRect &box, bool applyGamma, bool
 
 void VkPostprocess::DrawPresentTextureToImage(VkTextureImage *image, VkFormat outputFormat, const IntRect &box, bool applyGamma, bool screenshot, float sourceScaleX, float sourceScaleY, float sourceOffsetX, float sourceOffsetY, VulkanCommandBuffer *cmdbuffer)
 {
-	(void)outputFormat;
 	VkPPRenderState renderstate(fb);
+	const bool outputIsSrgb = outputFormat == VK_FORMAT_B8G8R8A8_SRGB || outputFormat == VK_FORMAT_R8G8B8A8_SRGB;
 
 	if (!screenshot)
 		hw_postprocess.customShaders.Run(&renderstate, "screen");
@@ -261,18 +266,41 @@ void VkPostprocess::DrawPresentTextureToImage(VkTextureImage *image, VkFormat ou
 	}
 	else
 	{
-		uniforms.InvGamma = 1.0f / clamp<float>(vid_gamma, 0.1f, 4.f);
+		// sRGB XR swapchains already get the final framebuffer transfer on write,
+		// so applying the full software gamma exponent here tends to over-brighten
+		// the submitted eye image. Keep the present-pass shaping, but use a softer
+		// compensation curve to recover some of the darker midtone contrast seen
+		// in the OpenVR/OpenGL path.
+		const float gammaValue = clamp<float>(vid_gamma, 0.1f, 4.f);
+		uniforms.InvGamma = outputIsSrgb ? (1.0f / sqrtf(gammaValue)) : (1.0f / gammaValue);
 		uniforms.Contrast = clamp<float>(vid_contrast, 0.1f, 3.f);
 		uniforms.Brightness = clamp<float>(vid_brightness, -0.8f, 0.8f);
 		uniforms.Saturation = clamp<float>(vid_saturation, -15.0f, 15.f);
 		uniforms.GrayFormula = static_cast<int>(gl_satformula);
+
+		// OpenXR headset compositor path can look noticeably brighter/flatter than
+		// the local mirror/OpenVR reference even with matching source images. Allow
+		// XR-only final present tuning to recover headset parity without affecting
+		// the non-XR present path.
+		if (IsOpenXRPresent())
+		{
+			const float gammaBias = clamp<float>(vr_openxr_present_gamma_bias, 0.25f, 4.0f);
+			const float contrastBias = clamp<float>(vr_openxr_present_contrast_bias, 0.25f, 4.0f);
+			const float brightnessBias = clamp<float>(vr_openxr_present_brightness_bias, -0.8f, 0.8f);
+			const float saturationBias = clamp<float>(vr_openxr_present_saturation_bias, 0.0f, 4.0f);
+
+			uniforms.InvGamma = clamp<float>(uniforms.InvGamma * gammaBias, 0.1f, 4.0f);
+			uniforms.Contrast = clamp<float>(uniforms.Contrast * contrastBias, 0.1f, 3.0f);
+			uniforms.Brightness = clamp<float>(uniforms.Brightness + brightnessBias, -0.8f, 0.8f);
+			uniforms.Saturation = clamp<float>(uniforms.Saturation * saturationBias, -15.0f, 15.0f);
+		}
 	}
 	uniforms.ColorScale = (gl_dither_bpc == -1) ? 255.0f : (float)((1 << gl_dither_bpc) - 1);
 
 	if (vr_debug_projection_compare || vr_openxr_debug_present)
 	{
 		auto* buffers = fb->GetBuffers();
-		Printf("XR_PRESENT_MAP toImage box=%dx%d srcVP=%dx%d sceneVP=%dx%d src=%dx%d dst=%dx%d scale=(%.4f,%.4f) offset=(%.4f,%.4f) applyGamma=%d screenshot=%d\n",
+		Printf("XR_PRESENT_MAP toImage box=%dx%d srcVP=%dx%d sceneVP=%dx%d src=%dx%d dst=%dx%d scale=(%.4f,%.4f) offset=(%.4f,%.4f) applyGamma=%d screenshot=%d outputFormat=%d outputIsSrgb=%d\n",
 			box.width, box.height,
 			screen ? screen->mScreenViewport.width : -1,
 			screen ? screen->mScreenViewport.height : -1,
@@ -287,7 +315,9 @@ void VkPostprocess::DrawPresentTextureToImage(VkTextureImage *image, VkFormat ou
 			(double)sourceOffsetX,
 			(double)sourceOffsetY,
 			applyGamma ? 1 : 0,
-			screenshot ? 1 : 0);
+			screenshot ? 1 : 0,
+			(int)outputFormat,
+			outputIsSrgb ? 1 : 0);
 	}
 
 	uniforms.Scale = { sourceScaleX, sourceScaleY };

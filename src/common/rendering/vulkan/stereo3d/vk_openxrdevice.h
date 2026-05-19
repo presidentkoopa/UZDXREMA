@@ -53,9 +53,11 @@ public:
 	virtual bool AcquireXRSwapchain() const override;
 	virtual bool SubmitFrame() const override;
 	virtual void AdjustViewport(DFrameBuffer* screen) const override;
+	virtual bool IsRenderingVirtualScreen() const override;
 	virtual bool RenderVirtualScreen() const override;
 	virtual void FinalizeEyeImage(VulkanRenderDevice* fb, int eyeIndex) const override;
 	virtual bool RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage* dstImage) const override;
+	bool GetRecommendedRenderSize(int& outWidth, int& outHeight) const;
 	
 	virtual bool GetHandTransform(int hand, VSMatrix* out) const override;
 	virtual bool RenderPlayerSpritesInScene() const { return true; }
@@ -79,6 +81,7 @@ protected:
 
 	void updateVirtualScreenLayer() const;
 	bool ShouldRenderVirtualScreen() const;
+	void PurgeDeferredOpenXRResources() const;
 
 	std::unique_ptr<VKOpenXRDeviceEyePose> mEyes[2];
 
@@ -87,6 +90,7 @@ protected:
 	mutable bool isSessionRunning = false;
 	mutable bool isSessionReadyToBegin = false;
 	mutable bool mInVRSceneRender = false;
+	mutable bool mInVirtualScreenRender = false;
 	mutable uint32_t sceneWidth = 0;
 	mutable uint32_t sceneHeight = 0;
 	mutable int cachedScreenBlocks = 0;
@@ -116,10 +120,13 @@ protected:
 	mutable std::vector<XrSwapchainImageVulkanKHR> xrSwapchainImages;
 	mutable std::vector<VkTextureImage> xrSwapchainTextures;
 	mutable std::vector<VkTextureImage> xrPresentTextures;
+	mutable std::vector<std::vector<VkTextureImage>> xrDeferredPresentTextures;
 	mutable std::vector<XrSwapchainImageVulkanKHR> xrVirtualScreenSwapchainImages;
 	mutable std::vector<XrSwapchainImageVulkanKHR> xrVirtualScreenBackdropSwapchainImages;
 	mutable std::vector<VkTextureImage> xrVirtualScreenTextures;
 	mutable std::vector<VkTextureImage> xrVirtualScreenBackdropTextures;
+	mutable std::vector<std::vector<VkTextureImage>> xrDeferredVirtualScreenTextures;
+	mutable std::vector<std::vector<VkTextureImage>> xrDeferredVirtualScreenBackdropTextures;
 	mutable uint32_t xrViewCount = 0;
 	mutable int xrCurrentImageIndex = -1;
 	mutable int xrVirtualScreenImageIndex = -1;

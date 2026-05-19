@@ -115,12 +115,15 @@ static bool HasOpenXRExtension(const char* extensionName)
 static XrColorSpaceFB SelectPreferredColorSpace(const std::vector<XrColorSpaceFB>& supportedColorSpaces)
 {
 	const XrColorSpaceFB preferredOrder[] = {
-		XR_COLOR_SPACE_RIFT_S_FB,
+		// Match the OpenVR/OpenGL handoff as closely as possible: submit the
+		// engine's already-presented LDR output without asking the runtime to
+		// reinterpret it into a managed display color space first.
+		XR_COLOR_SPACE_UNMANAGED_FB,
 		XR_COLOR_SPACE_REC709_FB,
-		XR_COLOR_SPACE_P3_FB,
+		XR_COLOR_SPACE_RIFT_S_FB,
 		XR_COLOR_SPACE_QUEST_FB,
+		XR_COLOR_SPACE_P3_FB,
 		XR_COLOR_SPACE_REC2020_FB,
-		XR_COLOR_SPACE_UNMANAGED_FB
 	};
 
 	for (XrColorSpaceFB preferred : preferredOrder)
@@ -161,6 +164,11 @@ static XrVector3f AddVector(const XrVector3f& a, const XrVector3f& b)
 	return { a.x + b.x, a.y + b.y, a.z + b.z };
 }
 
+static XrVector3f SubtractVector(const XrVector3f& a, const XrVector3f& b)
+{
+	return { a.x - b.x, a.y - b.y, a.z - b.z };
+}
+
 static XrVector3f ScaleVector(const XrVector3f& v, float scale)
 {
 	return { v.x * scale, v.y * scale, v.z * scale };
@@ -174,6 +182,11 @@ static XrQuaternionf MultiplyQuaternion(const XrQuaternionf& a, const XrQuaterni
 		a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
 		a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z
 	};
+}
+
+static XrQuaternionf ConjugateQuaternion(const XrQuaternionf& q)
+{
+	return { -q.x, -q.y, -q.z, q.w };
 }
 
 static XrQuaternionf MakeAxisAngleQuaternion(const XrVector3f& axis, float angleRadians)
@@ -223,6 +236,86 @@ static float GetViewpointYaw()
 	return doomYaw;
 }
 
+struct XrSafeSourceRect
+{
+	IntRect rect = { 0, 0, 0, 0 };
+	float scaleX = 1.0f;
+	float scaleY = -1.0f;
+	float offsetX = 0.0f;
+	float offsetY = 1.0f;
+	bool usedFallback = false;
+	bool wasClamped = false;
+};
+
+static void GetStableOpenXRVirtualScreenSize(uint32_t& width, uint32_t& height)
+{
+	// Keep the OpenXR menu/console surface independent from the live framebuffer
+	// size. The OpenVR reference path uses a stable virtual-screen surface, and
+	// resizing this overlay to arbitrary desktop dimensions was triggering the
+	// freeze you observed once the resolution got large.
+	width = 960;
+	height = 720;
+}
+
+static XrSafeSourceRect GetSafeXrSourceRect(VulkanRenderDevice* vkfb)
+{
+	XrSafeSourceRect result;
+	auto* buffers = vkfb ? vkfb->GetBuffers() : nullptr;
+	const int srcBufferW = buffers ? buffers->GetWidth() : 0;
+	const int srcBufferH = buffers ? buffers->GetHeight() : 0;
+	const IntRect requestedRect = vkfb ? vkfb->mSceneViewport : IntRect{ 0, 0, 0, 0 };
+
+	auto useFullBufferFallback = [&]()
+	{
+		result.rect.left = 0;
+		result.rect.top = 0;
+		result.rect.width = std::max(1, srcBufferW);
+		result.rect.height = std::max(1, srcBufferH);
+		result.usedFallback = true;
+	};
+
+	if (srcBufferW <= 0 || srcBufferH <= 0 || requestedRect.width <= 0 || requestedRect.height <= 0)
+	{
+		useFullBufferFallback();
+	}
+	else
+	{
+		const int requestedLeft = requestedRect.left;
+		const int requestedTop = requestedRect.top;
+		const int requestedRight = requestedRect.left + requestedRect.width;
+		const int requestedBottom = requestedRect.top + requestedRect.height;
+
+		const int clampedLeft = std::clamp(requestedLeft, 0, srcBufferW);
+		const int clampedTop = std::clamp(requestedTop, 0, srcBufferH);
+		const int clampedRight = std::clamp(requestedRight, 0, srcBufferW);
+		const int clampedBottom = std::clamp(requestedBottom, 0, srcBufferH);
+
+		if (clampedRight <= clampedLeft || clampedBottom <= clampedTop)
+		{
+			useFullBufferFallback();
+		}
+		else
+		{
+			result.rect.left = clampedLeft;
+			result.rect.top = clampedTop;
+			result.rect.width = clampedRight - clampedLeft;
+			result.rect.height = clampedBottom - clampedTop;
+			result.wasClamped = clampedLeft != requestedLeft || clampedTop != requestedTop ||
+				clampedRight != requestedRight || clampedBottom != requestedBottom;
+		}
+	}
+
+	if (srcBufferW > 0 && srcBufferH > 0)
+	{
+		result.scaleX = result.rect.width / (float)srcBufferW;
+		result.scaleY = -result.rect.height / (float)srcBufferH;
+		result.offsetX = result.rect.left / (float)srcBufferW;
+		result.offsetY = (result.rect.top + result.rect.height) / (float)srcBufferH;
+	}
+
+	return result;
+}
+
 static void AngleVectors(const float angles[3], float* forward, float* right, float* up)
 {
 	const float pitch = (float)(angles[0] * (M_PI / 180.0f));
@@ -260,6 +353,8 @@ static void AngleVectors(const float angles[3], float* forward, float* right, fl
 
 static VSMatrix BuildOpenXREyeProjection(const XrFovf& fov, float nearZ, float farZ, int eye)
 {
+	(void)eye;
+
 	const float fovAdjust = DEG2RAD(clamp<float>(vr_openxr_fov_adjust_deg, -30.0f, 30.0f));
 	const XrFovf adjustedFov = {
 		std::max(fov.angleLeft - fovAdjust, (float)(-0.5 * M_PI + 0.001)),
@@ -272,26 +367,27 @@ static VSMatrix BuildOpenXREyeProjection(const XrFovf& fov, float nearZ, float f
 	const float tanRight = std::tan(adjustedFov.angleRight);
 	const float tanUp = std::tan(adjustedFov.angleUp);
 	const float tanDown = std::tan(adjustedFov.angleDown);
-
-	const float left = nearZ * tanLeft;
-	const float right = nearZ * tanRight;
-	const float bottom = nearZ * tanDown;
-	const float top = nearZ * tanUp;
 	const float tanWidth = tanRight - tanLeft;
 	const float tanHeight = tanUp - tanDown;
-	const float skewX = -(tanRight + tanLeft) / tanWidth;
-	const float skewY = (tanUp + tanDown) / tanHeight;
 
 	FLOATTYPE m[16];
 	memset(m, 0, sizeof(m));
-	m[0 * 4 + 0] = 2.0f * nearZ / (right - left);
-	m[1 * 4 + 1] = 2.0f * nearZ / (top - bottom);
-	m[2 * 4 + 0] = skewX;
-	m[2 * 4 + 1] = skewY;
-	m[2 * 4 + 2] = - (farZ + nearZ) / (farZ - nearZ);
-	m[2 * 4 + 3] = -1.0f;
-	m[3 * 4 + 2] = - 2.0f * farZ * nearZ / (farZ - nearZ);
-	m[3 * 4 + 3] = 0.0f;
+
+	// Use the OpenXR SDK's asymmetric frustum layout, but keep the engine's
+	// existing projection convention. Feeding raw Vulkan clip-space here flips
+	// the 3D scene because the renderer's matrix path still expects the
+	// OpenGL-style Y/depth form at this stage.
+	m[0] = 2.0f / tanWidth;
+	m[5] = 2.0f / tanHeight;
+	// Doom's existing view/projection path expects the horizontal asymmetric
+	// center term with the opposite sign from the raw OpenXR helper output.
+	// Using the SDK sign here makes the scene diverge/cross-eye while the rest
+	// of the layer pipeline remains correct.
+	m[8] = -(tanRight + tanLeft) / tanWidth;
+	m[9] = (tanUp + tanDown) / tanHeight;
+	m[10] = -(farZ + nearZ) / (farZ - nearZ);
+	m[11] = -1.0f;
+	m[14] = -(2.0f * farZ * nearZ) / (farZ - nearZ);
 
 	VSMatrix matrix;
 	matrix.loadMatrix(m);
@@ -339,12 +435,24 @@ static int64_t SelectSwapchainFormat(const std::vector<int64_t>& runtimeFormats,
 		return std::find(runtimeFormats.begin(), runtimeFormats.end(), format) != runtimeFormats.end();
 	};
 
+	const VkFormat preferredSrgb =
+		(preferredFormat == VK_FORMAT_R8G8B8A8_UNORM) ? VK_FORMAT_R8G8B8A8_SRGB :
+		(preferredFormat == VK_FORMAT_B8G8R8A8_UNORM) ? VK_FORMAT_B8G8R8A8_SRGB :
+		(preferredFormat == VK_FORMAT_R8G8B8A8_SRGB) ? VK_FORMAT_R8G8B8A8_SRGB :
+		(preferredFormat == VK_FORMAT_B8G8R8A8_SRGB) ? VK_FORMAT_B8G8R8A8_SRGB :
+		VK_FORMAT_UNDEFINED;
+	const VkFormat preferredUnorm =
+		(preferredFormat == VK_FORMAT_R8G8B8A8_SRGB) ? VK_FORMAT_R8G8B8A8_UNORM :
+		(preferredFormat == VK_FORMAT_B8G8R8A8_SRGB) ? VK_FORMAT_B8G8R8A8_UNORM :
+		VK_FORMAT_UNDEFINED;
+
 	const int64_t preferred[] = {
-		(preferredFormat == VK_FORMAT_B8G8R8A8_UNORM) ? (int64_t)VK_FORMAT_B8G8R8A8_SRGB : (int64_t)preferredFormat,
-		(preferredFormat == VK_FORMAT_R8G8B8A8_UNORM) ? (int64_t)VK_FORMAT_R8G8B8A8_SRGB : (int64_t)VK_FORMAT_B8G8R8A8_SRGB,
-		(preferredFormat == VK_FORMAT_B8G8R8A8_UNORM) ? (int64_t)VK_FORMAT_B8G8R8A8_UNORM : (int64_t)VK_FORMAT_B8G8R8A8_UNORM,
-		(preferredFormat == VK_FORMAT_R8G8B8A8_UNORM) ? (int64_t)VK_FORMAT_R8G8B8A8_UNORM : (int64_t)VK_FORMAT_R8G8B8A8_SRGB,
-		(int64_t)VK_FORMAT_R8G8B8A8_UNORM
+		(int64_t)preferredSrgb,
+		(preferredSrgb == VK_FORMAT_B8G8R8A8_SRGB) ? (int64_t)VK_FORMAT_R8G8B8A8_SRGB : (int64_t)VK_FORMAT_B8G8R8A8_SRGB,
+		(preferredSrgb == VK_FORMAT_R8G8B8A8_SRGB) ? (int64_t)VK_FORMAT_B8G8R8A8_SRGB : (int64_t)VK_FORMAT_R8G8B8A8_SRGB,
+		(int64_t)preferredUnorm,
+		(preferredUnorm == VK_FORMAT_B8G8R8A8_UNORM) ? (int64_t)VK_FORMAT_R8G8B8A8_UNORM : (int64_t)VK_FORMAT_B8G8R8A8_UNORM,
+		(preferredUnorm == VK_FORMAT_R8G8B8A8_UNORM) ? (int64_t)VK_FORMAT_B8G8R8A8_UNORM : (int64_t)VK_FORMAT_R8G8B8A8_UNORM
 	};
 
 	for (int64_t format : preferred)
@@ -359,15 +467,6 @@ static int64_t SelectSwapchainFormat(const std::vector<int64_t>& runtimeFormats,
 static bool IsSRGBSwapchainFormat(VkFormat format)
 {
 	return format == VK_FORMAT_B8G8R8A8_SRGB || format == VK_FORMAT_R8G8B8A8_SRGB;
-}
-
-static VkFormat GetPresentIntermediateFormat(VkFormat format)
-{
-	if (format == VK_FORMAT_B8G8R8A8_SRGB)
-		return VK_FORMAT_B8G8R8A8_UNORM;
-	if (format == VK_FORMAT_R8G8B8A8_SRGB)
-		return VK_FORMAT_R8G8B8A8_UNORM;
-	return format;
 }
 
 static VREyeInfo* GetDummyOpenXREyes()
@@ -403,15 +502,14 @@ DVector3 VKOpenXRDeviceEyePose::GetViewShift(FRenderViewpoint& vp) const
 	DVector3 shift;
 	if (eye >= 0)
 	{
-		const XrVector3f& eyePos = currentEyePose.position;
-		const float dx = (float)(eyePos.x - hmdPosition[0]);
-		const float dy = (float)(eyePos.y - hmdPosition[1]);
-		const float dz = (float)(eyePos.z - hmdPosition[2]);
-		const float scale = vr_vunits_per_meter * clamp<float>(vr_openxr_eye_shift_scale, 0.0f, 4.0f);
-
-		shift.X = dx * scale;
-		shift.Y = -dz * scale;
-		shift.Z = dy * scale + (hmdHeight - playerHeight);
+		// Isolation step: remove OpenXR per-eye camera translation entirely and
+		// let the asymmetric projection matrix carry scene stereo by itself.
+		// If comfort changes here, the remaining issue is in eye translation;
+		// if not, the frustum math is still the real problem.
+		shift.X = 0.0;
+		shift.Y = 0.0;
+		shift.Z = 0.0;
+		shift.Z += hmdHeight - playerHeight;
 	}
 	else
 	{
@@ -813,7 +911,7 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 				const XrColorSpaceFB requestedColorSpace = SelectPreferredColorSpace(supportedColorSpaces);
 				if (XR_SUCCEEDED(xrSetColorSpaceFB(xrSession, requestedColorSpace)))
 				{
-					Printf("OpenXR: requested FB color space %d.\n", (int)requestedColorSpace);
+					Printf("OpenXR: requested FB color space %d from %u supported modes.\n", (int)requestedColorSpace, colorSpaceCount);
 				}
 			}
 		}
@@ -915,6 +1013,11 @@ bool VKOpenXRDeviceMode::CreateSwapchain() const
 		xrEnumerateSwapchainFormats(xrSession, formatCount, &formatCount, runtimeFormats.data());
 	}
 	xrSwapchainFormat = SelectSwapchainFormat(runtimeFormats, preferredFormat);
+	Printf("OpenXR: preferred scene swapchain format=%d selected=%d srgb=%d runtimeFormats=%u.\n",
+		(int)preferredFormat,
+		(int)xrSwapchainFormat,
+		IsSRGBSwapchainFormat((VkFormat)xrSwapchainFormat) ? 1 : 0,
+		formatCount);
 
 	XrSwapchainCreateInfo swapchainInfo{ XR_TYPE_SWAPCHAIN_CREATE_INFO };
 	swapchainInfo.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
@@ -978,15 +1081,18 @@ bool VKOpenXRDeviceMode::CreatePresentTextures(VulkanRenderDevice* vkfb) const
 	if (xrPresentTextures.size() == xrViewCount && xrPresentWidth == width && xrPresentHeight == height)
 		return true;
 
+	if (!xrPresentTextures.empty())
+		xrDeferredPresentTextures.emplace_back(std::move(xrPresentTextures));
+	xrPresentTextures.clear();
+
 	for (auto& texture : xrPresentTextures)
 		texture.Reset(vkfb);
-	xrPresentTextures.clear();
 
 	xrPresentTextures.resize(xrViewCount);
 	xrPresentWidth = width;
 	xrPresentHeight = height;
 
-	const VkFormat presentFormat = GetPresentIntermediateFormat((VkFormat)xrSwapchainFormat);
+	const VkFormat presentFormat = (VkFormat)xrSwapchainFormat;
 	for (uint32_t i = 0; i < xrViewCount; ++i)
 	{
 		auto& texture = xrPresentTextures[i];
@@ -1024,6 +1130,10 @@ bool VKOpenXRDeviceMode::CreateVirtualScreenSwapchain(uint32_t width, uint32_t h
 	{
 		return true;
 	}
+
+	if (!xrVirtualScreenTextures.empty())
+		xrDeferredVirtualScreenTextures.emplace_back(std::move(xrVirtualScreenTextures));
+	xrVirtualScreenTextures.clear();
 
 	DestroyVirtualScreenSwapchain();
 
@@ -1096,6 +1206,10 @@ bool VKOpenXRDeviceMode::CreateVirtualScreenBackdropSwapchain(uint32_t width, ui
 	{
 		return true;
 	}
+
+	if (!xrVirtualScreenBackdropTextures.empty())
+		xrDeferredVirtualScreenBackdropTextures.emplace_back(std::move(xrVirtualScreenBackdropTextures));
+	xrVirtualScreenBackdropTextures.clear();
 
 	DestroyVirtualScreenBackdropSwapchain();
 
@@ -1236,6 +1350,7 @@ void VKOpenXRDeviceMode::DestroyOpenXR() const
 	xrSwapchainImages.clear();
 	xrSwapchainTextures.clear();
 	xrPresentTextures.clear();
+	xrDeferredPresentTextures.clear();
 	xrViewConfigs.clear();
 	xrViews.clear();
 	xrProjectionViews.clear();
@@ -1253,10 +1368,20 @@ void VKOpenXRDeviceMode::DestroyOpenXR() const
 	xrVkCommandPool.reset();
 	xrVkDevice.reset();
 	xrVkInstance.reset();
+	xrDeferredVirtualScreenTextures.clear();
+	xrDeferredVirtualScreenBackdropTextures.clear();
+}
+
+void VKOpenXRDeviceMode::PurgeDeferredOpenXRResources() const
+{
+	xrDeferredPresentTextures.clear();
+	xrDeferredVirtualScreenTextures.clear();
+	xrDeferredVirtualScreenBackdropTextures.clear();
 }
 
 void VKOpenXRDeviceMode::SetUp() const
 {
+	PurgeDeferredOpenXRResources();
 	struct Guard
 	{
 		bool& flag;
@@ -1834,11 +1959,13 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 
 	const XrCompositionLayerBaseHeader* layers[3];
 	int layerIndex = 0;
-	if (!submitVirtualScreen)
-	{
-		layers[layerIndex++] = (const XrCompositionLayerBaseHeader*)&layer;
-	}
-	else
+	// Always keep the projection layer alive. The virtual-screen path is an
+	// overlay layer, not a replacement for the headset scene. Replacing the
+	// projection layer made the whole HMD depend on the menu quad pass and could
+	// drop straight into SteamVR's waiting screen if that overlay path failed.
+	layers[layerIndex++] = (const XrCompositionLayerBaseHeader*)&layer;
+
+	if (submitVirtualScreen)
 	{
 		if (submitBackdrop)
 		{
@@ -1876,16 +2003,19 @@ void VKOpenXRDeviceMode::Present() const
 void VKOpenXRDeviceMode::AdjustViewport(DFrameBuffer* screen) const
 {
 	if (screen == nullptr) return;
-	if (sceneWidth == 0 || sceneHeight == 0) return;
 	if (!mInVRSceneRender) return;
-	screen->mSceneViewport.width = sceneWidth;
-	screen->mSceneViewport.height = sceneHeight;
-	screen->mSceneViewport.left = 0;
-	screen->mSceneViewport.top = 0;
-	screen->mScreenViewport.width = sceneWidth;
-	screen->mScreenViewport.height = sceneHeight;
-	screen->mScreenViewport.left = 0;
-	screen->mScreenViewport.top = 0;
+
+	// Preserve the normal VR viewport scaling contract here instead of forcing
+	// the scene to the XR recommended eye size. The XR swapchain itself already
+	// carries the eye-image dimensions, and rewriting the framebuffer viewport
+	// here can distort/zoom the scene and break 2D overlay composition when the
+	// desktop resolution or scaling changes.
+	VRMode::AdjustViewport(screen);
+}
+
+bool VKOpenXRDeviceMode::IsRenderingVirtualScreen() const
+{
+	return mInVirtualScreenRender;
 }
 
 void VKOpenXRDeviceMode::updateVirtualScreenLayer() const
@@ -1974,23 +2104,9 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 		return false;
 	}
 
-	uint32_t screenWidth = vkfb->GetBuffers() != nullptr ? (uint32_t)vkfb->GetBuffers()->GetWidth() : 0;
-	uint32_t screenHeight = vkfb->GetBuffers() != nullptr ? (uint32_t)vkfb->GetBuffers()->GetHeight() : 0;
-	if (screenWidth == 0 || screenHeight == 0)
-	{
-		screenWidth = xrPresentWidth;
-		screenHeight = xrPresentHeight;
-	}
-	if (screenWidth == 0 || screenHeight == 0)
-	{
-		if (!xrViewConfigs.empty())
-		{
-			screenWidth = xrViewConfigs[0].recommendedImageRectWidth;
-			screenHeight = xrViewConfigs[0].recommendedImageRectHeight;
-		}
-	}
-	screenWidth = std::max(1u, screenWidth);
-	screenHeight = std::max(1u, screenHeight);
+	uint32_t screenWidth = 0;
+	uint32_t screenHeight = 0;
+	GetStableOpenXRVirtualScreenSize(screenWidth, screenHeight);
 	if (!CreateVirtualScreenSwapchain(screenWidth, screenHeight))
 	{
 		xrVirtualScreenVisible = false;
@@ -2025,7 +2141,7 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 	}
 
 	XrSwapchainImageWaitInfo waitInfo{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
-	waitInfo.timeout = 20 * 1000 * 1000;
+	waitInfo.timeout = 100 * 1000 * 1000;
 	xrResult = xrWaitSwapchainImage(xrVirtualScreenSwapchain, &waitInfo);
 	if (XR_FAILED(xrResult))
 	{
@@ -2082,17 +2198,34 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 	}
 
 	auto* renderState = vkfb->GetRenderState();
+	const IntRect savedScreenViewport = vkfb->mScreenViewport;
+	const IntRect savedSceneViewport = vkfb->mSceneViewport;
+	const IntRect savedOutputLetterbox = vkfb->mOutputLetterbox;
+	const int savedGameScreenWidth = vkfb->mGameScreenWidth;
+	const int savedGameScreenHeight = vkfb->mGameScreenHeight;
+	vkfb->mScreenViewport = { 0, 0, (int)screenWidth, (int)screenHeight };
+	vkfb->mSceneViewport = vkfb->mScreenViewport;
+	vkfb->mOutputLetterbox = vkfb->mScreenViewport;
+	vkfb->mGameScreenWidth = (int)screenWidth;
+	vkfb->mGameScreenHeight = (int)screenHeight;
 	renderState->SetRenderTarget(&target, nullptr, (int)screenWidth, (int)screenHeight, (VkFormat)xrSwapchainFormat, VK_SAMPLE_COUNT_1_BIT);
 	// Render the virtual-screen texture as a regular 2D target. The VR layer
 	// compositor will handle the actual head-locked presentation.
 	screen->mViewpoints->Set2D(*renderState, (int)screenWidth, (int)screenHeight);
+	mInVirtualScreenRender = true;
 	if (!useSceneBackdrop)
 	{
 		renderState->Clear(CT_Color);
 	}
 	screen->Draw2D(true);
 	screen->Draw2D(false);
+	mInVirtualScreenRender = false;
 	renderState->EndRenderPass();
+	vkfb->mScreenViewport = savedScreenViewport;
+	vkfb->mSceneViewport = savedSceneViewport;
+	vkfb->mOutputLetterbox = savedOutputLetterbox;
+	vkfb->mGameScreenWidth = savedGameScreenWidth;
+	vkfb->mGameScreenHeight = savedGameScreenHeight;
 
 	memcpy(screen->mSceneClearColor, savedClear, sizeof(savedClear));
 
@@ -2147,7 +2280,7 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 	}
 
 	XrSwapchainImageWaitInfo backdropWaitInfo{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
-	backdropWaitInfo.timeout = 20 * 1000 * 1000;
+	backdropWaitInfo.timeout = 100 * 1000 * 1000;
 	xrResult = xrWaitSwapchainImage(xrVirtualScreenBackdropSwapchain, &backdropWaitInfo);
 	if (XR_FAILED(xrResult))
 	{
@@ -2224,8 +2357,18 @@ void VKOpenXRDeviceMode::FinalizeEyeImage(VulkanRenderDevice* vkfb, int eyeIndex
 	if (!postprocess)
 		return;
 	const int pipelineImageIndex = postprocess->GetCurrentPipelineImage();
+	const XrSafeSourceRect sourceRect = GetSafeXrSourceRect(vkfb);
+	static bool xrLoggedPresentFormat = false;
+	if (!xrLoggedPresentFormat)
+	{
+		Printf("OpenXR: finalize eye copy uses xrSwapchainFormat=%d srgb=%d presentTextureFormat=%d.\n",
+			(int)xrSwapchainFormat,
+			IsSRGBSwapchainFormat((VkFormat)xrSwapchainFormat) ? 1 : 0,
+			(int)xrSwapchainFormat);
+		xrLoggedPresentFormat = true;
+	}
 
-	if (vr_debug_projection_compare || vr_openxr_debug_present)
+	if (vr_debug_projection_compare || vr_openxr_debug_present || vr_openxr_debug_sizes)
 	{
 		auto* buffers = vkfb->GetBuffers();
 		const auto* sourceTexture = (buffers && pipelineImageIndex >= 0 && pipelineImageIndex < 2)
@@ -2249,6 +2392,43 @@ void VKOpenXRDeviceMode::FinalizeEyeImage(VulkanRenderDevice* vkfb, int eyeIndex
 			buffers ? buffers->GetHeight() : -1,
 			xrPresentWidth,
 			xrPresentHeight);
+
+		Printf("XR_PRESENT_MAP finalize eye=%d srcBuffer=%dx%d srcRect=%d,%d %dx%d scale=(%.4f,%.4f) offset=(%.4f,%.4f) dstEye=%dx%d fallback=%d clamped=%d\n",
+			eyeIndex,
+			buffers ? buffers->GetWidth() : -1,
+			buffers ? buffers->GetHeight() : -1,
+			sourceRect.rect.left,
+			sourceRect.rect.top,
+			sourceRect.rect.width,
+			sourceRect.rect.height,
+			(double)sourceRect.scaleX,
+			(double)sourceRect.scaleY,
+			(double)sourceRect.offsetX,
+			(double)sourceRect.offsetY,
+			targetWidth,
+			targetHeight,
+			sourceRect.usedFallback ? 1 : 0,
+			sourceRect.wasClamped ? 1 : 0);
+	}
+
+	static bool xrLoggedSourceRectAdjustment = false;
+	if (!xrLoggedSourceRectAdjustment && (sourceRect.usedFallback || sourceRect.wasClamped) && (vr_openxr_debug_present || vr_openxr_debug_sizes))
+	{
+		auto* buffers = vkfb->GetBuffers();
+		Printf("OpenXR: adjusted XR finalize source rect srcBuffer=%dx%d requested=%d,%d %dx%d chosen=%d,%d %dx%d fallback=%d clamped=%d\n",
+			buffers ? buffers->GetWidth() : -1,
+			buffers ? buffers->GetHeight() : -1,
+			vkfb->mSceneViewport.left,
+			vkfb->mSceneViewport.top,
+			vkfb->mSceneViewport.width,
+			vkfb->mSceneViewport.height,
+			sourceRect.rect.left,
+			sourceRect.rect.top,
+			sourceRect.rect.width,
+			sourceRect.rect.height,
+			sourceRect.usedFallback ? 1 : 0,
+			sourceRect.wasClamped ? 1 : 0);
+		xrLoggedSourceRectAdjustment = true;
 	}
 
 	postprocess->SetCurrentPipelineImage(pipelineImageIndex);
@@ -2261,14 +2441,14 @@ void VKOpenXRDeviceMode::FinalizeEyeImage(VulkanRenderDevice* vkfb, int eyeIndex
 
 	postprocess->DrawPresentTextureToImage(
 		&xrPresentTextures[eyeIndex],
-		GetPresentIntermediateFormat((VkFormat)xrSwapchainFormat),
+		(VkFormat)xrSwapchainFormat,
 		targetBox,
 		true,
 		false,
-		1.0f,
-		-1.0f,
-		0.0f,
-		1.0f,
+		sourceRect.scaleX,
+		sourceRect.scaleY,
+		sourceRect.offsetX,
+		sourceRect.offsetY,
 		vkfb->GetCommands()->GetDrawCommands());
 }
 
