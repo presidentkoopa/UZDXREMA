@@ -4764,11 +4764,12 @@ AActor *P_LineAttack(AActor *t1, DAngle angle, double distance,
 		if ( damage > 0) {
             //Haptics
             long rightHanded = vr_control_scheme < 10;
-			rightHanded = (flags & LAF_ISOFFHAND) ? 1 - rightHanded : rightHanded;
+			const bool offhandAttack = (flags & LAF_ISOFFHAND) != 0;
+			rightHanded = offhandAttack ? 1 - rightHanded : rightHanded;
             vrmode->Vibrate(150, rightHanded ? 1 : 0, 0.8);
 			VR_HapticEvent("fire_weapon", rightHanded ? 2 : 1, 100 * C_GetExternalHapticLevelValue("fire_weapon"), 0, 0);
 
-            if (weaponStabilised) {
+            if (weaponStabilised && !offhandAttack) {
                 vrmode->Vibrate(150, rightHanded ? 0 : 1, 0.6);
 				VR_HapticEvent("fire_weapon", rightHanded ? 1 : 2, 100 * C_GetExternalHapticLevelValue("fire_weapon"), 0, 0);
 			}
@@ -5692,12 +5693,13 @@ void P_RailAttack(FRailParams *p)
 		if (p->damage > 0) {
 			//Haptics
 			long rightHanded = vr_control_scheme < 10;
-			rightHanded = (p->flags & RAF_ISOFFHAND) ? 1 - rightHanded : rightHanded;
+			const bool offhandAttack = (p->flags & RAF_ISOFFHAND) != 0;
+			rightHanded = offhandAttack ? 1 - rightHanded : rightHanded;
 			auto vrmode = VRMode::GetVRModeCached(true);
 			vrmode->Vibrate(150, rightHanded ? 1 : 0, 0.8);
 			VR_HapticEvent("fire_weapon", rightHanded ? 2 : 1, 100 * C_GetExternalHapticLevelValue("fire_weapon"), 0, 0);
 
-			if (weaponStabilised) {
+			if (weaponStabilised && !offhandAttack) {
 				vrmode->Vibrate(150, rightHanded ? 0 : 1, 0.6);
 				VR_HapticEvent("fire_weapon", rightHanded ? 1 : 2, 100 * C_GetExternalHapticLevelValue("fire_weapon"), 0, 0);
 			}

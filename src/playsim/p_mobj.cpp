@@ -7550,11 +7550,12 @@ AActor *P_SpawnPlayerMissile (AActor *source, double x, double y, double z,
 		{
 			//Haptics
 			long rightHanded = vr_control_scheme < 10;
-			rightHanded = (aimflags & ALF_ISOFFHAND) ? 1 - rightHanded : rightHanded;
+			const bool offhandAttack = (aimflags & ALF_ISOFFHAND) != 0;
+			rightHanded = offhandAttack ? 1 - rightHanded : rightHanded;
 			auto vrmode = VRMode::GetVRModeCached(true);
 			vrmode->Vibrate(150, rightHanded ? 1 : 0, 0.8);
 			VR_HapticEvent("fire_weapon", rightHanded ? 2 : 1, 100 * C_GetExternalHapticLevelValue("fire_weapon"), 0, 0);
-			if (weaponStabilised)
+			if (weaponStabilised && !offhandAttack)
 			{
 				vrmode->Vibrate(150, rightHanded ? 0 : 1, 0.6);
 				VR_HapticEvent("fire_weapon", rightHanded ? 1 : 2, 100 * C_GetExternalHapticLevelValue("fire_weapon"), 0, 0);

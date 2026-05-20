@@ -70,6 +70,9 @@ public:
 protected:
 
 	void updateHmdPose(FRenderViewpoint& vp) const;
+	void UpdateControllerState() const;
+	void ProcessHaptics() const;
+	void StopHaptics() const;
 	bool InitializeOpenXR() const;
 	bool CreateSwapchain() const;
 	bool CreatePresentTextures(VulkanRenderDevice* fb) const;
@@ -113,6 +116,43 @@ protected:
 	mutable XrSpace xrHandSpaces[2] = { XR_NULL_HANDLE, XR_NULL_HANDLE };
 	mutable XrAction xrSelectAction = XR_NULL_HANDLE;
 	mutable XrAction xrMenuAction = XR_NULL_HANDLE;
+	mutable XrAction xrGripAction = XR_NULL_HANDLE;
+	mutable XrAction xrThumbClickAction = XR_NULL_HANDLE;
+	mutable XrAction xrThumbstickAction = XR_NULL_HANDLE;
+	mutable XrAction xrTrackpadAction = XR_NULL_HANDLE;
+	mutable XrAction xrAAction = XR_NULL_HANDLE;
+	mutable XrAction xrBAction = XR_NULL_HANDLE;
+	mutable XrAction xrXAction = XR_NULL_HANDLE;
+	mutable XrAction xrYAction = XR_NULL_HANDLE;
+	mutable XrAction xrPrimaryAction = XR_NULL_HANDLE;
+	mutable XrAction xrSecondaryAction = XR_NULL_HANDLE;
+	mutable XrPath xrLeftHandPath = XR_NULL_PATH;
+	mutable XrPath xrRightHandPath = XR_NULL_PATH;
+	mutable XrPosef xrHandPoses[2] = { { {0,0,0,1}, {0,0,0} }, { {0,0,0,1}, {0,0,0} } };
+	mutable bool xrHandPoseValid[2] = { false, false };
+	mutable bool xrLastSelectState[2] = { false, false };
+	mutable bool xrLastMenuState[2] = { false, false };
+	mutable bool xrLastGripState[2] = { false, false };
+	mutable bool xrLastThumbClickState[2] = { false, false };
+	mutable bool xrLastTrackpadClickState[2] = { false, false };
+	mutable bool xrLastAState[2] = { false, false };
+	mutable bool xrLastBState[2] = { false, false };
+	mutable bool xrLastXState[2] = { false, false };
+	mutable bool xrLastYState[2] = { false, false };
+	mutable bool xrLastPrimaryState[2] = { false, false };
+	mutable bool xrLastSecondaryState[2] = { false, false };
+	mutable XrVector2f xrLastThumbstickState[2] = { {0.0f, 0.0f}, {0.0f, 0.0f} };
+	mutable XrVector2f xrLastTrackpadState[2] = { {0.0f, 0.0f}, {0.0f, 0.0f} };
+	mutable bool xrLastMenuReturnState = false;
+	mutable bool xrLastMenuBackState = false;
+	mutable bool xrLastMenuBackspaceState = false;
+	mutable bool xrLoggedWeaponState = false;
+	mutable XrAction xrHapticAction = XR_NULL_HANDLE;
+	mutable double xrHapticDuration[2] = { 0.0, 0.0 };
+	mutable float xrHapticIntensity[2] = { 0.0f, 0.0f };
+	mutable bool xrHapticActive[2] = { false, false };
+	mutable DVector3 m_TeleportLocation = DVector3(0.0, 0.0, 0.0);
+	mutable int m_TeleportTarget = 0;
 
 	mutable std::vector<XrViewConfigurationView> xrViewConfigs;
 	mutable std::vector<XrView> xrViews;

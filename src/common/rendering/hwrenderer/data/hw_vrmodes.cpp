@@ -334,6 +334,7 @@ CVAR(Float, vr_openxr_eye_shift_scale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_debug_projection_compare, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_openxr_debug_sizes, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_openxr_debug_present, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, vr_openxr_debug_weapon, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // Experimental: render the OpenXR scene at runtime-recommended eye size
 // instead of desktop framebuffer size to reduce upscale aliasing.
 CVAR(Bool, vr_openxr_force_recommended_viewport, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)

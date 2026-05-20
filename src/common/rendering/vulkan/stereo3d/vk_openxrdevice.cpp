@@ -13,11 +13,18 @@
 #include "zvulkan/vulkanbuilders.h"
 #include "zvulkan/vulkancompatibledevice.h"
 #include "zvulkan/vulkanswapchain.h"
+#include "QzDoom/VrCommon.h"
 #include "d_player.h"
 #include "g_game.h"
 #include "g_levellocals.h"
 #include "doomdef.h"
 #include "c_console.h"
+#include "d_eventbase.h"
+#include "d_gui.h"
+#include "p_trace.h"
+#include "p_linetracedata.h"
+#include "p_local.h"
+#include "LSMatrix.h"
 #include "rendering/hwrenderer/scene/hw_drawinfo.h"
 #include "common/rendering/hwrenderer/data/hw_viewpointbuffer.h"
 #include "v_draw.h"
@@ -41,10 +48,21 @@ extern float offhandangles[3];
 extern float doomYaw;
 extern float previousPitch;
 extern float playerYaw;
+extern float snapTurn;
+extern float remote_movementSideways;
+extern float remote_movementForward;
+extern float positional_movementSideways;
+extern float positional_movementForward;
 extern bool resetDoomYaw;
 extern bool resetPreviousPitch;
+extern bool ready_teleport;
+extern bool trigger_teleport;
 extern bool automapactive;
 extern bool cinemamode;
+bool VR_UseScreenLayer();
+void VR_SetHMDOrientation(float pitch, float yaw, float roll);
+void VR_SetHMDPosition(float x, float y, float z);
+double P_XYMovement(AActor* mo, DVector2 scroll);
 void QzDoom_setUseScreenLayer(bool use);
 
 EXTERN_CVAR(Float, vr_ipd);
@@ -55,6 +73,14 @@ EXTERN_CVAR(Float, vr_openxr_eye_shift_scale);
 EXTERN_CVAR(Bool, vr_debug_projection_compare);
 EXTERN_CVAR(Bool, vr_openxr_debug_sizes);
 EXTERN_CVAR(Bool, vr_openxr_debug_present);
+EXTERN_CVAR(Bool, vr_openxr_debug_weapon);
+EXTERN_CVAR(Float, vr_snapTurn);
+EXTERN_CVAR(Bool, vr_move_use_offhand);
+EXTERN_CVAR(Bool, vr_switch_sticks);
+EXTERN_CVAR(Bool, vr_secondary_button_mappings);
+EXTERN_CVAR(Bool, vr_teleport);
+EXTERN_CVAR(Float, vr_weaponRotate);
+EXTERN_CVAR(Bool, vr_enable_haptics);
 EXTERN_CVAR(Int, screenblocks);
 EXTERN_CVAR(Float, vr_automap_stereo);
 EXTERN_CVAR(Float, vr_hud_stereo);
@@ -78,6 +104,7 @@ EXTERN_CVAR(Float, vr_overlayscreen_dist);
 EXTERN_CVAR(Float, vr_overlayscreen_vpos);
 EXTERN_CVAR(Int, vr_overlayscreen_bg);
 EXTERN_CVAR(Int, vr_control_scheme);
+EXTERN_CVAR(Bool, vr_two_handed_weapons);
 
 namespace s3d {
 
@@ -159,6 +186,16 @@ static XrVector3f RotateVector(const XrQuaternionf& q, const XrVector3f& v)
 	return result;
 }
 
+static XrVector3f NormalizeVector(const XrVector3f& v)
+{
+	const float length = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+	if (length <= 0.0f)
+	{
+		return { 0.0f, 0.0f, 0.0f };
+	}
+	return { v.x / length, v.y / length, v.z / length };
+}
+
 static XrVector3f AddVector(const XrVector3f& a, const XrVector3f& b)
 {
 	return { a.x + b.x, a.y + b.y, a.z + b.z };
@@ -195,6 +232,21 @@ static XrQuaternionf MakeAxisAngleQuaternion(const XrVector3f& axis, float angle
 	const float s = std::sin(halfAngle);
 	const float c = std::cos(halfAngle);
 	return { axis.x * s, axis.y * s, axis.z * s, c };
+}
+
+static XrVector3f OpenVREulerAnglesFromQuaternion(const XrQuaternionf& quat)
+{
+	double q0 = quat.w;
+	// Permute axes to match OpenVR's yaw/pitch/roll convention.
+	double q2 = quat.x;
+	double q3 = quat.y;
+	double q1 = quat.z;
+
+	double roll = std::atan2(2.0 * (q0 * q1 + q2 * q3), 1.0 - 2.0 * (q1 * q1 + q2 * q2));
+	double pitch = std::asin(2.0 * (q0 * q2 - q3 * q1));
+	double yaw = std::atan2(2.0 * (q0 * q3 + q1 * q2), 1.0 - 2.0 * (q2 * q2 + q3 * q3));
+
+	return { (float)yaw, (float)pitch, (float)roll };
 }
 
 static int mAngleFromRadians(double radians)
@@ -411,6 +463,24 @@ void QuaternionToEuler(const XrQuaternionf& q, float& pitch, float& yaw, float& 
 	roll = (float)(outRoll * (180.0 / M_PI));
 }
 
+static XrQuaternionf QuaternionFromAxisAngle(float x, float y, float z, float radians)
+{
+	const float halfAngle = radians * 0.5f;
+	const float sine = sinf(halfAngle);
+	return XrQuaternionf{ x * sine, y * sine, z * sine, cosf(halfAngle) };
+}
+
+static double NormalizeAngle(double angle)
+{
+	angle = fmod(angle, 360.0);
+	angle = fmod(angle + 360.0, 360.0);
+	if (angle > 180.0)
+	{
+		angle -= 360.0;
+	}
+	return angle;
+}
+
 static const float overlayBG[6][3] = {
 	{ 0.0f, 0.0f, 0.0f },
 	{ 0.11f, 0.0f, 0.01f },
@@ -424,6 +494,298 @@ static XrVector3f GetVirtualScreenBackgroundColor()
 {
 	const int idx = clamp<int>(vr_overlayscreen_bg, 0, 5);
 	return { overlayBG[idx][0], overlayBG[idx][1], overlayBG[idx][2] };
+}
+
+static bool IsRightHandedVrControls()
+{
+	return vr_control_scheme < 10;
+}
+
+static int GetMainHandIndex()
+{
+	return IsRightHandedVrControls() ? 1 : 0;
+}
+
+static int GetOffHandIndex()
+{
+	return IsRightHandedVrControls() ? 0 : 1;
+}
+
+static int HandKeyOffset(int hand)
+{
+	return hand * (KEY_PAD_RSHOULDER - KEY_PAD_LSHOULDER);
+}
+
+static int HandAxisKeyOffset(int hand)
+{
+	return hand * (KEY_PAD_RTHUMB_LEFT - KEY_PAD_LTHUMB_LEFT);
+}
+
+struct OpenXRHandInputState
+{
+	bool select = false;
+	bool grip = false;
+	bool thumbClick = false;
+	bool menu = false;
+	bool a = false;
+	bool b = false;
+	bool x = false;
+	bool y = false;
+	XrVector2f thumbstick = { 0.0f, 0.0f };
+	XrVector2f trackpad = { 0.0f, 0.0f };
+};
+
+static void PostControllerKeyTransition(bool oldState, bool newState, int key)
+{
+	if (oldState == newState)
+		return;
+
+	event_t ev = {};
+	ev.data1 = key;
+	ev.type = newState ? EV_KeyDown : EV_KeyUp;
+	D_PostEvent(&ev);
+}
+
+static void PostControllerAxisTransitions(const XrVector2f& oldValue, const XrVector2f& newValue, int leftKey, int rightKey, int downKey, int upKey)
+{
+	constexpr float deadZone = 0.25f;
+	const bool oldLeft = oldValue.x < -deadZone;
+	const bool oldRight = oldValue.x > deadZone;
+	const bool oldDown = oldValue.y < -deadZone;
+	const bool oldUp = oldValue.y > deadZone;
+	const bool newLeft = newValue.x < -deadZone;
+	const bool newRight = newValue.x > deadZone;
+	const bool newDown = newValue.y < -deadZone;
+	const bool newUp = newValue.y > deadZone;
+
+	PostControllerKeyTransition(oldLeft, newLeft, leftKey);
+	PostControllerKeyTransition(oldRight, newRight, rightKey);
+	PostControllerKeyTransition(oldDown, newDown, downKey);
+	PostControllerKeyTransition(oldUp, newUp, upKey);
+}
+
+static void PostRemappedControllerAxisTransitions(
+	const XrVector2f& oldValue,
+	const XrVector2f& newValue,
+	bool oldModifier,
+	bool newModifier,
+	int baseLeftKey,
+	int baseRightKey,
+	int baseDownKey,
+	int baseUpKey,
+	int modifiedLeftKey,
+	int modifiedRightKey,
+	int modifiedDownKey,
+	int modifiedUpKey)
+{
+	constexpr float deadZone = 0.25f;
+	const bool oldLeft = oldValue.x < -deadZone;
+	const bool oldRight = oldValue.x > deadZone;
+	const bool oldDown = oldValue.y < -deadZone;
+	const bool oldUp = oldValue.y > deadZone;
+	const bool newLeft = newValue.x < -deadZone;
+	const bool newRight = newValue.x > deadZone;
+	const bool newDown = newValue.y < -deadZone;
+	const bool newUp = newValue.y > deadZone;
+
+	const int oldLeftKey = oldModifier ? modifiedLeftKey : baseLeftKey;
+	const int oldRightKey = oldModifier ? modifiedRightKey : baseRightKey;
+	const int oldDownKey = oldModifier ? modifiedDownKey : baseDownKey;
+	const int oldUpKey = oldModifier ? modifiedUpKey : baseUpKey;
+	const int newLeftKey = newModifier ? modifiedLeftKey : baseLeftKey;
+	const int newRightKey = newModifier ? modifiedRightKey : baseRightKey;
+	const int newDownKey = newModifier ? modifiedDownKey : baseDownKey;
+	const int newUpKey = newModifier ? modifiedUpKey : baseUpKey;
+
+	PostControllerKeyTransition(oldLeft, newLeft, oldLeftKey);
+	PostControllerKeyTransition(oldRight, newRight, oldRightKey);
+	PostControllerKeyTransition(oldDown, newDown, oldDownKey);
+	PostControllerKeyTransition(oldUp, newUp, oldUpKey);
+}
+
+static float NonLinearFilter(float value)
+{
+	const float absValue = fabsf(value);
+	const float squared = absValue * absValue;
+	return (value < 0.0f) ? -squared : squared;
+}
+
+static float OpenVRLength2D(float x, float y)
+{
+	return sqrtf(x * x + y * y);
+}
+
+static float OpenVRNonLinearFilter(float in)
+{
+	constexpr float NLF_DEADZONE = 0.1f;
+	constexpr float NLF_POWER = 2.2f;
+
+	float val = 0.0f;
+	if (in > NLF_DEADZONE)
+	{
+		val = in > 1.0f ? 1.0f : in;
+		val -= NLF_DEADZONE;
+		val /= (1.0f - NLF_DEADZONE);
+		val = powf(val, NLF_POWER);
+	}
+	else if (in < -NLF_DEADZONE)
+	{
+		val = in < -1.0f ? -1.0f : in;
+		val += NLF_DEADZONE;
+		val /= (1.0f - NLF_DEADZONE);
+		val = -powf(fabsf(val), NLF_POWER);
+	}
+
+	return val;
+}
+
+static void PostRemappedControllerKeyTransition(bool oldPressed, bool newPressed, bool oldModifier, bool newModifier, int baseKey, int modifiedKey)
+{
+	const int oldKey = oldModifier ? modifiedKey : baseKey;
+	const int newKey = newModifier ? modifiedKey : baseKey;
+
+	if (oldKey == newKey)
+	{
+		PostControllerKeyTransition(oldPressed, newPressed, newKey);
+		return;
+	}
+
+	if (oldPressed)
+		PostControllerKeyTransition(true, false, oldKey);
+	if (newPressed)
+		PostControllerKeyTransition(false, true, newKey);
+}
+
+static bool GetActionBoolean(XrSession session, XrAction action, XrPath subactionPath)
+{
+	if (session == XR_NULL_HANDLE || action == XR_NULL_HANDLE)
+		return false;
+
+	XrActionStateGetInfo getInfo{ XR_TYPE_ACTION_STATE_GET_INFO };
+	getInfo.action = action;
+	getInfo.subactionPath = subactionPath;
+
+	XrActionStateBoolean state{ XR_TYPE_ACTION_STATE_BOOLEAN };
+	if (XR_FAILED(xrGetActionStateBoolean(session, &getInfo, &state)))
+		return false;
+	return state.currentState != XR_FALSE;
+}
+
+static XrVector2f GetActionVector2f(XrSession session, XrAction action, XrPath subactionPath)
+{
+	if (session == XR_NULL_HANDLE || action == XR_NULL_HANDLE)
+		return { 0.0f, 0.0f };
+
+	XrActionStateGetInfo getInfo{ XR_TYPE_ACTION_STATE_GET_INFO };
+	getInfo.action = action;
+	getInfo.subactionPath = subactionPath;
+
+	XrActionStateVector2f state{ XR_TYPE_ACTION_STATE_VECTOR2F };
+	if (XR_FAILED(xrGetActionStateVector2f(session, &getInfo, &state)))
+		return { 0.0f, 0.0f };
+	return state.currentState;
+}
+
+static FString PathToString(XrInstance instance, XrPath path)
+{
+	if (instance == XR_NULL_HANDLE || path == XR_NULL_PATH)
+		return FString("<null>");
+
+	uint32_t bufferLength = 0;
+	if (XR_FAILED(xrPathToString(instance, path, 0, &bufferLength, nullptr)) || bufferLength == 0)
+		return FString("<invalid>");
+
+	std::vector<char> buffer(bufferLength);
+	if (XR_FAILED(xrPathToString(instance, path, bufferLength, &bufferLength, buffer.data())))
+		return FString("<invalid>");
+
+	return FString(buffer.data());
+}
+
+static bool IsCurrentInteractionProfile(XrInstance instance, XrSession session, XrPath handPath, const char* profilePathSuffix)
+{
+	if (instance == XR_NULL_HANDLE || session == XR_NULL_HANDLE || handPath == XR_NULL_PATH || profilePathSuffix == nullptr)
+		return false;
+
+	XrInteractionProfileState profileState{ XR_TYPE_INTERACTION_PROFILE_STATE };
+	if (XR_FAILED(xrGetCurrentInteractionProfile(session, handPath, &profileState)) || profileState.interactionProfile == XR_NULL_PATH)
+		return false;
+
+	uint32_t bufferLength = 0;
+	if (XR_FAILED(xrPathToString(instance, profileState.interactionProfile, 0, &bufferLength, nullptr)) || bufferLength == 0)
+		return false;
+
+	std::vector<char> buffer(bufferLength);
+	if (XR_FAILED(xrPathToString(instance, profileState.interactionProfile, bufferLength, &bufferLength, buffer.data())))
+		return false;
+
+	return strstr(buffer.data(), profilePathSuffix) != nullptr;
+}
+
+static void LogBoundSourcesForAction(XrInstance instance, XrSession session, XrAction action, const char* label)
+{
+	if (instance == XR_NULL_HANDLE || session == XR_NULL_HANDLE || action == XR_NULL_HANDLE || label == nullptr)
+		return;
+	if (!xrEnumerateBoundSourcesForAction)
+		return;
+
+	XrBoundSourcesForActionEnumerateInfo enumerateInfo{ XR_TYPE_BOUND_SOURCES_FOR_ACTION_ENUMERATE_INFO };
+	enumerateInfo.action = action;
+
+	uint32_t sourceCount = 0;
+	if (XR_FAILED(xrEnumerateBoundSourcesForAction(session, &enumerateInfo, 0, &sourceCount, nullptr)) || sourceCount == 0)
+	{
+		Printf("OpenXR: bound sources [%s] unavailable.\n", label);
+		return;
+	}
+
+	std::vector<XrPath> sources(sourceCount, XR_NULL_PATH);
+	if (XR_FAILED(xrEnumerateBoundSourcesForAction(session, &enumerateInfo, sourceCount, &sourceCount, sources.data())))
+	{
+		Printf("OpenXR: bound sources [%s] query failed.\n", label);
+		return;
+	}
+
+	FString list;
+	for (uint32_t i = 0; i < sourceCount; ++i)
+	{
+		const FString source = PathToString(instance, sources[i]);
+		if (i != 0)
+			list += ", ";
+		list += source.GetChars();
+	}
+
+	Printf("OpenXR: bound sources [%s] = %s\n", label, list.GetChars());
+}
+
+static void SuggestBindingsForProfile(XrInstance instance, XrPath profilePath, const char* profileName, const std::vector<XrActionSuggestedBinding>& bindings)
+{
+	if (instance == XR_NULL_HANDLE || profilePath == XR_NULL_PATH || bindings.empty())
+		return;
+
+	XrInteractionProfileSuggestedBinding suggested{ XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
+	suggested.interactionProfile = profilePath;
+	suggested.suggestedBindings = bindings.data();
+	suggested.countSuggestedBindings = (uint32_t)bindings.size();
+	const XrResult result = xrSuggestInteractionProfileBindings(instance, &suggested);
+	Printf("OpenXR: profile %s suggestion count=%u result=%d\n",
+		profileName != nullptr ? profileName : "<unknown>",
+		(unsigned)bindings.size(),
+		(int)result);
+	if (XR_FAILED(result))
+	{
+		Printf("OpenXR: xrSuggestInteractionProfileBindings failed for profile %s result=%d\n",
+			profileName != nullptr ? profileName : "<unknown>",
+			(int)result);
+	}
+}
+
+static void AddBinding(std::vector<XrActionSuggestedBinding>& bindings, XrAction action, XrPath path)
+{
+	if (action != XR_NULL_HANDLE && path != XR_NULL_PATH)
+	{
+		bindings.push_back({ action, path });
+	}
 }
 
 }
@@ -780,7 +1142,9 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 		return true;
 	if (xrInstance != XR_NULL_HANDLE || xrSession != XR_NULL_HANDLE || xrSwapchain != XR_NULL_HANDLE ||
 		xrSpace != XR_NULL_HANDLE || xrActionSet != XR_NULL_HANDLE || xrPoseAction != XR_NULL_HANDLE ||
-		xrSelectAction != XR_NULL_HANDLE || xrMenuAction != XR_NULL_HANDLE || xrVkInstance != nullptr ||
+		xrSelectAction != XR_NULL_HANDLE || xrMenuAction != XR_NULL_HANDLE || xrGripAction != XR_NULL_HANDLE ||
+		xrThumbClickAction != XR_NULL_HANDLE || xrThumbstickAction != XR_NULL_HANDLE ||
+		xrPrimaryAction != XR_NULL_HANDLE || xrSecondaryAction != XR_NULL_HANDLE || xrVkInstance != nullptr ||
 		xrVkDevice != nullptr || xrVkCommandPool != nullptr || xrVkCommandBuffer != nullptr ||
 		xrVkSubmitFence != nullptr || !xrSwapchainImages.empty() || !xrViewConfigs.empty() ||
 		!xrViews.empty() || !xrProjectionViews.empty() || xrViewCount != 0 || sceneWidth != 0 || sceneHeight != 0)
@@ -949,18 +1313,200 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	strncpy(actionSetInfo.localizedActionSetName, "Gameplay", sizeof(actionSetInfo.localizedActionSetName) - 1);
 	xrCreateActionSet(xrInstance, &actionSetInfo, &xrActionSet);
 
+	xrStringToPath(xrInstance, "/user/hand/left", &xrLeftHandPath);
+	xrStringToPath(xrInstance, "/user/hand/right", &xrRightHandPath);
+	const XrPath subactionPaths[2] = { xrLeftHandPath, xrRightHandPath };
+
 	auto createAction = [&](const char* name, const char* localizedName, XrActionType type, XrAction& out)
 	{
 		XrActionCreateInfo actionInfo{ XR_TYPE_ACTION_CREATE_INFO };
 		actionInfo.actionType = type;
 		strncpy(actionInfo.actionName, name, sizeof(actionInfo.actionName) - 1);
 		strncpy(actionInfo.localizedActionName, localizedName, sizeof(actionInfo.localizedActionName) - 1);
+		actionInfo.countSubactionPaths = 2;
+		actionInfo.subactionPaths = subactionPaths;
 		xrCreateAction(xrActionSet, &actionInfo, &out);
 	};
 
 	createAction("hand_pose", "Hand Pose", XR_ACTION_TYPE_POSE_INPUT, xrPoseAction);
 	createAction("select", "Select", XR_ACTION_TYPE_BOOLEAN_INPUT, xrSelectAction);
 	createAction("menu", "Menu", XR_ACTION_TYPE_BOOLEAN_INPUT, xrMenuAction);
+	createAction("grip", "Grip", XR_ACTION_TYPE_BOOLEAN_INPUT, xrGripAction);
+	createAction("thumb_click", "Thumb Click", XR_ACTION_TYPE_BOOLEAN_INPUT, xrThumbClickAction);
+	createAction("thumbstick", "Thumbstick", XR_ACTION_TYPE_VECTOR2F_INPUT, xrThumbstickAction);
+	createAction("trackpad", "Trackpad", XR_ACTION_TYPE_VECTOR2F_INPUT, xrTrackpadAction);
+	createAction("button_a", "Button A", XR_ACTION_TYPE_BOOLEAN_INPUT, xrAAction);
+	createAction("button_b", "Button B", XR_ACTION_TYPE_BOOLEAN_INPUT, xrBAction);
+	createAction("button_x", "Button X", XR_ACTION_TYPE_BOOLEAN_INPUT, xrXAction);
+	createAction("button_y", "Button Y", XR_ACTION_TYPE_BOOLEAN_INPUT, xrYAction);
+	createAction("primary", "Primary", XR_ACTION_TYPE_BOOLEAN_INPUT, xrPrimaryAction);
+	createAction("secondary", "Secondary", XR_ACTION_TYPE_BOOLEAN_INPUT, xrSecondaryAction);
+	createAction("haptic", "Haptic", XR_ACTION_TYPE_VIBRATION_OUTPUT, xrHapticAction);
+
+	XrPath leftTriggerClickPath = XR_NULL_PATH;
+	XrPath rightTriggerClickPath = XR_NULL_PATH;
+	XrPath leftTriggerValuePath = XR_NULL_PATH;
+	XrPath rightTriggerValuePath = XR_NULL_PATH;
+	XrPath leftSqueezeClickPath = XR_NULL_PATH;
+	XrPath rightSqueezeClickPath = XR_NULL_PATH;
+	XrPath leftSqueezeValuePath = XR_NULL_PATH;
+	XrPath rightSqueezeValuePath = XR_NULL_PATH;
+	XrPath leftThumbClickPath = XR_NULL_PATH;
+	XrPath rightThumbClickPath = XR_NULL_PATH;
+	XrPath leftThumbstickPath = XR_NULL_PATH;
+	XrPath rightThumbstickPath = XR_NULL_PATH;
+	XrPath leftTrackpadPath = XR_NULL_PATH;
+	XrPath rightTrackpadPath = XR_NULL_PATH;
+	XrPath leftTrackpadClickPath = XR_NULL_PATH;
+	XrPath rightTrackpadClickPath = XR_NULL_PATH;
+	XrPath leftTrackpadTouchPath = XR_NULL_PATH;
+	XrPath rightTrackpadTouchPath = XR_NULL_PATH;
+	XrPath leftHapticPath = XR_NULL_PATH;
+	XrPath rightHapticPath = XR_NULL_PATH;
+	XrPath leftMenuClickPath = XR_NULL_PATH;
+	XrPath rightMenuClickPath = XR_NULL_PATH;
+	XrPath leftSelectClickPath = XR_NULL_PATH;
+	XrPath rightSelectClickPath = XR_NULL_PATH;
+	XrPath leftGripPosePath = XR_NULL_PATH;
+	XrPath rightGripPosePath = XR_NULL_PATH;
+	XrPath leftAimPosePath = XR_NULL_PATH;
+	XrPath rightAimPosePath = XR_NULL_PATH;
+	XrPath leftXClickPath = XR_NULL_PATH;
+	XrPath leftYClickPath = XR_NULL_PATH;
+	XrPath leftPrimaryClickPath = XR_NULL_PATH;
+	XrPath rightPrimaryClickPath = XR_NULL_PATH;
+	XrPath leftSecondaryClickPath = XR_NULL_PATH;
+	XrPath rightSecondaryClickPath = XR_NULL_PATH;
+
+	xrStringToPath(xrInstance, "/user/hand/left/input/trigger/click", &leftTriggerClickPath);
+	xrStringToPath(xrInstance, "/user/hand/right/input/trigger/click", &rightTriggerClickPath);
+	xrStringToPath(xrInstance, "/user/hand/left/input/trigger/value", &leftTriggerValuePath);
+	xrStringToPath(xrInstance, "/user/hand/right/input/trigger/value", &rightTriggerValuePath);
+	xrStringToPath(xrInstance, "/user/hand/left/input/squeeze/click", &leftSqueezeClickPath);
+	xrStringToPath(xrInstance, "/user/hand/right/input/squeeze/click", &rightSqueezeClickPath);
+	xrStringToPath(xrInstance, "/user/hand/left/input/squeeze/value", &leftSqueezeValuePath);
+	xrStringToPath(xrInstance, "/user/hand/right/input/squeeze/value", &rightSqueezeValuePath);
+	xrStringToPath(xrInstance, "/user/hand/left/input/thumbstick/click", &leftThumbClickPath);
+	xrStringToPath(xrInstance, "/user/hand/right/input/thumbstick/click", &rightThumbClickPath);
+	xrStringToPath(xrInstance, "/user/hand/left/input/thumbstick", &leftThumbstickPath);
+	xrStringToPath(xrInstance, "/user/hand/right/input/thumbstick", &rightThumbstickPath);
+	xrStringToPath(xrInstance, "/user/hand/left/input/trackpad", &leftTrackpadPath);
+	xrStringToPath(xrInstance, "/user/hand/right/input/trackpad", &rightTrackpadPath);
+	xrStringToPath(xrInstance, "/user/hand/left/input/trackpad/click", &leftTrackpadClickPath);
+	xrStringToPath(xrInstance, "/user/hand/right/input/trackpad/click", &rightTrackpadClickPath);
+	xrStringToPath(xrInstance, "/user/hand/left/input/trackpad/touch", &leftTrackpadTouchPath);
+	xrStringToPath(xrInstance, "/user/hand/right/input/trackpad/touch", &rightTrackpadTouchPath);
+	xrStringToPath(xrInstance, "/user/hand/left/output/haptic", &leftHapticPath);
+	xrStringToPath(xrInstance, "/user/hand/right/output/haptic", &rightHapticPath);
+	xrStringToPath(xrInstance, "/user/hand/left/input/menu/click", &leftMenuClickPath);
+	xrStringToPath(xrInstance, "/user/hand/right/input/menu/click", &rightMenuClickPath);
+	xrStringToPath(xrInstance, "/user/hand/left/input/select/click", &leftSelectClickPath);
+	xrStringToPath(xrInstance, "/user/hand/right/input/select/click", &rightSelectClickPath);
+	xrStringToPath(xrInstance, "/user/hand/left/input/grip/pose", &leftGripPosePath);
+	xrStringToPath(xrInstance, "/user/hand/right/input/grip/pose", &rightGripPosePath);
+	xrStringToPath(xrInstance, "/user/hand/left/input/aim/pose", &leftAimPosePath);
+	xrStringToPath(xrInstance, "/user/hand/right/input/aim/pose", &rightAimPosePath);
+	xrStringToPath(xrInstance, "/user/hand/left/input/x/click", &leftXClickPath);
+	xrStringToPath(xrInstance, "/user/hand/left/input/y/click", &leftYClickPath);
+	xrStringToPath(xrInstance, "/user/hand/left/input/a/click", &leftPrimaryClickPath);
+	xrStringToPath(xrInstance, "/user/hand/right/input/a/click", &rightPrimaryClickPath);
+	xrStringToPath(xrInstance, "/user/hand/left/input/b/click", &leftSecondaryClickPath);
+	xrStringToPath(xrInstance, "/user/hand/right/input/b/click", &rightSecondaryClickPath);
+
+	XrPath simpleProfile = XR_NULL_PATH;
+	XrPath viveProfile = XR_NULL_PATH;
+	XrPath touchProfile = XR_NULL_PATH;
+	XrPath indexProfile = XR_NULL_PATH;
+	XrPath wmrProfile = XR_NULL_PATH;
+	xrStringToPath(xrInstance, "/interaction_profiles/khr/simple_controller", &simpleProfile);
+	xrStringToPath(xrInstance, "/interaction_profiles/htc/vive_controller", &viveProfile);
+	xrStringToPath(xrInstance, "/interaction_profiles/oculus/touch_controller", &touchProfile);
+	xrStringToPath(xrInstance, "/interaction_profiles/valve/index_controller", &indexProfile);
+	xrStringToPath(xrInstance, "/interaction_profiles/microsoft/motion_controller", &wmrProfile);
+
+	std::vector<XrActionSuggestedBinding> simpleBindings;
+	AddBinding(simpleBindings, xrSelectAction, leftSelectClickPath);
+	AddBinding(simpleBindings, xrSelectAction, rightSelectClickPath);
+	AddBinding(simpleBindings, xrMenuAction, leftMenuClickPath);
+	AddBinding(simpleBindings, xrMenuAction, rightMenuClickPath);
+	AddBinding(simpleBindings, xrPoseAction, leftAimPosePath);
+	AddBinding(simpleBindings, xrPoseAction, rightAimPosePath);
+	AddBinding(simpleBindings, xrHapticAction, leftHapticPath);
+	AddBinding(simpleBindings, xrHapticAction, rightHapticPath);
+	SuggestBindingsForProfile(xrInstance, simpleProfile, "KHR simple", simpleBindings);
+
+	std::vector<XrActionSuggestedBinding> viveBindings;
+	AddBinding(viveBindings, xrSelectAction, leftTriggerClickPath);
+	AddBinding(viveBindings, xrSelectAction, rightTriggerClickPath);
+	AddBinding(viveBindings, xrGripAction, leftSqueezeClickPath);
+	AddBinding(viveBindings, xrGripAction, rightSqueezeClickPath);
+	AddBinding(viveBindings, xrTrackpadAction, leftTrackpadPath);
+	AddBinding(viveBindings, xrTrackpadAction, rightTrackpadPath);
+	AddBinding(viveBindings, xrThumbClickAction, leftTrackpadClickPath);
+	AddBinding(viveBindings, xrThumbClickAction, rightTrackpadClickPath);
+	AddBinding(viveBindings, xrMenuAction, leftMenuClickPath);
+	AddBinding(viveBindings, xrMenuAction, rightMenuClickPath);
+	AddBinding(viveBindings, xrPoseAction, leftAimPosePath);
+	AddBinding(viveBindings, xrPoseAction, rightAimPosePath);
+	AddBinding(viveBindings, xrHapticAction, leftHapticPath);
+	AddBinding(viveBindings, xrHapticAction, rightHapticPath);
+	SuggestBindingsForProfile(xrInstance, viveProfile, "Vive", viveBindings);
+
+	std::vector<XrActionSuggestedBinding> touchBindings;
+	AddBinding(touchBindings, xrSelectAction, leftTriggerValuePath);
+	AddBinding(touchBindings, xrSelectAction, rightTriggerValuePath);
+	AddBinding(touchBindings, xrGripAction, leftSqueezeValuePath);
+	AddBinding(touchBindings, xrGripAction, rightSqueezeValuePath);
+	AddBinding(touchBindings, xrThumbClickAction, leftThumbClickPath);
+	AddBinding(touchBindings, xrThumbClickAction, rightThumbClickPath);
+	AddBinding(touchBindings, xrThumbstickAction, leftThumbstickPath);
+	AddBinding(touchBindings, xrThumbstickAction, rightThumbstickPath);
+	AddBinding(touchBindings, xrXAction, leftXClickPath);
+	AddBinding(touchBindings, xrYAction, leftYClickPath);
+	AddBinding(touchBindings, xrAAction, rightPrimaryClickPath);
+	AddBinding(touchBindings, xrBAction, rightSecondaryClickPath);
+	AddBinding(touchBindings, xrMenuAction, leftMenuClickPath);
+	AddBinding(touchBindings, xrPoseAction, leftAimPosePath);
+	AddBinding(touchBindings, xrPoseAction, rightAimPosePath);
+	AddBinding(touchBindings, xrHapticAction, leftHapticPath);
+	AddBinding(touchBindings, xrHapticAction, rightHapticPath);
+	SuggestBindingsForProfile(xrInstance, touchProfile, "Oculus Touch", touchBindings);
+
+	std::vector<XrActionSuggestedBinding> indexBindings;
+	AddBinding(indexBindings, xrSelectAction, leftTriggerValuePath);
+	AddBinding(indexBindings, xrSelectAction, rightTriggerValuePath);
+	AddBinding(indexBindings, xrGripAction, leftSqueezeValuePath);
+	AddBinding(indexBindings, xrGripAction, rightSqueezeValuePath);
+	AddBinding(indexBindings, xrThumbClickAction, leftThumbClickPath);
+	AddBinding(indexBindings, xrThumbClickAction, rightThumbClickPath);
+	AddBinding(indexBindings, xrThumbstickAction, leftThumbstickPath);
+	AddBinding(indexBindings, xrThumbstickAction, rightThumbstickPath);
+	AddBinding(indexBindings, xrXAction, leftXClickPath);
+	AddBinding(indexBindings, xrYAction, leftYClickPath);
+	AddBinding(indexBindings, xrAAction, rightPrimaryClickPath);
+	AddBinding(indexBindings, xrBAction, rightSecondaryClickPath);
+	AddBinding(indexBindings, xrPoseAction, leftAimPosePath);
+	AddBinding(indexBindings, xrPoseAction, rightAimPosePath);
+	AddBinding(indexBindings, xrHapticAction, leftHapticPath);
+	AddBinding(indexBindings, xrHapticAction, rightHapticPath);
+	SuggestBindingsForProfile(xrInstance, indexProfile, "Valve Index", indexBindings);
+
+	std::vector<XrActionSuggestedBinding> wmrBindings;
+	AddBinding(wmrBindings, xrSelectAction, leftTriggerValuePath);
+	AddBinding(wmrBindings, xrSelectAction, rightTriggerValuePath);
+	AddBinding(wmrBindings, xrGripAction, leftSqueezeClickPath);
+	AddBinding(wmrBindings, xrGripAction, rightSqueezeClickPath);
+	AddBinding(wmrBindings, xrThumbClickAction, leftThumbClickPath);
+	AddBinding(wmrBindings, xrThumbClickAction, rightThumbClickPath);
+	AddBinding(wmrBindings, xrThumbstickAction, leftThumbstickPath);
+	AddBinding(wmrBindings, xrThumbstickAction, rightThumbstickPath);
+	AddBinding(wmrBindings, xrMenuAction, leftMenuClickPath);
+	AddBinding(wmrBindings, xrMenuAction, rightMenuClickPath);
+	AddBinding(wmrBindings, xrPoseAction, leftAimPosePath);
+	AddBinding(wmrBindings, xrPoseAction, rightAimPosePath);
+	AddBinding(wmrBindings, xrHapticAction, leftHapticPath);
+	AddBinding(wmrBindings, xrHapticAction, rightHapticPath);
+	SuggestBindingsForProfile(xrInstance, wmrProfile, "WMR", wmrBindings);
 
 	XrSessionActionSetsAttachInfo attachInfo{ XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO };
 	attachInfo.countActionSets = 1;
@@ -971,7 +1517,7 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	{
 		XrActionSpaceCreateInfo actionSpaceInfo{ XR_TYPE_ACTION_SPACE_CREATE_INFO };
 		actionSpaceInfo.action = xrPoseAction;
-		actionSpaceInfo.subactionPath = XR_NULL_PATH; 
+		actionSpaceInfo.subactionPath = subactionPaths[i]; 
 		actionSpaceInfo.poseInActionSpace = XrPosef{ {0,0,0,1}, {0,0,0} };
 		xrCreateActionSpace(xrSession, &actionSpaceInfo, &xrHandSpaces[i]);
 	}
@@ -1299,6 +1845,7 @@ void VKOpenXRDeviceMode::DestroyVirtualScreenBackdropSwapchain() const
 
 void VKOpenXRDeviceMode::DestroyOpenXR() const
 {
+	StopHaptics();
 	DestroyVirtualScreenSwapchain();
 	DestroyVirtualScreenBackdropSwapchain();
 	if (xrSwapchain != XR_NULL_HANDLE)
@@ -1321,6 +1868,11 @@ void VKOpenXRDeviceMode::DestroyOpenXR() const
 	}
 	if (xrActionSet != XR_NULL_HANDLE)
 	{
+		if (xrHapticAction != XR_NULL_HANDLE)
+		{
+			xrDestroyAction(xrHapticAction);
+			xrHapticAction = XR_NULL_HANDLE;
+		}
 		xrDestroyActionSet(xrActionSet);
 		xrActionSet = XR_NULL_HANDLE;
 	}
@@ -1347,6 +1899,45 @@ void VKOpenXRDeviceMode::DestroyOpenXR() const
 	xrPoseAction = XR_NULL_HANDLE;
 	xrSelectAction = XR_NULL_HANDLE;
 	xrMenuAction = XR_NULL_HANDLE;
+	xrGripAction = XR_NULL_HANDLE;
+	xrThumbClickAction = XR_NULL_HANDLE;
+	xrThumbstickAction = XR_NULL_HANDLE;
+	xrAAction = XR_NULL_HANDLE;
+	xrBAction = XR_NULL_HANDLE;
+	xrXAction = XR_NULL_HANDLE;
+	xrYAction = XR_NULL_HANDLE;
+	xrPrimaryAction = XR_NULL_HANDLE;
+	xrSecondaryAction = XR_NULL_HANDLE;
+	xrLeftHandPath = XR_NULL_PATH;
+	xrRightHandPath = XR_NULL_PATH;
+	xrHandPoseValid[0] = false;
+	xrHandPoseValid[1] = false;
+	xrLastSelectState[0] = xrLastSelectState[1] = false;
+	xrLastMenuState[0] = xrLastMenuState[1] = false;
+	xrLastGripState[0] = xrLastGripState[1] = false;
+	xrLastThumbClickState[0] = xrLastThumbClickState[1] = false;
+	xrLastTrackpadClickState[0] = xrLastTrackpadClickState[1] = false;
+	xrLastAState[0] = xrLastAState[1] = false;
+	xrLastBState[0] = xrLastBState[1] = false;
+	xrLastXState[0] = xrLastXState[1] = false;
+	xrLastYState[0] = xrLastYState[1] = false;
+	xrLastPrimaryState[0] = xrLastPrimaryState[1] = false;
+	xrLastSecondaryState[0] = xrLastSecondaryState[1] = false;
+	xrLastThumbstickState[0] = { 0.0f, 0.0f };
+	xrLastThumbstickState[1] = { 0.0f, 0.0f };
+	xrLastTrackpadState[0] = { 0.0f, 0.0f };
+	xrLastTrackpadState[1] = { 0.0f, 0.0f };
+	xrLastMenuReturnState = false;
+	xrLastMenuBackState = false;
+	xrLastMenuBackspaceState = false;
+	xrLoggedWeaponState = false;
+	StopHaptics();
+	xrHapticAction = XR_NULL_HANDLE;
+	xrHapticDuration[0] = xrHapticDuration[1] = 0.0;
+	xrHapticIntensity[0] = xrHapticIntensity[1] = 0.0f;
+	xrHapticActive[0] = xrHapticActive[1] = false;
+	m_TeleportTarget = 0;
+	m_TeleportLocation = DVector3(0, 0, 0);
 	xrSwapchainImages.clear();
 	xrSwapchainTextures.clear();
 	xrPresentTextures.clear();
@@ -1381,6 +1972,7 @@ void VKOpenXRDeviceMode::PurgeDeferredOpenXRResources() const
 
 void VKOpenXRDeviceMode::SetUp() const
 {
+	super::SetUp();
 	PurgeDeferredOpenXRResources();
 	struct Guard
 	{
@@ -1434,6 +2026,23 @@ void VKOpenXRDeviceMode::SetUp() const
 		QzDoom_setUseScreenLayer(true);
 	}
 
+	UpdateControllerState();
+
+	player_t* player = r_viewpoint.camera ? r_viewpoint.camera->player : nullptr;
+	if (gamestate == GS_LEVEL && resetDoomYaw && r_viewpoint.camera != nullptr)
+	{
+		doomYaw = (float)r_viewpoint.camera->Angles.Yaw.Degrees();
+		resetDoomYaw = false;
+	}
+	else if (gamestate != GS_LEVEL || menuactive != MENU_Off
+		|| ConsoleState == c_down || ConsoleState == c_falling
+		|| (player && player->playerstate == PST_DEAD)
+		|| (player && player->resetDoomYaw)
+		|| paused)
+	{
+		resetDoomYaw = true;
+	}
+
 	if (isSessionRunning)
 	{
 		updateHmdPose(r_viewpoint);
@@ -1462,12 +2071,14 @@ void VKOpenXRDeviceMode::PollXREvents() const
 			}
 			else if (ev->state == XR_SESSION_STATE_STOPPING)
 			{
+				StopHaptics();
 				xrEndSession(xrSession);
 				isSessionRunning = false;
 				isSessionReadyToBegin = false;
 			}
 			else if (ev->state == XR_SESSION_STATE_LOSS_PENDING || ev->state == XR_SESSION_STATE_EXITING)
 			{
+				StopHaptics();
 				DestroyOpenXR();
 			}
 			else
@@ -1502,6 +2113,26 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 	hmdorientation[0] = -p;
 	hmdorientation[1] = -y;
 	hmdorientation[2] = -r;
+	VR_SetHMDPosition(hmdPosition[0], hmdPosition[1], hmdPosition[2]);
+	VR_SetHMDOrientation(hmdorientation[0], hmdorientation[1], hmdorientation[2]);
+	positional_movementSideways = 0.0f;
+	positional_movementForward = 0.0f;
+
+	static bool havePreviousHmdPosition = false;
+	static float previousHmdPosition[3] = { 0.0f, 0.0f, 0.0f };
+	if (havePreviousHmdPosition && gamestate == GS_LEVEL && menuactive == MENU_Off && !paused)
+	{
+		const float dx = hmdPosition[0] - previousHmdPosition[0];
+		const float dz = hmdPosition[2] - previousHmdPosition[2];
+		const float rotation = GetViewpointYaw() - hmdorientation[1];
+		DVector2 rotated = DVector2(dx, dz).Rotated(DAngle::fromDeg(-rotation));
+		positional_movementSideways = rotated.Y;
+		positional_movementForward = rotated.X;
+	}
+	previousHmdPosition[0] = hmdPosition[0];
+	previousHmdPosition[1] = hmdPosition[1];
+	previousHmdPosition[2] = hmdPosition[2];
+	havePreviousHmdPosition = true;
 
 	if (!xrUsingStageSpace && !xrHasLocalHeightAnchor && r_viewpoint.camera && r_viewpoint.camera->player)
 	{
@@ -1528,7 +2159,7 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 
 	static float previousHmdYaw = 0;
 	static bool havePreviousYaw = false;
-	const float currentHmdYaw = hmdorientation[1];
+	const float currentHmdYaw = hmdorientation[1] + snapTurn;
 	if (!havePreviousYaw)
 	{
 		previousHmdYaw = currentHmdYaw;
@@ -1544,15 +2175,585 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 		doomYaw += hmdYawDeltaDegrees;
 		vp.HWAngles.Roll = FAngle::fromDeg(-r);
 		vp.HWAngles.Pitch = FAngle::fromDeg(-p);
-		double viewYaw = doomYaw;
+		double viewYaw = GetViewpointYaw();
 		while (viewYaw <= -180.0) viewYaw += 360.0;
 		while (viewYaw > 180.0) viewYaw -= 360.0;
 		vp.Angles.Yaw = DAngle::fromDeg(viewYaw);
 	}
 }
 
+void VKOpenXRDeviceMode::UpdateControllerState() const
+{
+	if (xrSession == XR_NULL_HANDLE || xrSpace == XR_NULL_HANDLE || xrActionSet == XR_NULL_HANDLE)
+		return;
+	if (!isSessionRunning)
+		return;
+
+	if (xrFrameState.predictedDisplayTime == 0)
+		return;
+
+	XrActiveActionSet activeActionSet{};
+	activeActionSet.actionSet = xrActionSet;
+
+	XrActionsSyncInfo syncInfo{ XR_TYPE_ACTIONS_SYNC_INFO };
+	syncInfo.countActiveActionSets = 1;
+	syncInfo.activeActionSets = &activeActionSet;
+	const XrResult syncResult = xrSyncActions(xrSession, &syncInfo);
+	if (XR_FAILED(syncResult))
+	{
+		Printf("OpenXR: xrSyncActions failed result=%d\n", (int)syncResult);
+	}
+
+	const bool menuMode = menuactive != MENU_Off;
+	const bool gameplayMode = gamestate == GS_LEVEL && !menuMode && !paused;
+	const int mainHand = GetMainHandIndex();
+	const int offHand = GetOffHandIndex();
+	const int movementHand = *vr_switch_sticks ? mainHand : offHand;
+	const int turnHand = *vr_switch_sticks ? offHand : mainHand;
+	const bool useTrackpad = IsCurrentInteractionProfile(xrInstance, xrSession, xrRightHandPath, "vive_controller");
+	static bool loggedProfile = false;
+	if (!loggedProfile)
+	{
+		Printf("OpenXR: controller profile %s, locomotion=%s\n",
+			useTrackpad ? "vive/trackpad" : "thumbstick",
+			"left-move/right-turn");
+		loggedProfile = true;
+	}
+
+	OpenXRHandInputState handInput[2];
+	for (int hand = 0; hand < 2; ++hand)
+	{
+		OpenXRHandInputState& input = handInput[hand];
+		const XrPath handPath = (hand == 0) ? xrLeftHandPath : xrRightHandPath;
+		input.select = GetActionBoolean(xrSession, xrSelectAction, handPath);
+		input.grip = GetActionBoolean(xrSession, xrGripAction, handPath);
+		input.thumbClick = GetActionBoolean(xrSession, xrThumbClickAction, handPath);
+		input.menu = GetActionBoolean(xrSession, xrMenuAction, handPath);
+		input.a = GetActionBoolean(xrSession, xrAAction, handPath);
+		input.b = GetActionBoolean(xrSession, xrBAction, handPath);
+		input.x = GetActionBoolean(xrSession, xrXAction, handPath);
+		input.y = GetActionBoolean(xrSession, xrYAction, handPath);
+		input.trackpad = GetActionVector2f(xrSession, xrTrackpadAction, handPath);
+		input.thumbstick = GetActionVector2f(xrSession, xrThumbstickAction, handPath);
+	}
+
+	static bool lastMenuMode = false;
+	const bool menuModeChanged = (lastMenuMode != menuMode);
+	lastMenuMode = menuMode;
+
+	auto syncHandState = [&](int hand)
+	{
+		const OpenXRHandInputState& input = handInput[hand];
+		xrLastSelectState[hand] = input.select;
+		xrLastMenuState[hand] = input.menu;
+		xrLastGripState[hand] = input.grip;
+		xrLastThumbClickState[hand] = input.thumbClick;
+		xrLastTrackpadClickState[hand] = input.thumbClick;
+		xrLastAState[hand] = input.a;
+		xrLastBState[hand] = input.b;
+		xrLastXState[hand] = input.x;
+		xrLastYState[hand] = input.y;
+		xrLastPrimaryState[hand] = input.a;
+		xrLastSecondaryState[hand] = input.b;
+		xrLastThumbstickState[hand] = input.thumbstick;
+		xrLastTrackpadState[hand] = input.trackpad;
+	};
+
+	if (menuModeChanged)
+	{
+		syncHandState(0);
+		syncHandState(1);
+	}
+
+	const bool dominantGripModifierNew = *vr_secondary_button_mappings && handInput[mainHand].grip;
+	const bool dominantGripModifierOld = *vr_secondary_button_mappings && xrLastGripState[mainHand];
+
+		if (gameplayMode && *vr_snapTurn > 0.0f)
+		{
+			static bool turnRightLatched[2] = { false, false };
+			static bool turnLeftLatched[2] = { false, false };
+
+			if (dominantGripModifierNew)
+			{
+				turnRightLatched[mainHand] = false;
+				turnLeftLatched[mainHand] = false;
+			}
+			else
+			{
+				const XrVector2f rightTurnState = useTrackpad
+					? handInput[turnHand].trackpad
+					: handInput[turnHand].thumbstick;
+				const float turnX = rightTurnState.x;
+
+				if (*vr_snapTurn <= 10.0f)
+				{
+					if (fabsf(turnX) > 0.05f)
+					{
+						snapTurn -= *vr_snapTurn * turnX;
+						resetDoomYaw = true;
+					}
+				}
+				else
+				{
+					if (turnX > 0.60f)
+					{
+						if (!turnRightLatched[mainHand])
+						{
+							snapTurn -= *vr_snapTurn;
+							resetDoomYaw = true;
+							turnRightLatched[mainHand] = true;
+						}
+					}
+					else if (turnX < 0.40f)
+					{
+						turnRightLatched[mainHand] = false;
+					}
+
+					if (turnX < -0.60f)
+					{
+						if (!turnLeftLatched[mainHand])
+						{
+							snapTurn += *vr_snapTurn;
+							resetDoomYaw = true;
+							turnLeftLatched[mainHand] = true;
+						}
+					}
+					else if (turnX > -0.40f)
+					{
+						turnLeftLatched[mainHand] = false;
+					}
+				}
+			}
+		}
+
+	auto updateHandPose = [&](int hand, float* offset, float* angles)
+	{
+		if (xrHandSpaces[hand] == XR_NULL_HANDLE)
+		{
+			xrHandPoseValid[hand] = false;
+			return false;
+		}
+		XrSpaceLocation location{ XR_TYPE_SPACE_LOCATION };
+		if (XR_FAILED(xrLocateSpace(xrHandSpaces[hand], xrSpace, xrFrameState.predictedDisplayTime, &location)))
+		{
+			xrHandPoseValid[hand] = false;
+			return false;
+		}
+
+		const bool valid = (location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0 &&
+			(location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0;
+		xrHandPoseValid[hand] = valid;
+		if (!valid)
+			return false;
+
+		xrHandPoses[hand] = location.pose;
+
+		offset[0] = location.pose.position.x - hmdPosition[0];
+		offset[1] = location.pose.position.y - hmdPosition[1];
+		offset[2] = location.pose.position.z - hmdPosition[2];
+
+		const float yawRotation = GetViewpointYaw() - hmdorientation[1];
+		DVector2 rotated = DVector2(offset[0], offset[2]).Rotated(-yawRotation);
+		offset[0] = rotated.Y;
+		offset[2] = rotated.X;
+
+		// Keep the OpenVR-style controller convention so the weapon model and
+		// offhand movement share the same baseline.
+		const XrQuaternionf weaponRotation = QuaternionFromAxisAngle(0.0f, 0.0f, 1.0f, -(vr_weaponRotate * 2.0f) * (float)(M_PI / 180.0));
+		const XrQuaternionf adjustedOrientation = MultiplyQuaternion(location.pose.orientation, weaponRotation);
+		const XrVector3f euler = OpenVREulerAnglesFromQuaternion(adjustedOrientation);
+		angles[YAW] = (float)(euler.x * (180.0 / M_PI));
+		angles[PITCH] = -(float)(euler.y * (180.0 / M_PI));
+		angles[ROLL] = (float)NormalizeAngle(-(float)(euler.z * (180.0 / M_PI)) + 30.0f);
+		return true;
+	};
+
+	const bool mainHandValid = updateHandPose(mainHand, weaponoffset, weaponangles);
+	const bool offHandValid = updateHandPose(offHand, offhandoffset, offhandangles);
+	if (mainHandValid && offHandValid)
+	{
+		const float dx = xrHandPoses[mainHand].position.x - xrHandPoses[offHand].position.x;
+		const float dy = xrHandPoses[mainHand].position.y - xrHandPoses[offHand].position.y;
+		const float dz = xrHandPoses[mainHand].position.z - xrHandPoses[offHand].position.z;
+		const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+		const bool offhandGrip = handInput[offHand].grip;
+		if (vr_two_handed_weapons)
+		{
+			if (offhandGrip && distance < 0.50f)
+				weaponStabilised = true;
+			else if (!offhandGrip)
+				weaponStabilised = false;
+		}
+		else
+		{
+			weaponStabilised = false;
+		}
+
+		if (weaponStabilised)
+		{
+			const float z = xrHandPoses[offHand].position.z - xrHandPoses[mainHand].position.z;
+			const float x = xrHandPoses[offHand].position.x - xrHandPoses[mainHand].position.x;
+			const float y = xrHandPoses[offHand].position.y - xrHandPoses[mainHand].position.y;
+			const float zxDist = std::sqrt(x * x + z * z);
+			if (zxDist != 0.0f && z != 0.0f)
+			{
+				weaponangles[0] = -(float)(atanf(y / zxDist) * (180.0 / M_PI));
+				weaponangles[1] = -(float)(atan2f(x, -z) * (180.0 / M_PI));
+			}
+		}
+	}
+	else
+	{
+		weaponStabilised = false;
+	}
+
+	if (vr_openxr_debug_weapon)
+	{
+		static bool lastLoggedWeaponStabilised = false;
+		static bool haveLastLoggedWeaponStabilised = false;
+		const float dx = xrHandPoses[mainHand].position.x - xrHandPoses[offHand].position.x;
+		const float dy = xrHandPoses[mainHand].position.y - xrHandPoses[offHand].position.y;
+		const float dz = xrHandPoses[mainHand].position.z - xrHandPoses[offHand].position.z;
+		const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+		if (!haveLastLoggedWeaponStabilised || lastLoggedWeaponStabilised != weaponStabilised)
+		{
+			Printf("VR_WEAPON OpenXR stab=%d dist=%.3f main=%d off=%d grip=%d valid=%d/%d\n",
+				weaponStabilised ? 1 : 0,
+				distance,
+				mainHand,
+				offHand,
+				handInput[offHand].grip ? 1 : 0,
+				mainHandValid ? 1 : 0,
+				offHandValid ? 1 : 0);
+			lastLoggedWeaponStabilised = weaponStabilised;
+			haveLastLoggedWeaponStabilised = true;
+		}
+	}
+
+	if (menuModeChanged)
+	{
+		ProcessHaptics();
+		return;
+	}
+
+	if (gameplayMode)
+	{
+		const bool suppressLocomotion = dominantGripModifierNew;
+		remote_movementSideways = 0.0f;
+		remote_movementForward = 0.0f;
+
+		auto applyCurve = [](float value)
+		{
+			const float deadZone = 0.15f;
+			const float absValue = fabsf(value);
+			if (absValue < deadZone)
+				return 0.0f;
+
+			float scaled = (absValue - deadZone) / (1.0f - deadZone);
+			scaled *= scaled;
+			return (value < 0.0f) ? -scaled : scaled;
+		};
+
+		if (!suppressLocomotion)
+		{
+			const XrVector2f leftMovementState = useTrackpad
+				? handInput[movementHand].trackpad
+				: handInput[movementHand].thumbstick;
+			float moveDist = OpenVRLength2D(leftMovementState.x, leftMovementState.y);
+			const float nlf = OpenVRNonLinearFilter(moveDist);
+			moveDist = (moveDist > 1.0f) ? moveDist : 1.0f;
+			float moveX = nlf * (leftMovementState.x / moveDist);
+			float moveY = nlf * (leftMovementState.y / moveDist);
+			const bool playerMoving = (fabsf(moveX) + fabsf(moveY)) > 0.05f;
+			moveX = playerMoving ? moveX : 0.0f;
+			moveY = playerMoving ? moveY : 0.0f;
+			remote_movementSideways = moveX;
+			remote_movementForward = moveY;
+
+			if (*vr_teleport)
+			{
+				if (moveY > 0.7f && !ready_teleport)
+				{
+					ready_teleport = true;
+				}
+				else if (moveY < 0.7f && ready_teleport)
+				{
+					ready_teleport = false;
+					trigger_teleport = true;
+				}
+			}
+		}
+		else
+		{
+			remote_movementSideways = 0.0f;
+			remote_movementForward = 0.0f;
+		}
+
+	}
+	else
+	{
+		remote_movementSideways = 0.0f;
+		remote_movementForward = 0.0f;
+	}
+
+	auto emitGameplayHandButtons = [&](int hand)
+	{
+		const bool dominantHand = (hand == mainHand);
+		const bool modifierOld = dominantGripModifierOld;
+		const bool modifierNew = dominantGripModifierNew;
+		const int handOffset = HandKeyOffset(hand);
+		const int axisOffset = HandAxisKeyOffset(hand);
+		const int oppositeAxisOffset = HandAxisKeyOffset(1 - hand);
+		const int gripKey = KEY_PAD_LSHOULDER + handOffset;
+		const bool suppressGripButton = dominantHand && *vr_secondary_button_mappings;
+		const bool face1Pressed = hand == 1 ? handInput[hand].a : handInput[hand].x;
+		const bool face2Pressed = hand == 1 ? handInput[hand].b : handInput[hand].y;
+		const bool face1Old = hand == 1 ? xrLastAState[hand] : xrLastXState[hand];
+		const bool face2Old = hand == 1 ? xrLastBState[hand] : xrLastYState[hand];
+		const int face1BaseKey = hand == 1 ? KEY_PAD_A : KEY_PAD_X;
+		const int face2BaseKey = hand == 1 ? KEY_PAD_B : KEY_PAD_Y;
+		const int face1AltKey = dominantHand ? KEY_PAD_LTHUMB : KEY_PGDN;
+		const int face2AltKey = dominantHand ? KEY_BACKSPACE : KEY_PGUP;
+		const int triggerBaseKey = dominantHand ? KEY_PAD_RTRIGGER : KEY_LSHIFT;
+		const int triggerAltKey = dominantHand ? KEY_PAD_LTRIGGER : KEY_LALT;
+		const int thumbBaseKey = dominantHand ? KEY_ENTER : KEY_SPACE;
+		const int thumbAltKey = dominantHand ? KEY_TAB : KEY_HOME;
+		const int gripAltKey = KEY_PAD_DPAD_UP;
+
+		PostRemappedControllerKeyTransition(xrLastSelectState[hand], handInput[hand].select, modifierOld, modifierNew, triggerBaseKey, triggerAltKey);
+		if (suppressGripButton)
+		{
+			// While the dominant hand grip is acting as a modifier, do not emit it
+			// as a separate button. This keeps grip+B style combos from also firing
+			// the standalone grip binding and matches the OpenVR shift-layer intent.
+			PostControllerKeyTransition(xrLastGripState[hand], false, gripKey);
+		}
+		else if (!dominantHand && *vr_secondary_button_mappings)
+		{
+			PostRemappedControllerKeyTransition(xrLastGripState[hand], handInput[hand].grip, modifierOld, modifierNew, gripKey, gripAltKey);
+		}
+		else
+		{
+			PostControllerKeyTransition(xrLastGripState[hand], handInput[hand].grip, gripKey);
+		}
+		PostRemappedControllerKeyTransition(xrLastThumbClickState[hand], handInput[hand].thumbClick, modifierOld, modifierNew, thumbBaseKey, thumbAltKey);
+		if (dominantHand)
+		{
+			PostRemappedControllerKeyTransition(face1Old, face1Pressed, dominantGripModifierOld, dominantGripModifierNew, face1BaseKey, face1AltKey);
+			PostRemappedControllerKeyTransition(face2Old, face2Pressed, dominantGripModifierOld, dominantGripModifierNew, face2BaseKey, face2AltKey);
+		}
+		else if (*vr_secondary_button_mappings)
+		{
+			PostRemappedControllerKeyTransition(face1Old, face1Pressed, modifierOld, modifierNew, face1BaseKey, KEY_PGDN);
+			PostRemappedControllerKeyTransition(face2Old, face2Pressed, modifierOld, modifierNew, face2BaseKey, KEY_PGUP);
+		}
+		else
+		{
+			PostControllerKeyTransition(face1Old, face1Pressed, face1BaseKey);
+			PostControllerKeyTransition(face2Old, face2Pressed, face2BaseKey);
+		}
+
+		const XrVector2f& lastAxisState = useTrackpad ? xrLastTrackpadState[hand] : xrLastThumbstickState[hand];
+		const XrVector2f& newAxisState = useTrackpad ? handInput[hand].trackpad : handInput[hand].thumbstick;
+		const int baseLeftKey = hand == 1 ? KEY_JOYAXIS3MINUS : KEY_JOYAXIS1MINUS;
+		const int baseRightKey = hand == 1 ? KEY_JOYAXIS3PLUS : KEY_JOYAXIS1PLUS;
+		const int baseDownKey = hand == 1 ? KEY_JOYAXIS4MINUS : KEY_JOYAXIS2MINUS;
+		const int baseUpKey = hand == 1 ? KEY_JOYAXIS4PLUS : KEY_JOYAXIS2PLUS;
+		const int shiftedLeftKey = hand == 1 ? KEY_JOYAXIS7MINUS : KEY_JOYAXIS5MINUS;
+		const int shiftedRightKey = hand == 1 ? KEY_JOYAXIS7PLUS : KEY_JOYAXIS5PLUS;
+		const int shiftedDownKey = hand == 1 ? KEY_JOYAXIS8MINUS : KEY_JOYAXIS6MINUS;
+		const int shiftedUpKey = hand == 1 ? KEY_JOYAXIS8PLUS : KEY_JOYAXIS6PLUS;
+
+		PostRemappedControllerAxisTransitions(lastAxisState, newAxisState, modifierOld, modifierNew,
+			baseLeftKey,
+			baseRightKey,
+			baseDownKey,
+			baseUpKey,
+			shiftedLeftKey,
+			shiftedRightKey,
+			shiftedDownKey,
+			shiftedUpKey);
+
+		syncHandState(hand);
+	};
+
+	if (menuMode)
+	{
+		emitGameplayHandButtons(0);
+		emitGameplayHandButtons(1);
+		return;
+	}
+
+	emitGameplayHandButtons(0);
+	emitGameplayHandButtons(1);
+	if (gameplayMode)
+	{
+		player_t* player = r_viewpoint.camera ? r_viewpoint.camera->player : nullptr;
+		if (player && player->mo)
+		{
+			const float hmdHeight = GetHmdAdjustedHeightInMapUnit(xrUsingStageSpace ? false : xrHasLocalHeightAnchor, xrLocalHeightAnchor);
+			if (!vr_crouch_use_button)
+			{
+				const double defaultViewHeight = player->DefaultViewHeight();
+				if (defaultViewHeight > 0.0)
+				{
+					player->crouching = 10;
+					player->crouchfactor = hmdHeight / defaultViewHeight;
+				}
+			}
+			else if (player->crouching == 10)
+			{
+				player->Uncrouch();
+			}
+
+			LSMatrix44 mat;
+			if (GetWeaponTransform(&mat, VR_MAINHAND))
+			{
+				player->mo->AttackPos.X = mat[3][0];
+				player->mo->AttackPos.Y = mat[3][2];
+				player->mo->AttackPos.Z = mat[3][1];
+				player->mo->AttackPitch = DAngle::fromDeg(VR_UseScreenLayer()
+					? -weaponangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees()
+					: -weaponangles[PITCH]);
+				player->mo->AttackAngle = DAngle::fromDeg(-90 + GetViewpointYaw() + (weaponangles[YAW] - playerYaw));
+				player->mo->AttackRoll = DAngle::fromDeg(weaponangles[ROLL]);
+			}
+
+			LSMatrix44 matOffhand;
+			if (GetWeaponTransform(&matOffhand, VR_OFFHAND))
+			{
+				player->mo->OffhandPos.X = matOffhand[3][0];
+				player->mo->OffhandPos.Y = matOffhand[3][2];
+				player->mo->OffhandPos.Z = matOffhand[3][1];
+				player->mo->OffhandPitch = DAngle::fromDeg(VR_UseScreenLayer()
+					? -offhandangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees()
+					: -offhandangles[PITCH]);
+				player->mo->OffhandAngle = DAngle::fromDeg(-90 + GetViewpointYaw() + (offhandangles[YAW] - playerYaw));
+				player->mo->OffhandRoll = DAngle::fromDeg(offhandangles[ROLL]);
+			}
+
+			if (vr_teleport && player->mo->health > 0)
+			{
+				DAngle yaw = DAngle::fromDeg(GetViewpointYaw() - hmdorientation[YAW] + offhandangles[YAW]);
+				DAngle pitch = DAngle::fromDeg(offhandangles[PITCH]);
+				const double pixelstretch = r_viewpoint.ViewLevel ? r_viewpoint.ViewLevel->pixelstretch : 1.2;
+
+				if (ready_teleport)
+				{
+					FLineTraceData trace;
+					if (P_LineTrace(player->mo, yaw, 8192, pitch, TRF_ABSOFFSET | TRF_BLOCKUSE | TRF_BLOCKSELF | TRF_SOLIDACTORS,
+						((hmdPosition[1] + offhandoffset[1] + vr_height_adjust) * vr_vunits_per_meter) / pixelstretch,
+						-(offhandoffset[2] * vr_vunits_per_meter),
+						-(offhandoffset[0] * vr_vunits_per_meter), &trace))
+					{
+						m_TeleportTarget = trace.HitType;
+						m_TeleportLocation = trace.HitLocation;
+					}
+					else
+					{
+						m_TeleportTarget = TRACE_HitNone;
+						m_TeleportLocation = DVector3(0, 0, 0);
+					}
+				}
+				else if (trigger_teleport && m_TeleportTarget == TRACE_HitFloor)
+				{
+					auto vel = player->mo->Vel;
+					player->mo->Vel = DVector3(m_TeleportLocation.X - player->mo->X(),
+						m_TeleportLocation.Y - player->mo->Y(), 0);
+					bool wasOnGround = player->mo->Z() <= player->mo->floorz + 0.1;
+					double oldZ = player->mo->Z();
+					P_XYMovement(player->mo, DVector2(0, 0));
+
+					if (player->mo->Z() >= oldZ && wasOnGround)
+					{
+						player->mo->SetZ(player->mo->floorz);
+					}
+					else
+					{
+						player->mo->SetZ(oldZ);
+					}
+					player->mo->Vel = vel;
+				}
+
+				trigger_teleport = false;
+			}
+
+			if (*vr_move_use_offhand && xrHandPoseValid[offHand])
+			{
+				const DAngle offhandYaw = DAngle::fromDeg(GetViewpointYaw() - hmdorientation[YAW] + offhandangles[YAW]);
+				player->mo->ThrustAngleOffset = offhandYaw - player->mo->Angles.Yaw;
+			}
+			else
+			{
+				player->mo->ThrustAngleOffset = nullAngle;
+			}
+
+			auto vel = player->mo->Vel;
+			player->mo->Vel = DVector3((DVector2(positional_movementSideways, positional_movementForward) * vr_vunits_per_meter), 0);
+			bool wasOnGround = player->mo->Z() <= player->mo->floorz;
+			float oldZ = player->mo->Z();
+			P_XYMovement(player->mo, DVector2(0, 0));
+
+			if (player->mo->Z() >= oldZ && wasOnGround)
+			{
+				player->mo->SetZ(player->mo->floorz);
+			}
+			else
+			{
+				player->mo->SetZ(oldZ);
+			}
+			player->mo->Vel = vel;
+
+			if (vr_openxr_debug_weapon && !xrLoggedWeaponState)
+			{
+				Printf("VR_WEAPON OpenXR handedness=%s main=%d off=%d weapon=(%.3f,%.3f,%.3f|%.1f,%.1f,%.1f) offhand=(%.3f,%.3f,%.3f|%.1f,%.1f,%.1f) stab=%d teleport=%d target=%d\n",
+					IsRightHandedVrControls() ? "right" : "left",
+					GetMainHandIndex(), GetOffHandIndex(),
+					weaponoffset[0], weaponoffset[1], weaponoffset[2],
+					weaponangles[0], weaponangles[1], weaponangles[2],
+					offhandoffset[0], offhandoffset[1], offhandoffset[2],
+					offhandangles[0], offhandangles[1], offhandangles[2],
+					weaponStabilised ? 1 : 0,
+					ready_teleport ? 1 : 0,
+					m_TeleportTarget);
+				xrLoggedWeaponState = true;
+			}
+		}
+	}
+	static bool loggedBoundSources = false;
+	ProcessHaptics();
+	if (!loggedBoundSources)
+	{
+		auto getCurrentProfile = [&](XrPath handPath)
+		{
+			XrInteractionProfileState profileState{ XR_TYPE_INTERACTION_PROFILE_STATE };
+			if (XR_FAILED(xrGetCurrentInteractionProfile(xrSession, handPath, &profileState)) || profileState.interactionProfile == XR_NULL_PATH)
+				return FString("<unbound>");
+			return PathToString(xrInstance, profileState.interactionProfile);
+		};
+
+		const FString leftProfile = getCurrentProfile(xrLeftHandPath);
+		const FString rightProfile = getCurrentProfile(xrRightHandPath);
+		if (!strcmp(leftProfile.GetChars(), "<unbound>") && !strcmp(rightProfile.GetChars(), "<unbound>"))
+			return;
+
+		loggedBoundSources = true;
+		Printf("OpenXR: active interaction profiles left=%s right=%s\n",
+			leftProfile.GetChars(),
+			rightProfile.GetChars());
+		LogBoundSourcesForAction(xrInstance, xrSession, xrSelectAction, "select");
+		LogBoundSourcesForAction(xrInstance, xrSession, xrGripAction, "grip");
+		LogBoundSourcesForAction(xrInstance, xrSession, xrMenuAction, "menu");
+		LogBoundSourcesForAction(xrInstance, xrSession, xrAAction, "A");
+		LogBoundSourcesForAction(xrInstance, xrSession, xrBAction, "B");
+		LogBoundSourcesForAction(xrInstance, xrSession, xrXAction, "X");
+		LogBoundSourcesForAction(xrInstance, xrSession, xrYAction, "Y");
+	}
+}
+
 void VKOpenXRDeviceMode::TearDown() const
 {
+	StopHaptics();
 	if (cachedScreenBlocks != 0 && gamestate == GS_LEVEL && menuactive == MENU_Off && !paused)
 	{
 		screenblocks = cachedScreenBlocks;
@@ -2616,26 +3817,157 @@ bool VKOpenXRDeviceMode::GetHandTransform(int hand, VSMatrix* mat) const
 	player_t* player = r_viewpoint.camera ? r_viewpoint.camera->player : nullptr;
 	if (player)
 	{
-		mat->loadIdentity();
-		mat->translate((float)r_viewpoint.CenterEyePos.X, (float)r_viewpoint.CenterEyePos.Z - (float)player->DefaultViewHeight(), (float)r_viewpoint.CenterEyePos.Y);
-		mat->scale((float)vr_vunits_per_meter, (float)vr_vunits_per_meter, (float)-vr_vunits_per_meter);
+		const bool rightHanded = IsRightHandedVrControls();
+		const bool useMainHandPose = (rightHanded && hand == 1) || (!rightHanded && hand == 0);
+		float* offset = useMainHandPose ? weaponoffset : offhandoffset;
+		float* angles = useMainHandPose ? weaponangles : offhandangles;
 
-		float* offset = (hand == 1) ? weaponoffset : offhandoffset;
-		float* angles = (hand == 1) ? weaponangles : offhandangles;
+		mat->loadIdentity();
+		mat->translate((float)r_viewpoint.CenterEyePos.X, (float)r_viewpoint.CenterEyePos.Z - GetDoomPlayerHeightWithoutCrouch(player), (float)r_viewpoint.CenterEyePos.Y);
+		mat->scale((float)vr_vunits_per_meter, (float)vr_vunits_per_meter, (float)-vr_vunits_per_meter);
 
 		mat->translate(-offset[0], (hmdPosition[1] + offset[1] + (float)vr_height_adjust) / (float)pixelstretch, offset[2]);
 		mat->scale(1, 1 / (float)pixelstretch, 1);
 
-		mat->rotate(-90 + doomYaw + (angles[1] - hmdorientation[1]), 0, 1, 0);
-		mat->rotate(angles[0], 1, 0, 0);
-		mat->rotate(angles[2], 0, 0, 1);
+		if (VR_UseScreenLayer())
+		{
+			mat->rotate(-90 + r_viewpoint.Angles.Yaw.Degrees() + (angles[1] - playerYaw), 0, 1, 0);
+			mat->rotate(-angles[0] - r_viewpoint.Angles.Pitch.Degrees(), 1, 0, 0);
+		}
+		else
+		{
+			mat->rotate(-90 + doomYaw + (angles[1] - hmdorientation[1]), 0, 1, 0);
+			mat->rotate(-angles[0], 1, 0, 0);
+		}
+		mat->rotate(-angles[2], 0, 0, 1);
 		return true;
 	}
 	return false;
 }
 
-bool VKOpenXRDeviceMode::GetTeleportLocation(DVector3 &out) const { return false; }
-void VKOpenXRDeviceMode::Vibrate(float duration, int channel, float intensity) const {}
+bool VKOpenXRDeviceMode::GetTeleportLocation(DVector3 &out) const
+{
+	player_t* player = r_viewpoint.camera ? r_viewpoint.camera->player : nullptr;
+	if (vr_teleport &&
+		ready_teleport &&
+		(player && player->mo->health > 0) &&
+		m_TeleportTarget == TRACE_HitFloor)
+	{
+		out = m_TeleportLocation;
+		return true;
+	}
+
+	return false;
+}
+
+void VKOpenXRDeviceMode::StopHaptics() const
+{
+	if (xrSession == XR_NULL_HANDLE || xrHapticAction == XR_NULL_HANDLE)
+		return;
+
+	for (int hand = 0; hand < 2; ++hand)
+	{
+		if (!xrHapticActive[hand])
+			continue;
+
+		XrHapticActionInfo actionInfo{ XR_TYPE_HAPTIC_ACTION_INFO };
+		actionInfo.action = xrHapticAction;
+		actionInfo.subactionPath = (hand == 0) ? xrLeftHandPath : xrRightHandPath;
+		xrStopHapticFeedback(xrSession, &actionInfo);
+		xrHapticActive[hand] = false;
+	}
+
+	xrHapticDuration[0] = xrHapticDuration[1] = 0.0;
+	xrHapticIntensity[0] = xrHapticIntensity[1] = 0.0f;
+}
+
+void VKOpenXRDeviceMode::ProcessHaptics() const
+{
+	if (!vr_enable_haptics || xrSession == XR_NULL_HANDLE || xrHapticAction == XR_NULL_HANDLE || !isSessionRunning)
+	{
+		StopHaptics();
+		return;
+	}
+
+	static auto lastUpdate = std::chrono::steady_clock::now();
+	const auto now = std::chrono::steady_clock::now();
+	const double elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastUpdate).count();
+	lastUpdate = now;
+
+	for (int hand = 0; hand < 2; ++hand)
+	{
+		const bool active = xrHapticDuration[hand] != 0.0 && xrHapticIntensity[hand] > 0.0f;
+		if (!active)
+		{
+			if (xrHapticActive[hand])
+			{
+				XrHapticActionInfo actionInfo{ XR_TYPE_HAPTIC_ACTION_INFO };
+				actionInfo.action = xrHapticAction;
+				actionInfo.subactionPath = (hand == 0) ? xrLeftHandPath : xrRightHandPath;
+				xrStopHapticFeedback(xrSession, &actionInfo);
+				xrHapticActive[hand] = false;
+			}
+			continue;
+		}
+
+		XrHapticVibration vibration{ XR_TYPE_HAPTIC_VIBRATION };
+		vibration.amplitude = clamp<float>(xrHapticIntensity[hand], 0.0f, 1.0f);
+		vibration.frequency = XR_FREQUENCY_UNSPECIFIED;
+		vibration.duration = XR_MIN_HAPTIC_DURATION;
+
+		XrHapticActionInfo actionInfo{ XR_TYPE_HAPTIC_ACTION_INFO };
+		actionInfo.action = xrHapticAction;
+		actionInfo.subactionPath = (hand == 0) ? xrLeftHandPath : xrRightHandPath;
+		XrResult result = xrApplyHapticFeedback(xrSession, &actionInfo, (XrHapticBaseHeader*)&vibration);
+		if (XR_SUCCEEDED(result))
+		{
+			xrHapticActive[hand] = true;
+		}
+		else if (xrHapticActive[hand])
+		{
+			xrStopHapticFeedback(xrSession, &actionInfo);
+			xrHapticActive[hand] = false;
+		}
+
+		if (xrHapticDuration[hand] > 0.0)
+		{
+			xrHapticDuration[hand] -= elapsedMs;
+			if (xrHapticDuration[hand] <= 0.0)
+			{
+				xrHapticDuration[hand] = 0.0;
+			}
+		}
+	}
+}
+
+void VKOpenXRDeviceMode::Vibrate(float duration, int channel, float intensity) const
+{
+	if (channel < 0)
+		channel = 0;
+	if (channel > 1)
+		channel = 1;
+
+	if (!vr_enable_haptics)
+		return;
+
+	xrHapticDuration[channel] = duration;
+	xrHapticIntensity[channel] = intensity;
+
+	if (duration <= 0.0f || intensity <= 0.0f)
+	{
+		XrHapticActionInfo actionInfo{ XR_TYPE_HAPTIC_ACTION_INFO };
+		actionInfo.action = xrHapticAction;
+		actionInfo.subactionPath = (channel == 0) ? xrLeftHandPath : xrRightHandPath;
+		if (xrSession != XR_NULL_HANDLE && xrHapticAction != XR_NULL_HANDLE)
+			xrStopHapticFeedback(xrSession, &actionInfo);
+		xrHapticActive[channel] = false;
+		xrHapticDuration[channel] = 0.0;
+		xrHapticIntensity[channel] = 0.0f;
+		return;
+	}
+
+	ProcessHaptics();
+}
 void VKOpenXRDeviceMode::InitializeMultiview() const {}
 
 } // namespace s3d

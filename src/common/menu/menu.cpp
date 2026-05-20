@@ -726,10 +726,21 @@ bool M_Responder (event_t *ev)
 				}
 			}
 		}
-		else if (menuactive != MENU_WaitKey && (ev->type == EV_KeyDown || ev->type == EV_KeyUp))
+		else if (ev->type == EV_KeyDown || ev->type == EV_KeyUp)
 		{
 			// eat blocked controller events without dispatching them.
 			if (ev->data1 >= KEY_FIRSTJOYBUTTON && m_blockcontrollers) return true;
+
+			// In key-binding capture mode, controller buttons must stay raw so
+			// the binding UI can record the actual Pad_* key instead of menu input.
+			// They still need to reach the current menu's OnInputEvent handler, but
+			// must be swallowed here so the same press cannot leak into gameplay or
+			// normal menu navigation.
+			if (menuactive == MENU_WaitKey && ev->data1 >= KEY_FIRSTJOYBUTTON)
+			{
+				CurrentMenu->CallResponder(ev);
+				return true;
+			}
 
 			keyup = ev->type == EV_KeyUp;
 
