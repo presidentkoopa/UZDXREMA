@@ -497,6 +497,11 @@ static XrVector3f GetVirtualScreenBackgroundColor()
 	return { overlayBG[idx][0], overlayBG[idx][1], overlayBG[idx][2] };
 }
 
+static XrVector3f GetVirtualScreenBackdropColor()
+{
+	return GetVirtualScreenBackgroundColor();
+}
+
 static bool IsRightHandedVrControls()
 {
 	return vr_control_scheme < 10;
@@ -959,7 +964,7 @@ void VKOpenXRDeviceEyePose::SetUp() const
 	}
 
 	VREyeInfo::SetUp();
-	mode.mInVRSceneRender = true;
+	mode.mInVRSceneRender = !VR_UseScreenLayer();
 }
 
 void VKOpenXRDeviceEyePose::TearDown() const
@@ -1158,6 +1163,11 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	std::vector<const char*> extensions = {
 		XR_KHR_VULKAN_ENABLE_EXTENSION_NAME
 	};
+	xrHasEquirectBackdrop = HasOpenXRExtension(XR_KHR_COMPOSITION_LAYER_EQUIRECT_EXTENSION_NAME);
+	if (xrHasEquirectBackdrop)
+	{
+		extensions.push_back(XR_KHR_COMPOSITION_LAYER_EQUIRECT_EXTENSION_NAME);
+	}
 	xrHasFBColorSpace = HasOpenXRExtension(XR_FB_COLOR_SPACE_EXTENSION_NAME);
 	if (xrHasFBColorSpace)
 	{
@@ -1890,6 +1900,7 @@ void VKOpenXRDeviceMode::DestroyOpenXR() const
 	xrSessionState = XR_SESSION_STATE_UNKNOWN;
 	xrFrameInProgress = false;
 	isSetup = false;
+	xrHasEquirectBackdrop = false;
 	xrHasFBColorSpace = false;
 	xrUsingStageSpace = false;
 	xrHasLocalHeightAnchor = false;
@@ -1970,6 +1981,13 @@ void VKOpenXRDeviceMode::PurgeDeferredOpenXRResources() const
 
 void VKOpenXRDeviceMode::SetUp() const
 {
+	const bool forceVirtualScreen = gamestate == GS_LEVEL && menuactive == MENU_Off && (cinemamode || vr_overlayscreen_always);
+	if (forceVirtualScreen)
+	{
+		screenblocks = 12;
+		QzDoom_setUseScreenLayer(true);
+	}
+
 	super::SetUp();
 	PurgeDeferredOpenXRResources();
 	struct Guard
@@ -2015,9 +2033,17 @@ void VKOpenXRDeviceMode::SetUp() const
 
 	if (gamestate == GS_LEVEL && menuactive == MENU_Off)
 	{
-		cachedScreenBlocks = screenblocks;
-		screenblocks = 12;
-		QzDoom_setUseScreenLayer(false);
+		if (forceVirtualScreen)
+		{
+			screenblocks = 12;
+			QzDoom_setUseScreenLayer(true);
+		}
+		else
+		{
+			cachedScreenBlocks = screenblocks;
+			screenblocks = 12;
+			QzDoom_setUseScreenLayer(false);
+		}
 	}
 	else
 	{
@@ -3235,8 +3261,7 @@ void VKOpenXRDeviceMode::updateVirtualScreenLayer() const
 	const float screenHeight = std::max(0.1f, screenWidth / std::max(aspect, 0.01f));
 	const XrQuaternionf flipRotation = MakeAxisAngleQuaternion({ 0.0f, 0.0f, 1.0f }, (float)M_PI);
 
-	// Keep the quad aligned with the headset and apply only the in-plane
-	// correction that the original overlay path used.
+	// Rotate the virtual-screen quad 180 degrees in-plane.
 	xrVirtualScreenPose.orientation = MultiplyQuaternion(headOrientation, flipRotation);
 	xrVirtualScreenPose.position = AddVector(center, ScaleVector(forward, distance));
 	xrVirtualScreenPose.position = AddVector(xrVirtualScreenPose.position, ScaleVector(up, vr_overlayscreen_vpos));
@@ -3265,11 +3290,27 @@ void VKOpenXRDeviceMode::updateVirtualScreenLayer() const
 	xrVirtualScreenBackdropLayer.subImage.imageRect.offset = { 0, 0 };
 	xrVirtualScreenBackdropLayer.subImage.imageRect.extent = { (int32_t)xrVirtualScreenWidth, (int32_t)xrVirtualScreenHeight };
 
+	if (xrHasEquirectBackdrop)
+	{
+		xrVirtualScreenBackdropEquirectLayer.type = XR_TYPE_COMPOSITION_LAYER_EQUIRECT_KHR;
+		xrVirtualScreenBackdropEquirectLayer.layerFlags = 0;
+		xrVirtualScreenBackdropEquirectLayer.space = xrSpace;
+		xrVirtualScreenBackdropEquirectLayer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+		xrVirtualScreenBackdropEquirectLayer.pose = xrVirtualScreenBackdropPose;
+		xrVirtualScreenBackdropEquirectLayer.radius = 0.0f;
+		xrVirtualScreenBackdropEquirectLayer.scale = { 1.0f, 1.0f };
+		xrVirtualScreenBackdropEquirectLayer.bias = { 0.0f, 0.0f };
+		xrVirtualScreenBackdropEquirectLayer.subImage.swapchain = xrVirtualScreenBackdropSwapchain;
+		xrVirtualScreenBackdropEquirectLayer.subImage.imageArrayIndex = 0;
+		xrVirtualScreenBackdropEquirectLayer.subImage.imageRect.offset = { 0, 0 };
+		xrVirtualScreenBackdropEquirectLayer.subImage.imageRect.extent = { (int32_t)xrVirtualScreenWidth, (int32_t)xrVirtualScreenHeight };
+	}
+
 }
 
 bool VKOpenXRDeviceMode::ShouldRenderVirtualScreen() const
 {
-	return (gamestate != GS_LEVEL || menuactive != MENU_Off || cinemamode || ConsoleState != c_up) && (vr_overlayscreen || vr_overlayscreen_always);
+	return (gamestate != GS_LEVEL || menuactive != MENU_Off || cinemamode || ConsoleState != c_up || vr_overlayscreen_always) && (vr_overlayscreen || vr_overlayscreen_always);
 }
 
 bool VKOpenXRDeviceMode::RenderVirtualScreen() const
@@ -3286,7 +3327,7 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 		return false;
 	}
 
-	const bool forceOverlay = gamestate != GS_LEVEL || menuactive != MENU_Off || cinemamode || ConsoleState != c_up;
+	const bool forceOverlay = gamestate != GS_LEVEL || menuactive != MENU_Off || cinemamode || ConsoleState != c_up || vr_overlayscreen_always;
 	const bool allowBlankOverlay = vr_overlayscreen_always || cinemamode || gamestate != GS_LEVEL;
 	if (twod == nullptr || (twod->DrawCount() == 0 && !allowBlankOverlay && !forceOverlay))
 	{
@@ -3345,8 +3386,7 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 
 	xrVirtualScreenImageIndex = (int)imageIndex;
 	auto& target = xrVirtualScreenTextures[imageIndex];
-	const bool useSceneBackdrop = gamestate == GS_LEVEL && menuactive != MENU_Off && !cinemamode;
-
+	const bool useSceneBackdrop = gamestate == GS_LEVEL;
 	if (vr_openxr_debug_sizes)
 	{
 		Printf("XR_VSCREEN visible=%d swapchain=%ux%u draw=%ux%u backdrop=%d\n",
@@ -3490,12 +3530,15 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 		.AddImage(&backdropTarget, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, false)
 		.Execute(vkfb->GetCommands()->GetDrawCommands());
 
-	const XrVector3f bgColor = GetVirtualScreenBackgroundColor();
+	const XrVector3f backdropColor =
+		(cinemamode || vr_overlayscreen_always || gamestate == GS_LEVEL)
+		? GetVirtualScreenBackdropColor()
+		: XrVector3f{ 0.0f, 0.0f, 0.0f };
 	float savedBackdropClear[4];
 	memcpy(savedBackdropClear, screen->mSceneClearColor, sizeof(savedBackdropClear));
-	screen->mSceneClearColor[0] = bgColor.x;
-	screen->mSceneClearColor[1] = bgColor.y;
-	screen->mSceneClearColor[2] = bgColor.z;
+	screen->mSceneClearColor[0] = backdropColor.x;
+	screen->mSceneClearColor[1] = backdropColor.y;
+	screen->mSceneClearColor[2] = backdropColor.z;
 	screen->mSceneClearColor[3] = 1.0f;
 
 	auto* backdropState = vkfb->GetRenderState();
@@ -3958,6 +4001,7 @@ void VKOpenXRDeviceMode::Vibrate(float duration, int channel, float intensity) c
 
 	ProcessHaptics();
 }
+
 void VKOpenXRDeviceMode::InitializeMultiview() const {}
 
 } // namespace s3d

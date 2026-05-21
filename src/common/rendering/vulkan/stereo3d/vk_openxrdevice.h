@@ -180,6 +180,7 @@ protected:
 	mutable XrSwapchain xrVirtualScreenBackdropSwapchain = XR_NULL_HANDLE;
 	mutable XrCompositionLayerQuad xrVirtualScreenLayer{ XR_TYPE_COMPOSITION_LAYER_QUAD };
 	mutable XrCompositionLayerQuad xrVirtualScreenBackdropLayer{ XR_TYPE_COMPOSITION_LAYER_QUAD };
+	mutable XrCompositionLayerEquirectKHR xrVirtualScreenBackdropEquirectLayer{ XR_TYPE_COMPOSITION_LAYER_EQUIRECT_KHR };
 	mutable XrPosef xrVirtualScreenPose{};
 	mutable XrPosef xrVirtualScreenBackdropPose{};
 	mutable XrFrameState xrFrameState = { XR_TYPE_FRAME_STATE };
@@ -190,6 +191,7 @@ protected:
 	mutable bool mSetUpInProgress = false;
 	mutable uint64_t xrFrameCounter = 0;
 	mutable bool xrHasFBColorSpace = false;
+	mutable bool xrHasEquirectBackdrop = false;
     
 private:
 	typedef VRMode super;

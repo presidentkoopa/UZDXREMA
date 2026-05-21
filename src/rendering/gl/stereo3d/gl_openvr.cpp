@@ -350,6 +350,7 @@ Texture_t* blankTexture;
 bool doTrackHmdAngles = true;
 bool forceDisableOverlay = false;
 int prevOverlayBG = -1;
+int prevOverlayBackdropMode = -1;
 float overlayBG[6][3] = {
 	{0.0f, 0.0f, 0.0f},
 	{0.11f, 0.0f, 0.01f},
@@ -931,7 +932,8 @@ namespace s3d
 
 		static VRTextureBounds_t tBounds = { 0, 0, 1, 1 };
 
-		if(forceDisableOverlay || !VR_UseScreenLayer())
+		const bool showOverlay = (ConsoleState != c_up) || (!forceDisableOverlay && VR_UseScreenLayer());
+		if (!showOverlay)
 		{
 			//clear and hide overlay when not in use
 			vrOverlay->ClearOverlayTexture(overlayHandle);
@@ -940,8 +942,11 @@ namespace s3d
 		}
 		else {
 			// create a solid color backdrop texture
-			if (prevOverlayBG != vr_overlayscreen_bg) {
+			const bool useBlackBackdrop = (gamestate == GS_STARTUP || gamestate == GS_DEMOSCREEN || gamestate == GS_INTRO || gamestate == GS_TITLELEVEL);
+			const int currentBackdropMode = useBlackBackdrop ? 0 : 1;
+			if (prevOverlayBG != vr_overlayscreen_bg || prevOverlayBackdropMode != currentBackdropMode) {
 				prevOverlayBG = vr_overlayscreen_bg;
+				prevOverlayBackdropMode = currentBackdropMode;
 				blankTexture = new Texture_t();
 				blankTexture->handle = nullptr;
 				blankTexture->eType = ETextureType_TextureType_OpenGL;
@@ -962,7 +967,7 @@ namespace s3d
 				glBindTexture(GL_TEXTURE_2D, emptyTextureID);
 				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-				if (gamestate == GS_STARTUP || gamestate == GS_DEMOSCREEN || gamestate == GS_INTRO || gamestate == GS_TITLELEVEL)
+				if (useBlackBackdrop)
 					glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tWidth, tHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, &emptyDataStart[0]);
 				else
 					glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, tWidth, tHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, emptyData);
@@ -976,7 +981,7 @@ namespace s3d
 			vrCompositor->Submit(EVREye(eye), blankTexture, &tBounds, EVRSubmitFlags_Submit_Default);
 			vrOverlay->SetOverlayTexture(overlayHandle, eyeTexture);
 			vrOverlay->SetOverlayTextureBounds(overlayHandle, &tBounds);
-			vrOverlay->SetOverlayWidthInMeters(overlayHandle, 1 + vr_overlayscreen_size);
+			vrOverlay->SetOverlayWidthInMeters(overlayHandle, (1.0f + vr_overlayscreen_size) * 0.8f);
 			vrOverlay->ShowOverlay(overlayHandle);
 		}
 		return true;
@@ -2401,13 +2406,13 @@ namespace s3d
 
 		haptics->ProcessHaptics();
 
-		if (gamestate == GS_LEVEL && menuactive == MENU_Off && !paused) {
+		if (gamestate == GS_LEVEL && menuactive == MENU_Off && !paused && ConsoleState == c_up) {
 			cachedScreenBlocks = screenblocks;
 			screenblocks = 12; // always be full-screen during 3D scene render
 			QzDoom_setUseScreenLayer(false);
 		}
 		else {
-			//Ensure we are drawing on virtual screen
+			// Ensure we are drawing on virtual screen
 			QzDoom_setUseScreenLayer(true);
 		}
 		
@@ -2696,11 +2701,11 @@ namespace s3d
 			else
 				forceDisableOverlay = false;
 #endif
-			if (VR_UseScreenLayer())
+			if (VR_UseScreenLayer() || ConsoleState != c_up)
 			{
 				forceDisableOverlay = false;
 			}
-			if (VR_UseScreenLayer() || gamestate == GS_TITLELEVEL || menuactive != MENU_Off)
+			if (VR_UseScreenLayer() || gamestate == GS_TITLELEVEL || menuactive != MENU_Off || ConsoleState != c_up)
 			{
 				UpdateOverlaySettings();
 			}
