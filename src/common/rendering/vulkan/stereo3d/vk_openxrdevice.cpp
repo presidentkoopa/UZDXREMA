@@ -49,6 +49,7 @@ extern float doomYaw;
 extern float previousPitch;
 extern float playerYaw;
 extern float snapTurn;
+extern vec3_t positionDeltaThisFrame;
 extern float remote_movementSideways;
 extern float remote_movementForward;
 extern float positional_movementSideways;
@@ -860,14 +861,11 @@ DVector3 VKOpenXRDeviceEyePose::GetViewShift(FRenderViewpoint& vp) const
 	auto& mode = const_cast<VKOpenXRDeviceMode&>((const VKOpenXRDeviceMode&)VKOpenXRDeviceMode::getInstance());
 	const float hmdHeight = GetHmdAdjustedHeightInMapUnit(mode.xrUsingStageSpace ? false : mode.xrHasLocalHeightAnchor, mode.xrLocalHeightAnchor);
 	const float playerHeight = (r_viewpoint.camera && r_viewpoint.camera->player) ? GetDoomPlayerHeightWithoutCrouch(r_viewpoint.camera->player) : hmdHeight;
-
 	DVector3 shift;
 	if (eye >= 0)
 	{
-		// Isolation step: remove OpenXR per-eye camera translation entirely and
-		// let the asymmetric projection matrix carry scene stereo by itself.
-		// If comfort changes here, the remaining issue is in eye translation;
-		// if not, the frustum math is still the real problem.
+		// Keep the view shift stereo-only. Room-scale movement belongs in the
+		// locomotion path, not in the eye separation itself.
 		shift.X = 0.0;
 		shift.Y = 0.0;
 		shift.Z = 0.0;
@@ -2118,21 +2116,13 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 	positional_movementSideways = 0.0f;
 	positional_movementForward = 0.0f;
 
-	static bool havePreviousHmdPosition = false;
-	static float previousHmdPosition[3] = { 0.0f, 0.0f, 0.0f };
-	if (havePreviousHmdPosition && gamestate == GS_LEVEL && menuactive == MENU_Off && !paused)
+	if (gamestate == GS_LEVEL && menuactive == MENU_Off && !paused)
 	{
-		const float dx = hmdPosition[0] - previousHmdPosition[0];
-		const float dz = hmdPosition[2] - previousHmdPosition[2];
 		const float rotation = GetViewpointYaw() - hmdorientation[1];
-		DVector2 rotated = DVector2(dx, dz).Rotated(DAngle::fromDeg(-rotation));
+		DVector2 rotated = DVector2(positionDeltaThisFrame[0], positionDeltaThisFrame[2]).Rotated(DAngle::fromDeg(-rotation));
 		positional_movementSideways = rotated.Y;
 		positional_movementForward = rotated.X;
 	}
-	previousHmdPosition[0] = hmdPosition[0];
-	previousHmdPosition[1] = hmdPosition[1];
-	previousHmdPosition[2] = hmdPosition[2];
-	havePreviousHmdPosition = true;
 
 	if (!xrUsingStageSpace && !xrHasLocalHeightAnchor && r_viewpoint.camera && r_viewpoint.camera->player)
 	{
