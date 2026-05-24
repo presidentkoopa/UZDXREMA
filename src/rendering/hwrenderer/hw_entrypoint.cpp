@@ -204,10 +204,7 @@ sector_t* RenderViewpoint(FRenderViewpoint& mainvp, AActor* camera, IntRect* bou
 				di->DrawEndScene2D(mainvp.sector, RenderState);
 			});
 
-			if (!vrmode->IsVR())
-			{
-				eye->AdjustBlend(di);
-			}
+			eye->AdjustBlend(di);
 			V_DrawBlend(mainvp.sector);
 			PostProcess.Unclock();
 		}

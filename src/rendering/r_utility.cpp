@@ -264,7 +264,10 @@ void R_SetViewSize (int blocks)
 
 void R_SetWindow (FRenderViewpoint &viewpoint, FViewWindow &viewwindow, int windowSize, int fullWidth, int fullHeight, int stHeight, bool renderingToCanvas)
 {
-	if (windowSize >= 11)
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	const bool forceFullSceneWindow = vrmode != nullptr && vrmode->IsVR() && !vrmode->IsRenderingVirtualScreen() && !renderingToCanvas;
+
+	if (forceFullSceneWindow || windowSize >= 11)
 	{
 		viewwidth = fullWidth;
 		freelookviewheight = viewheight = fullHeight;

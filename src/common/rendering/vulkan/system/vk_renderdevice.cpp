@@ -58,6 +58,8 @@
 #include "vulkan/textures/vk_texture.h"
 #include "vulkan/textures/vk_framebuffer.h"
 #include <zvulkan/vulkanswapchain.h>
+
+bool VR_UseScreenLayer();
 #include <zvulkan/vulkanbuilders.h>
 #include <zvulkan/vulkansurface.h>
 #include <zvulkan/vulkancompatibledevice.h>
@@ -230,12 +232,25 @@ void VulkanRenderDevice::Update()
 		if (vrmode != nullptr && vrmode->IsVR())
 		{
 			const int eyeCount = vrmode->mEyeCount > 0 ? vrmode->mEyeCount : 1;
+			const bool suppressSceneEye2D = VR_UseScreenLayer();
 			FirstEye();
 			for (int eye_ix = 0; eye_ix < eyeCount; ++eye_ix)
 			{
+				const auto eye = (eye_ix >= 0 && eye_ix < 2) ? vrmode->mEyes[eye_ix] : nullptr;
 				postprocess->SetActiveRenderTarget();
+				if (eye != nullptr)
+				{
+					eye->AdjustBlend(nullptr);
+				}
 				Draw2D(true);
-				Draw2D(false);
+				if (!VR_UseScreenLayer() && !vrmode->IsRenderingVirtualScreen() && eye != nullptr)
+				{
+					eye->AdjustHud();
+				}
+				if (!suppressSceneEye2D)
+				{
+					Draw2D(false);
+				}
 				vrmode->FinalizeEyeImage(this, eye_ix);
 				if (eye_ix + 1 < eyeCount)
 					NextEye(eyeCount);

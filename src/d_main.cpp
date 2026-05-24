@@ -372,6 +372,7 @@ static int pagetic;
 //==========================================================================
 
 CVAR(Int, saved_screenblocks, 10, CVAR_ARCHIVE)
+CVAR(Bool, vr_hud_debug_border, false, CVAR_ARCHIVE)
 CVAR(Bool, saved_drawplayersprite, true, CVAR_ARCHIVE)
 CVAR(Bool, saved_showmessages, true, CVAR_ARCHIVE)
 CVAR(Bool, hud_toggled, false, CVAR_ARCHIVE)
@@ -936,6 +937,22 @@ static void DrawOverlays()
 		FStat::PrintStat (twod);
 }
 
+static void DrawVRHudDebugBorder(int width, int height)
+{
+	if (!vr_hud_debug_border || twod == nullptr || width <= 0 || height <= 0)
+	{
+		return;
+	}
+
+	const int thickness = width >= 1920 ? 3 : (width >= 960 ? 2 : 1);
+	const uint32_t color = 0xFF00FF00;
+
+	twod->AddColorOnlyQuad(0, 0, width, thickness, color);
+	twod->AddColorOnlyQuad(0, height - thickness, width, thickness, color);
+	twod->AddColorOnlyQuad(0, 0, thickness, height, color);
+	twod->AddColorOnlyQuad(width - thickness, 0, thickness, height, color);
+}
+
 static void DrawHudToSurface(const FRenderViewpoint& vp)
 {
 	if ((!vr_hud_mount && !vr_automap_mount) || hud_toggled || StatusBar == nullptr)
@@ -1046,6 +1063,7 @@ static void DrawHudToSurface(const FRenderViewpoint& vp)
 		StatusBar->CallDraw(HUD_StatusBar, vp.TicFrac);
 		StatusBar->DrawTopStuff(HUD_StatusBar);
 	}
+	DrawVRHudDebugBorder(hudWidth, hudHeight);
 
 	viewwidth = saved_vw;
 	viewheight = saved_vh;
@@ -1232,7 +1250,7 @@ void D_Display ()
 				primaryLevel->automap->Drawer(viewheight);
 			}
 			
-			if (drawFaceHud && (automapactive || viewactive))
+			if (drawFaceHud && (!automapactive || viewactive))
 			{
 				StatusBar->RefreshViewBorder ();
 			}
@@ -1261,6 +1279,10 @@ void D_Display ()
 				StatusBar->DrawBottomStuff (HUD_StatusBar);
 				StatusBar->CallDraw (HUD_StatusBar, vp.TicFrac);
 				StatusBar->DrawTopStuff (HUD_StatusBar);
+			}
+			if (drawFaceHud && vrmode->IsVR())
+			{
+				DrawVRHudDebugBorder(screen->GetWidth(), screen->GetHeight());
 			}
 		}
 	}
@@ -3046,7 +3068,9 @@ IntRect System_GetSceneRect()
 	IntRect mSceneViewport;
 	// Special handling so the view with a visible status bar displays properly
 	int height, width;
-	if (screenblocks >= 10)
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	const bool forceFullSceneRect = vrmode != nullptr && vrmode->IsVR() && !vrmode->IsRenderingVirtualScreen();
+	if (forceFullSceneRect || screenblocks >= 10)
 	{
 		height = screen->GetHeight();
 		width = screen->GetWidth();

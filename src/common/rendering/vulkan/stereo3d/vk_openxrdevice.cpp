@@ -330,6 +330,7 @@ static XrSafeSourceRect GetSafeXrSourceRect(VulkanRenderDevice* vkfb)
 	const int srcBufferW = buffers ? buffers->GetWidth() : 0;
 	const int srcBufferH = buffers ? buffers->GetHeight() : 0;
 	const IntRect requestedRect = vkfb ? vkfb->mSceneViewport : IntRect{ 0, 0, 0, 0 };
+	const bool overlayUIActive = menuactive != MENU_Off || ConsoleState != c_up || cinemamode;
 
 	auto useFullBufferFallback = [&]()
 	{
@@ -340,7 +341,7 @@ static XrSafeSourceRect GetSafeXrSourceRect(VulkanRenderDevice* vkfb)
 		result.usedFallback = true;
 	};
 
-	if (srcBufferW <= 0 || srcBufferH <= 0 || requestedRect.width <= 0 || requestedRect.height <= 0)
+	if (srcBufferW <= 0 || srcBufferH <= 0 || requestedRect.width <= 0 || requestedRect.height <= 0 || overlayUIActive)
 	{
 		useFullBufferFallback();
 	}
@@ -1004,23 +1005,29 @@ void VKOpenXRDeviceEyePose::AdjustHud() const
 	if (r_viewpoint.ViewLevel == nullptr)
 		return;
 	if (VR_ShouldDrawMountedHud())
+	{
+		static bool loggedMountedHudBypass = false;
+		if (!loggedMountedHudBypass && (vr_openxr_debug_present || vr_debug_projection_compare))
+		{
+			Printf("OpenXR HUD: skipping camera HUD projection because mounted HUD path is active.\n");
+			loggedMountedHudBypass = true;
+		}
 		return;
+	}
 	VSMatrix hudProj = GetHUDProjection();
-	const float hudStereo = (automapactive && !vr_automap_use_hud) ? (float)vr_automap_stereo : (float)vr_hud_stereo;
-	const float orthoWidth = 2.0f;
-	const float stereoSeparation = (eye == 0 ? 1.0f : -1.0f) * vr_ipd * hudStereo * 0.1f * orthoWidth;
+	static bool loggedCameraHudPath = false;
+	if (!loggedCameraHudPath && (vr_openxr_debug_present || vr_debug_projection_compare))
+	{
+		Printf("OpenXR HUD: using camera-mounted HUD projection path (mounted HUD inactive).\n");
+		loggedCameraHudPath = true;
+	}
 
 	auto* di = HWDrawInfo::StartDrawInfo(r_viewpoint.ViewLevel, nullptr, r_viewpoint, nullptr);
 	if (di)
 	{
-		di->VPUniforms.mViewMatrix.translate(stereoSeparation, 0.0f, 0.0f);
+		di->VPUniforms.mViewMatrix.loadIdentity();
 		di->VPUniforms.mProjectionMatrix = hudProj;
-		di->ProjectionMatrix2 = hudProj;
-		di->VPUniforms.CalcDependencies();
-		if (screen->mViewpoints)
-		{
-			ApplyVPUniforms(di);
-		}
+		ApplyVPUniforms(di);
 		di->EndDrawInfo();
 	}
 }
@@ -1037,24 +1044,11 @@ void VKOpenXRDeviceEyePose::AdjustBlend(HWDrawInfo* di) const
 		new_di = true;
 	}
 
-	auto& renderState = *screen->RenderState();
-	const VSMatrix eyeProjection = BuildOpenXREyeProjection(currentFov, (float)screen->GetZNear(), (float)screen->GetZFar(), eye);
-	di->VPUniforms.mProjectionMatrix = eyeProjection;
-	di->ProjectionMatrix2 = eyeProjection;
-	di->VPUniforms.CalcDependencies();
-	if (screen->mViewpoints)
-	{
-		di->vpIndex = screen->mViewpoints->SetViewpoint(renderState, &di->VPUniforms);
-	}
-
-	VSMatrix finalMatrix = projection;
-	di->VPUniforms.mProjectionMatrix = finalMatrix;
-	di->ProjectionMatrix2 = finalMatrix;
-	di->VPUniforms.CalcDependencies();
-	if (screen->mViewpoints)
-	{
-		di->vpIndex = screen->mViewpoints->SetViewpoint(renderState, &di->VPUniforms);
-	}
+	di->VPUniforms.mViewMatrix.loadIdentity();
+	di->VPUniforms.mProjectionMatrix.loadIdentity();
+	di->VPUniforms.mProjectionMatrix.translate(-1, 1, 0);
+	di->VPUniforms.mProjectionMatrix.scale(2.0 / SCREENWIDTH, -2.0 / SCREENHEIGHT, -1.0);
+	di->ProjectionMatrix2 = di->VPUniforms.mProjectionMatrix;
 	ApplyVPUniforms(di);
 
 	if (new_di)
@@ -1096,8 +1090,9 @@ VSMatrix VKOpenXRDeviceEyePose::GetHUDProjection() const
 	hudProjection.loadIdentity();
 
 	const float hudStereo = getHUDValue<FFloatCVarRef>(vr_automap_stereo, vr_hud_stereo);
-	const float orthoWidth = 2.0f;
-	const float stereoSeparation = (eye == 0 ? 1.0f : -1.0f) * vr_ipd * hudStereo * 0.1f * orthoWidth;
+	const float stereoSeparation =
+		(vr_ipd * 0.5f) * vr_vunits_per_meter * hudStereo * (eye == 1 ? 1.0f : -1.0f);
+	hudProjection.translate(stereoSeparation, 0.0f, 0.0f);
 
 	hudProjection.scale(-vr_vunits_per_meter, vr_vunits_per_meter, -vr_vunits_per_meter);
 
@@ -1120,17 +1115,33 @@ VSMatrix VKOpenXRDeviceEyePose::GetHUDProjection() const
 	const float hudScale = getHUDValue<FFloatCVarRef>(vr_automap_scale, vr_hud_scale);
 	hudProjection.scale(-hudScale, hudScale, -hudScale);
 
-	const float screenWidth = (float)screen->GetWidth();
-	const float screenHeight = (float)screen->GetHeight();
+	const float screenWidth = (float)SCREENWIDTH;
+	const float screenHeight = (float)SCREENHEIGHT;
 	hudProjection.translate(-1.0f, 1.0f, 0.0f);
 	hudProjection.scale(2.0f / screenWidth, -2.0f / screenHeight, -1.0f);
 
-	VSMatrix projection;
-	projection.loadIdentity();
-	const float hudOrthoScale = 1.0f;
-	projection.ortho(-hudOrthoScale, hudOrthoScale, -hudOrthoScale, hudOrthoScale, 0.5f, 65536.0f);
-
+	// Match OpenVR/GL OpenXR behavior: compose eye projection with the HUD
+	// transform so the HUD is camera-anchored in front of the user.
 	VSMatrix finalProjection(projection);
+	finalProjection.multMatrix(hudProjection);
+
+	if (vr_openxr_debug_present || vr_debug_projection_compare)
+	{
+		static bool loggedHudProjection[2] = { false, false };
+		if (eye >= 0 && eye < 2 && !loggedHudProjection[eye])
+		{
+			const FLOATTYPE* m = finalProjection.get();
+			Printf("OpenXR HUD eye=%d stereo=%.3f dist=%.3f scale=%.3f projRow0=[%.5f %.5f %.5f %.5f] projRow1=[%.5f %.5f %.5f %.5f]\n",
+				eye,
+				(double)hudStereo,
+				(double)getHUDValue<FFloatCVarRef>(vr_automap_distance, vr_hud_distance),
+				(double)getHUDValue<FFloatCVarRef>(vr_automap_scale, vr_hud_scale),
+				(double)m[0], (double)m[4], (double)m[8], (double)m[12],
+				(double)m[1], (double)m[5], (double)m[9], (double)m[13]);
+			loggedHudProjection[eye] = true;
+		}
+	}
+
 	return finalProjection;
 }
 
@@ -1997,7 +2008,14 @@ void VKOpenXRDeviceMode::SetUp() const
 	const bool forceVirtualScreen = gamestate == GS_LEVEL && menuactive == MENU_Off && (cinemamode || vr_overlayscreen_always);
 	if (forceVirtualScreen)
 	{
-		screenblocks = 12;
+		QzDoom_setUseScreenLayer(true);
+	}
+	else if (gamestate == GS_LEVEL && menuactive == MENU_Off && !paused && ConsoleState == c_up)
+	{
+		QzDoom_setUseScreenLayer(false);
+	}
+	else
+	{
 		QzDoom_setUseScreenLayer(true);
 	}
 
@@ -2048,14 +2066,7 @@ void VKOpenXRDeviceMode::SetUp() const
 	{
 		if (forceVirtualScreen)
 		{
-			screenblocks = 12;
 			QzDoom_setUseScreenLayer(true);
-		}
-		else
-		{
-			cachedScreenBlocks = screenblocks;
-			screenblocks = 12;
-			QzDoom_setUseScreenLayer(false);
 		}
 	}
 	else
@@ -2783,11 +2794,6 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 void VKOpenXRDeviceMode::TearDown() const
 {
 	StopHaptics();
-	if (cachedScreenBlocks != 0 && gamestate == GS_LEVEL && menuactive == MENU_Off && !paused)
-	{
-		screenblocks = cachedScreenBlocks;
-		cachedScreenBlocks = 0;
-	}
 }
 
 bool VKOpenXRDeviceMode::SubmitFrame() const
