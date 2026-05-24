@@ -53,6 +53,9 @@ public:
 	virtual bool AcquireXRSwapchain() const override;
 	virtual bool SubmitFrame() const override;
 	virtual void AdjustViewport(DFrameBuffer* screen) const override;
+	virtual void AdjustPlayerSprites(FRenderState& state, int hand = 0) const override;
+	virtual void UnAdjustPlayerSprites(FRenderState& state) const override;
+	virtual void DrawMountedHud(HWDrawInfo* di, FRenderState& state) const override;
 	virtual bool IsRenderingVirtualScreen() const override;
 	virtual bool RenderVirtualScreen() const override;
 	virtual void FinalizeEyeImage(VulkanRenderDevice* fb, int eyeIndex) const override;

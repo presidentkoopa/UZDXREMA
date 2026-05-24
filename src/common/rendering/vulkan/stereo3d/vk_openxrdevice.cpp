@@ -81,7 +81,12 @@ EXTERN_CVAR(Bool, vr_switch_sticks);
 EXTERN_CVAR(Bool, vr_secondary_button_mappings);
 EXTERN_CVAR(Bool, vr_teleport);
 EXTERN_CVAR(Float, vr_weaponRotate);
+EXTERN_CVAR(Float, vr_weaponScale);
 EXTERN_CVAR(Bool, vr_enable_haptics);
+EXTERN_CVAR(Float, vr_2dweaponScale);
+EXTERN_CVAR(Float, vr_2dweaponOffsetX);
+EXTERN_CVAR(Float, vr_2dweaponOffsetY);
+EXTERN_CVAR(Float, vr_2dweaponOffsetZ);
 EXTERN_CVAR(Int, screenblocks);
 EXTERN_CVAR(Float, vr_automap_stereo);
 EXTERN_CVAR(Float, vr_hud_stereo);
@@ -91,10 +96,18 @@ EXTERN_CVAR(Float, vr_automap_distance);
 EXTERN_CVAR(Float, vr_hud_distance);
 EXTERN_CVAR(Float, vr_automap_scale);
 EXTERN_CVAR(Float, vr_hud_scale);
+EXTERN_CVAR(Bool, vr_hud_mount);
+EXTERN_CVAR(Int, vr_hud_mount_pos);
+EXTERN_CVAR(Float, vr_hud_mount_scale);
 EXTERN_CVAR(Bool, vr_automap_fixed_roll);
 EXTERN_CVAR(Bool, vr_hud_fixed_roll);
 EXTERN_CVAR(Bool, vr_automap_fixed_pitch);
 EXTERN_CVAR(Bool, vr_hud_fixed_pitch);
+EXTERN_CVAR(Bool, vr_automap_mount);
+EXTERN_CVAR(Int, vr_automap_mount_pos);
+EXTERN_CVAR(Float, vr_automap_mount_scale);
+EXTERN_CVAR(Int, vr_automap_border);
+EXTERN_CVAR(Color, vr_automap_border_color);
 EXTERN_CVAR(Int, vr_desktop_view);
 EXTERN_CVAR(Bool, vr_swap_eyes);
 EXTERN_CVAR(Bool, vr_automap_use_hud);
@@ -3228,6 +3241,71 @@ void VKOpenXRDeviceMode::AdjustViewport(DFrameBuffer* screen) const
 	// here can distort/zoom the scene and break 2D overlay composition when the
 	// desktop resolution or scaling changes.
 	VRMode::AdjustViewport(screen);
+}
+
+void VKOpenXRDeviceMode::AdjustPlayerSprites(FRenderState& state, int hand) const
+{
+	if (GetWeaponTransform(&state.mModelMatrix, hand))
+	{
+		const float scale = 0.00125f * vr_weaponScale * vr_2dweaponScale;
+		state.mModelMatrix.scale(scale, -scale, scale);
+		state.mModelMatrix.translate(-viewwidth / 2, -viewheight * 3 / 4, 0.0f);
+
+		const float offsetFactor = 40.f;
+		state.mModelMatrix.translate(vr_2dweaponOffsetX * offsetFactor, -vr_2dweaponOffsetY * offsetFactor, vr_2dweaponOffsetZ * offsetFactor);
+	}
+	state.EnableModelMatrix(true);
+}
+
+void VKOpenXRDeviceMode::UnAdjustPlayerSprites(FRenderState& state) const
+{
+	state.EnableModelMatrix(false);
+}
+
+void VKOpenXRDeviceMode::DrawMountedHud(HWDrawInfo* di, FRenderState& state) const
+{
+	if (!VR_ShouldDrawMountedHud() || di == nullptr)
+	{
+		return;
+	}
+
+	auto& surface = GetVRHudSurface();
+	VSMatrix mountTransform;
+	if (!VR_GetMountedHudTransform(mountTransform))
+	{
+		return;
+	}
+
+	const float mountScale = automapactive ? vr_automap_mount_scale : vr_hud_mount_scale;
+	const float pixelUnit = mountScale * 0.002f;
+	const float baseWidth = (float)surface.GetWidth() * pixelUnit;
+	const float baseHeight = (float)surface.GetHeight() * pixelUnit;
+
+	auto savedMatrix = state.mModelMatrix;
+	state.mModelMatrix = mountTransform;
+	state.EnableModelMatrix(true);
+	di->DrawHudQuad(state, surface.GetGameTexture(),
+		baseWidth,
+		baseHeight,
+		0.f, 0.f,
+		(automapactive ? vr_automap_mount_pos : vr_hud_mount_pos) == 1,
+		automapactive);
+	if (automapactive && vr_automap_border > 0)
+	{
+		const PalEntry borderColor = (uint32_t)vr_automap_border_color;
+		float borderPadPx = (float)vr_automap_border;
+		if (borderPadPx < 1.0f) borderPadPx = 1.0f;
+		if (borderPadPx > 5.0f) borderPadPx = 5.0f;
+		borderPadPx *= 5.0f;
+		const float borderPadX = pixelUnit * borderPadPx;
+		const float borderPadY = pixelUnit * borderPadPx;
+		di->DrawVRHudBorder(state, baseWidth + (borderPadX * 2.0f), borderPadY, borderColor, 0.f, (baseHeight * 0.5f) + (borderPadY * 0.5f));
+		di->DrawVRHudBorder(state, baseWidth + (borderPadX * 2.0f), borderPadY, borderColor, 0.f, -((baseHeight * 0.5f) + (borderPadY * 0.5f)));
+		di->DrawVRHudBorder(state, borderPadX, baseHeight, borderColor, -((baseWidth * 0.5f) + (borderPadX * 0.5f)), 0.f);
+		di->DrawVRHudBorder(state, borderPadX, baseHeight, borderColor, (baseWidth * 0.5f) + (borderPadX * 0.5f), 0.f);
+	}
+	state.mModelMatrix = savedMatrix;
+	state.EnableModelMatrix(false);
 }
 
 bool VKOpenXRDeviceMode::IsRenderingVirtualScreen() const
