@@ -143,6 +143,9 @@ void QzDoom_GetScreenRes(uint32_t *width, uint32_t *height);
 extern bool weaponStabilised;
 
 VRHudSurface& GetVRHudSurface();
+void VR_DestroyHudSurface();
 void VR_EnsureHudSurface(int width, int height);
+void VR_InitPortableHudBinding();
+bool VR_UsePortableHud();
 bool VR_ShouldDrawMountedHud();
 bool VR_GetMountedHudTransform(VSMatrix& out);

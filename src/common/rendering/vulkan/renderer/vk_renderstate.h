@@ -74,6 +74,7 @@ protected:
 	VkPipelineKey mPipelineKey = {};
 	VkRenderPassSetup *mPassSetup = nullptr;
 	int mClearTargets = 0;
+	float mQueuedClearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 	bool mNeedApply = true;
 
 	int mScissorX = 0, mScissorY = 0, mScissorWidth = -1, mScissorHeight = -1;

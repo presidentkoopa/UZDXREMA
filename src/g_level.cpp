@@ -78,6 +78,7 @@
 #include "vm.h"
 #include "events.h"
 #include "i_music.h"
+#include "hw_vrmodes.h"
 #include "a_dynlight.h"
 #include "p_conversation.h"
 #include "p_effect.h"
@@ -565,6 +566,10 @@ void G_InitNew (const char *mapname, bool bTitleLevel)
 	// did we have any level before?
 	if (primaryLevel->info != nullptr)
 		staticEventManager.WorldUnloaded(FString());	// [MK] don't pass the new map, as it's not a level transition
+
+	// Portable HUD surfaces are rebuilt on demand. Destroy the old canvas here
+	// so the next map starts from a clean slate instead of reusing stale 2D state.
+	VR_DestroyHudSurface();
 
 	UnlatchCVars ();
 	if (!savegamerestore)

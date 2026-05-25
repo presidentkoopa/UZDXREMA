@@ -906,6 +906,7 @@ OptionMenu "OtherControlsMenu" protected
 
 	StaticText ""
 	Control    "Toggle Cinema Mode"        , "cinemamode"
+	Control    "Toggle Portable HUD"       , "portablehud"
 	Control    "$CNTRLMNU_AUTOMAP"         , "togglemap"
 
 	StaticText ""

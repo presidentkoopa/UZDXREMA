@@ -70,7 +70,15 @@ void Draw2D(F2DDrawer* drawer, FRenderState& state, int x, int y, int width, int
 		GetVRHudSurface().IsValid() &&
 		(drawer == &GetVRHudSurface().GetCanvas()->Drawer);
 	const bool isVirtualScreenPass = vrmode->IsVR() && vrmode->IsRenderingVirtualScreen();
-	if (!isVRHudCanvas)
+	if (isVRHudCanvas)
+	{
+		// Mounted HUD/automap canvas must always define its own viewport + 2D
+		// projection, otherwise it inherits the active eye viewport and only a
+		// sub-rect gets rendered into the texture.
+		state.SetViewport(x, y, width, height);
+		screen->mViewpoints->Set2D(state, drawer->GetWidth(), drawer->GetHeight());
+	}
+	else
 	{
 		state.SetViewport(x, y, width, height);
 		// Match the OpenGL VR path: regular HUD/menu rendering keeps the

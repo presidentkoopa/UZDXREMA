@@ -134,7 +134,21 @@ void VkRenderState::EnableClipDistance(int num, bool state)
 
 void VkRenderState::Clear(int targets)
 {
-	mClearTargets = targets;
+	if (targets & CT_Color)
+	{
+		// Snapshot the color clear value now. Vulkan performs attachment clears
+		// when the next render pass begins, so callers may legitimately restore
+		// screen->mSceneClearColor immediately after requesting a clear.
+		mQueuedClearColor[0] = screen->mSceneClearColor[0];
+		mQueuedClearColor[1] = screen->mSceneClearColor[1];
+		mQueuedClearColor[2] = screen->mSceneClearColor[2];
+		mQueuedClearColor[3] = screen->mSceneClearColor[3];
+	}
+
+	// Multiple clear requests can be queued before the next render pass begins
+	// (e.g. translucent HUD canvas requests CT_Color, then Draw2D requests
+	// CT_Stencil). Keep all requested bits so earlier clears are not lost.
+	mClearTargets |= targets;
 	EndRenderPass();
 }
 
@@ -373,7 +387,12 @@ void VkRenderState::ApplyPushConstants()
 
 	int tempTM = TM_NORMAL;
 	if (mMaterial.mMaterial && mMaterial.mMaterial->Source()->isHardwareCanvas())
-		tempTM = TM_OPAQUE;
+	{
+		// Match GL behavior: only force opaque for fully-opaque canvas textures.
+		// Translucent UI canvases (VR HUD surface) must preserve alpha.
+		auto* canvasTex = static_cast<FCanvasTexture*>(mMaterial.mMaterial->Source()->GetTexture());
+		tempTM = (canvasTex && canvasTex->bTranslucentCanvas) ? TM_NORMAL : TM_OPAQUE;
+	}
 
 	mPushConstants.uFogEnabled = fogset;
 	mPushConstants.uTextureMode = GetTextureModeAndFlags(tempTM);
@@ -566,7 +585,7 @@ void VkRenderState::BeginRenderPass(VulkanCommandBuffer *cmdbuffer)
 	beginInfo.RenderPass(mPassSetup->GetRenderPass(mClearTargets));
 	beginInfo.RenderArea(0, 0, mRenderTarget.Width, mRenderTarget.Height);
 	beginInfo.Framebuffer(framebuffer.get());
-	beginInfo.AddClearColor(screen->mSceneClearColor[0], screen->mSceneClearColor[1], screen->mSceneClearColor[2], screen->mSceneClearColor[3]);
+	beginInfo.AddClearColor(mQueuedClearColor[0], mQueuedClearColor[1], mQueuedClearColor[2], mQueuedClearColor[3]);
 	if (key.DrawBuffers > 1)
 		beginInfo.AddClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 	if (key.DrawBuffers > 2)

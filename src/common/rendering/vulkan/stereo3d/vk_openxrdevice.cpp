@@ -1182,6 +1182,12 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	{
 		return fail();
 	}
+	// Some runtimes expose the loader DLL but do not support Vulkan OpenXR.
+	if (!HasOpenXRExtension(XR_KHR_VULKAN_ENABLE_EXTENSION_NAME))
+	{
+		Printf("OpenXR: runtime does not advertise %s, skipping OpenXR initialization.\n", XR_KHR_VULKAN_ENABLE_EXTENSION_NAME);
+		return fail();
+	}
 
 
 	std::vector<const char*> extensions = {

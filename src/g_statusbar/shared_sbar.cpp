@@ -95,6 +95,7 @@ CVAR(Bool, log_vgafont, false, CVAR_ARCHIVE)
 CVAR(Bool, hud_oldscale, true, CVAR_ARCHIVE)
 
 DBaseStatusBar *StatusBar;
+bool gPortableHudCanvasRender = false;
 
 extern int setblocks;
 
@@ -927,6 +928,11 @@ void DBaseStatusBar::RefreshViewBorder ()
 
 void DBaseStatusBar::RefreshBackground () const
 {
+	if (gPortableHudCanvasRender)
+	{
+		return;
+	}
+
 	int x, x2, y;
 
 	float ratio = ActiveRatio (twod->GetWidth(), twod->GetHeight());
@@ -1071,7 +1077,7 @@ void DBaseStatusBar::Draw (EHudState state, double ticFrac)
 	if (state == HUD_AltHud)
 		return;
 
-	if (state == HUD_StatusBar)
+	if (state == HUD_StatusBar && !gPortableHudCanvasRender)
 	{
 		RefreshBackground ();
 	}

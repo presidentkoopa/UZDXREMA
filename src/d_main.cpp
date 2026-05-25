@@ -955,13 +955,27 @@ static void DrawVRHudDebugBorder(int width, int height)
 
 static void DrawHudToSurface(const FRenderViewpoint& vp)
 {
-	if ((!vr_hud_mount && !vr_automap_mount) || hud_toggled || StatusBar == nullptr)
+	// The portable HUD surface is not safe to refresh while a level transition
+	// or new-game load is in flight. The status bar/background textures can be
+	// torn down and rebuilt during those actions, so skip one frame instead of
+	// drawing into a half-reset canvas.
+	switch (gameaction)
+	{
+	case ga_nothing:
+	case ga_fullconsole:
+		break;
+	default:
+		return;
+	}
+
+	const bool portableHud = VR_UsePortableHud();
+	if ((!portableHud && !vr_hud_mount && !vr_automap_mount) || hud_toggled || StatusBar == nullptr)
 	{
 		return;
 	}
 
 	// If the automap is not mounted, keep the regular automap/HUD screen path untouched.
-	if (automapactive && !vr_automap_mount)
+	if (automapactive && !portableHud && !vr_automap_mount)
 	{
 		return;
 	}
@@ -988,6 +1002,13 @@ static void DrawHudToSurface(const FRenderViewpoint& vp)
 	}
 
 	mutableSurface.BeginUpdate();
+	struct PortableHudCanvasGuard
+	{
+		bool& flag;
+		explicit PortableHudCanvasGuard(bool& inFlag) : flag(inFlag) { flag = true; }
+		~PortableHudCanvasGuard() { flag = false; }
+	};
+	PortableHudCanvasGuard portableHudGuard(gPortableHudCanvasRender);
 	auto* savedtwod = twod;
 	twod = &hudCanvas->Drawer;
 	twod->Begin(hudWidth, hudHeight);
@@ -1027,7 +1048,7 @@ static void DrawHudToSurface(const FRenderViewpoint& vp)
 	// Force the status bar to update its internal scaling for the current twod
 	StatusBar->CallScreenSizeChanged();
 
-	if (automapactive && vr_automap_mount)
+	if (automapactive && (portableHud || vr_automap_mount))
 	{
 		// Draw the full automap stack to the surface.
 		twod->ClearClipRect();
@@ -1046,7 +1067,7 @@ static void DrawHudToSurface(const FRenderViewpoint& vp)
 	}
 	else if (saved_vh == saved_sh && (viewactive || automapactive) && saved_sb > 10)
 	{
-		EHudState state = (DrawFSHUD || automapactive) ? HUD_Fullscreen : HUD_None;
+		EHudState state = portableHud ? HUD_StatusBar : ((DrawFSHUD || automapactive) ? HUD_Fullscreen : HUD_None);
 		if (state == HUD_None) StatusBar->RefreshBackground();
 		StatusBar->DrawBottomStuff(state);
 		StatusBar->CallDraw(state, vp.TicFrac);
@@ -1054,14 +1075,23 @@ static void DrawHudToSurface(const FRenderViewpoint& vp)
 	}
 	else
 	{
-		StatusBar->RefreshBackground();
-		if (!automapactive || viewactive)
+		if (portableHud)
 		{
-			StatusBar->RefreshViewBorder();
+			StatusBar->DrawBottomStuff(HUD_StatusBar);
+			StatusBar->CallDraw(HUD_StatusBar, vp.TicFrac);
+			StatusBar->DrawTopStuff(HUD_StatusBar);
 		}
-		StatusBar->DrawBottomStuff(HUD_StatusBar);
-		StatusBar->CallDraw(HUD_StatusBar, vp.TicFrac);
-		StatusBar->DrawTopStuff(HUD_StatusBar);
+		else
+		{
+			StatusBar->RefreshBackground();
+			if (!automapactive || viewactive)
+			{
+				StatusBar->RefreshViewBorder();
+			}
+			StatusBar->DrawBottomStuff(HUD_StatusBar);
+			StatusBar->CallDraw(HUD_StatusBar, vp.TicFrac);
+			StatusBar->DrawTopStuff(HUD_StatusBar);
+		}
 	}
 	DrawVRHudDebugBorder(hudWidth, hudHeight);
 
@@ -1236,9 +1266,10 @@ void D_Display ()
 			}
 
 			// Keep HUD and automap toggles independent.
-			const bool drawMountedHud = vr_hud_mount && !menuactive && ConsoleState == c_up && !automapactive;
-			const bool drawMountedMap = vr_automap_mount && automapactive && !menuactive && ConsoleState == c_up;
-			const bool drawFaceMap = automapactive && !drawMountedMap;
+			const bool portableHud = VR_UsePortableHud();
+			const bool drawMountedHud = !menuactive && ConsoleState == c_up && !automapactive && (portableHud || vr_hud_mount);
+			const bool drawMountedMap = !menuactive && ConsoleState == c_up && automapactive && (portableHud || vr_automap_mount);
+			const bool drawFaceMap = automapactive && !drawMountedMap && !portableHud;
 			const bool drawFaceHud = (!drawMountedHud && !drawMountedMap) || drawFaceMap;
 
 			if (drawMountedMap)
@@ -1314,7 +1345,7 @@ void D_Display ()
 	}
 	if (!hud_toggled)
 	{
-		if (!vr_hud_mount || automapactive || menuactive || ConsoleState != c_up)
+		if ((!VR_UsePortableHud() && !vr_hud_mount) || automapactive || menuactive || ConsoleState != c_up)
 		{
 			CT_Drawer ();
 		}
@@ -3560,7 +3591,8 @@ static int D_InitGame(const FIWADInfo* iwad_info, std::vector<std::string>& allw
 
 	// Base systems have been inited; enable cvar callbacks
 	FBaseCVar::EnableCallbacks ();
-	
+	VR_InitPortableHudBinding();
+
 	// +compatmode cannot be used on the command line, so use this as a substitute
 	auto compatmodeval = Args->CheckValue("-compatmode");
 	if (compatmodeval)

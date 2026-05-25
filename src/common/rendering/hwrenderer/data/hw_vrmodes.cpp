@@ -76,6 +76,7 @@
 #include <algorithm>
 #include <functional>
 #include <thread>
+#include "c_dispatch.h"
 #include "c_console.h"
 #include "common/scripting/jit/jit.h"
 
@@ -101,6 +102,7 @@ EXTERN_CVAR(Float, vr_automap_mount_zoffset);
 EXTERN_CVAR(Float, vr_automap_mount_pitch);
 EXTERN_CVAR(Float, vr_automap_mount_yaw);
 EXTERN_CVAR(Bool, vr_automap_mount_roll);
+EXTERN_CVAR(Bool, portablehud);
 EXTERN_CVAR(Int, vr_mode);
 
 extern float weaponangles[3];
@@ -181,6 +183,11 @@ VRHudSurface& GetVRHudSurface()
 	return surface;
 }
 
+void VR_DestroyHudSurface()
+{
+	GetVRHudSurface().Clear();
+}
+
 void VR_EnsureHudSurface(int width, int height)
 {
 	GetVRHudSurface().EnsureSize(width, height);
@@ -188,7 +195,8 @@ void VR_EnsureHudSurface(int width, int height)
 
 bool VR_ShouldDrawMountedHud()
 {
-	if (!vr_hud_mount && !vr_automap_mount)
+	const bool portableHud = VR_UsePortableHud();
+	if (!portableHud && !vr_hud_mount && !vr_automap_mount)
 	{
 		return false;
 	}
@@ -200,8 +208,8 @@ bool VR_ShouldDrawMountedHud()
 	}
 
 	// [MR] Only draw if the respective feature is active
-	if (automapactive && !vr_automap_mount) return false;
-	if (!automapactive && !vr_hud_mount) return false;
+	if (automapactive && !portableHud && !vr_automap_mount) return false;
+	if (!automapactive && !portableHud && !vr_hud_mount) return false;
 
 	auto& surface = GetVRHudSurface();
 	return surface.HasGameTexture() && surface.GetWidth() > 0 && surface.GetHeight() > 0;
@@ -209,14 +217,15 @@ bool VR_ShouldDrawMountedHud()
 
 bool VR_GetMountedHudTransform(VSMatrix& out)
 {
-	if (!vr_hud_mount && !vr_automap_mount)
+	const bool portableHud = VR_UsePortableHud();
+	if (!portableHud && !vr_hud_mount && !vr_automap_mount)
 	{
 		return false;
 	}
 
 	VSMatrix mountTransform;
 	int mountedHand;
-	if (automapactive && vr_automap_mount)
+	if (automapactive && (portableHud || vr_automap_mount))
 	{
 		mountedHand = vr_automap_mount_pos == 0 ? VR_MAINHAND : VR_OFFHAND;
 		if (!VRMode::GetVRModeCached(true)->GetWeaponTransform(&mountTransform, mountedHand)) return false;
@@ -248,6 +257,11 @@ bool VR_GetMountedHudTransform(VSMatrix& out)
 	}
 	out = mountTransform;
 	return true;
+}
+
+bool VR_UsePortableHud()
+{
+	return portablehud;
 }
 
 const VRMode *VRMode::GetVRModeCached(bool toscreen)
@@ -398,6 +412,9 @@ CVAR(Float, vr_hud_mount_scale, 0.15f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_hud_mount_pitch, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_hud_mount_yaw, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_hud_mount_roll, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// Runtime override that forces the mounted HUD/automap path on without
+// changing the individual menu toggles.
+CVAR(Bool, portablehud, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 //AutoMap control
 CVAR(Bool, vr_automap_use_hud, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -418,6 +435,19 @@ CVAR(Float, vr_automap_mount_yaw, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_automap_mount_roll, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, vr_automap_border, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Color, vr_automap_border_color, 0x636363, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+CCMD(toggleportablehud)
+{
+	portablehud = !portablehud;
+	Printf("portablehud %s\n", portablehud ? "enabled" : "disabled");
+}
+
+void VR_InitPortableHudBinding()
+{
+	// Allow the menu/keybind entry named "portablehud" to invoke the toggle
+	// path instead of only querying the boolean cvar.
+	C_SetAlias("portablehud", "toggleportablehud");
+}
 
 
 CVARD(Bool, vr_override_weap_pos, false, 0, "Only used for testing VR environment on PC");

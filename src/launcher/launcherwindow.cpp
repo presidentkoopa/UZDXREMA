@@ -3,6 +3,7 @@
 #include "launcherbuttonbar.h"
 #include "playgamepage.h"
 #include "settingspage.h"
+#include "m_misc.h"
 #include "v_video.h"
 #include "version.h"
 #include "i_interface.h"
@@ -55,6 +56,9 @@ LauncherWindow::LauncherWindow(WadStuff* wads, int numwads, int defaultiwad, int
 void LauncherWindow::Start()
 {
 	Settings->Save();
+	// Persist the chosen startup CVars before handing control to the game so
+	// a startup crash cannot lose the last backend / VR selections.
+	M_SaveDefaults(nullptr);
 
 	ExecResult = PlayGame->GetSelectedGame();
 	DisplayWindow::ExitLoop();
