@@ -1239,6 +1239,20 @@ F2DVertexBuffer::F2DVertexBuffer()
 
 TArray<FCanvas*> AllCanvases;
 
+void FCanvas::OnDestroy()
+{
+	if (Tex != nullptr && Tex->Canvas == this)
+	{
+		Tex->Canvas = nullptr;
+	}
+	Tex = nullptr;
+	auto idx = AllCanvases.Find(this);
+	if (idx != -1)
+	{
+		AllCanvases.Delete(idx);
+	}
+}
+
 class InitTextureCanvasGC
 {
 public:
@@ -1250,6 +1264,7 @@ public:
 			});
 	}
 };
+static InitTextureCanvasGC InitCanvasGC;
 
 FCanvas* GetTextureCanvas(const FString& texturename)
 {
@@ -1263,8 +1278,6 @@ FCanvas* GetTextureCanvas(const FString& texturename)
 			FCanvasTexture* canvasTex = static_cast<FCanvasTexture*>(tex->GetTexture());
 			if (!canvasTex->Canvas)
 			{
-				static InitTextureCanvasGC initCanvasGC; // Does the common code have a natural init function this could be moved to?
-
 				canvasTex->Canvas = Create<FCanvas>();
 				canvasTex->Canvas->Tex = canvasTex;
 				canvasTex->Canvas->Drawer.SetSize(tex->GetTexelWidth(), tex->GetTexelHeight());

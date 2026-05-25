@@ -66,9 +66,11 @@ void Draw2D(F2DDrawer* drawer, FRenderState& state, int x, int y, int width, int
 	auto vrmode = VRMode::GetVRModeCached(true);
 	// In vr mode viewport setting and color swaping is already done in FGLRenderer::Flush()
 	// However, for the texture-mounted HUD, we MUST set the viewport and 2D matrix for the eye-specific resolution of the hud surface.
+	auto* vrHudCanvas = GetVRHudSurface().GetCanvas();
 	const bool isVRHudCanvas = vrmode->IsVR() &&
 		GetVRHudSurface().IsValid() &&
-		(drawer == &GetVRHudSurface().GetCanvas()->Drawer);
+		(vrHudCanvas != nullptr) &&
+		(drawer == &vrHudCanvas->Drawer);
 	const bool isVirtualScreenPass = vrmode->IsVR() && vrmode->IsRenderingVirtualScreen();
 	if (isVRHudCanvas)
 	{

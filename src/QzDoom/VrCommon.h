@@ -47,6 +47,7 @@ extern bool trigger_teleport;
 
 //Called from engine code
 void QzDoom_setUseScreenLayer(bool use);
+bool VR_UseScreenLayer();
 void QzDoom_Restart();
 
 

@@ -69,6 +69,7 @@
 #include "gl/stereo3d/gl_openvr.h"
 #include "gl/stereo3d/gl_openxrdevice.h"
 #include "vulkan/stereo3d/vk_openxrdevice.h"
+#include <QzDoom/VrCommon.h>
 
 #include "textures.h"
 #include "gametexture.h"
@@ -108,6 +109,9 @@ EXTERN_CVAR(Int, vr_mode);
 extern float weaponangles[3];
 extern float offhandangles[3];
 
+static int gSuppressMountedHudFrames = 0;
+static uint64_t gSuppressMountedHudLastFrameTime = 0;
+
 VRHudSurface::VRHudSurface() = default;
 
 VRHudSurface::~VRHudSurface()
@@ -119,6 +123,10 @@ void VRHudSurface::Clear()
 {
 	if (Canvas != nullptr)
 	{
+		if (Texture != nullptr && Texture->Canvas == Canvas)
+		{
+			Texture->Canvas = nullptr;
+		}
 		Canvas->Tex = nullptr;
 		auto idx = AllCanvases.Find(Canvas);
 		if (idx != -1)
@@ -131,13 +139,26 @@ void VRHudSurface::Clear()
 	Texture = nullptr;
 }
 
+bool VRHudSurface::IsCanvasLive() const
+{
+	if (Texture == nullptr || Canvas == nullptr)
+	{
+		return false;
+	}
+	if (Texture->Canvas != Canvas || Canvas->Tex != Texture)
+	{
+		return false;
+	}
+	return AllCanvases.Find(Canvas) != -1;
+}
+
 void VRHudSurface::EnsureSize(int width, int height)
 {
 	if (width <= 0 || height <= 0)
 	{
 		return;
 	}
-	if (Texture && Texture->GetWidth() == width && Texture->GetHeight() == height)
+	if (Texture && Texture->GetWidth() == width && Texture->GetHeight() == height && IsCanvasLive())
 	{
 		return;
 	}
@@ -193,8 +214,26 @@ void VR_EnsureHudSurface(int width, int height)
 	GetVRHudSurface().EnsureSize(width, height);
 }
 
+void VR_SuppressMountedHudForFrames(int frames)
+{
+	if (frames > gSuppressMountedHudFrames)
+	{
+		gSuppressMountedHudFrames = frames;
+	}
+}
+
 bool VR_ShouldDrawMountedHud()
 {
+	if (gSuppressMountedHudFrames > 0 && screen != nullptr)
+	{
+		if (gSuppressMountedHudLastFrameTime != screen->FrameTime)
+		{
+			gSuppressMountedHudLastFrameTime = screen->FrameTime;
+			gSuppressMountedHudFrames--;
+		}
+		return false;
+	}
+
 	const bool portableHud = VR_UsePortableHud();
 	if (!portableHud && !vr_hud_mount && !vr_automap_mount)
 	{
@@ -261,7 +300,9 @@ bool VR_GetMountedHudTransform(VSMatrix& out)
 
 bool VR_UsePortableHud()
 {
-	return portablehud;
+	// Portable HUD is world-space only. While virtual screen/screen-layer mode
+	// is active, use the normal screen composition path and skip the portable pass.
+	return portablehud && !VR_UseScreenLayer();
 }
 
 const VRMode *VRMode::GetVRModeCached(bool toscreen)

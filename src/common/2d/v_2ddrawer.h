@@ -285,6 +285,8 @@ class FCanvas : public DObject
 public:
 	F2DDrawer Drawer;
 	FCanvasTexture* Tex = nullptr;
+
+	void OnDestroy() override;
 };
 
 struct DShape2DBufferInfo : RefCountedBase

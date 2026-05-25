@@ -47,6 +47,7 @@ struct VRHudSurface
 	void BeginUpdate();
 	void EndUpdate();
 	void MarkDirty();
+	bool IsCanvasLive() const;
 	bool IsValid() const { return Texture != nullptr; }
 	bool HasGameTexture() const { return GameTexture != nullptr; }
 	int GetWidth() const { return Texture != nullptr ? Texture->GetWidth() : 0; }
@@ -148,4 +149,5 @@ void VR_EnsureHudSurface(int width, int height);
 void VR_InitPortableHudBinding();
 bool VR_UsePortableHud();
 bool VR_ShouldDrawMountedHud();
+void VR_SuppressMountedHudForFrames(int frames);
 bool VR_GetMountedHudTransform(VSMatrix& out);

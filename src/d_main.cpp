@@ -955,16 +955,38 @@ static void DrawVRHudDebugBorder(int width, int height)
 
 static void DrawHudToSurface(const FRenderViewpoint& vp)
 {
-	// The portable HUD surface is not safe to refresh while a level transition
-	// or new-game load is in flight. The status bar/background textures can be
-	// torn down and rebuilt during those actions, so skip one frame instead of
-	// drawing into a half-reset canvas.
-	switch (gameaction)
+	// Transition/intermission -> map handoff can leave status bar texture refs
+	// briefly unstable. Keep portable HUD draw disabled for a short cooldown
+	// window after any unstable state is detected.
+	static int portableHudCooldownTics = 0;
+	static bool lastPortableSurfaceAutomap = false;
+	static bool lastPortableSurfaceModeValid = false;
+
+	// Never route portable HUD drawing through the status bar while the virtual
+	// screen layer owns composition.
+	if (VR_UseScreenLayer())
 	{
-	case ga_nothing:
-	case ga_fullconsole:
-		break;
-	default:
+		portableHudCooldownTics = 0;
+		return;
+	}
+
+	const bool unstableAction = (gameaction != ga_nothing && gameaction != ga_fullconsole);
+	const bool unstableState = unstableAction || setsizeneeded || gamestate == GS_INTERMISSION;
+	if (unstableState)
+	{
+		portableHudCooldownTics = 35;
+		return;
+	}
+
+	if (primaryLevel != nullptr && primaryLevel->maptime < 8)
+	{
+		portableHudCooldownTics = 35;
+		return;
+	}
+
+	if (portableHudCooldownTics > 0)
+	{
+		--portableHudCooldownTics;
 		return;
 	}
 
@@ -973,7 +995,6 @@ static void DrawHudToSurface(const FRenderViewpoint& vp)
 	{
 		return;
 	}
-
 	// If the automap is not mounted, keep the regular automap/HUD screen path untouched.
 	if (automapactive && !portableHud && !vr_automap_mount)
 	{
@@ -988,18 +1009,49 @@ static void DrawHudToSurface(const FRenderViewpoint& vp)
 
 	auto& surface = GetVRHudSurface();
 	auto& mutableSurface = const_cast<VRHudSurface&>(surface);
-	auto* hudTexture = surface.GetTexture();
-	auto* hudCanvas = surface.GetCanvas();
-	if (!surface.IsValid() || hudCanvas == nullptr || hudTexture == nullptr)
+	if (!surface.IsValid())
 	{
 		return;
 	}
-	const int hudWidth = surface.GetWidth();
-	const int hudHeight = surface.GetHeight();
+	int hudWidth = surface.GetWidth();
+	int hudHeight = surface.GetHeight();
 	if (hudWidth <= 0 || hudHeight <= 0)
 	{
 		return;
 	}
+	if (!surface.IsCanvasLive())
+	{
+		mutableSurface.EnsureSize(hudWidth, hudHeight);
+		hudWidth = surface.GetWidth();
+		hudHeight = surface.GetHeight();
+	}
+	auto* hudTexture = surface.GetTexture();
+	auto* hudCanvas = surface.GetCanvas();
+	if (!surface.IsCanvasLive() || hudCanvas == nullptr || hudTexture == nullptr)
+	{
+		lastPortableSurfaceModeValid = false;
+		return;
+	}
+	const bool renderAutomapToPortableSurface = automapactive && (portableHud || vr_automap_mount);
+	if (lastPortableSurfaceModeValid && renderAutomapToPortableSurface != lastPortableSurfaceAutomap)
+	{
+		// Automap<->HUD handoff can briefly present the previous texture for one
+		// frame. Force a clear-only update first and suppress mounted HUD once
+		// so the stale texture is never presented.
+		VR_SuppressMountedHudForFrames(1);
+		mutableSurface.BeginUpdate();
+		auto* savedtwod = twod;
+		twod = &hudCanvas->Drawer;
+		twod->Begin(hudWidth, hudHeight);
+		twod->End();
+		twod = savedtwod;
+		mutableSurface.EndUpdate();
+		lastPortableSurfaceAutomap = renderAutomapToPortableSurface;
+		lastPortableSurfaceModeValid = true;
+		return;
+	}
+	lastPortableSurfaceAutomap = renderAutomapToPortableSurface;
+	lastPortableSurfaceModeValid = true;
 
 	mutableSurface.BeginUpdate();
 	struct PortableHudCanvasGuard
@@ -1048,7 +1100,7 @@ static void DrawHudToSurface(const FRenderViewpoint& vp)
 	// Force the status bar to update its internal scaling for the current twod
 	StatusBar->CallScreenSizeChanged();
 
-	if (automapactive && (portableHud || vr_automap_mount))
+	if (renderAutomapToPortableSurface)
 	{
 		// Draw the full automap stack to the surface.
 		twod->ClearClipRect();
@@ -1093,6 +1145,10 @@ static void DrawHudToSurface(const FRenderViewpoint& vp)
 			StatusBar->DrawTopStuff(HUD_StatusBar);
 		}
 	}
+	// Keep debug border drawing off the portable HUD surface path. It is a
+	// diagnostic overlay and can trigger additional 2D allocations in exactly
+	// the transition window we're trying to keep stable. At this point we've
+	// already passed transition guards and canvas-liveness checks, so this is safe.
 	DrawVRHudDebugBorder(hudWidth, hudHeight);
 
 	viewwidth = saved_vw;
