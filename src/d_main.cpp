@@ -929,7 +929,11 @@ static void DrawVersionString ()
 static void DrawOverlays()
 {
 	NetUpdate ();
-	C_DrawConsole ();
+	const bool drawConsoleOnPortableHud = (gamestate == GS_LEVEL && ConsoleState == c_up && VR_UsePortableHud());
+	if (!drawConsoleOnPortableHud)
+	{
+		C_DrawConsole ();
+	}
 	M_Drawer ();
 	DrawRateStuff();
 	DrawVersionString();
@@ -1145,10 +1149,7 @@ static void DrawHudToSurface(const FRenderViewpoint& vp)
 			StatusBar->DrawTopStuff(HUD_StatusBar);
 		}
 	}
-	// Keep debug border drawing off the portable HUD surface path. It is a
-	// diagnostic overlay and can trigger additional 2D allocations in exactly
-	// the transition window we're trying to keep stable. At this point we've
-	// already passed transition guards and canvas-liveness checks, so this is safe.
+	C_DrawConsole();
 	DrawVRHudDebugBorder(hudWidth, hudHeight);
 
 	viewwidth = saved_vw;
