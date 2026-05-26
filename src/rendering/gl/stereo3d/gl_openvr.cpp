@@ -2174,6 +2174,8 @@ namespace s3d
 				(pDominantTrackedRemoteOld->ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Grip)) : false;
 		bool dominantGripPushedNew = vr_secondary_button_mappings ?
 				(pDominantTrackedRemoteNew->ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Grip)) : false;
+		static float analogTurnRateDegPerSec = 0.0f;
+		static uint64_t lastAnalogTurnTime = 0;
 
 		VRControllerState_t *pPrimaryTrackedRemoteNew, *pPrimaryTrackedRemoteOld,  *pSecondaryTrackedRemoteNew, *pSecondaryTrackedRemoteOld;
 		if (vr_switch_sticks)
@@ -2364,12 +2366,31 @@ namespace s3d
 				static int increaseSnap = true;
 				static int decreaseSnap = true;
 
-				float joy = -I_OpenVRGetYaw();
-				if (vr_snapTurn <= 10.0f && abs(joy) > 0.05f)
+				const uint64_t currentTime = I_msTime();
+				if (lastAnalogTurnTime == 0)
 				{
-					increaseSnap = false;
-					decreaseSnap = false;
-					snapTurn -= vr_snapTurn * nonLinearFilter(joy);
+					lastAnalogTurnTime = currentTime;
+				}
+				float deltaSeconds = float(currentTime - lastAnalogTurnTime) * 0.001f;
+				if (deltaSeconds > 0.1f)
+				{
+					deltaSeconds = 0.1f;
+				}
+				lastAnalogTurnTime = currentTime;
+
+				float joy = -I_OpenVRGetYaw();
+				if (vr_snapTurn <= 10.0f)
+				{
+					snapTurn += VR_ApplyAnalogSmoothTurn(joy, 210.0f, deltaSeconds, VR_GetAnalogTurnResponseScale(vr_snapTurn), analogTurnRateDegPerSec);
+					if (fabsf(joy) > 0.05f)
+					{
+						increaseSnap = false;
+						decreaseSnap = false;
+					}
+					else
+					{
+						analogTurnRateDegPerSec = 0.0f;
+					}
 				}
 
 				// Turning logic
@@ -2399,6 +2420,11 @@ namespace s3d
 				else if (snapTurn > 180.0f) {
 					snapTurn -= 360.f;
 				}
+			}
+			else
+			{
+				analogTurnRateDegPerSec = 0.0f;
+				lastAnalogTurnTime = 0;
 			}
 
 			//Menu button - invoke menu

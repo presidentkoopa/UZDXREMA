@@ -849,6 +849,52 @@ float nonLinearFilter(float in)
     return val;
 }
 
+float VR_GetAnalogTurnResponseScale(float smoothTurnSetting)
+{
+    const float clamped = clamp(smoothTurnSetting, 0.0f, 10.0f);
+
+    if (clamped <= 0.0f)
+    {
+        return 15.0f;
+    }
+
+    return 1.0f + (10.0f - clamped);
+}
+
+float VR_ApplyAnalogSmoothTurn(float turnAxis, float maxTurnRateDegPerSec, float deltaSeconds, float responseScale, float& currentTurnRateDegPerSec)
+{
+    constexpr float analogTurnDeadzone = 0.10f;
+    constexpr float analogTurnResponse = 8.0f;
+
+    if (deltaSeconds < 0.0f)
+    {
+        deltaSeconds = 0.0f;
+    }
+
+    float targetTurnRate = 0.0f;
+    const float absTurnAxis = fabsf(turnAxis);
+    if (absTurnAxis > analogTurnDeadzone)
+    {
+        float t = (absTurnAxis - analogTurnDeadzone) / (1.0f - analogTurnDeadzone);
+        if (t < 0.0f)
+        {
+            t = 0.0f;
+        }
+        else if (t > 1.0f)
+        {
+            t = 1.0f;
+        }
+
+        // Ease in and out so the turn starts gently, then ramps toward the cap.
+        const float eased = t * t * (3.0f - 2.0f * t);
+        targetTurnRate = (turnAxis > 0.0f ? -1.0f : 1.0f) * maxTurnRateDegPerSec * eased;
+    }
+
+    const float response = 1.0f - expf(-analogTurnResponse * responseScale * deltaSeconds);
+    currentTurnRateDegPerSec += (targetTurnRate - currentTurnRateDegPerSec) * response;
+    return currentTurnRateDegPerSec * deltaSeconds;
+}
+
 bool between(float min, float val, float max)
 {
     return (min < val) && (val < max);

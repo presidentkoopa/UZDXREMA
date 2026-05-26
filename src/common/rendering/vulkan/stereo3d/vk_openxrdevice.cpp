@@ -2562,14 +2562,18 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 
 	const bool dominantGripModifierNew = *vr_secondary_button_mappings && handInput[mainHand].grip;
 	const bool dominantGripModifierOld = *vr_secondary_button_mappings && xrLastGripState[mainHand];
+	static float analogTurnRateDegPerSec = 0.0f;
+	static uint64_t lastAnalogTurnTime = 0;
 
-		if (gameplayMode && *vr_snapTurn > 0.0f)
+		if (gameplayMode)
 		{
 			static bool turnRightLatched[2] = { false, false };
 			static bool turnLeftLatched[2] = { false, false };
 
 			if (dominantGripModifierNew)
 			{
+				analogTurnRateDegPerSec = 0.0f;
+				lastAnalogTurnTime = 0;
 				turnRightLatched[mainHand] = false;
 				turnLeftLatched[mainHand] = false;
 			}
@@ -2579,17 +2583,34 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 					? handInput[turnHand].trackpad
 					: handInput[turnHand].thumbstick;
 				const float turnX = rightTurnState.x;
+				const uint64_t currentTime = I_msTime();
+				if (lastAnalogTurnTime == 0)
+				{
+					lastAnalogTurnTime = currentTime;
+				}
+				float deltaSeconds = float(currentTime - lastAnalogTurnTime) * 0.001f;
+				if (deltaSeconds > 0.1f)
+				{
+					deltaSeconds = 0.1f;
+				}
+				lastAnalogTurnTime = currentTime;
 
 				if (*vr_snapTurn <= 10.0f)
 				{
+					snapTurn += VR_ApplyAnalogSmoothTurn(turnX, 210.0f, deltaSeconds, VR_GetAnalogTurnResponseScale(*vr_snapTurn), analogTurnRateDegPerSec);
 					if (fabsf(turnX) > 0.05f)
 					{
-						snapTurn -= *vr_snapTurn * turnX;
-						resetDoomYaw = true;
+						turnRightLatched[mainHand] = false;
+						turnLeftLatched[mainHand] = false;
+					}
+					else
+					{
+						analogTurnRateDegPerSec = 0.0f;
 					}
 				}
 				else
 				{
+					analogTurnRateDegPerSec = 0.0f;
 					if (turnX > 0.60f)
 					{
 						if (!turnRightLatched[mainHand])
@@ -2619,6 +2640,11 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 					}
 				}
 			}
+		}
+		else
+		{
+			analogTurnRateDegPerSec = 0.0f;
+			lastAnalogTurnTime = 0;
 		}
 
 	auto updateHandPose = [&](int hand, float* offset, float* angles)
