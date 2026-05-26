@@ -21,6 +21,7 @@
 #include "c_console.h"
 #include "d_eventbase.h"
 #include "d_gui.h"
+#include "menu.h"
 #include "p_trace.h"
 #include "p_linetracedata.h"
 #include "p_local.h"
@@ -119,6 +120,9 @@ EXTERN_CVAR(Float, vr_overlayscreen_vpos);
 EXTERN_CVAR(Int, vr_overlayscreen_bg);
 EXTERN_CVAR(Int, vr_control_scheme);
 EXTERN_CVAR(Bool, vr_two_handed_weapons);
+CVAR(Bool, vr_menu_pointer, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Color, vr_menu_pointer_color, 0xffffff, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Bool, vr_mouse_in_menu, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 
 namespace s3d {
 
@@ -225,6 +229,20 @@ static XrVector3f ScaleVector(const XrVector3f& v, float scale)
 	return { v.x * scale, v.y * scale, v.z * scale };
 }
 
+static float DotVector(const XrVector3f& a, const XrVector3f& b)
+{
+	return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+static XrVector3f CrossVector(const XrVector3f& a, const XrVector3f& b)
+{
+	return {
+		a.y * b.z - a.z * b.y,
+		a.z * b.x - a.x * b.z,
+		a.x * b.y - a.y * b.x
+	};
+}
+
 static XrQuaternionf MultiplyQuaternion(const XrQuaternionf& a, const XrQuaternionf& b)
 {
 	return {
@@ -238,6 +256,49 @@ static XrQuaternionf MultiplyQuaternion(const XrQuaternionf& a, const XrQuaterni
 static XrQuaternionf ConjugateQuaternion(const XrQuaternionf& q)
 {
 	return { -q.x, -q.y, -q.z, q.w };
+}
+
+static XrQuaternionf QuaternionFromBasis(const XrVector3f& xAxis, const XrVector3f& yAxis, const XrVector3f& zAxis)
+{
+	const float m00 = xAxis.x, m01 = yAxis.x, m02 = zAxis.x;
+	const float m10 = xAxis.y, m11 = yAxis.y, m12 = zAxis.y;
+	const float m20 = xAxis.z, m21 = yAxis.z, m22 = zAxis.z;
+
+	const float trace = m00 + m11 + m22;
+	XrQuaternionf q{};
+	if (trace > 0.0f)
+	{
+		const float s = std::sqrt(trace + 1.0f) * 2.0f;
+		q.w = 0.25f * s;
+		q.x = (m21 - m12) / s;
+		q.y = (m02 - m20) / s;
+		q.z = (m10 - m01) / s;
+	}
+	else if (m00 > m11 && m00 > m22)
+	{
+		const float s = std::sqrt(1.0f + m00 - m11 - m22) * 2.0f;
+		q.w = (m21 - m12) / s;
+		q.x = 0.25f * s;
+		q.y = (m01 + m10) / s;
+		q.z = (m02 + m20) / s;
+	}
+	else if (m11 > m22)
+	{
+		const float s = std::sqrt(1.0f + m11 - m00 - m22) * 2.0f;
+		q.w = (m02 - m20) / s;
+		q.x = (m01 + m10) / s;
+		q.y = 0.25f * s;
+		q.z = (m12 + m21) / s;
+	}
+	else
+	{
+		const float s = std::sqrt(1.0f + m22 - m00 - m11) * 2.0f;
+		q.w = (m10 - m01) / s;
+		q.x = (m02 + m20) / s;
+		q.y = (m12 + m21) / s;
+		q.z = 0.25f * s;
+	}
+	return q;
 }
 
 static XrQuaternionf MakeAxisAngleQuaternion(const XrVector3f& axis, float angleRadians)
@@ -319,8 +380,53 @@ static void GetStableOpenXRVirtualScreenSize(uint32_t& width, uint32_t& height)
 	// size. The OpenVR reference path uses a stable virtual-screen surface, and
 	// resizing this overlay to arbitrary desktop dimensions was triggering the
 	// freeze you observed once the resolution got large.
-	width = 960;
-	height = 720;
+	// width = 960;
+	// height = 720;
+
+	// Match the OpenVR-style behavior by tracking the active UI/render size,
+	// but keep hard safety bounds so we don't regress into runtime instability
+	// when users pick very large desktop/window dimensions.
+	constexpr uint32_t kFallbackW = 960;
+	constexpr uint32_t kFallbackH = 720;
+	constexpr uint32_t kMinW = 640;
+	constexpr uint32_t kMinH = 360;
+	constexpr uint32_t kMaxW = 2048;
+	constexpr uint32_t kMaxH = 2048;
+	constexpr uint64_t kMaxPixels = 2048ull * 1536ull; // keep below prior freeze-prone territory
+
+	uint32_t targetW = (screen != nullptr) ? (uint32_t)screen->GetWidth() : kFallbackW;
+	uint32_t targetH = (screen != nullptr) ? (uint32_t)screen->GetHeight() : kFallbackH;
+	if (targetW == 0 || targetH == 0)
+	{
+		targetW = kFallbackW;
+		targetH = kFallbackH;
+	}
+
+	targetW = std::clamp(targetW, kMinW, kMaxW);
+	targetH = std::clamp(targetH, kMinH, kMaxH);
+
+	// Keep dimensions even for predictable blit/viewport behavior.
+	targetW &= ~1u;
+	targetH &= ~1u;
+	if (targetW == 0 || targetH == 0)
+	{
+		targetW = kFallbackW;
+		targetH = kFallbackH;
+	}
+
+	// Cap total pixels while preserving aspect ratio.
+	uint64_t pixels = (uint64_t)targetW * (uint64_t)targetH;
+	if (pixels > kMaxPixels)
+	{
+		const double scale = std::sqrt((double)kMaxPixels / (double)pixels);
+		targetW = std::max<uint32_t>(kMinW, (uint32_t)std::floor((double)targetW * scale));
+		targetH = std::max<uint32_t>(kMinH, (uint32_t)std::floor((double)targetH * scale));
+		targetW &= ~1u;
+		targetH &= ~1u;
+	}
+
+	width = targetW;
+	height = targetH;
 }
 
 static XrSafeSourceRect GetSafeXrSourceRect(VulkanRenderDevice* vkfb)
@@ -563,6 +669,27 @@ static void PostControllerKeyTransition(bool oldState, bool newState, int key)
 	event_t ev = {};
 	ev.data1 = key;
 	ev.type = newState ? EV_KeyDown : EV_KeyUp;
+	D_PostEvent(&ev);
+}
+
+static void PostGuiMouseEvent(EGUIEvent type, int x, int y)
+{
+	event_t ev = {};
+	ev.type = EV_GUI_Event;
+	ev.subtype = type;
+	ev.data1 = x;
+	ev.data2 = y;
+	D_PostEvent(&ev);
+}
+
+static void PostGuiWheelEvent(EGUIEvent type, int x, int y, int modifiers = 0)
+{
+	event_t ev = {};
+	ev.type = EV_GUI_Event;
+	ev.subtype = type;
+	ev.data1 = x;
+	ev.data2 = y;
+	ev.data3 = (int16_t)modifiers;
 	D_PostEvent(&ev);
 }
 
@@ -1668,11 +1795,17 @@ bool VKOpenXRDeviceMode::CreatePresentTextures(VulkanRenderDevice* vkfb) const
 	if (!xrPresentTextures.empty())
 		xrDeferredPresentTextures.emplace_back(std::move(xrPresentTextures));
 	xrPresentTextures.clear();
+	if (!xrMirrorPresentTextures.empty())
+		xrDeferredMirrorPresentTextures.emplace_back(std::move(xrMirrorPresentTextures));
+	xrMirrorPresentTextures.clear();
 
 	for (auto& texture : xrPresentTextures)
 		texture.Reset(vkfb);
+	for (auto& texture : xrMirrorPresentTextures)
+		texture.Reset(vkfb);
 
 	xrPresentTextures.resize(xrViewCount);
+	xrMirrorPresentTextures.resize(xrViewCount);
 	xrPresentWidth = width;
 	xrPresentHeight = height;
 
@@ -1691,6 +1824,20 @@ bool VKOpenXRDeviceMode::CreatePresentTextures(VulkanRenderDevice* vkfb) const
 		texture.View = ImageViewBuilder()
 			.Image(texture.Image.get(), presentFormat)
 			.DebugName("OpenXRPresentTextureView")
+			.Create(vkfb->device.get());
+
+		auto& mirrorTexture = xrMirrorPresentTextures[i];
+		mirrorTexture.Layout = VK_IMAGE_LAYOUT_UNDEFINED;
+		mirrorTexture.AspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		mirrorTexture.Image = ImageBuilder()
+			.Format(presentFormat)
+			.Size(width, height)
+			.Usage(VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+			.DebugName("OpenXRMirrorPresentTexture")
+			.Create(vkfb->device.get());
+		mirrorTexture.View = ImageViewBuilder()
+			.Image(mirrorTexture.Image.get(), presentFormat)
+			.DebugName("OpenXRMirrorPresentTextureView")
 			.Create(vkfb->device.get());
 	}
 
@@ -1853,6 +2000,69 @@ bool VKOpenXRDeviceMode::CreateVirtualScreenBackdropSwapchain(uint32_t width, ui
 	return true;
 }
 
+bool VKOpenXRDeviceMode::CreateMenuPointerBeamSwapchain() const
+{
+	constexpr uint32_t beamW = 8;
+	constexpr uint32_t beamH = 8;
+	if (xrSession == XR_NULL_HANDLE || xrVkDevice == nullptr || xrSwapchainFormat == VK_FORMAT_UNDEFINED)
+		return false;
+	if (xrMenuPointerBeamSwapchain != XR_NULL_HANDLE && !xrMenuPointerBeamTextures.empty())
+		return true;
+
+	if (!xrMenuPointerBeamTextures.empty())
+		xrDeferredMenuPointerBeamTextures.emplace_back(std::move(xrMenuPointerBeamTextures));
+	xrMenuPointerBeamTextures.clear();
+
+	DestroyMenuPointerBeamSwapchain();
+
+	XrSwapchainCreateInfo swapchainInfo{ XR_TYPE_SWAPCHAIN_CREATE_INFO };
+	swapchainInfo.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
+	swapchainInfo.format = xrSwapchainFormat;
+	swapchainInfo.sampleCount = 1;
+	swapchainInfo.width = beamW;
+	swapchainInfo.height = beamH;
+	swapchainInfo.faceCount = 1;
+	swapchainInfo.arraySize = 1;
+	swapchainInfo.mipCount = 1;
+
+	if (XR_FAILED(xrCreateSwapchain(xrSession, &swapchainInfo, &xrMenuPointerBeamSwapchain)))
+		return false;
+
+	uint32_t imageCount = 0;
+	if (XR_FAILED(xrEnumerateSwapchainImages(xrMenuPointerBeamSwapchain, 0, &imageCount, nullptr)) || imageCount == 0)
+	{
+		DestroyMenuPointerBeamSwapchain();
+		return false;
+	}
+
+	xrMenuPointerBeamSwapchainImages.resize(imageCount);
+	for (auto& image : xrMenuPointerBeamSwapchainImages)
+		image.type = XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR;
+	if (XR_FAILED(xrEnumerateSwapchainImages(xrMenuPointerBeamSwapchain, imageCount, &imageCount,
+		reinterpret_cast<XrSwapchainImageBaseHeader*>(xrMenuPointerBeamSwapchainImages.data()))))
+	{
+		DestroyMenuPointerBeamSwapchain();
+		return false;
+	}
+	xrMenuPointerBeamSwapchainImages.resize(imageCount);
+
+	xrMenuPointerBeamTextures.resize(imageCount);
+	for (uint32_t i = 0; i < imageCount; ++i)
+	{
+		auto& texture = xrMenuPointerBeamTextures[i];
+		texture.Layout = VK_IMAGE_LAYOUT_UNDEFINED;
+		texture.AspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		texture.Image = std::make_unique<VulkanImage>(xrVkDevice.get(), xrMenuPointerBeamSwapchainImages[i].image, nullptr,
+			(int)beamW, (int)beamH, 1, 1);
+		texture.View = ImageViewBuilder()
+			.Type(VK_IMAGE_VIEW_TYPE_2D)
+			.Image(texture.Image.get(), (VkFormat)xrSwapchainFormat)
+			.DebugName("OpenXR.MenuPointerBeamView")
+			.Create(xrVkDevice.get());
+	}
+	return true;
+}
+
 void VKOpenXRDeviceMode::DestroyVirtualScreenSwapchain() const
 {
 	xrVirtualScreenVisible = false;
@@ -1881,11 +2091,24 @@ void VKOpenXRDeviceMode::DestroyVirtualScreenBackdropSwapchain() const
 	}
 }
 
+void VKOpenXRDeviceMode::DestroyMenuPointerBeamSwapchain() const
+{
+	xrMenuPointerBeamImageIndex = -1;
+	xrMenuPointerBeamTextures.clear();
+	xrMenuPointerBeamSwapchainImages.clear();
+	if (xrMenuPointerBeamSwapchain != XR_NULL_HANDLE)
+	{
+		xrDestroySwapchain(xrMenuPointerBeamSwapchain);
+		xrMenuPointerBeamSwapchain = XR_NULL_HANDLE;
+	}
+}
+
 void VKOpenXRDeviceMode::DestroyOpenXR() const
 {
 	StopHaptics();
 	DestroyVirtualScreenSwapchain();
 	DestroyVirtualScreenBackdropSwapchain();
+	DestroyMenuPointerBeamSwapchain();
 	if (xrSwapchain != XR_NULL_HANDLE)
 	{
 		xrDestroySwapchain(xrSwapchain);
@@ -1980,7 +2203,9 @@ void VKOpenXRDeviceMode::DestroyOpenXR() const
 	xrSwapchainImages.clear();
 	xrSwapchainTextures.clear();
 	xrPresentTextures.clear();
+	xrMirrorPresentTextures.clear();
 	xrDeferredPresentTextures.clear();
+	xrDeferredMirrorPresentTextures.clear();
 	xrViewConfigs.clear();
 	xrViews.clear();
 	xrProjectionViews.clear();
@@ -2000,13 +2225,16 @@ void VKOpenXRDeviceMode::DestroyOpenXR() const
 	xrVkInstance.reset();
 	xrDeferredVirtualScreenTextures.clear();
 	xrDeferredVirtualScreenBackdropTextures.clear();
+	xrDeferredMenuPointerBeamTextures.clear();
 }
 
 void VKOpenXRDeviceMode::PurgeDeferredOpenXRResources() const
 {
 	xrDeferredPresentTextures.clear();
+	xrDeferredMirrorPresentTextures.clear();
 	xrDeferredVirtualScreenTextures.clear();
 	xrDeferredVirtualScreenBackdropTextures.clear();
+	xrDeferredMenuPointerBeamTextures.clear();
 }
 
 void VKOpenXRDeviceMode::SetUp() const
@@ -2542,7 +2770,7 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		remote_movementForward = 0.0f;
 	}
 
-	auto emitGameplayHandButtons = [&](int hand)
+	auto emitGameplayHandButtons = [&](int hand, bool emitAxes)
 	{
 		const bool dominantHand = (hand == mainHand);
 		const bool modifierOld = dominantGripModifierOld;
@@ -2566,7 +2794,19 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		const int thumbAltKey = dominantHand ? KEY_TAB : KEY_HOME;
 		const int gripAltKey = KEY_PAD_DPAD_UP;
 
-		PostRemappedControllerKeyTransition(xrLastSelectState[hand], handInput[hand].select, modifierOld, modifierNew, triggerBaseKey, triggerAltKey);
+		// When virtual menu mouse is active on the right hand, the trigger drives
+		// GUI left-click events. Suppress trigger-as-key to avoid menu key-path
+		// conflicts (notably messagebox yes/no confirmations).
+		const bool suppressSelectAsKey = menuMode && hand == 1 && *vr_menu_pointer && (*vr_mouse_in_menu || handInput[1].grip);
+		if (suppressSelectAsKey)
+		{
+			const int oldSelectKey = modifierOld ? triggerAltKey : triggerBaseKey;
+			PostControllerKeyTransition(xrLastSelectState[hand], false, oldSelectKey);
+		}
+		else
+		{
+			PostRemappedControllerKeyTransition(xrLastSelectState[hand], handInput[hand].select, modifierOld, modifierNew, triggerBaseKey, triggerAltKey);
+		}
 		if (suppressGripButton)
 		{
 			// While the dominant hand grip is acting as a modifier, do not emit it
@@ -2599,39 +2839,311 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			PostControllerKeyTransition(face2Old, face2Pressed, face2BaseKey);
 		}
 
-		const XrVector2f& lastAxisState = useTrackpad ? xrLastTrackpadState[hand] : xrLastThumbstickState[hand];
-		const XrVector2f& newAxisState = useTrackpad ? handInput[hand].trackpad : handInput[hand].thumbstick;
-		const int baseLeftKey = hand == 1 ? KEY_JOYAXIS3MINUS : KEY_JOYAXIS1MINUS;
-		const int baseRightKey = hand == 1 ? KEY_JOYAXIS3PLUS : KEY_JOYAXIS1PLUS;
-		const int baseDownKey = hand == 1 ? KEY_JOYAXIS4MINUS : KEY_JOYAXIS2MINUS;
-		const int baseUpKey = hand == 1 ? KEY_JOYAXIS4PLUS : KEY_JOYAXIS2PLUS;
-		const int shiftedLeftKey = hand == 1 ? KEY_JOYAXIS7MINUS : KEY_JOYAXIS5MINUS;
-		const int shiftedRightKey = hand == 1 ? KEY_JOYAXIS7PLUS : KEY_JOYAXIS5PLUS;
-		const int shiftedDownKey = hand == 1 ? KEY_JOYAXIS8MINUS : KEY_JOYAXIS6MINUS;
-		const int shiftedUpKey = hand == 1 ? KEY_JOYAXIS8PLUS : KEY_JOYAXIS6PLUS;
+		if (emitAxes)
+		{
+			const XrVector2f& lastAxisState = useTrackpad ? xrLastTrackpadState[hand] : xrLastThumbstickState[hand];
+			const XrVector2f& newAxisState = useTrackpad ? handInput[hand].trackpad : handInput[hand].thumbstick;
+			const int baseLeftKey = hand == 1 ? KEY_JOYAXIS3MINUS : KEY_JOYAXIS1MINUS;
+			const int baseRightKey = hand == 1 ? KEY_JOYAXIS3PLUS : KEY_JOYAXIS1PLUS;
+			const int baseDownKey = hand == 1 ? KEY_JOYAXIS4MINUS : KEY_JOYAXIS2MINUS;
+			const int baseUpKey = hand == 1 ? KEY_JOYAXIS4PLUS : KEY_JOYAXIS2PLUS;
+			const int shiftedLeftKey = hand == 1 ? KEY_JOYAXIS7MINUS : KEY_JOYAXIS5MINUS;
+			const int shiftedRightKey = hand == 1 ? KEY_JOYAXIS7PLUS : KEY_JOYAXIS5PLUS;
+			const int shiftedDownKey = hand == 1 ? KEY_JOYAXIS8MINUS : KEY_JOYAXIS6MINUS;
+			const int shiftedUpKey = hand == 1 ? KEY_JOYAXIS8PLUS : KEY_JOYAXIS6PLUS;
 
-		PostRemappedControllerAxisTransitions(lastAxisState, newAxisState, modifierOld, modifierNew,
-			baseLeftKey,
-			baseRightKey,
-			baseDownKey,
-			baseUpKey,
-			shiftedLeftKey,
-			shiftedRightKey,
-			shiftedDownKey,
-			shiftedUpKey);
+			PostRemappedControllerAxisTransitions(lastAxisState, newAxisState, modifierOld, modifierNew,
+				baseLeftKey,
+				baseRightKey,
+				baseDownKey,
+				baseUpKey,
+				shiftedLeftKey,
+				shiftedRightKey,
+				shiftedDownKey,
+				shiftedUpKey);
+		}
 
 		syncHandState(hand);
 	};
 
+	xrMenuPointerActive = false;
+	xrMenuPointerHasHit = false;
+	xrMenuPointerBeamVisible = false;
+	xrMenuPointerBeamLength = 0.0f;
+	menu_allow_mouse_override = false;
+
+	const int pointerHand = 1; // Always use the right controller for virtual menu mouse.
+	const bool vrMouseEnabled = *vr_mouse_in_menu || handInput[pointerHand].grip;
+	const bool canUseMenuPointer = menuMode &&
+		*vr_menu_pointer &&
+		vrMouseEnabled &&
+		pointerHand >= 0 && pointerHand < 2 &&
+		xrHandPoseValid[pointerHand] &&
+		xrVirtualScreenWidth > 0 &&
+		xrVirtualScreenHeight > 0 &&
+		xrViewCount > 0 &&
+		xrViews.size() >= xrViewCount;
+
+	if (canUseMenuPointer)
+	{
+		XrVector3f center{ 0.0f, 0.0f, 0.0f };
+		for (uint32_t i = 0; i < xrViewCount; ++i)
+		{
+			center.x += xrViews[i].pose.position.x;
+			center.y += xrViews[i].pose.position.y;
+			center.z += xrViews[i].pose.position.z;
+		}
+		center.x /= xrViewCount;
+		center.y /= xrViewCount;
+		center.z /= xrViewCount;
+		const XrQuaternionf headOrientation = xrViews[0].pose.orientation;
+		const XrVector3f headForward = RotateVector(headOrientation, { 0.0f, 0.0f, -1.0f });
+		const XrVector3f headUp = RotateVector(headOrientation, { 0.0f, 1.0f, 0.0f });
+		const float screenDistance = std::max(0.25f, 2.5f + vr_overlayscreen_dist);
+		const float screenWidth = std::max(0.1f, 1.0f + vr_overlayscreen_size);
+		const float aspect = (xrVirtualScreenHeight > 0) ? (float)xrVirtualScreenWidth / (float)xrVirtualScreenHeight : 1.0f;
+		const float screenHeight = std::max(0.1f, screenWidth / std::max(aspect, 0.01f));
+		const XrQuaternionf screenOrientation = MultiplyQuaternion(headOrientation, MakeAxisAngleQuaternion({ 0.0f, 0.0f, 1.0f }, (float)M_PI));
+		const XrVector3f planeOrigin = AddVector(AddVector(center, ScaleVector(headForward, screenDistance)), ScaleVector(headUp, vr_overlayscreen_vpos));
+
+		const XrVector3f planeNormal = NormalizeVector(RotateVector(screenOrientation, { 0.0f, 0.0f, 1.0f }));
+		const XrVector3f planeRight = NormalizeVector(RotateVector(screenOrientation, { 1.0f, 0.0f, 0.0f }));
+		const XrVector3f planeUp = NormalizeVector(RotateVector(screenOrientation, { 0.0f, 1.0f, 0.0f }));
+		const XrVector3f rayOrigin = xrHandPoses[pointerHand].position;
+		const XrQuaternionf pointerAlignRotation = QuaternionFromAxisAngle(0.0f, 0.0f, 1.0f, -(vr_weaponRotate * 2.0f) * (float)(M_PI / 180.0));
+		const XrQuaternionf pointerOrientation = MultiplyQuaternion(xrHandPoses[pointerHand].orientation, pointerAlignRotation);
+
+		struct RayHit
+		{
+			bool valid = false;
+			float t = 0.0f;
+			float unclampedU = 0.0f;
+			float unclampedV = 0.0f;
+			float localX = 0.0f;
+			float localY = 0.0f;
+			float overflow = 0.0f;
+			XrVector3f hitPoint = { 0.0f, 0.0f, 0.0f };
+		};
+
+		auto testRayAxis = [&](const XrVector3f& localAxis) -> RayHit
+		{
+			RayHit out;
+			const XrVector3f rayDir = NormalizeVector(RotateVector(pointerOrientation, localAxis));
+			const float denom = DotVector(rayDir, planeNormal);
+			if (fabsf(denom) <= 0.0001f)
+			{
+				return out;
+			}
+
+			const float t = DotVector(SubtractVector(planeOrigin, rayOrigin), planeNormal) / denom;
+			if (t <= 0.0f)
+			{
+				return out;
+			}
+
+			const XrVector3f hitPoint = AddVector(rayOrigin, ScaleVector(rayDir, t));
+			const XrVector3f hitDelta = SubtractVector(hitPoint, planeOrigin);
+			out.hitPoint = hitPoint;
+			const float localX = DotVector(hitDelta, planeRight);
+			const float localY = DotVector(hitDelta, planeUp);
+			const float halfW = screenWidth * 0.5f;
+			const float halfH = screenHeight * 0.5f;
+			out.localX = localX;
+			out.localY = localY;
+			out.unclampedU = (localX + halfW) / std::max(screenWidth, 0.0001f);
+			out.unclampedV = (halfH - localY) / std::max(screenHeight, 0.0001f);
+			out.overflow =
+				(out.unclampedU < 0.0f ? -out.unclampedU : 0.0f) +
+				(out.unclampedU > 1.0f ? out.unclampedU - 1.0f : 0.0f) +
+				(out.unclampedV < 0.0f ? -out.unclampedV : 0.0f) +
+				(out.unclampedV > 1.0f ? out.unclampedV - 1.0f : 0.0f);
+			out.t = t;
+			out.valid = true;
+			return out;
+		};
+
+		const XrVector3f candidateAxes[] = {
+			{ 0.0f, 0.0f, -1.0f },
+			{ 0.0f, 0.0f, 1.0f }
+		};
+
+		RayHit bestHit{};
+		int bestAxis = -1;
+		for (int i = 0; i < 2; ++i)
+		{
+			const RayHit hit = testRayAxis(candidateAxes[i]);
+			if (!hit.valid) continue;
+			if (bestAxis < 0 ||
+				hit.overflow < bestHit.overflow ||
+				(hit.overflow == bestHit.overflow && hit.t < bestHit.t))
+			{
+				bestAxis = i;
+				bestHit = hit;
+			}
+		}
+
+		if (bestAxis >= 0 && bestHit.valid)
+		{
+			const float mappedU = 1.0f - bestHit.unclampedU;
+			const float mappedV = 1.0f - bestHit.unclampedV;
+			const int mouseXUnclamped = (int)std::lround(mappedU * (float)(xrVirtualScreenWidth - 1));
+			const int mouseYUnclamped = (int)std::lround(mappedV * (float)(xrVirtualScreenHeight - 1));
+			const int mouseX = clamp<int>(mouseXUnclamped, 0, (int)xrVirtualScreenWidth - 1);
+			const int mouseY = clamp<int>(mouseYUnclamped, 0, (int)xrVirtualScreenHeight - 1);
+			const int guiMouseX = mouseX;
+			const int guiMouseY = mouseY;
+			if (vr_openxr_debug_sizes)
+			{
+				static int pointerDebugTicker = 0;
+				if ((pointerDebugTicker++ % 35) == 0)
+				{
+					const int guiW = screen ? screen->GetWidth() : 0;
+					const int guiH = screen ? screen->GetHeight() : 0;
+					Printf("XR_MENU_PTR axis=%d t=%.3f local=(%.3f,%.3f) half=(%.3f,%.3f) uvRaw=(%.3f,%.3f) uvMap=(%.3f,%.3f) ovf=%.3f virt=%ux%u vis=(%d,%d) gui=%dx%d guiPos=(%d,%d)\n",
+						bestAxis,
+						bestHit.t,
+						bestHit.localX, bestHit.localY,
+						screenWidth * 0.5f, screenHeight * 0.5f,
+						bestHit.unclampedU, bestHit.unclampedV,
+						mappedU, mappedV,
+						bestHit.overflow,
+						xrVirtualScreenWidth, xrVirtualScreenHeight,
+						mouseX, mouseY,
+						guiW, guiH,
+						guiMouseX, guiMouseY);
+				}
+			}
+
+			xrMenuPointerActive = true;
+			xrMenuPointerHasHit = true;
+			xrMenuPointerX = (float)mouseX;
+			xrMenuPointerY = (float)mouseY;
+			menu_allow_mouse_override = true;
+
+			// Build a world-space quad layer representing a laser beam from
+			// controller pose to the virtual-screen hit point.
+			const XrVector3f beamStart = rayOrigin;
+			const XrVector3f beamEnd = bestHit.hitPoint;
+			const XrVector3f beamVec = SubtractVector(beamEnd, beamStart);
+			const float beamLength = std::sqrt(DotVector(beamVec, beamVec));
+			if (beamLength > 0.01f)
+			{
+				const XrVector3f beamDir = ScaleVector(beamVec, 1.0f / beamLength);
+				const XrVector3f beamCenter = AddVector(beamStart, ScaleVector(beamDir, beamLength * 0.5f));
+				XrVector3f viewDir = NormalizeVector(SubtractVector(center, beamCenter));
+				XrVector3f xAxis = NormalizeVector(CrossVector(viewDir, beamDir));
+				if (DotVector(xAxis, xAxis) < 0.0001f)
+				{
+					xAxis = NormalizeVector(CrossVector({ 0.0f, 1.0f, 0.0f }, beamDir));
+					if (DotVector(xAxis, xAxis) < 0.0001f)
+						xAxis = NormalizeVector(CrossVector({ 1.0f, 0.0f, 0.0f }, beamDir));
+				}
+				const XrVector3f xBeamAxis = beamDir;
+				const XrVector3f yBeamAxis = xAxis;
+				const XrVector3f zAxis = NormalizeVector(CrossVector(xBeamAxis, yBeamAxis));
+				xrMenuPointerBeamPose.position = beamCenter;
+				xrMenuPointerBeamPose.orientation = QuaternionFromBasis(xBeamAxis, yBeamAxis, zAxis);
+				xrMenuPointerBeamLength = beamLength;
+				xrMenuPointerBeamVisible = true;
+			}
+
+			if (!xrMenuPointerHadPos || guiMouseX != xrMenuPointerLastX || guiMouseY != xrMenuPointerLastY)
+			{
+				PostGuiMouseEvent(EV_GUI_MouseMove, guiMouseX, guiMouseY);
+				xrMenuPointerLastX = guiMouseX;
+				xrMenuPointerLastY = guiMouseY;
+				xrMenuPointerHadPos = true;
+			}
+
+			if (handInput[pointerHand].select != xrMenuPointerLastLeftDown)
+			{
+				PostGuiMouseEvent(handInput[pointerHand].select ? EV_GUI_LButtonDown : EV_GUI_LButtonUp, xrMenuPointerLastX, xrMenuPointerLastY);
+				xrMenuPointerLastLeftDown = handInput[pointerHand].select;
+			}
+			// If vr_mouse_in_menu is disabled, grip acts as a temporary "hold to use mouse"
+			// modifier, so do not also emit right-click from the same button.
+			const bool emitRightClick = *vr_mouse_in_menu;
+			if (emitRightClick && handInput[pointerHand].grip != xrMenuPointerLastRightDown)
+			{
+				PostGuiMouseEvent(handInput[pointerHand].grip ? EV_GUI_RButtonDown : EV_GUI_RButtonUp, xrMenuPointerLastX, xrMenuPointerLastY);
+				xrMenuPointerLastRightDown = handInput[pointerHand].grip;
+			}
+			else if (!emitRightClick)
+			{
+				xrMenuPointerLastRightDown = false;
+			}
+		}
+		else
+		{
+			// Keep a visible fallback cursor/beam while in menu mode so the
+			// pointer path stays debuggable even if the current controller forward
+			// axis does not intersect the virtual-screen plane.
+			if (!xrMenuPointerHadPos)
+			{
+				xrMenuPointerLastX = (int)xrVirtualScreenWidth / 2;
+				xrMenuPointerLastY = (int)xrVirtualScreenHeight / 2;
+				xrMenuPointerHadPos = true;
+			}
+			xrMenuPointerActive = true;
+			xrMenuPointerHasHit = true;
+			xrMenuPointerX = (float)xrMenuPointerLastX;
+			xrMenuPointerY = (float)xrMenuPointerLastY;
+		}
+
+		// Allow scrolling long menus with right-thumbstick vertical movement,
+		// even if the current ray cast misses the panel.
+		{
+			constexpr float wheelDeadZone = 0.55f;
+			static int wheelRepeatCooldown = 0;
+			if (wheelRepeatCooldown > 0) wheelRepeatCooldown--;
+			const float wheelY = handInput[pointerHand].thumbstick.y;
+			if (wheelRepeatCooldown == 0)
+			{
+				if (wheelY >= wheelDeadZone)
+				{
+					PostGuiWheelEvent(EV_GUI_WheelUp, xrMenuPointerLastX, xrMenuPointerLastY);
+					wheelRepeatCooldown = 8;
+				}
+				else if (wheelY <= -wheelDeadZone)
+				{
+					PostGuiWheelEvent(EV_GUI_WheelDown, xrMenuPointerLastX, xrMenuPointerLastY);
+					wheelRepeatCooldown = 8;
+				}
+			}
+		}
+	}
+	if (!menuMode || !xrMenuPointerActive)
+	{
+		if (xrMenuPointerLastLeftDown || xrMenuPointerLastRightDown)
+		{
+			const int releaseX = xrMenuPointerHadPos ? xrMenuPointerLastX : 0;
+			const int releaseY = xrMenuPointerHadPos ? xrMenuPointerLastY : 0;
+			if (xrMenuPointerLastLeftDown)
+			{
+				PostGuiMouseEvent(EV_GUI_LButtonUp, releaseX, releaseY);
+			}
+			if (xrMenuPointerLastRightDown)
+			{
+				PostGuiMouseEvent(EV_GUI_RButtonUp, releaseX, releaseY);
+			}
+		}
+		xrMenuPointerLastLeftDown = false;
+		xrMenuPointerLastRightDown = false;
+		if (!menuMode)
+		{
+			xrMenuPointerHadPos = false;
+		}
+	}
+
 	if (menuMode)
 	{
-		emitGameplayHandButtons(0);
-		emitGameplayHandButtons(1);
+		emitGameplayHandButtons(0, true);
+		emitGameplayHandButtons(1, false);
 		return;
 	}
 
-	emitGameplayHandButtons(0);
-	emitGameplayHandButtons(1);
+	emitGameplayHandButtons(0, true);
+	emitGameplayHandButtons(1, true);
 	if (gameplayMode)
 	{
 		player_t* player = r_viewpoint.camera ? r_viewpoint.camera->player : nullptr;
@@ -3196,10 +3708,16 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 
 	XrCompositionLayerQuad backdropLayer{ XR_TYPE_COMPOSITION_LAYER_QUAD };
 	XrCompositionLayerQuad quadLayer{ XR_TYPE_COMPOSITION_LAYER_QUAD };
+	XrCompositionLayerQuad beamLayer{ XR_TYPE_COMPOSITION_LAYER_QUAD };
 	bool submitVirtualScreen = xrVirtualScreenVisible && xrVirtualScreenSwapchain != XR_NULL_HANDLE && xrVirtualScreenImageIndex >= 0;
 	bool submitBackdrop = submitVirtualScreen && xrVirtualScreenBackdropVisible && xrVirtualScreenBackdropSwapchain != XR_NULL_HANDLE && xrVirtualScreenBackdropImageIndex >= 0;
+	bool submitMenuPointerBeam = submitVirtualScreen &&
+		xrMenuPointerBeamVisible &&
+		xrMenuPointerBeamSwapchain != XR_NULL_HANDLE &&
+		xrMenuPointerBeamImageIndex >= 0 &&
+		!xrMenuPointerBeamTextures.empty();
 
-	const XrCompositionLayerBaseHeader* layers[3];
+	const XrCompositionLayerBaseHeader* layers[4];
 	int layerIndex = 0;
 	// Always keep the projection layer alive. The virtual-screen path is an
 	// overlay layer, not a replacement for the headset scene. Replacing the
@@ -3226,6 +3744,17 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		quadLayer.subImage.swapchain = xrVirtualScreenSwapchain;
 		quadLayer.subImage.imageArrayIndex = 0;
 		layers[layerIndex++] = (const XrCompositionLayerBaseHeader*)&quadLayer;
+
+		if (submitMenuPointerBeam)
+		{
+			beamLayer = xrMenuPointerBeamLayer;
+			beamLayer.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
+			beamLayer.layerFlags = 0;
+			beamLayer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+			beamLayer.subImage.swapchain = xrMenuPointerBeamSwapchain;
+			beamLayer.subImage.imageArrayIndex = 0;
+			layers[layerIndex++] = (const XrCompositionLayerBaseHeader*)&beamLayer;
+		}
 	}
 	XrFrameEndInfo endInfo{ XR_TYPE_FRAME_END_INFO };
 	endInfo.displayTime = xrFrameState.predictedDisplayTime;
@@ -3419,6 +3948,7 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 
 	const bool forceOverlay = gamestate != GS_LEVEL || menuactive != MENU_Off || cinemamode || ConsoleState != c_up || vr_overlayscreen_always;
 	const bool allowBlankOverlay = vr_overlayscreen_always || cinemamode || gamestate != GS_LEVEL;
+	xrMenuPointerBeamImageIndex = -1;
 	if (twod == nullptr || (twod->DrawCount() == 0 && !allowBlankOverlay && !forceOverlay))
 	{
 		xrVirtualScreenVisible = false;
@@ -3439,6 +3969,10 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 		xrVirtualScreenVisible = false;
 		xrVirtualScreenBackdropVisible = false;
 		return false;
+	}
+	if (!CreateMenuPointerBeamSwapchain())
+	{
+		xrMenuPointerBeamVisible = false;
 	}
 	if (xrVirtualScreenSwapchain == XR_NULL_HANDLE || xrVirtualScreenTextures.empty())
 	{
@@ -3539,6 +4073,29 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 		renderState->Clear(CT_Color);
 	}
 	screen->Draw2D(true);
+	if (xrMenuPointerActive && xrMenuPointerHasHit && twod != nullptr)
+	{
+		const float beamEndX = xrMenuPointerX;
+		const float beamEndY = xrMenuPointerY;
+		const PalEntry cursorColor = PalEntry(vr_menu_pointer_color);
+		// twod line colors are packed as AABBGGRR.
+		const uint32_t cursorLineColor =
+			0xFF000000u |
+			((uint32_t)cursorColor.b << 16) |
+			((uint32_t)cursorColor.g << 8) |
+			(uint32_t)cursorColor.r;
+		const float cursorRadius = 8.0f;
+		const int cursorSegments = 16;
+		for (int i = 0; i < cursorSegments; ++i)
+		{
+			const float a0 = (float)(2.0 * M_PI * (double)i / (double)cursorSegments);
+			const float a1 = (float)(2.0 * M_PI * (double)(i + 1) / (double)cursorSegments);
+			const DVector2 p0(beamEndX + std::cos(a0) * cursorRadius, beamEndY + std::sin(a0) * cursorRadius);
+			const DVector2 p1(beamEndX + std::cos(a1) * cursorRadius, beamEndY + std::sin(a1) * cursorRadius);
+			twod->AddThickLine(p0, p1, 3.0, cursorLineColor, 255);
+		}
+		twod->AddColorOnlyQuad((int)(beamEndX - 3.0f), (int)(beamEndY - 3.0f), 6, 6, PalEntry(255, cursorColor.r, cursorColor.g, cursorColor.b));
+	}
 	screen->Draw2D(false);
 	mInVirtualScreenRender = false;
 	renderState->EndRenderPass();
@@ -3552,10 +4109,54 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 
 	auto* cmdbuffer = vkfb->GetCommands()->GetDrawCommands();
 	auto& bounce = vkfb->GetBuffers()->PipelineImage[0];
+	auto* postprocess = vkfb->GetPostprocess();
 	const int32_t targetWidth = target.Image != nullptr ? target.Image->width : 0;
 	const int32_t targetHeight = target.Image != nullptr ? target.Image->height : 0;
 	const int32_t bounceWidth = bounce.Image != nullptr ? bounce.Image->width : 0;
 	const int32_t bounceHeight = bounce.Image != nullptr ? bounce.Image->height : 0;
+
+	// Run the same present-shader shaping used by the OpenXR eye present path
+	// so the virtual-screen quad matches headset tone/color tuning.
+	if (postprocess != nullptr && targetWidth > 0 && targetHeight > 0 && bounceWidth > 0 && bounceHeight > 0)
+	{
+		VkImageTransition()
+			.AddImage(&target, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
+			.AddImage(&bounce, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, false)
+			.Execute(cmdbuffer);
+
+		VkImageBlit copyToPipeline = {};
+		copyToPipeline.srcOffsets[0] = { 0, 0, 0 };
+		copyToPipeline.srcOffsets[1] = { targetWidth, targetHeight, 1 };
+		copyToPipeline.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+		copyToPipeline.dstOffsets[0] = { 0, 0, 0 };
+		copyToPipeline.dstOffsets[1] = { bounceWidth, bounceHeight, 1 };
+		copyToPipeline.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+		cmdbuffer->blitImage(target.Image->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			bounce.Image->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			1, &copyToPipeline, VK_FILTER_NEAREST);
+
+		VkImageTransition()
+			.AddImage(&bounce, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, false)
+			.Execute(cmdbuffer);
+
+		const int previousPipelineImage = postprocess->GetCurrentPipelineImage();
+		postprocess->SetCurrentPipelineImage(0);
+		IntRect fullTargetRect = { 0, 0, targetWidth, targetHeight };
+		postprocess->DrawPresentTextureToImage(
+			&target,
+			(VkFormat)xrSwapchainFormat,
+			fullTargetRect,
+			false,
+			false,
+			1.0f,
+			1.0f,
+			0.0f,
+			0.0f,
+			cmdbuffer,
+			false);
+		postprocess->SetCurrentPipelineImage(previousPipelineImage);
+	}
+
 	VkImageTransition()
 		.AddImage(&target, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
 		.AddImage(&bounce, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, false)
@@ -3617,30 +4218,83 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 	auto& backdropTarget = xrVirtualScreenBackdropTextures[backdropIndex];
 
 	VkImageTransition()
-		.AddImage(&backdropTarget, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, false)
+		.AddImage(&backdropTarget, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, false)
 		.Execute(vkfb->GetCommands()->GetDrawCommands());
 
 	const XrVector3f backdropColor =
 		(cinemamode || vr_overlayscreen_always || gamestate == GS_LEVEL)
 		? GetVirtualScreenBackdropColor()
 		: XrVector3f{ 0.0f, 0.0f, 0.0f };
-	float savedBackdropClear[4];
-	memcpy(savedBackdropClear, screen->mSceneClearColor, sizeof(savedBackdropClear));
-	screen->mSceneClearColor[0] = backdropColor.x;
-	screen->mSceneClearColor[1] = backdropColor.y;
-	screen->mSceneClearColor[2] = backdropColor.z;
-	screen->mSceneClearColor[3] = 1.0f;
-
-	auto* backdropState = vkfb->GetRenderState();
-	backdropState->SetRenderTarget(&backdropTarget, nullptr, (int)screenWidth, (int)screenHeight, (VkFormat)xrSwapchainFormat, VK_SAMPLE_COUNT_1_BIT);
-	backdropState->Clear(CT_Color);
-	backdropState->EndRenderPass();
-
-	memcpy(screen->mSceneClearColor, savedBackdropClear, sizeof(savedBackdropClear));
+	VkClearColorValue backdropColorValue = {};
+	backdropColorValue.float32[0] = backdropColor.x;
+	backdropColorValue.float32[1] = backdropColor.y;
+	backdropColorValue.float32[2] = backdropColor.z;
+	backdropColorValue.float32[3] = 1.0f;
+	VkImageSubresourceRange backdropRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+	vkfb->GetCommands()->GetDrawCommands()->clearColorImage(
+		backdropTarget.Image->image,
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		&backdropColorValue,
+		1,
+		&backdropRange);
 
 	VkImageTransition()
 		.AddImage(&backdropTarget, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false)
 		.Execute(vkfb->GetCommands()->GetDrawCommands());
+
+	if (xrMenuPointerBeamVisible && xrMenuPointerBeamSwapchain != XR_NULL_HANDLE && !xrMenuPointerBeamTextures.empty())
+	{
+		XrSwapchainImageAcquireInfo beamAcquireInfo{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
+		uint32_t beamIndex = 0;
+		xrResult = xrAcquireSwapchainImage(xrMenuPointerBeamSwapchain, &beamAcquireInfo, &beamIndex);
+		if (XR_SUCCEEDED(xrResult))
+		{
+			XrSwapchainImageWaitInfo beamWaitInfo{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
+			beamWaitInfo.timeout = 100 * 1000 * 1000;
+			xrResult = xrWaitSwapchainImage(xrMenuPointerBeamSwapchain, &beamWaitInfo);
+			if (XR_SUCCEEDED(xrResult))
+			{
+				xrMenuPointerBeamImageIndex = (int)beamIndex;
+				auto& beamTarget = xrMenuPointerBeamTextures[beamIndex];
+
+				VkImageTransition()
+					.AddImage(&beamTarget, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, false)
+					.Execute(vkfb->GetCommands()->GetDrawCommands());
+
+				const int beamColorRaw = (int)vr_menu_pointer_color;
+				VkClearColorValue beamColorValue = {};
+				beamColorValue.float32[0] = RPART(beamColorRaw) / 255.0f;
+				beamColorValue.float32[1] = GPART(beamColorRaw) / 255.0f;
+				beamColorValue.float32[2] = BPART(beamColorRaw) / 255.0f;
+				beamColorValue.float32[3] = 1.0f;
+				VkImageSubresourceRange beamRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+				vkfb->GetCommands()->GetDrawCommands()->clearColorImage(
+					beamTarget.Image->image,
+					VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+					&beamColorValue,
+					1,
+					&beamRange);
+
+				VkImageTransition()
+					.AddImage(&beamTarget, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false)
+					.Execute(vkfb->GetCommands()->GetDrawCommands());
+
+				xrMenuPointerBeamLayer.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
+				xrMenuPointerBeamLayer.layerFlags = 0;
+				xrMenuPointerBeamLayer.space = xrSpace;
+				xrMenuPointerBeamLayer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+				xrMenuPointerBeamLayer.pose = xrMenuPointerBeamPose;
+				xrMenuPointerBeamLayer.size = { std::max(0.02f, xrMenuPointerBeamLength), 0.005f };
+				xrMenuPointerBeamLayer.subImage.swapchain = xrMenuPointerBeamSwapchain;
+				xrMenuPointerBeamLayer.subImage.imageArrayIndex = 0;
+				xrMenuPointerBeamLayer.subImage.imageRect.offset = { 0, 0 };
+				xrMenuPointerBeamLayer.subImage.imageRect.extent = { beamTarget.Image->width, beamTarget.Image->height };
+			}
+
+			XrSwapchainImageReleaseInfo beamReleaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
+			xrReleaseSwapchainImage(xrMenuPointerBeamSwapchain, &beamReleaseInfo);
+		}
+	}
 
 	XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
 	xrResult = xrReleaseSwapchainImage(xrVirtualScreenBackdropSwapchain, &releaseInfo);
@@ -3763,6 +4417,24 @@ void VKOpenXRDeviceMode::FinalizeEyeImage(VulkanRenderDevice* vkfb, int eyeIndex
 	targetBox.width = (int)xrPresentWidth;
 	targetBox.height = (int)xrPresentHeight;
 
+	// 1) Unbiased image for desktop mirror parity.
+	if (eyeIndex >= 0 && eyeIndex < (int)xrMirrorPresentTextures.size())
+	{
+		postprocess->DrawPresentTextureToImage(
+			&xrMirrorPresentTextures[eyeIndex],
+			(VkFormat)xrSwapchainFormat,
+			targetBox,
+			true,
+			false,
+			sourceRect.scaleX,
+			sourceRect.scaleY,
+			sourceRect.offsetX,
+			sourceRect.offsetY,
+			vkfb->GetCommands()->GetDrawCommands(),
+			false);
+	}
+
+	// 2) XR-submitted image with OpenXR bias knobs applied.
 	postprocess->DrawPresentTextureToImage(
 		&xrPresentTextures[eyeIndex],
 		(VkFormat)xrSwapchainFormat,
@@ -3773,7 +4445,8 @@ void VKOpenXRDeviceMode::FinalizeEyeImage(VulkanRenderDevice* vkfb, int eyeIndex
 		sourceRect.scaleY,
 		sourceRect.offsetX,
 		sourceRect.offsetY,
-		vkfb->GetCommands()->GetDrawCommands());
+		vkfb->GetCommands()->GetDrawCommands(),
+		true);
 }
 
 bool VKOpenXRDeviceMode::RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage* dstImage) const
@@ -3786,15 +4459,15 @@ bool VKOpenXRDeviceMode::RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage
 	const int leftSourceIndex = vr_swap_eyes ? 1 : 0;
 	const int rightSourceIndex = vr_swap_eyes ? 0 : 1;
 
-	if (xrPresentTextures.empty() || xrPresentTextures[leftSourceIndex].Image == nullptr || (sideBySide && xrPresentTextures[rightSourceIndex].Image == nullptr))
+	if (xrMirrorPresentTextures.empty() || xrMirrorPresentTextures[leftSourceIndex].Image == nullptr || (sideBySide && xrMirrorPresentTextures[rightSourceIndex].Image == nullptr))
 		return false;
 
 	const bool hasBackdrop = xrVirtualScreenBackdropVisible &&
 		xrVirtualScreenBackdropImageIndex >= 0 &&
 		xrVirtualScreenBackdropImageIndex < (int)xrVirtualScreenBackdropTextures.size();
 
-	VkTextureImage* leftEyeSource = &xrPresentTextures[leftSourceIndex];
-	VkTextureImage* rightEyeSource = &xrPresentTextures[rightSourceIndex];
+	VkTextureImage* leftEyeSource = &xrMirrorPresentTextures[leftSourceIndex];
+	VkTextureImage* rightEyeSource = &xrMirrorPresentTextures[rightSourceIndex];
 	VkImageTransition()
 		.AddImage(leftEyeSource, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
 		.Execute(cmdbuffer);

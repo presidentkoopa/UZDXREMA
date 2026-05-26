@@ -11,6 +11,7 @@
 
 EXTERN_CVAR(Float, snd_menuvolume)
 EXTERN_CVAR(Int, m_use_mouse);
+extern bool menu_allow_mouse_override;
 
 
 struct event_t;
@@ -314,6 +315,7 @@ void M_PreviousMenu ();
 void M_ParseMenuDefs();
 void M_StartControlPanel(bool makeSound, bool scaleoverride = false);
 void M_SetMenu(FName menu, int param = -1);
+void M_RequestMenuRebuild();
 void M_StartMessage(const char *message, int messagemode, FName action = NAME_None);
 DMenu *StartPickerMenu(DMenu *parent, const char *name, FColorCVar *cvar);
 void M_MarkMenus();

@@ -399,10 +399,10 @@ CVAR(Float, vr_openxr_render_scale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // Use the full screen viewport as XR present source by default to reduce
 // aspect-stretch upscaling artifacts compared to mSceneViewport.
 CVAR(Bool, vr_openxr_use_screen_viewport_for_submit, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, vr_openxr_present_gamma_bias, 1.30f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, vr_openxr_present_contrast_bias, 1.02f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, vr_openxr_present_brightness_bias, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, vr_openxr_present_saturation_bias, 1.05f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_openxr_present_gamma_bias, 1.95f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_openxr_present_contrast_bias, 0.85f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_openxr_present_brightness_bias, -0.10f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_openxr_present_saturation_bias, 1.15f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CUSTOM_CVAR(Int, vr_control_scheme, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL)
 {
 	M_ResetButtonStates();

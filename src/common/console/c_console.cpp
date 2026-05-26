@@ -143,6 +143,7 @@ CUSTOM_CVAR(Float, con_alpha, 0.75f, CVAR_ARCHIVE)
 CUSTOM_CVAR(Int, developer, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	FScriptPosition::Developer = self;
+	M_RequestMenuRebuild();
 }
 
 

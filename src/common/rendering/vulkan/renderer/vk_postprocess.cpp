@@ -248,7 +248,7 @@ void VkPostprocess::DrawPresentTexture(const IntRect &box, bool applyGamma, bool
 	renderstate.Draw();
 }
 
-void VkPostprocess::DrawPresentTextureToImage(VkTextureImage *image, VkFormat outputFormat, const IntRect &box, bool applyGamma, bool screenshot, float sourceScaleX, float sourceScaleY, float sourceOffsetX, float sourceOffsetY, VulkanCommandBuffer *cmdbuffer)
+void VkPostprocess::DrawPresentTextureToImage(VkTextureImage *image, VkFormat outputFormat, const IntRect &box, bool applyGamma, bool screenshot, float sourceScaleX, float sourceScaleY, float sourceOffsetX, float sourceOffsetY, VulkanCommandBuffer *cmdbuffer, bool applyOpenXrBias)
 {
 	VkPPRenderState renderstate(fb);
 	const bool outputIsSrgb = outputFormat == VK_FORMAT_B8G8R8A8_SRGB || outputFormat == VK_FORMAT_R8G8B8A8_SRGB;
@@ -282,7 +282,7 @@ void VkPostprocess::DrawPresentTextureToImage(VkTextureImage *image, VkFormat ou
 		// the local mirror/OpenVR reference even with matching source images. Allow
 		// XR-only final present tuning to recover headset parity without affecting
 		// the non-XR present path.
-		if (IsOpenXRPresent())
+		if (applyOpenXrBias && IsOpenXRPresent())
 		{
 			const float gammaBias = clamp<float>(vr_openxr_present_gamma_bias, 0.25f, 4.0f);
 			const float contrastBias = clamp<float>(vr_openxr_present_contrast_bias, 0.25f, 4.0f);

@@ -370,8 +370,8 @@ OptionMenu "OptionsMenu" protected
 	IfNotOption(OpenXR)
 	{
 	Submenu "$OPTMNU_MOUSE",			"MouseOptions"
-	Submenu "$OPTMNU_JOYSTICK",			"JoystickOptions"
 	}
+	Submenu "$OPTMNU_JOYSTICK",			"JoystickOptions"
 	StaticText " "
 	Submenu "$OPTMNU_PLAYER",			"NewPlayerMenu"
 	Submenu "$OPTMNU_GAMEPLAY",			"GameplayOptions"
@@ -2938,7 +2938,7 @@ OptionMenu VROptionsMenu protected
 	Title "VR OPTIONS"
 
 	StaticText ""
-	ifOption(OpenVR)
+	ifOption(OpenVR, OpenXR)
 	{
 		Submenu "$VRCMODEMNU_TITLE",        "CinemaModeOptions"
 	}
@@ -2946,27 +2946,37 @@ OptionMenu VROptionsMenu protected
 	Submenu "VR Weapon Options",        "VRWeaponOptions"
 	StaticText ""
 	StaticText "Misc", gold
-	ifOption(OpenVR)
+	ifOption(OpenVR, OpenXR)
 	{
 		Option "$VRPREFMNU_DESKTOP",        "vr_desktop_view", "DesktopViewModes"
 	}
 	Slider "$VRPREFMNU_WORLDSCALE",     "vr_vunits_per_meter", 1, 60, 1, 0
 	Slider "Height Adjust",		        "vr_height_adjust", -0.5, 1.0, 0.01, 2
+	ifOption(OpenXR)
+	{
+		StaticText ""
+		StaticText "Display Adjust", gold
+		Slider "Adjust Gamma",     		"vr_openxr_present_gamma_bias", -2, 2, 0.01, 2
+		Slider "Adjust Contrast",     	"vr_openxr_present_contrast_bias", -2, 2, 0.01, 2
+		Slider "Adjust Brightness",     "vr_openxr_present_brightness_bias", -2, 2, 0.01, 2
+		Slider "Adjust Saturation",     "vr_openxr_present_saturation_bias", -2, 2, 0.01, 2
+	}
 	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_desktop_view vr_vunits_per_meter vr_height_adjust"
-
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_desktop_view vr_vunits_per_meter vr_height_adjust vr_openxr_present_gamma_bias vr_openxr_present_contrast_bias vr_openxr_present_brightness_bias vr_openxr_present_saturation_bias"
 	StaticText ""
 	StaticText "VR Controls", gold
-	ifOption(OpenVR)
+	ifOption(OpenVR, OpenXR)
 	{
-		Option "Control Mode",				"vr_joy_mode", "ControlMode"
+		Option "Control Mode",			"vr_joy_mode", "ControlMode"
 	}
 	Option "Control Scheme",			"vr_control_scheme", "ControlScheme"
 	Option "Switch Thumbsticks",		"vr_switch_sticks", "OnOff", vr_joy_mode
+	Option "Virtual Mouse",				"vr_mouse_in_menu", "OnOff"
+	ColorPicker "Mouse Pointer",		"vr_menu_pointer_color"
 	Option "Secondary Button Mappings",	"vr_secondary_button_mappings", "OnOff", vr_joy_mode
 	Option "Two Handed Weapons",		"vr_two_handed_weapons", "OnOff"
 	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_control_scheme vr_switch_sticks vr_secondary_button_mappings vr_two_handed_weapons"
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_control_scheme vr_switch_sticks vr_mouse_in_menu vr_menu_pointer_color vr_secondary_button_mappings vr_two_handed_weapons"
 
 	StaticText ""
 	StaticText "Locomotion", gold
