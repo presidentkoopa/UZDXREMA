@@ -197,6 +197,17 @@ protected:
 	mutable XrPosef xrVirtualScreenPose{};
 	mutable XrPosef xrVirtualScreenBackdropPose{};
 	mutable XrPosef xrMenuPointerBeamPose{};
+	mutable bool xrStationaryAnchorValid = false;
+	mutable int xrStationaryAnchorMode = -1;
+	mutable bool xrVirtualScreenWasVisibleLastFrame = false;
+	mutable XrPosef xrStationaryAnchorPose{};
+	mutable XrPosef xrStationaryFollowCurrentPose{};
+	mutable XrPosef xrStationaryFollowTargetPose{};
+	mutable double xrStationaryFollowNextTargetTimeMs = 0.0;
+	mutable double xrStationaryFollowLastStepTimeMs = 0.0;
+	mutable bool xrHasPrevHeadSampleForRecenter = false;
+	mutable XrVector3f xrPrevHeadCenterForRecenter{ 0.0f, 0.0f, 0.0f };
+	mutable float xrPrevHeadYawDegForRecenter = 0.0f;
 	mutable float xrMenuPointerBeamLength = 0.0f;
 	mutable XrFrameState xrFrameState = { XR_TYPE_FRAME_STATE };
 	mutable bool xrFrameInProgress = false;

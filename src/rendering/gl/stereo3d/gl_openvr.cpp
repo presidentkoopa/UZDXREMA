@@ -388,6 +388,25 @@ HmdMatrix34_t openvrLatestHmdPose = {
 };
 bool openvrOverlayAnchorValid = false;
 int openvrOverlayAnchorMode = -1;
+bool openvrOverlayWasVisible = false;
+HmdMatrix34_t openvrOverlayFollowCurrentTransform = {
+	1.0f, 0.0f, 0.0f, 0.0f,
+	0.0f, 1.0f, 0.0f, 1.5f,
+	0.0f, 0.0f, 1.0f, -2.5f
+};
+HmdMatrix34_t openvrOverlayFollowTargetTransform = {
+	1.0f, 0.0f, 0.0f, 0.0f,
+	0.0f, 1.0f, 0.0f, 1.5f,
+	0.0f, 0.0f, 1.0f, -2.5f
+};
+double openvrOverlayFollowNextTargetTime = 0.0;
+double openvrOverlayFollowLastStepTime = 0.0;
+bool openvrHadPrevHmdPoseForRecenter = false;
+HmdMatrix34_t openvrPrevHmdPoseForRecenter = {
+	1.0f, 0.0f, 0.0f, 0.0f,
+	0.0f, 1.0f, 0.0f, 0.0f,
+	0.0f, 0.0f, 1.0f, 0.0f
+};
 HmdMatrix34_t openvrOverlayAnchorTransform = {
 	1.0f, 0.0f, 0.0f, 0.0f,
 	0.0f, 1.0f, 0.0f, 1.5f,
@@ -478,15 +497,71 @@ static HmdMatrix34_t BuildStationaryOverlayAnchorFromHmd()
 {
 	const float screenDistance = 2.5f + vr_overlayscreen_dist;
 	const HmdVector3_t hmdPos = { openvrLatestHmdPose.m[0][3], openvrLatestHmdPose.m[1][3], openvrLatestHmdPose.m[2][3] };
-	const HmdVector3_t right = Scale3(Normalize3({ openvrLatestHmdPose.m[0][0], openvrLatestHmdPose.m[1][0], openvrLatestHmdPose.m[2][0] }), 1.3f);
-	const HmdVector3_t up = Normalize3({ openvrLatestHmdPose.m[0][1], openvrLatestHmdPose.m[1][1], openvrLatestHmdPose.m[2][1] });
-	const HmdVector3_t forward = Normalize3({ -openvrLatestHmdPose.m[0][2], -openvrLatestHmdPose.m[1][2], -openvrLatestHmdPose.m[2][2] });
-	const HmdVector3_t center = Add3(Add3(hmdPos, Scale3(forward, screenDistance)), Scale3(up, vr_overlayscreen_vpos));
+	const HmdVector3_t worldUp = Normalize3({ 0.0f, 1.0f, 0.0f });
+	HmdVector3_t forward = Normalize3({ -openvrLatestHmdPose.m[0][2], -openvrLatestHmdPose.m[1][2], -openvrLatestHmdPose.m[2][2] });
+	// Stationary anchor should be upright in world space: preserve yaw only.
+	forward.v[1] = 0.0f;
+	if (Dot3(forward, forward) < 1e-6f)
+	{
+		forward = Normalize3({ -openvrLatestHmdPose.m[0][0], 0.0f, -openvrLatestHmdPose.m[2][0] });
+	}
+	forward = Normalize3(forward);
 	const HmdVector3_t normal = Scale3(forward, -1.0f);
+	HmdVector3_t right = Normalize3(Cross3(worldUp, normal));
+	if (Dot3(right, right) < 1e-6f)
+	{
+		right = Normalize3({ 1.0f, 0.0f, 0.0f });
+	}
+	const HmdVector3_t up = worldUp;
+	right = Scale3(right, 1.3f);
+	const HmdVector3_t center = Add3(Add3(hmdPos, Scale3(forward, screenDistance)), Scale3(worldUp, vr_overlayscreen_vpos));
 	return HmdMatrix34_t{
 		right.v[0], up.v[0], normal.v[0], center.v[0],
 		right.v[1], up.v[1], normal.v[1], center.v[1],
 		right.v[2], up.v[2], normal.v[2], center.v[2]
+	};
+}
+
+static float YawFromPoseDeg(const HmdMatrix34_t& pose)
+{
+	HmdVector3_t forward = Normalize3({ -pose.m[0][2], -pose.m[1][2], -pose.m[2][2] });
+	forward.v[1] = 0.0f;
+	forward = Normalize3(forward);
+	return RAD2DEG(atan2f(forward.v[0], forward.v[2]));
+}
+
+static float ShortestAngleDeltaDeg(float a, float b)
+{
+	float d = fmodf(a - b, 360.0f);
+	if (d > 180.0f) d -= 360.0f;
+	if (d < -180.0f) d += 360.0f;
+	return d;
+}
+
+static float YawFromOverlayTransformDeg(const HmdMatrix34_t& xf)
+{
+	const HmdVector3_t forward = Normalize3({ -xf.m[0][2], -xf.m[1][2], -xf.m[2][2] });
+	return RAD2DEG(atan2f(forward.v[0], forward.v[2]));
+}
+
+static HmdMatrix34_t OrthonormalizeOverlayTransform(const HmdMatrix34_t& in)
+{
+	HmdVector3_t right = { in.m[0][0], in.m[1][0], in.m[2][0] };
+	HmdVector3_t up = { in.m[0][1], in.m[1][1], in.m[2][1] };
+	HmdVector3_t normal = { in.m[0][2], in.m[1][2], in.m[2][2] };
+	const float rightLen = std::sqrt(std::max(0.0f, Dot3(right, right)));
+	normal = Normalize3(normal);
+	right = Normalize3(Cross3(up, normal));
+	if (Dot3(right, right) < 1e-6f)
+	{
+		right = Normalize3({ 1.0f, 0.0f, 0.0f });
+	}
+	up = Normalize3(Cross3(normal, right));
+	right = Scale3(right, std::max(0.1f, rightLen));
+	return HmdMatrix34_t{
+		right.v[0], up.v[0], normal.v[0], in.m[0][3],
+		right.v[1], up.v[1], normal.v[1], in.m[1][3],
+		right.v[2], up.v[2], normal.v[2], in.m[2][3]
 	};
 }
 
@@ -1593,7 +1668,7 @@ namespace s3d
 		TrackedDeviceIndex_t offhandOverlayIndex = controllers[rightHanded ? 0 : 1].active ? controllers[rightHanded ? 0 : 1].index : openvr::k_unTrackedDeviceIndex_Hmd;
 
 		switch (vr_overlayscreen) {
-		case 1: // overlay stationary position
+		case 1: // stationary
 		{
 			if (!openvrOverlayAnchorValid || openvrOverlayAnchorMode != vr_overlayscreen)
 			{
@@ -1610,13 +1685,61 @@ namespace s3d
 			break;
 		}
 
-		case 2: // overlay follows head movement
+		case 2: // stationary (follow)
+		{
+			const double now = I_msTimeF();
+			if (!openvrOverlayAnchorValid || openvrOverlayAnchorMode != vr_overlayscreen)
+			{
+				if (openvrHasLatestHmdPose)
+				{
+					openvrOverlayFollowCurrentTransform = BuildStationaryOverlayAnchorFromHmd();
+					openvrOverlayFollowTargetTransform = openvrOverlayFollowCurrentTransform;
+					openvrOverlayFollowNextTargetTime = now + 1000.0;
+					openvrOverlayFollowLastStepTime = now;
+					openvrOverlayAnchorValid = true;
+				}
+				openvrOverlayAnchorMode = vr_overlayscreen;
+			}
+			if (openvrHasLatestHmdPose && now >= openvrOverlayFollowNextTargetTime)
+			{
+				const HmdMatrix34_t candidateTarget = BuildStationaryOverlayAnchorFromHmd();
+				const float currentTargetYaw = YawFromOverlayTransformDeg(openvrOverlayFollowTargetTransform);
+				const float candidateYaw = YawFromOverlayTransformDeg(candidateTarget);
+				const float yawDelta = fabsf(ShortestAngleDeltaDeg(candidateYaw, currentTargetYaw));
+				// Ignore tiny head yaw drift to prevent stationary-follow jitter.
+				if (yawDelta >= 15.0f)
+				{
+					openvrOverlayFollowTargetTransform = candidateTarget;
+				}
+				openvrOverlayFollowNextTargetTime = now + 1000.0;
+			}
+			const float dt = (float)clamp((now - openvrOverlayFollowLastStepTime) / 1000.0, 0.0, 0.1);
+			openvrOverlayFollowLastStepTime = now;
+			const float step = clamp(dt * 1.1f, 0.0f, 1.0f);
+			const float eased = 1.0f - powf(1.0f - step, 3.0f);
+			for (int r = 0; r < 3; ++r)
+			{
+				for (int c = 0; c < 4; ++c)
+				{
+					openvrOverlayFollowCurrentTransform.m[r][c] =
+						openvrOverlayFollowCurrentTransform.m[r][c] +
+						(openvrOverlayFollowTargetTransform.m[r][c] - openvrOverlayFollowCurrentTransform.m[r][c]) * eased;
+				}
+			}
+			openvrOverlayFollowCurrentTransform = OrthonormalizeOverlayTransform(openvrOverlayFollowCurrentTransform);
+			openvrOverlayAbsTransform = openvrOverlayFollowCurrentTransform;
+			auto tracking = (ETrackingUniverseOrigin)openvr::ETrackingUniverseOrigin_TrackingUniverseStanding;
+			vrOverlay->SetOverlayTransformAbsolute(overlayHandle, tracking, &openvrOverlayAbsTransform);
+			break;
+		}
+
+		case 3: // follow head movement
 			if (openvrHasLatestHmdPose)
 				openvrOverlayAbsTransform = Mul34(openvrLatestHmdPose, overlayRelTransform);
 			vrOverlay->SetOverlayTransformTrackedDeviceRelative(overlayHandle, openvr::k_unTrackedDeviceIndex_Hmd, &overlayRelTransform);
 			break;
 
-		case 3: // overlay follows main hand movement
+		case 4: // follow main hand
 			if (mainhandOverlayIndex == openvr::k_unTrackedDeviceIndex_Hmd)
 			{
 				if (openvrHasLatestHmdPose)
@@ -1632,7 +1755,7 @@ namespace s3d
 			}
 			break;
 
-		case 4: // overlay follows off hand movement
+		case 5: // follow off hand
 			if (offhandOverlayIndex == openvr::k_unTrackedDeviceIndex_Hmd)
 			{
 				if (openvrHasLatestHmdPose)
@@ -2796,6 +2919,22 @@ namespace s3d
 		
 		if (hmdPose0.bPoseIsValid) {
 			const HmdMatrix34_t& hmdPose = hmdPose0.mDeviceToAbsoluteTracking;
+			if (openvrHadPrevHmdPoseForRecenter)
+			{
+				const float prevYaw = YawFromPoseDeg(openvrPrevHmdPoseForRecenter);
+				const float currYaw = YawFromPoseDeg(hmdPose);
+				const float yawDelta = fabsf(ShortestAngleDeltaDeg(currYaw, prevYaw));
+				const float prevY = openvrPrevHmdPoseForRecenter.m[1][3];
+				const float currY = hmdPose.m[1][3];
+				const float heightDelta = fabsf(currY - prevY);
+				if ((vr_overlayscreen == 1 || vr_overlayscreen == 2) && (yawDelta > 25.0f || heightDelta > 0.20f))
+				{
+					// Respect runtime recenter / tracking-origin reset for stationary modes.
+					openvrOverlayAnchorValid = false;
+				}
+			}
+			openvrPrevHmdPoseForRecenter = hmdPose;
+			openvrHadPrevHmdPoseForRecenter = true;
 			openvrLatestHmdPose = hmdPose;
 			openvrHasLatestHmdPose = true;
 			HmdVector3d_t eulerAngles = eulerAnglesFromMatrix(hmdPose);
@@ -3062,7 +3201,14 @@ namespace s3d
 			{
 				forceDisableOverlay = false;
 			}
-				if (VR_UseScreenLayer() || gamestate == GS_TITLELEVEL || menuactive != MENU_Off || ConsoleState != c_up)
+				const bool overlayVisibleNow = (VR_UseScreenLayer() || gamestate == GS_TITLELEVEL || menuactive != MENU_Off || ConsoleState != c_up);
+				if ((vr_overlayscreen == 1 || vr_overlayscreen == 2) && overlayVisibleNow && !openvrOverlayWasVisible)
+				{
+					// Re-anchor stationary overlay whenever virtual screen is (re)entered.
+					openvrOverlayAnchorValid = false;
+				}
+				openvrOverlayWasVisible = overlayVisibleNow;
+				if (overlayVisibleNow)
 				{
 					UpdateOverlaySettings();
 				}

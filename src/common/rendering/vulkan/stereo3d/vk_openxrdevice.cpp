@@ -22,6 +22,7 @@
 #include "d_eventbase.h"
 #include "d_gui.h"
 #include "menu.h"
+#include "i_time.h"
 #include "p_trace.h"
 #include "p_linetracedata.h"
 #include "p_local.h"
@@ -429,6 +430,24 @@ static void GetStableOpenXRVirtualScreenSize(uint32_t& width, uint32_t& height)
 	height = targetH;
 }
 
+static float YawDegFromForward(const XrVector3f& forwardIn)
+{
+	XrVector3f forward = forwardIn;
+	forward.y = 0.0f;
+	forward = NormalizeVector(forward);
+	if (DotVector(forward, forward) <= 0.000001f)
+		return 0.0f;
+	return std::atan2(forward.x, forward.z) * (180.0f / (float)M_PI);
+}
+
+static float ShortestAngleDeltaDeg(float a, float b)
+{
+	float d = std::fmod(a - b, 360.0f);
+	if (d > 180.0f) d -= 360.0f;
+	if (d < -180.0f) d += 360.0f;
+	return d;
+}
+
 static XrSafeSourceRect GetSafeXrSourceRect(VulkanRenderDevice* vkfb)
 {
 	XrSafeSourceRect result;
@@ -619,7 +638,9 @@ static XrVector3f GetVirtualScreenBackgroundColor()
 
 static XrVector3f GetVirtualScreenBackdropColor()
 {
-	return GetVirtualScreenBackgroundColor();
+	const XrVector3f base = GetVirtualScreenBackgroundColor();
+	constexpr float kBackdropDimScale = 0.30f;
+	return { base.x * kBackdropDimScale, base.y * kBackdropDimScale, base.z * kBackdropDimScale };
 }
 
 static bool IsRightHandedVrControls()
@@ -2886,25 +2907,11 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 
 	if (canUseMenuPointer)
 	{
-		XrVector3f center{ 0.0f, 0.0f, 0.0f };
-		for (uint32_t i = 0; i < xrViewCount; ++i)
-		{
-			center.x += xrViews[i].pose.position.x;
-			center.y += xrViews[i].pose.position.y;
-			center.z += xrViews[i].pose.position.z;
-		}
-		center.x /= xrViewCount;
-		center.y /= xrViewCount;
-		center.z /= xrViewCount;
-		const XrQuaternionf headOrientation = xrViews[0].pose.orientation;
-		const XrVector3f headForward = RotateVector(headOrientation, { 0.0f, 0.0f, -1.0f });
-		const XrVector3f headUp = RotateVector(headOrientation, { 0.0f, 1.0f, 0.0f });
-		const float screenDistance = std::max(0.25f, 2.5f + vr_overlayscreen_dist);
 		const float screenWidth = std::max(0.1f, 1.0f + vr_overlayscreen_size);
 		const float aspect = (xrVirtualScreenHeight > 0) ? (float)xrVirtualScreenWidth / (float)xrVirtualScreenHeight : 1.0f;
 		const float screenHeight = std::max(0.1f, screenWidth / std::max(aspect, 0.01f));
-		const XrQuaternionf screenOrientation = MultiplyQuaternion(headOrientation, MakeAxisAngleQuaternion({ 0.0f, 0.0f, 1.0f }, (float)M_PI));
-		const XrVector3f planeOrigin = AddVector(AddVector(center, ScaleVector(headForward, screenDistance)), ScaleVector(headUp, vr_overlayscreen_vpos));
+		const XrQuaternionf screenOrientation = xrVirtualScreenPose.orientation;
+		const XrVector3f planeOrigin = xrVirtualScreenPose.position;
 
 		const XrVector3f planeNormal = NormalizeVector(RotateVector(screenOrientation, { 0.0f, 0.0f, 1.0f }));
 		const XrVector3f planeRight = NormalizeVector(RotateVector(screenOrientation, { 1.0f, 0.0f, 0.0f }));
@@ -3030,7 +3037,7 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			{
 				const XrVector3f beamDir = ScaleVector(beamVec, 1.0f / beamLength);
 				const XrVector3f beamCenter = AddVector(beamStart, ScaleVector(beamDir, beamLength * 0.5f));
-				XrVector3f viewDir = NormalizeVector(SubtractVector(center, beamCenter));
+				XrVector3f viewDir = NormalizeVector(SubtractVector(xrViews[0].pose.position, beamCenter));
 				XrVector3f xAxis = NormalizeVector(CrossVector(viewDir, beamDir));
 				if (DotVector(xAxis, xAxis) < 0.0001f)
 				{
@@ -3869,21 +3876,128 @@ void VKOpenXRDeviceMode::updateVirtualScreenLayer() const
 	center.x /= xrViewCount;
 	center.y /= xrViewCount;
 	center.z /= xrViewCount;
+	const int effectiveOverlayMode = (vr_overlayscreen == 0) ? 2 : vr_overlayscreen;
 
 	const XrQuaternionf headOrientation = xrViews[0].pose.orientation;
-	const XrVector3f forward = RotateVector(headOrientation, { 0.0f, 0.0f, -1.0f });
-	const XrVector3f up = RotateVector(headOrientation, { 0.0f, 1.0f, 0.0f });
+	const XrVector3f headForward = RotateVector(headOrientation, { 0.0f, 0.0f, -1.0f });
+	const XrVector3f headUp = RotateVector(headOrientation, { 0.0f, 1.0f, 0.0f });
+	const float headYawDeg = YawDegFromForward(headForward);
+	if (xrHasPrevHeadSampleForRecenter)
+	{
+		// Do not treat normal head turning as recenter. Only react to large
+		// vertical/discontinuous jumps that indicate runtime origin reset.
+		const float heightDelta = fabsf(center.y - xrPrevHeadCenterForRecenter.y);
+		const XrVector3f deltaPos = SubtractVector(center, xrPrevHeadCenterForRecenter);
+		const float deltaLen = std::sqrt(std::max(0.0f, DotVector(deltaPos, deltaPos)));
+		if ((effectiveOverlayMode == 1 || effectiveOverlayMode == 2) && (heightDelta > 0.35f || deltaLen > 0.80f))
+		{
+			xrStationaryAnchorValid = false;
+		}
+	}
+	xrPrevHeadCenterForRecenter = center;
+	xrPrevHeadYawDegForRecenter = headYawDeg;
+	xrHasPrevHeadSampleForRecenter = true;
 
 	const float distance = std::max(0.25f, 2.5f + vr_overlayscreen_dist);
 	const float screenWidth = std::max(0.1f, 1.0f + vr_overlayscreen_size);
 	const float aspect = (xrVirtualScreenHeight > 0) ? (float)xrVirtualScreenWidth / (float)xrVirtualScreenHeight : 1.0f;
 	const float screenHeight = std::max(0.1f, screenWidth / std::max(aspect, 0.01f));
 	const XrQuaternionf flipRotation = MakeAxisAngleQuaternion({ 0.0f, 0.0f, 1.0f }, (float)M_PI);
+	const XrVector3f worldUp = { 0.0f, 1.0f, 0.0f };
+	const XrVector3f yawForward = NormalizeVector({ headForward.x, 0.0f, headForward.z });
+	const double now = I_msTimeF();
 
-	// Rotate the virtual-screen quad 180 degrees in-plane.
-	xrVirtualScreenPose.orientation = MultiplyQuaternion(headOrientation, flipRotation);
-	xrVirtualScreenPose.position = AddVector(center, ScaleVector(forward, distance));
-	xrVirtualScreenPose.position = AddVector(xrVirtualScreenPose.position, ScaleVector(up, vr_overlayscreen_vpos));
+	auto BuildYawUprightPose = [&](const XrVector3f& anchorCenter, const XrVector3f& forwardIn) -> XrPosef
+	{
+		XrVector3f forward = NormalizeVector({ forwardIn.x, 0.0f, forwardIn.z });
+		if (DotVector(forward, forward) < 0.0001f)
+			forward = { 0.0f, 0.0f, -1.0f };
+		const XrVector3f normal = ScaleVector(forward, -1.0f);
+		XrVector3f right = NormalizeVector(CrossVector(worldUp, normal));
+		if (DotVector(right, right) < 0.0001f)
+			right = { 1.0f, 0.0f, 0.0f };
+		const XrVector3f up = NormalizeVector(CrossVector(normal, right));
+		const XrVector3f pos = AddVector(AddVector(anchorCenter, ScaleVector(forward, distance)), ScaleVector(worldUp, vr_overlayscreen_vpos));
+		XrPosef pose{};
+		pose.orientation = QuaternionFromBasis(right, up, normal);
+		pose.orientation = MultiplyQuaternion(pose.orientation, flipRotation);
+		pose.position = pos;
+		return pose;
+	};
+
+	switch (effectiveOverlayMode)
+	{
+	case 1: // Stationary
+		if (!xrStationaryAnchorValid || xrStationaryAnchorMode != effectiveOverlayMode)
+		{
+			xrStationaryAnchorPose = BuildYawUprightPose(center, yawForward);
+			xrStationaryAnchorValid = true;
+			xrStationaryAnchorMode = effectiveOverlayMode;
+		}
+		xrVirtualScreenPose = xrStationaryAnchorPose;
+		break;
+	case 2: // Stationary (follow)
+		if (!xrStationaryAnchorValid || xrStationaryAnchorMode != effectiveOverlayMode)
+		{
+			xrStationaryFollowCurrentPose = BuildYawUprightPose(center, yawForward);
+			xrStationaryFollowTargetPose = xrStationaryFollowCurrentPose;
+			xrStationaryFollowNextTargetTimeMs = now + 1000.0;
+			xrStationaryFollowLastStepTimeMs = now;
+			xrStationaryAnchorValid = true;
+			xrStationaryAnchorMode = effectiveOverlayMode;
+		}
+		if (now >= xrStationaryFollowNextTargetTimeMs)
+		{
+			const XrPosef candidateTarget = BuildYawUprightPose(center, yawForward);
+			const float oldYaw = YawDegFromForward(RotateVector(xrStationaryFollowTargetPose.orientation, { 0.0f, 0.0f, -1.0f }));
+			const float newYaw = YawDegFromForward(RotateVector(candidateTarget.orientation, { 0.0f, 0.0f, -1.0f }));
+			if (fabsf(ShortestAngleDeltaDeg(newYaw, oldYaw)) >= 15.0f)
+				xrStationaryFollowTargetPose = candidateTarget;
+			xrStationaryFollowNextTargetTimeMs = now + 1000.0;
+		}
+		{
+			const float dt = (float)clamp((now - xrStationaryFollowLastStepTimeMs) / 1000.0, 0.0, 0.1);
+			xrStationaryFollowLastStepTimeMs = now;
+			const float step = clamp(dt * 1.1f, 0.0f, 1.0f);
+			const float eased = 1.0f - powf(1.0f - step, 3.0f);
+			xrStationaryFollowCurrentPose.position = AddVector(
+				xrStationaryFollowCurrentPose.position,
+				ScaleVector(SubtractVector(xrStationaryFollowTargetPose.position, xrStationaryFollowCurrentPose.position), eased));
+			const XrVector3f currentForward = RotateVector(xrStationaryFollowCurrentPose.orientation, { 0.0f, 0.0f, -1.0f });
+			const XrVector3f targetForward = RotateVector(xrStationaryFollowTargetPose.orientation, { 0.0f, 0.0f, -1.0f });
+			const XrVector3f blendedForward = NormalizeVector(AddVector(ScaleVector(currentForward, 1.0f - eased), ScaleVector(targetForward, eased)));
+			XrPosef orientedPose = BuildYawUprightPose(center, blendedForward);
+			orientedPose.position = xrStationaryFollowCurrentPose.position;
+			xrStationaryFollowCurrentPose = orientedPose;
+			xrVirtualScreenPose = xrStationaryFollowCurrentPose;
+		}
+		break;
+	case 4: // Follow Main Hand
+	case 5: // Follow Offhand
+	{
+		const int hand = (effectiveOverlayMode == 4) ? 1 : 0;
+		if (hand >= 0 && hand < 2 && xrHandPoseValid[hand])
+		{
+			const XrQuaternionf handOrientation = xrHandPoses[hand].orientation;
+			const XrVector3f handForward = RotateVector(handOrientation, { 0.0f, 0.0f, -1.0f });
+			// Keep controller-follow overlay upright (no roll), like OpenVR overlay behavior.
+			xrVirtualScreenPose = BuildYawUprightPose(xrHandPoses[hand].position, handForward);
+		}
+		else
+		{
+			xrVirtualScreenPose.orientation = MultiplyQuaternion(headOrientation, flipRotation);
+			xrVirtualScreenPose.position = AddVector(center, ScaleVector(headForward, distance));
+			xrVirtualScreenPose.position = AddVector(xrVirtualScreenPose.position, ScaleVector(headUp, vr_overlayscreen_vpos));
+		}
+		break;
+	}
+	case 3: // Follow Head movement
+	default:
+		xrVirtualScreenPose.orientation = MultiplyQuaternion(headOrientation, flipRotation);
+		xrVirtualScreenPose.position = AddVector(center, ScaleVector(headForward, distance));
+		xrVirtualScreenPose.position = AddVector(xrVirtualScreenPose.position, ScaleVector(headUp, vr_overlayscreen_vpos));
+		break;
+	}
 
 	xrVirtualScreenLayer.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
 	xrVirtualScreenLayer.layerFlags = 0;
@@ -3897,7 +4011,7 @@ void VKOpenXRDeviceMode::updateVirtualScreenLayer() const
 	xrVirtualScreenLayer.subImage.imageRect.extent = { (int32_t)xrVirtualScreenWidth, (int32_t)xrVirtualScreenHeight };
 
 	xrVirtualScreenBackdropPose.orientation = MultiplyQuaternion(headOrientation, flipRotation);
-	xrVirtualScreenBackdropPose.position = AddVector(center, ScaleVector(forward, distance + 0.15f));
+	xrVirtualScreenBackdropPose.position = AddVector(center, ScaleVector(headForward, distance + 0.15f));
 	xrVirtualScreenBackdropLayer.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
 	xrVirtualScreenBackdropLayer.layerFlags = 0;
 	xrVirtualScreenBackdropLayer.space = xrSpace;
@@ -3929,7 +4043,9 @@ void VKOpenXRDeviceMode::updateVirtualScreenLayer() const
 
 bool VKOpenXRDeviceMode::ShouldRenderVirtualScreen() const
 {
-	return (gamestate != GS_LEVEL || menuactive != MENU_Off || cinemamode || ConsoleState != c_up || vr_overlayscreen_always) && (vr_overlayscreen || vr_overlayscreen_always);
+	const int effectiveOverlayMode = (vr_overlayscreen == 0) ? 2 : vr_overlayscreen;
+	const bool overlayEnabled = (effectiveOverlayMode > 0) || vr_overlayscreen_always;
+	return (gamestate != GS_LEVEL || menuactive != MENU_Off || cinemamode || ConsoleState != c_up || vr_overlayscreen_always) && overlayEnabled;
 }
 
 bool VKOpenXRDeviceMode::RenderVirtualScreen() const
@@ -3938,13 +4054,21 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 	if (!vkfb || !xrFrameInProgress || xrSession == XR_NULL_HANDLE || xrVkDevice == nullptr || xrVkCommandBuffer == nullptr)
 	{
 		xrVirtualScreenVisible = false;
+		xrVirtualScreenWasVisibleLastFrame = false;
 		return false;
 	}
 	if (!ShouldRenderVirtualScreen())
 	{
 		xrVirtualScreenVisible = false;
+		xrVirtualScreenWasVisibleLastFrame = false;
 		return false;
 	}
+	const int effectiveOverlayMode = (vr_overlayscreen == 0) ? 2 : vr_overlayscreen;
+	if ((effectiveOverlayMode == 1 || effectiveOverlayMode == 2) && !xrVirtualScreenWasVisibleLastFrame)
+	{
+		xrStationaryAnchorValid = false;
+	}
+	xrVirtualScreenWasVisibleLastFrame = true;
 
 	const bool forceOverlay = gamestate != GS_LEVEL || menuactive != MENU_Off || cinemamode || ConsoleState != c_up || vr_overlayscreen_always;
 	const bool allowBlankOverlay = vr_overlayscreen_always || cinemamode || gamestate != GS_LEVEL;
@@ -3953,6 +4077,7 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 	{
 		xrVirtualScreenVisible = false;
 		xrVirtualScreenImageIndex = -1;
+		xrVirtualScreenWasVisibleLastFrame = false;
 		return false;
 	}
 
@@ -3962,12 +4087,14 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 	if (!CreateVirtualScreenSwapchain(screenWidth, screenHeight))
 	{
 		xrVirtualScreenVisible = false;
+		xrVirtualScreenWasVisibleLastFrame = false;
 		return false;
 	}
 	if (!CreateVirtualScreenBackdropSwapchain(screenWidth, screenHeight))
 	{
 		xrVirtualScreenVisible = false;
 		xrVirtualScreenBackdropVisible = false;
+		xrVirtualScreenWasVisibleLastFrame = false;
 		return false;
 	}
 	if (!CreateMenuPointerBeamSwapchain())
@@ -3977,12 +4104,14 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 	if (xrVirtualScreenSwapchain == XR_NULL_HANDLE || xrVirtualScreenTextures.empty())
 	{
 		xrVirtualScreenVisible = false;
+		xrVirtualScreenWasVisibleLastFrame = false;
 		return false;
 	}
 	if (xrVirtualScreenBackdropSwapchain == XR_NULL_HANDLE || xrVirtualScreenBackdropTextures.empty())
 	{
 		xrVirtualScreenVisible = false;
 		xrVirtualScreenBackdropVisible = false;
+		xrVirtualScreenWasVisibleLastFrame = false;
 		return false;
 	}
 
@@ -3993,6 +4122,7 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 	{
 		Printf("OpenXR: virtual screen acquire failed (%d).\n", (int)xrResult);
 		xrVirtualScreenVisible = false;
+		xrVirtualScreenWasVisibleLastFrame = false;
 		return false;
 	}
 
@@ -4005,6 +4135,7 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 		xrReleaseSwapchainImage(xrVirtualScreenSwapchain, &releaseInfo);
 		Printf("OpenXR: virtual screen wait failed (%d).\n", (int)xrResult);
 		xrVirtualScreenVisible = false;
+		xrVirtualScreenWasVisibleLastFrame = false;
 		return false;
 	}
 

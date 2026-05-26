@@ -60,6 +60,7 @@
 #include <zvulkan/vulkanswapchain.h>
 
 bool VR_UseScreenLayer();
+extern bool cinemamode;
 #include <zvulkan/vulkanbuilders.h>
 #include <zvulkan/vulkansurface.h>
 #include <zvulkan/vulkancompatibledevice.h>
@@ -232,7 +233,7 @@ void VulkanRenderDevice::Update()
 		if (vrmode != nullptr && vrmode->IsVR())
 		{
 			const int eyeCount = vrmode->mEyeCount > 0 ? vrmode->mEyeCount : 1;
-			const bool suppressSceneEye2D = VR_UseScreenLayer();
+			const bool suppressSceneEye2D = VR_UseScreenLayer() || cinemamode;
 			FirstEye();
 			for (int eye_ix = 0; eye_ix < eyeCount; ++eye_ix)
 			{
@@ -242,7 +243,10 @@ void VulkanRenderDevice::Update()
 				{
 					eye->AdjustBlend(nullptr);
 				}
-				Draw2D(true);
+				if (!suppressSceneEye2D)
+				{
+					Draw2D(true);
+				}
 				if (!VR_UseScreenLayer() && !vrmode->IsRenderingVirtualScreen() && eye != nullptr)
 				{
 					eye->AdjustHud();
