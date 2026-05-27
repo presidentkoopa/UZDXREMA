@@ -716,15 +716,36 @@ static void PostGuiWheelEvent(EGUIEvent type, int x, int y, int modifiers = 0)
 
 static void PostControllerAxisTransitions(const XrVector2f& oldValue, const XrVector2f& newValue, int leftKey, int rightKey, int downKey, int upKey)
 {
-	constexpr float deadZone = 0.25f;
-	const bool oldLeft = oldValue.x < -deadZone;
-	const bool oldRight = oldValue.x > deadZone;
-	const bool oldDown = oldValue.y < -deadZone;
-	const bool oldUp = oldValue.y > deadZone;
-	const bool newLeft = newValue.x < -deadZone;
-	const bool newRight = newValue.x > deadZone;
-	const bool newDown = newValue.y < -deadZone;
-	const bool newUp = newValue.y > deadZone;
+	// Keep X/Y virtual-button zones mutually exclusive so diagonal thumbstick
+	// movement cannot trigger both turn (left/right) and up/down binds together.
+	// For right-stick vertical binds, make up/down significantly harder to
+	// trigger than left/right to protect turning from accidental weapon changes.
+	const bool strictRightVertical =
+		(downKey == KEY_JOYAXIS4MINUS && upKey == KEY_JOYAXIS4PLUS) ||
+		(downKey == KEY_JOYAXIS8MINUS && upKey == KEY_JOYAXIS8PLUS);
+	const float xDeadZone = 0.25f;
+	const float yDeadZone = strictRightVertical ? 0.72f : 0.25f;
+	const float horizontalDominanceMargin = strictRightVertical ? 0.00f : 0.15f;
+	const float verticalDominanceMargin = strictRightVertical ? 0.30f : 0.15f;
+	auto resolveCardinalStates = [&](const XrVector2f& value, bool& left, bool& right, bool& down, bool& up)
+	{
+		const float absX = fabsf(value.x);
+		const float absY = fabsf(value.y);
+		const bool xActive = absX > xDeadZone;
+		const bool yActive = absY > yDeadZone;
+		const bool xDominant = xActive && (!yActive || (absX - absY) >= horizontalDominanceMargin);
+		const bool yDominant = yActive && (!xActive || (absY - absX) >= verticalDominanceMargin);
+
+		left = xDominant && value.x < 0.0f;
+		right = xDominant && value.x > 0.0f;
+		down = yDominant && value.y < 0.0f;
+		up = yDominant && value.y > 0.0f;
+	};
+
+	bool oldLeft = false, oldRight = false, oldDown = false, oldUp = false;
+	bool newLeft = false, newRight = false, newDown = false, newUp = false;
+	resolveCardinalStates(oldValue, oldLeft, oldRight, oldDown, oldUp);
+	resolveCardinalStates(newValue, newLeft, newRight, newDown, newUp);
 
 	PostControllerKeyTransition(oldLeft, newLeft, leftKey);
 	PostControllerKeyTransition(oldRight, newRight, rightKey);
@@ -746,15 +767,36 @@ static void PostRemappedControllerAxisTransitions(
 	int modifiedDownKey,
 	int modifiedUpKey)
 {
-	constexpr float deadZone = 0.25f;
-	const bool oldLeft = oldValue.x < -deadZone;
-	const bool oldRight = oldValue.x > deadZone;
-	const bool oldDown = oldValue.y < -deadZone;
-	const bool oldUp = oldValue.y > deadZone;
-	const bool newLeft = newValue.x < -deadZone;
-	const bool newRight = newValue.x > deadZone;
-	const bool newDown = newValue.y < -deadZone;
-	const bool newUp = newValue.y > deadZone;
+	// Keep X/Y virtual-button zones mutually exclusive so diagonal thumbstick
+	// movement cannot trigger both turn (left/right) and up/down binds together.
+	// For right-stick vertical binds, make up/down significantly harder to
+	// trigger than left/right to protect turning from accidental weapon changes.
+	const bool strictRightVertical =
+		(baseDownKey == KEY_JOYAXIS4MINUS && baseUpKey == KEY_JOYAXIS4PLUS) ||
+		(modifiedDownKey == KEY_JOYAXIS8MINUS && modifiedUpKey == KEY_JOYAXIS8PLUS);
+	const float xDeadZone = 0.25f;
+	const float yDeadZone = strictRightVertical ? 0.72f : 0.25f;
+	const float horizontalDominanceMargin = strictRightVertical ? 0.00f : 0.15f;
+	const float verticalDominanceMargin = strictRightVertical ? 0.30f : 0.15f;
+	auto resolveCardinalStates = [&](const XrVector2f& value, bool& left, bool& right, bool& down, bool& up)
+	{
+		const float absX = fabsf(value.x);
+		const float absY = fabsf(value.y);
+		const bool xActive = absX > xDeadZone;
+		const bool yActive = absY > yDeadZone;
+		const bool xDominant = xActive && (!yActive || (absX - absY) >= horizontalDominanceMargin);
+		const bool yDominant = yActive && (!xActive || (absY - absX) >= verticalDominanceMargin);
+
+		left = xDominant && value.x < 0.0f;
+		right = xDominant && value.x > 0.0f;
+		down = yDominant && value.y < 0.0f;
+		up = yDominant && value.y > 0.0f;
+	};
+
+	bool oldLeft = false, oldRight = false, oldDown = false, oldUp = false;
+	bool newLeft = false, newRight = false, newDown = false, newUp = false;
+	resolveCardinalStates(oldValue, oldLeft, oldRight, oldDown, oldUp);
+	resolveCardinalStates(newValue, newLeft, newRight, newDown, newUp);
 
 	const int oldLeftKey = oldModifier ? modifiedLeftKey : baseLeftKey;
 	const int oldRightKey = oldModifier ? modifiedRightKey : baseRightKey;
