@@ -2844,7 +2844,7 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		// When virtual menu mouse is active on the right hand, the trigger drives
 		// GUI left-click events. Suppress trigger-as-key to avoid menu key-path
 		// conflicts (notably messagebox yes/no confirmations).
-		const bool suppressSelectAsKey = menuMode && hand == 1 && *vr_menu_pointer && (*vr_mouse_in_menu || handInput[1].grip);
+		const bool suppressSelectAsKey = menuMode && menuactive != MENU_WaitKey && hand == 1 && *vr_menu_pointer && (*vr_mouse_in_menu || handInput[1].grip);
 		if (suppressSelectAsKey)
 		{
 			const int oldSelectKey = modifierOld ? triggerAltKey : triggerBaseKey;
@@ -2918,10 +2918,12 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 	xrMenuPointerBeamVisible = false;
 	xrMenuPointerBeamLength = 0.0f;
 	menu_allow_mouse_override = false;
+	const bool keybindCaptureMode = menuactive == MENU_WaitKey;
 
 	const int pointerHand = 1; // Always use the right controller for virtual menu mouse.
-	const bool vrMouseEnabled = *vr_mouse_in_menu || handInput[pointerHand].grip;
+	const bool vrMouseEnabled = !keybindCaptureMode && (*vr_mouse_in_menu || handInput[pointerHand].grip);
 	const bool canUseMenuPointer = menuMode &&
+		!keybindCaptureMode &&
 		*vr_menu_pointer &&
 		vrMouseEnabled &&
 		pointerHand >= 0 && pointerHand < 2 &&
@@ -3171,7 +3173,7 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 	if (menuMode)
 	{
 		emitGameplayHandButtons(0, true);
-		emitGameplayHandButtons(1, false);
+		emitGameplayHandButtons(1, menuactive == MENU_WaitKey);
 		return;
 	}
 

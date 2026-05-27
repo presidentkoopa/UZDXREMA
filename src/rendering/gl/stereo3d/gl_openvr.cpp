@@ -3257,14 +3257,15 @@ namespace s3d
 				openvrMenuPointerBeamVisible = false;
 				openvrMenuSuppressSelectAsKey = false;
 				menu_allow_mouse_override = false;
+				const bool keybindCaptureMode = menuactive == MENU_WaitKey;
 				// Enable virtual mouse only while explicit GUI is open.
 				// This avoids pointer/beam during boot logo or idle title screen.
 				const bool guiMouseContext = (menuactive != MENU_Off) || (ConsoleState != c_up);
 				const bool menuMode = guiMouseContext && (vr_overlayscreen || vr_overlayscreen_always);
 				const bool rightControllerValid = controllers[1].active && controllers[1].pose.bPoseIsValid;
 				const bool rightGripDown = (rightTrackedRemoteState_new.ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Grip)) != 0;
-				const bool vrMouseEnabled = (*vr_menu_pointer) && ((*vr_mouse_in_menu) || rightGripDown);
-				openvrMenuSuppressSelectAsKey = menuMode && *vr_menu_pointer && (vrMouseEnabled || openvrMenuSuppressTriggerUntilRelease || openvrMenuPointerLastTriggerDown);
+				const bool vrMouseEnabled = !keybindCaptureMode && (*vr_menu_pointer) && ((*vr_mouse_in_menu) || rightGripDown);
+				openvrMenuSuppressSelectAsKey = !keybindCaptureMode && menuMode && *vr_menu_pointer && (vrMouseEnabled || openvrMenuSuppressTriggerUntilRelease || openvrMenuPointerLastTriggerDown);
 				if (menuMode && rightControllerValid && vrMouseEnabled)
 				{
 					const HmdMatrix34_t& overlayAbs = openvrOverlayAbsTransform;
