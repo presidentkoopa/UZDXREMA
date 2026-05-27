@@ -2720,14 +2720,14 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		offset[0] = rotated.Y;
 		offset[2] = rotated.X;
 
-		// Keep the OpenVR-style controller convention so the weapon model and
-		// offhand movement share the same baseline.
-		const XrQuaternionf weaponRotation = QuaternionFromAxisAngle(0.0f, 0.0f, 1.0f, -(vr_weaponRotate * 2.0f) * (float)(M_PI / 180.0));
-		const XrQuaternionf adjustedOrientation = MultiplyQuaternion(location.pose.orientation, weaponRotation);
-		const XrVector3f euler = OpenVREulerAnglesFromQuaternion(adjustedOrientation);
+		// Apply vr_weaponRotate as a pure pitch-domain adjustment
+		const XrVector3f euler = OpenVREulerAnglesFromQuaternion(location.pose.orientation);
 		angles[YAW] = (float)(euler.x * (180.0 / M_PI));
-		angles[PITCH] = -(float)(euler.y * (180.0 / M_PI));
-		angles[ROLL] = (float)NormalizeAngle(-(float)(euler.z * (180.0 / M_PI)) + 30.0f);
+		// Match OpenVR pitch-adjust direction: negative vr_weaponRotate should tilt the weapon downward
+		constexpr float openxrWeaponPitchBiasDeg = -40.0f;
+		angles[PITCH] = -(float)(euler.y * (180.0 / M_PI)) - (vr_weaponRotate * 2.0f) + openxrWeaponPitchBiasDeg;
+		// Apply extra 180-degree roll flip to match the expected OpenVR-facing baseline
+		angles[ROLL] = (float)NormalizeAngle(-(float)(euler.z * (180.0 / M_PI)));
 		return true;
 	};
 
