@@ -2830,6 +2830,13 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			const bool playerMoving = (fabsf(moveX) + fabsf(moveY)) > 0.05f;
 			moveX = playerMoving ? moveX : 0.0f;
 			moveY = playerMoving ? moveY : 0.0f;
+
+			// Keep OpenXR locomotion in line with the OpenVR path's effective speed.
+			// OpenVR movement is accumulated through both joystick axes and VR_GetMove.
+			// OpenXR currently feeds VR_GetMove only.
+			constexpr float kOpenXrLocomotionCompatScale = 2.0f;
+			moveX *= kOpenXrLocomotionCompatScale;
+			moveY *= kOpenXrLocomotionCompatScale;
 			remote_movementSideways = moveX;
 			remote_movementForward = moveY;
 
@@ -2912,6 +2919,8 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			PostControllerKeyTransition(xrLastGripState[hand], handInput[hand].grip, gripKey);
 		}
 		PostRemappedControllerKeyTransition(xrLastThumbClickState[hand], handInput[hand].thumbClick, modifierOld, modifierNew, thumbBaseKey, thumbAltKey);
+		const int thumbClickKey = (hand == 1) ? KEY_PAD_RTHUMB : KEY_PAD_LTHUMB;
+		PostControllerKeyTransition(xrLastThumbClickState[hand], handInput[hand].thumbClick, thumbClickKey);
 		if (dominantHand)
 		{
 			PostRemappedControllerKeyTransition(face1Old, face1Pressed, dominantGripModifierOld, dominantGripModifierNew, face1BaseKey, face1AltKey);
