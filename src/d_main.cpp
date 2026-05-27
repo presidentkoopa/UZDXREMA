@@ -3192,6 +3192,35 @@ FString System_GetPlayerName(int node)
 
 void System_ConsoleToggled(int state)
 {
+	static bool consoleTextEnterMenuOpen = false;
+	static bool consoleAutoPaused = false;
+
+	if ((state == c_falling || state == c_down) && menuactive == MENU_Off)
+	{
+		if (CurrentMenu == nullptr)
+		{
+			M_SetMenu(FName("ConsoleTextEnterMenu"), -1);
+			consoleTextEnterMenuOpen = (CurrentMenu != nullptr);
+		}
+		if (consoleTextEnterMenuOpen && !consoleAutoPaused && gamestate == GS_LEVEL && !netgame && paused == 0 && !pauseext)
+		{
+			consoleAutoPaused = true;
+			paused = 1;
+			S_PauseSound(false, false);
+		}
+	}
+	else if (consoleTextEnterMenuOpen && (state == c_rising || state == c_up))
+	{
+		M_ClearMenus();
+		if (consoleAutoPaused)
+		{
+			consoleAutoPaused = false;
+			paused = 0;
+			S_ResumeSound(false);
+		}
+		consoleTextEnterMenuOpen = false;
+	}
+
 	if (state == c_falling && hud_toggled)
 		D_ToggleHud();
 }

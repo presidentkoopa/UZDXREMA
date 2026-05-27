@@ -23,6 +23,7 @@ version "4.14.2"
 #include "zscript/engine/ui/menu/optionmenu.zs"
 #include "zscript/engine/ui/menu/optionmenuitems.zs"
 #include "zscript/engine/ui/menu/reverbedit.zs"
+#include "zscript/engine/ui/menu/consoletextentermenu.zs"
 #include "zscript/engine/ui/menu/textentermenu.zs"
 #include "zscript/engine/ui/menu/imagescroller.zs"
 

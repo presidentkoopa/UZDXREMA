@@ -1187,6 +1187,16 @@ DEFINE_ACTION_FUNCTION(DOptionMenuItemCommandInput, DoCommand)
 	return 0;
 }
 
+DEFINE_ACTION_FUNCTION(DConsoleTextEnterMenu, DoCommand)
+{
+	PARAM_PROLOGUE;
+	PARAM_STRING(cmd);
+	PARAM_BOOL(unsafe);
+	UnsafeExecutionScope scope(unsafe);
+	C_DoCommand(cmd.GetChars());
+	return 0;
+}
+
 DEFINE_ACTION_FUNCTION(_Console, HideConsole)
 {
 	C_HideConsole();

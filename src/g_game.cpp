@@ -1139,6 +1139,61 @@ bool G_Responder (event_t *ev)
 	if (CT_Responder (ev))
 		return true;			// chat ate the event
 
+	if ((ConsoleState != c_up || gamestate == GS_FULLCONSOLE) && ev->type == EV_KeyDown)
+	{
+		const char *cmd = Bindings.GetBind(ev->data1);
+		if ((cmd && !stricmp(cmd, "toggleconsole")) || ev->data1 == KEY_PAD_B)
+		{
+			if (gamestate == GS_FULLCONSOLE)
+			{
+				C_DoCommand("menu_main");
+			}
+			else
+			{
+				C_HideConsole();
+			}
+			return true;
+		}
+	}
+
+	if (ConsoleState != c_up && menuactive == MENU_Off && ev->type == EV_KeyDown)
+	{
+		switch (ev->data1)
+		{
+		case KEY_PAD_DPAD_UP:
+		case KEY_PAD_LTHUMB_UP:
+		case KEY_PAD_RTHUMB_UP:
+		case KEY_JOYPOV1_UP:
+		case KEY_JOYAXIS2PLUS:
+		case KEY_JOYAXIS4PLUS:
+			C_ScrollConsole(3);
+			return true;
+
+		case KEY_PAD_DPAD_DOWN:
+		case KEY_PAD_LTHUMB_DOWN:
+		case KEY_PAD_RTHUMB_DOWN:
+		case KEY_JOYPOV1_DOWN:
+		case KEY_JOYAXIS2MINUS:
+		case KEY_JOYAXIS4MINUS:
+			C_ScrollConsole(-3);
+			return true;
+		}
+	}
+
+	if (ConsoleState != c_up && menuactive == MENU_Off && ev->type == EV_Mouse)
+	{
+		if (ev->y > 0)
+		{
+			C_ScrollConsole(1);
+			return true;
+		}
+		else if (ev->y < 0)
+		{
+			C_ScrollConsole(-1);
+			return true;
+		}
+	}
+
 	if (gamestate == GS_LEVEL)
 	{
 		if (ST_Responder (ev))
@@ -1338,6 +1393,7 @@ void G_Ticker ()
 			gameaction = ga_nothing;
 			break;
 		case ga_intermission:
+			C_HideConsole();
 			gamestate = GS_CUTSCENE;
 			gameaction = ga_nothing;
 			break;

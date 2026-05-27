@@ -516,6 +516,7 @@ void G_NewInit ()
 
 void G_DoNewGame (void)
 {
+	C_HideConsole();
 	G_NewInit ();
 	playeringame[consoleplayer] = 1;
 	if (d_skill != -1)
@@ -1102,6 +1103,7 @@ void RunIntermission(level_info_t* fromMap, level_info_t* toMap, DIntermissionCo
 void G_DoCompleted (void)
 {
 	gameaction = ga_nothing;
+	C_HideConsole();
 	
 	if (   gamestate == GS_DEMOSCREEN
 		|| gamestate == GS_FULLCONSOLE
@@ -1578,6 +1580,7 @@ DEFINE_ACTION_FUNCTION(FLevelLocals, WorldDone)
 void G_DoWorldDone (void) 
 {		 
 	gamestate = GS_LEVEL;
+	C_HideConsole();
 	if (nextlevel.IsEmpty())
 	{
 		// Don't crash if no next map is given. Just repeat the current one.
