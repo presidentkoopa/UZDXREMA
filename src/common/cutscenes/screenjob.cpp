@@ -208,6 +208,16 @@ bool ScreenJobResponder(event_t* ev)
 			C_ToggleConsole();
 			return true;
 		}
+		if (binding.CompareNoCase("togglecheatmenu") == 0)
+		{
+			C_DoCommand("togglecheatmenu");
+			return true;
+		}
+		if (binding.CompareNoCase("menu_main") == 0)
+		{
+			C_DoCommand("menu_main");
+			return true;
+		}
 		if (binding.CompareNoCase("screenshot") == 0)
 		{
 			C_DoCommand("screenshot");

@@ -937,6 +937,9 @@ OptionMenu "OtherControlsMenu" protected
 	StaticText ""
 	Control    "$CNTRLMNU_QUICKSAVE"       , "quicksave"
 	Control    "$CNTRLMNU_QUICKLOAD"       , "quickload"
+
+	StaticText ""
+	Control    "WTF?"       	       , "togglecheatmenu"
 }
 
 OptionMenu "OtherDoubleControlsMenu" protected

@@ -406,6 +406,18 @@ CCMD (pause)
 	sendpause = true;
 }
 
+CCMD(togglecheatmenu)
+{
+	if (CurrentMenu != nullptr && CurrentMenu->IsKindOf("CheatMenu"))
+	{
+		M_ClearMenus();
+		return;
+	}
+
+	M_StartControlPanel(true);
+	M_SetMenu(FName("CheatMenu"), -1);
+}
+
 CCMD (turn180)
 {
 	sendturn180 = true;
@@ -1111,6 +1123,7 @@ bool G_Responder (event_t *ev)
 			if (!cmd || (
 				strnicmp (cmd, "menu_", 5) &&
 				stricmp (cmd, "toggleconsole") &&
+				stricmp (cmd, "togglecheatmenu") &&
 				stricmp (cmd, "sizeup") &&
 				stricmp (cmd, "sizedown") &&
 				stricmp (cmd, "togglemap") &&
