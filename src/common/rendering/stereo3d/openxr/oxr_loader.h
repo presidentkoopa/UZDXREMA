@@ -1,6 +1,9 @@
 #pragma once
 
 #include "i_module.h"
+#include <cstdint>
+#include <string>
+#include <vector>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -42,3 +45,17 @@ extern FModule OpenXRModule;
 #endif
 
 bool IsOpenXRPresent();
+
+struct OpenXRVulkanBootstrapInfo
+{
+	bool available = false;
+	bool supportsVulkanEnable = false;
+	bool supportsVulkanEnable2 = false;
+	uint64_t minApiVersionSupported = 0;
+	uint64_t maxApiVersionSupported = 0;
+	std::vector<std::string> requiredInstanceExtensions;
+	std::vector<std::string> requiredDeviceExtensions;
+};
+
+bool QueryOpenXRVulkanBootstrapInfo(OpenXRVulkanBootstrapInfo& outInfo);
+bool QueryOpenXRVulkanPreferredPhysicalDevice(VkInstance instance, VkPhysicalDevice& outPhysicalDevice);

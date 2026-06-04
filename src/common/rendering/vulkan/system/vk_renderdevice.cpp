@@ -68,12 +68,14 @@ extern bool cinemamode;
 #include "vulkan/system/vk_buffer.h"
 #include "engineerrors.h"
 #include "c_dispatch.h"
+#include "common/rendering/stereo3d/openxr/oxr_loader.h"
 
 FString JitCaptureStackTrace(int framesToSkip, bool includeNativeFrames, int maxFrames = -1);
 
 EXTERN_CVAR(Int, gl_tonemap)
 EXTERN_CVAR(Int, screenblocks)
 EXTERN_CVAR(Bool, cl_capfps)
+EXTERN_CVAR(Int, vr_mode)
 
 CVAR(Bool, vk_raytrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
@@ -131,6 +133,21 @@ VulkanRenderDevice::VulkanRenderDevice(void *hMonitor, bool fullscreen, std::sha
 	builder.OptionalRayQuery();
 	builder.Surface(surface);
 	builder.SelectDevice(vk_device);
+	if (vr_mode == VR_OPENXR_MOBILE)
+	{
+		OpenXRVulkanBootstrapInfo xrInfo;
+		if (QueryOpenXRVulkanBootstrapInfo(xrInfo))
+		{
+			for (const auto& ext : xrInfo.requiredDeviceExtensions)
+				builder.RequireExtension(ext);
+		}
+
+		VkPhysicalDevice preferredDevice = VK_NULL_HANDLE;
+		if (surface != nullptr && surface->Instance != nullptr && QueryOpenXRVulkanPreferredPhysicalDevice(surface->Instance->Instance, preferredDevice))
+		{
+			builder.PreferredPhysicalDevice(preferredDevice);
+		}
+	}
 	SupportedDevices = builder.FindDevices(surface->Instance);
 	device = builder.Create(surface->Instance);
 }

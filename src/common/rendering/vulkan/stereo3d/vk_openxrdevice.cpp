@@ -135,9 +135,13 @@ XrSessionState xrSessionState = XR_SESSION_STATE_UNKNOWN;
 
 using PFN_xrGetVulkanGraphicsRequirementsKHR_t = XrResult (XRAPI_PTR *)(XrInstance, XrSystemId, XrGraphicsRequirementsVulkanKHR*);
 using PFN_xrGetVulkanGraphicsDeviceKHR_t = XrResult (XRAPI_PTR *)(XrInstance, XrSystemId, VkInstance, VkPhysicalDevice*);
+using PFN_xrGetVulkanGraphicsRequirements2KHR_t = XrResult (XRAPI_PTR *)(XrInstance, XrSystemId, XrGraphicsRequirementsVulkanKHR*);
+using PFN_xrGetVulkanGraphicsDevice2KHR_t = XrResult (XRAPI_PTR *)(XrInstance, const XrVulkanGraphicsDeviceGetInfoKHR*, VkPhysicalDevice*);
 
 PFN_xrGetVulkanGraphicsRequirementsKHR_t xrGetVulkanGraphicsRequirementsKHR_inst = nullptr;
 PFN_xrGetVulkanGraphicsDeviceKHR_t xrGetVulkanGraphicsDeviceKHR_inst = nullptr;
+PFN_xrGetVulkanGraphicsRequirements2KHR_t xrGetVulkanGraphicsRequirements2KHR_inst = nullptr;
+PFN_xrGetVulkanGraphicsDevice2KHR_t xrGetVulkanGraphicsDevice2KHR_inst = nullptr;
 
 static bool HasOpenXRExtension(const char* extensionName)
 {
@@ -1373,16 +1377,21 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 		return fail();
 	}
 	// Some runtimes expose the loader DLL but do not support Vulkan OpenXR.
-	if (!HasOpenXRExtension(XR_KHR_VULKAN_ENABLE_EXTENSION_NAME))
+	const bool hasVulkanEnable = HasOpenXRExtension(XR_KHR_VULKAN_ENABLE_EXTENSION_NAME);
+	const bool hasVulkanEnable2 = HasOpenXRExtension(XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME);
+	if (!hasVulkanEnable && !hasVulkanEnable2)
 	{
-		Printf("OpenXR: runtime does not advertise %s, skipping OpenXR initialization.\n", XR_KHR_VULKAN_ENABLE_EXTENSION_NAME);
+		Printf("OpenXR: runtime does not advertise %s or %s, skipping OpenXR initialization.\n",
+			XR_KHR_VULKAN_ENABLE_EXTENSION_NAME, XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME);
 		return fail();
 	}
 
 
-	std::vector<const char*> extensions = {
-		XR_KHR_VULKAN_ENABLE_EXTENSION_NAME
-	};
+	std::vector<const char*> extensions;
+	if (hasVulkanEnable)
+		extensions.push_back(XR_KHR_VULKAN_ENABLE_EXTENSION_NAME);
+	if (hasVulkanEnable2)
+		extensions.push_back(XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME);
 	xrHasEquirectBackdrop = HasOpenXRExtension(XR_KHR_COMPOSITION_LAYER_EQUIRECT_EXTENSION_NAME);
 	if (xrHasEquirectBackdrop)
 	{
@@ -1421,6 +1430,8 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 
 	loadProc("xrGetVulkanGraphicsRequirementsKHR", reinterpret_cast<PFN_xrVoidFunction*>(&xrGetVulkanGraphicsRequirementsKHR_inst));
 	loadProc("xrGetVulkanGraphicsDeviceKHR", reinterpret_cast<PFN_xrVoidFunction*>(&xrGetVulkanGraphicsDeviceKHR_inst));
+	loadProc("xrGetVulkanGraphicsRequirements2KHR", reinterpret_cast<PFN_xrVoidFunction*>(&xrGetVulkanGraphicsRequirements2KHR_inst));
+	loadProc("xrGetVulkanGraphicsDevice2KHR", reinterpret_cast<PFN_xrVoidFunction*>(&xrGetVulkanGraphicsDevice2KHR_inst));
 
 	XrSystemGetInfo systemInfo{ XR_TYPE_SYSTEM_GET_INFO };
 	systemInfo.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
@@ -1436,7 +1447,14 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	}
 
 	XrGraphicsRequirementsVulkanKHR graphicsRequirements{ XR_TYPE_GRAPHICS_REQUIREMENTS_VULKAN_KHR };
-	if (xrGetVulkanGraphicsRequirementsKHR_inst)
+	if (xrGetVulkanGraphicsRequirements2KHR_inst)
+	{
+		if (XR_FAILED(xrGetVulkanGraphicsRequirements2KHR_inst(xrInstance, xrSystemId, &graphicsRequirements)))
+		{
+			return fail();
+		}
+	}
+	else if (xrGetVulkanGraphicsRequirementsKHR_inst)
 	{
 		if (XR_FAILED(xrGetVulkanGraphicsRequirementsKHR_inst(xrInstance, xrSystemId, &graphicsRequirements)))
 		{
@@ -1452,7 +1470,21 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 
 	XrGraphicsBindingVulkanKHR binding{ XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR };
 	VkPhysicalDevice xrPhysicalDevice = VK_NULL_HANDLE;
-	if (xrGetVulkanGraphicsDeviceKHR_inst)
+	if (xrGetVulkanGraphicsDevice2KHR_inst)
+	{
+		XrVulkanGraphicsDeviceGetInfoKHR getInfo{ XR_TYPE_VULKAN_GRAPHICS_DEVICE_GET_INFO_KHR };
+		getInfo.systemId = xrSystemId;
+		getInfo.vulkanInstance = xrVkInstance->Instance;
+		if (XR_FAILED(xrGetVulkanGraphicsDevice2KHR_inst(xrInstance, &getInfo, &xrPhysicalDevice)))
+		{
+			return fail();
+		}
+		if (xrVkDevice->PhysicalDevice.Device != xrPhysicalDevice)
+		{
+			return fail();
+		}
+	}
+	else if (xrGetVulkanGraphicsDeviceKHR_inst)
 	{
 		if (XR_FAILED(xrGetVulkanGraphicsDeviceKHR_inst(xrInstance, xrSystemId, xrVkInstance->Instance, &xrPhysicalDevice)))
 		{

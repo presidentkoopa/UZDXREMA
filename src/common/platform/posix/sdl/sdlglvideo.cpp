@@ -57,6 +57,8 @@
 
 #ifdef HAVE_VULKAN
 #include "vulkan/system/vk_renderdevice.h"
+#include "common/rendering/stereo3d/openxr/oxr_loader.h"
+#include "common/rendering/hwrenderer/data/hw_vrmodes.h"
 #include <zvulkan/vulkanbuilders.h>
 #include <zvulkan/vulkandevice.h>
 #include <zvulkan/vulkaninstance.h>
@@ -77,6 +79,10 @@
 
 // EXTERNAL DATA DECLARATIONS ----------------------------------------------
 extern IVideo *Video;
+
+#ifdef HAVE_VULKAN
+EXTERN_CVAR(Int, vr_mode)
+#endif
 
 EXTERN_CVAR (Int, vid_adapter)
 EXTERN_CVAR (Int, vid_displaybits)
@@ -402,6 +408,32 @@ DFrameBuffer *SDLVideo::CreateFrameBuffer ()
 			builder.DebugLayer(vk_debug);
 			for (unsigned int i = 0; i < count; i++)
 				builder.RequireExtension(names[i]);
+			if (vr_mode == VR_OPENXR_MOBILE)
+			{
+				OpenXRVulkanBootstrapInfo xrInfo;
+				if (QueryOpenXRVulkanBootstrapInfo(xrInfo))
+				{
+					for (const auto& ext : xrInfo.requiredInstanceExtensions)
+						builder.RequireExtension(ext);
+
+					std::vector<uint32_t> apiVersions = { VK_API_VERSION_1_2, VK_API_VERSION_1_1, VK_API_VERSION_1_0 };
+					if (xrInfo.minApiVersionSupported != 0 || xrInfo.maxApiVersionSupported != 0)
+					{
+						std::vector<uint32_t> filtered;
+						for (uint32_t version : apiVersions)
+						{
+							const uint64_t v = version;
+							if ((xrInfo.minApiVersionSupported == 0 || v >= xrInfo.minApiVersionSupported) &&
+								(xrInfo.maxApiVersionSupported == 0 || v <= xrInfo.maxApiVersionSupported))
+							{
+								filtered.push_back(version);
+							}
+						}
+						if (!filtered.empty())
+							builder.ApiVersionsToTry(filtered);
+					}
+				}
+			}
 			auto instance = builder.Create();
 
 			VkSurfaceKHR surfacehandle = nullptr;
