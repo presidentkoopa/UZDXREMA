@@ -77,6 +77,7 @@ CCMD (menu_resolution_commit_changes)
 
 	if (do_fullscreen == false)
 	{
+		vid_fullscreen = false;
 		vid_scalemode = 0;
 		vid_scalefactor = 1.;
 		vid_defwidth = *menu_resolution_custom_width;

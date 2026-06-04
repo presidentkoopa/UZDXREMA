@@ -384,7 +384,9 @@ CVAR(Float, vr_kill_momentum, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // default conversion between (vertical) DOOM units and meters
 CVAR(Float, vr_vunits_per_meter, 34.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // METERS
 CVAR(Float, vr_height_adjust, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // METERS
-CVAR(Float, vr_openxr_fov_adjust_deg, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // DEGREES PER SIDE
+// OpenXR still trends slightly tighter than the long-standing OpenVR path
+// So keep a small per-side widen by default while leaving the adjustment user-tunable.
+CVAR(Float, vr_openxr_fov_adjust_deg, 1.75f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // DEGREES PER SIDE
 CVAR(Float, vr_openxr_eye_shift_scale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_debug_projection_compare, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_openxr_debug_sizes, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)

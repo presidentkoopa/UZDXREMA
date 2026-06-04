@@ -252,6 +252,12 @@ void VkPostprocess::DrawPresentTextureToImage(VkTextureImage *image, VkFormat ou
 {
 	VkPPRenderState renderstate(fb);
 	const bool outputIsSrgb = outputFormat == VK_FORMAT_B8G8R8A8_SRGB || outputFormat == VK_FORMAT_R8G8B8A8_SRGB;
+	const auto* buffers = fb->GetBuffers();
+	const int sourceWidth = buffers ? buffers->GetWidth() : 0;
+	const int sourceHeight = buffers ? buffers->GetHeight() : 0;
+	const int destWidth = image && image->Image ? image->Image->width : box.width;
+	const int destHeight = image && image->Image ? image->Image->height : box.height;
+	const PPFilterMode presentFilter = ViewportLinearScale() ? PPFilterMode::Linear : PPFilterMode::Nearest;
 
 	if (!screenshot)
 		hw_postprocess.customShaders.Run(&renderstate, "screen");
@@ -299,17 +305,16 @@ void VkPostprocess::DrawPresentTextureToImage(VkTextureImage *image, VkFormat ou
 
 	if (vr_debug_projection_compare || vr_openxr_debug_present)
 	{
-		auto* buffers = fb->GetBuffers();
 		Printf("XR_PRESENT_MAP toImage box=%dx%d srcVP=%dx%d sceneVP=%dx%d src=%dx%d dst=%dx%d scale=(%.4f,%.4f) offset=(%.4f,%.4f) applyGamma=%d screenshot=%d outputFormat=%d outputIsSrgb=%d\n",
 			box.width, box.height,
 			screen ? screen->mScreenViewport.width : -1,
 			screen ? screen->mScreenViewport.height : -1,
 			screen ? screen->mSceneViewport.width : -1,
 			screen ? screen->mSceneViewport.height : -1,
-			buffers ? buffers->GetWidth() : -1,
-			buffers ? buffers->GetHeight() : -1,
-			image ? image->Image->width : -1,
-			image ? image->Image->height : -1,
+			sourceWidth,
+			sourceHeight,
+			destWidth,
+			destHeight,
 			(double)sourceScaleX,
 			(double)sourceScaleY,
 			(double)sourceOffsetX,
@@ -329,7 +334,7 @@ void VkPostprocess::DrawPresentTextureToImage(VkTextureImage *image, VkFormat ou
 	renderstate.Shader = &hw_postprocess.present.Present;
 	renderstate.Uniforms.Set(uniforms);
 	renderstate.Viewport = box;
-	renderstate.SetInputCurrent(0, ViewportLinearScale() ? PPFilterMode::Linear : PPFilterMode::Nearest);
+	renderstate.SetInputCurrent(0, presentFilter);
 	renderstate.SetInputTexture(1, &hw_postprocess.present.Dither, PPFilterMode::Nearest, PPWrapMode::Repeat);
 	renderstate.SetNoBlend();
 	renderstate.DrawToImage(image, outputFormat, cmdbuffer);

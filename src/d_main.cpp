@@ -1123,7 +1123,10 @@ static void DrawHudToSurface(const FRenderViewpoint& vp)
 	}
 	else if (saved_vh == saved_sh && (viewactive || automapactive) && saved_sb > 10)
 	{
-		EHudState state = portableHud ? HUD_StatusBar : ((DrawFSHUD || automapactive) ? HUD_Fullscreen : HUD_None);
+		const bool renderMountedHudSurface = portableHud || vr_hud_mount;
+		EHudState state = renderMountedHudSurface
+			? ((DrawFSHUD || automapactive) ? HUD_Fullscreen : HUD_StatusBar)
+			: ((DrawFSHUD || automapactive) ? HUD_Fullscreen : HUD_None);
 		if (state == HUD_None) StatusBar->RefreshBackground();
 		StatusBar->DrawBottomStuff(state);
 		StatusBar->CallDraw(state, vp.TicFrac);

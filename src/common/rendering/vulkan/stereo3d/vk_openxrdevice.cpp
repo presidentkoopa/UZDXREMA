@@ -36,6 +36,7 @@
 #include <algorithm>
 #include <thread>
 #include <chrono>
+#include <vector>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -73,6 +74,7 @@ EXTERN_CVAR(Float, vr_vunits_per_meter);
 EXTERN_CVAR(Float, vr_height_adjust);
 EXTERN_CVAR(Float, vr_openxr_fov_adjust_deg);
 EXTERN_CVAR(Float, vr_openxr_eye_shift_scale);
+EXTERN_CVAR(Float, vr_openxr_render_scale);
 EXTERN_CVAR(Bool, vr_debug_projection_compare);
 EXTERN_CVAR(Bool, vr_openxr_debug_sizes);
 EXTERN_CVAR(Bool, vr_openxr_debug_present);
@@ -90,6 +92,8 @@ EXTERN_CVAR(Float, vr_2dweaponOffsetX);
 EXTERN_CVAR(Float, vr_2dweaponOffsetY);
 EXTERN_CVAR(Float, vr_2dweaponOffsetZ);
 EXTERN_CVAR(Int, screenblocks);
+EXTERN_CVAR(Int, vid_defwidth);
+EXTERN_CVAR(Int, vid_defheight);
 EXTERN_CVAR(Float, vr_automap_stereo);
 EXTERN_CVAR(Float, vr_hud_stereo);
 EXTERN_CVAR(Float, vr_automap_rotate);
@@ -143,15 +147,39 @@ PFN_xrGetVulkanGraphicsDeviceKHR_t xrGetVulkanGraphicsDeviceKHR_inst = nullptr;
 PFN_xrGetVulkanGraphicsRequirements2KHR_t xrGetVulkanGraphicsRequirements2KHR_inst = nullptr;
 PFN_xrGetVulkanGraphicsDevice2KHR_t xrGetVulkanGraphicsDevice2KHR_inst = nullptr;
 
-static bool HasOpenXRExtension(const char* extensionName)
+static const std::vector<XrExtensionProperties>& GetOpenXRExtensions()
 {
+	static std::vector<XrExtensionProperties> cachedExtensions;
+	static bool cacheInitialized = false;
+	if (cacheInitialized)
+		return cachedExtensions;
+
+	cacheInitialized = true;
 	uint32_t extensionCount = 0;
 	if (XR_FAILED(xrEnumerateInstanceExtensionProperties(nullptr, 0, &extensionCount, nullptr)) || extensionCount == 0)
-		return false;
+		return cachedExtensions;
 
-	std::vector<XrExtensionProperties> extensions(extensionCount, { XR_TYPE_EXTENSION_PROPERTIES });
-	if (XR_FAILED(xrEnumerateInstanceExtensionProperties(nullptr, extensionCount, &extensionCount, extensions.data())))
-		return false;
+	cachedExtensions.assign(extensionCount, { XR_TYPE_EXTENSION_PROPERTIES });
+	if (XR_FAILED(xrEnumerateInstanceExtensionProperties(nullptr, extensionCount, &extensionCount, cachedExtensions.data())))
+	{
+		cachedExtensions.clear();
+		return cachedExtensions;
+	}
+
+	if (cachedExtensions.size() != extensionCount)
+		cachedExtensions.resize(extensionCount, { XR_TYPE_EXTENSION_PROPERTIES });
+
+	return cachedExtensions;
+}
+
+static bool IsGameplaySceneActive()
+{
+	return gamestate == GS_LEVEL && menuactive == MENU_Off && !paused && ConsoleState == c_up;
+}
+
+static bool HasOpenXRExtension(const char* extensionName)
+{
+	const auto& extensions = GetOpenXRExtensions();
 
 	for (const auto& extension : extensions)
 	{
@@ -160,6 +188,12 @@ static bool HasOpenXRExtension(const char* extensionName)
 	}
 
 	return false;
+}
+
+static bool ShouldRetryCreateSession(XrResult xrResult)
+{
+	// Retry only for transient runtime failures
+	return xrResult == XR_ERROR_RUNTIME_FAILURE;
 }
 
 static XrColorSpaceFB SelectPreferredColorSpace(const std::vector<XrColorSpaceFB>& supportedColorSpaces)
@@ -381,36 +415,54 @@ struct XrSafeSourceRect
 
 static void GetStableOpenXRVirtualScreenSize(uint32_t& width, uint32_t& height)
 {
-	// Keep the OpenXR menu/console surface independent from the live framebuffer
-	// size. The OpenVR reference path uses a stable virtual-screen surface, and
-	// resizing this overlay to arbitrary desktop dimensions was triggering the
-	// freeze you observed once the resolution got large.
-	// width = 960;
-	// height = 720;
-
-	// Match the OpenVR-style behavior by tracking the active UI/render size,
-	// but keep hard safety bounds so we don't regress into runtime instability
-	// when users pick very large desktop/window dimensions.
+	// Keep the virtual screen live with the current game resolution, but fold
+	// it into a stable 4:3 surface so the controller ray and menu pixels stay
+	// in the same coordinate space while the game is running.
 	constexpr uint32_t kFallbackW = 960;
 	constexpr uint32_t kFallbackH = 720;
 	constexpr uint32_t kMinW = 640;
 	constexpr uint32_t kMinH = 360;
 	constexpr uint32_t kMaxW = 2048;
 	constexpr uint32_t kMaxH = 2048;
-	constexpr uint64_t kMaxPixels = 2048ull * 1536ull; // keep below prior freeze-prone territory
+	constexpr uint64_t kMaxPixels = 2048ull * 1536ull;
 
-	uint32_t targetW = (screen != nullptr) ? (uint32_t)screen->GetWidth() : kFallbackW;
-	uint32_t targetH = (screen != nullptr) ? (uint32_t)screen->GetHeight() : kFallbackH;
-	if (targetW == 0 || targetH == 0)
+	uint32_t sourceW = (uint32_t)std::max(0, DisplayWidth);
+	uint32_t sourceH = (uint32_t)std::max(0, DisplayHeight);
+	if (sourceW == 0 || sourceH == 0)
 	{
-		targetW = kFallbackW;
-		targetH = kFallbackH;
+		sourceW = (uint32_t)std::max(0, (int)vid_defwidth);
+		sourceH = (uint32_t)std::max(0, (int)vid_defheight);
+	}
+	if (sourceW == 0 || sourceH == 0)
+	{
+		sourceW = kFallbackW;
+		sourceH = kFallbackH;
+	}
+
+	sourceW = std::clamp(sourceW, kMinW, kMaxW);
+	sourceH = std::clamp(sourceH, kMinH, kMaxH);
+
+	uint32_t targetW = sourceW;
+	uint32_t targetH = sourceH;
+	if ((uint64_t)sourceW * 3ull <= (uint64_t)sourceH * 4ull)
+	{
+		targetH = (uint32_t)std::floor((double)sourceW * 3.0 / 4.0);
+	}
+	else
+	{
+		targetW = (uint32_t)std::floor((double)sourceH * 4.0 / 3.0);
 	}
 
 	targetW = std::clamp(targetW, kMinW, kMaxW);
 	targetH = std::clamp(targetH, kMinH, kMaxH);
 
-	// Keep dimensions even for predictable blit/viewport behavior.
+	uint64_t pixels = (uint64_t)targetW * (uint64_t)targetH;
+	if (pixels > kMaxPixels)
+	{
+		const double scale = std::sqrt((double)kMaxPixels / (double)pixels);
+		targetW = std::max<uint32_t>(kMinW, (uint32_t)std::floor((double)targetW * scale));
+		targetH = std::max<uint32_t>(kMinH, (uint32_t)std::floor((double)targetH * scale));
+	}
 	targetW &= ~1u;
 	targetH &= ~1u;
 	if (targetW == 0 || targetH == 0)
@@ -419,19 +471,20 @@ static void GetStableOpenXRVirtualScreenSize(uint32_t& width, uint32_t& height)
 		targetH = kFallbackH;
 	}
 
-	// Cap total pixels while preserving aspect ratio.
-	uint64_t pixels = (uint64_t)targetW * (uint64_t)targetH;
-	if (pixels > kMaxPixels)
-	{
-		const double scale = std::sqrt((double)kMaxPixels / (double)pixels);
-		targetW = std::max<uint32_t>(kMinW, (uint32_t)std::floor((double)targetW * scale));
-		targetH = std::max<uint32_t>(kMinH, (uint32_t)std::floor((double)targetH * scale));
-		targetW &= ~1u;
-		targetH &= ~1u;
-	}
-
 	width = targetW;
 	height = targetH;
+}
+
+static void GetOpenXRVirtualScreenMeters(uint32_t renderW, uint32_t renderH, float& widthMeters, float& heightMeters)
+{
+	const float baseWidthMeters = std::max(0.1f, (1.0f + vr_overlayscreen_size) * 1.2f);
+	if (renderW == 0 || renderH == 0)
+	{
+		GetStableOpenXRVirtualScreenSize(renderW, renderH);
+	}
+
+	widthMeters = baseWidthMeters;
+	heightMeters = std::max(0.1f, baseWidthMeters * ((float)renderH / (float)std::max(renderW, 1u)) * 1.05f);
 }
 
 static float YawDegFromForward(const XrVector3f& forwardIn)
@@ -458,8 +511,17 @@ static XrSafeSourceRect GetSafeXrSourceRect(VulkanRenderDevice* vkfb)
 	auto* buffers = vkfb ? vkfb->GetBuffers() : nullptr;
 	const int srcBufferW = buffers ? buffers->GetWidth() : 0;
 	const int srcBufferH = buffers ? buffers->GetHeight() : 0;
-	const IntRect requestedRect = vkfb ? vkfb->mSceneViewport : IntRect{ 0, 0, 0, 0 };
+	IntRect requestedRect = vkfb ? vkfb->mSceneViewport : IntRect{ 0, 0, 0, 0 };
 	const bool overlayUIActive = menuactive != MENU_Off || ConsoleState != c_up || cinemamode;
+	const auto& mode = (const VKOpenXRDeviceMode&)VKOpenXRDeviceMode::getInstance();
+
+	if (mode.ShouldUseRecommendedRenderSizeThisFrame() && !overlayUIActive && srcBufferW > 0 && srcBufferH > 0)
+	{
+		requestedRect.left = 0;
+		requestedRect.top = 0;
+		requestedRect.width = srcBufferW;
+		requestedRect.height = srcBufferH;
+	}
 
 	auto useFullBufferFallback = [&]()
 	{
@@ -1071,35 +1133,11 @@ VSMatrix VKOpenXRDeviceEyePose::GetProjection(FLOATTYPE fov, FLOATTYPE aspectRat
 
 DVector3 VKOpenXRDeviceEyePose::GetViewShift(FRenderViewpoint& vp) const
 {
+	(void)vp;
 	auto& mode = const_cast<VKOpenXRDeviceMode&>((const VKOpenXRDeviceMode&)VKOpenXRDeviceMode::getInstance());
 	const float hmdHeight = GetHmdAdjustedHeightInMapUnit(mode.xrUsingStageSpace ? false : mode.xrHasLocalHeightAnchor, mode.xrLocalHeightAnchor);
 	const float playerHeight = (r_viewpoint.camera && r_viewpoint.camera->player) ? GetDoomPlayerHeightWithoutCrouch(r_viewpoint.camera->player) : hmdHeight;
-	DVector3 shift;
-	if (eye >= 0)
-	{
-		// Keep the view shift stereo-only. Room-scale movement belongs in the
-		// locomotion path, not in the eye separation itself.
-		shift.X = 0.0;
-		shift.Y = 0.0;
-		shift.Z = 0.0;
-		shift.Z += hmdHeight - playerHeight;
-	}
-	else
-	{
-		float angles[3];
-		angles[0] = vp.HWAngles.Pitch.Degrees();
-		angles[1] = GetViewpointYaw();
-		angles[2] = vp.HWAngles.Roll.Degrees();
-
-		float v_forward[3], v_right[3], v_up[3];
-		AngleVectors(angles, v_forward, v_right, v_up);
-
-		const float stereoSeparation = (vr_ipd * 0.5f) * vr_vunits_per_meter * (eye == 0 ? -1.0f : 1.0f);
-		shift.X = v_right[0] * stereoSeparation;
-		shift.Y = v_right[1] * stereoSeparation;
-		shift.Z = v_right[2] * stereoSeparation;
-		shift.Z += hmdHeight - playerHeight;
-	}
+	DVector3 shift = { 0.0, 0.0, hmdHeight - playerHeight };
 
 	if (vr_debug_projection_compare)
 	{
@@ -1172,7 +1210,7 @@ void VKOpenXRDeviceEyePose::SetUp() const
 	}
 
 	VREyeInfo::SetUp();
-	mode.mInVRSceneRender = !VR_UseScreenLayer();
+	mode.mInVRSceneRender = mode.ShouldUseRecommendedRenderSizeThisFrame();
 }
 
 void VKOpenXRDeviceEyePose::TearDown() const
@@ -1272,6 +1310,56 @@ const VRMode& VKOpenXRDeviceMode::getInstance()
 	return instance;
 }
 
+bool VKOpenXRDeviceMode::GetRecommendedRenderSize(int& outWidth, int& outHeight) const
+{
+	int width = 0;
+	int height = 0;
+
+	if (sceneWidth != 0 && sceneHeight != 0)
+	{
+		width = (int)sceneWidth;
+		height = (int)sceneHeight;
+	}
+	else if (!xrViewConfigs.empty() && xrViewConfigs[0].recommendedImageRectWidth != 0 && xrViewConfigs[0].recommendedImageRectHeight != 0)
+	{
+		width = (int)xrViewConfigs[0].recommendedImageRectWidth;
+		height = (int)xrViewConfigs[0].recommendedImageRectHeight;
+	}
+	else
+	{
+		outWidth = 0;
+		outHeight = 0;
+		return false;
+	}
+
+	const float renderScale = clamp<float>(vr_openxr_render_scale, 0.25f, 4.0f);
+	outWidth = std::max(1, (int)std::lround(width * renderScale));
+	outHeight = std::max(1, (int)std::lround(height * renderScale));
+	return true;
+}
+
+bool VKOpenXRDeviceMode::ShouldUseRecommendedRenderSizeThisFrame() const
+{
+	return mFrameRenderMode == FrameRenderMode::GameplayEyes;
+}
+
+bool VKOpenXRDeviceMode::ShouldUseScreenLayerForCurrentFrame() const
+{
+	return mFrameRenderMode != FrameRenderMode::GameplayEyes;
+}
+
+static void ApplyOpenXRGameplayViewport(DFrameBuffer* screen, int width, int height)
+{
+	screen->mSceneViewport.left = 0;
+	screen->mSceneViewport.top = 0;
+	screen->mSceneViewport.width = width;
+	screen->mSceneViewport.height = height;
+	screen->mScreenViewport.left = 0;
+	screen->mScreenViewport.top = 0;
+	screen->mScreenViewport.width = width;
+	screen->mScreenViewport.height = height;
+}
+
 template<class TYPE>
 static TYPE& getHUDValue(TYPE& automap, TYPE& hud)
 {
@@ -1309,8 +1397,8 @@ VSMatrix VKOpenXRDeviceEyePose::GetHUDProjection() const
 	const float hudScale = getHUDValue<FFloatCVarRef>(vr_automap_scale, vr_hud_scale);
 	hudProjection.scale(-hudScale, hudScale, -hudScale);
 
-	const float screenWidth = (float)SCREENWIDTH;
-	const float screenHeight = (float)SCREENHEIGHT;
+	float screenWidth = (float)SCREENWIDTH;
+	float screenHeight = (float)SCREENHEIGHT;
 	hudProjection.translate(-1.0f, 1.0f, 0.0f);
 	hudProjection.scale(2.0f / screenWidth, -2.0f / screenHeight, -1.0f);
 
@@ -1514,14 +1602,13 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	sessionInfo.next = &binding;
 	sessionInfo.systemId = xrSystemId;
 	xrResult = xrCreateSession(xrInstance, &sessionInfo, &xrSession);
+	if (XR_FAILED(xrResult) && ShouldRetryCreateSession(xrResult))
+	{
+		xrResult = xrCreateSession(xrInstance, &sessionInfo, &xrSession);
+	}
 	if (XR_FAILED(xrResult))
 	{
-		std::this_thread::sleep_for(std::chrono::milliseconds(500));
-		xrResult = xrCreateSession(xrInstance, &sessionInfo, &xrSession);
-		if (XR_FAILED(xrResult))
-		{
-			return fail();
-		}
+		return fail();
 	}
 
 	if (xrHasFBColorSpace && xrEnumerateColorSpacesFB && xrSetColorSpaceFB)
@@ -2332,14 +2419,17 @@ void VKOpenXRDeviceMode::PurgeDeferredOpenXRResources() const
 	xrDeferredMenuPointerBeamTextures.clear();
 }
 
-void VKOpenXRDeviceMode::SetUp() const
+VKOpenXRDeviceMode::FrameRenderMode VKOpenXRDeviceMode::DetermineFrameRenderMode() const
 {
 	const bool forceVirtualScreen = gamestate == GS_LEVEL && menuactive == MENU_Off && (cinemamode || vr_overlayscreen_always);
-	if (forceVirtualScreen)
-	{
-		QzDoom_setUseScreenLayer(true);
-	}
-	else if (gamestate == GS_LEVEL && menuactive == MENU_Off && !paused && ConsoleState == c_up)
+	return (IsGameplaySceneActive() && !forceVirtualScreen) ? FrameRenderMode::GameplayEyes : FrameRenderMode::VirtualScreen;
+}
+
+void VKOpenXRDeviceMode::ApplyFrameRenderMode(FrameRenderMode mode) const
+{
+	mFrameRenderMode = mode;
+
+	if (mode == FrameRenderMode::GameplayEyes)
 	{
 		QzDoom_setUseScreenLayer(false);
 	}
@@ -2347,6 +2437,11 @@ void VKOpenXRDeviceMode::SetUp() const
 	{
 		QzDoom_setUseScreenLayer(true);
 	}
+}
+
+void VKOpenXRDeviceMode::SetUp() const
+{
+	ApplyFrameRenderMode(DetermineFrameRenderMode());
 
 	super::SetUp();
 	PurgeDeferredOpenXRResources();
@@ -2384,24 +2479,12 @@ void VKOpenXRDeviceMode::SetUp() const
 	if (!isSetup)
 	{
 		if (!InitializeOpenXR()) return;
-		if (!CreateSwapchain()) return;
 		isSetup = true;
 	}
 
 	if (xrSession == XR_NULL_HANDLE) return;
 	PollXREvents();
-
-	if (gamestate == GS_LEVEL && menuactive == MENU_Off)
-	{
-		if (forceVirtualScreen)
-		{
-			QzDoom_setUseScreenLayer(true);
-		}
-	}
-	else
-	{
-		QzDoom_setUseScreenLayer(true);
-	}
+	ApplyFrameRenderMode(DetermineFrameRenderMode());
 
 	UpdateControllerState();
 
@@ -3018,9 +3101,9 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 
 	if (canUseMenuPointer)
 	{
-		const float screenWidth = std::max(0.1f, 1.0f + vr_overlayscreen_size);
-		const float aspect = (xrVirtualScreenHeight > 0) ? (float)xrVirtualScreenWidth / (float)xrVirtualScreenHeight : 1.0f;
-		const float screenHeight = std::max(0.1f, screenWidth / std::max(aspect, 0.01f));
+		float screenWidth = 0.0f;
+		float screenHeight = 0.0f;
+		GetOpenXRVirtualScreenMeters(xrVirtualScreenWidth, xrVirtualScreenHeight, screenWidth, screenHeight);
 		const XrQuaternionf screenOrientation = xrVirtualScreenPose.orientation;
 		const XrVector3f planeOrigin = xrVirtualScreenPose.position;
 
@@ -3080,36 +3163,18 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			return out;
 		};
 
-		const XrVector3f candidateAxes[] = {
-			{ 0.0f, 0.0f, -1.0f },
-			{ 0.0f, 0.0f, 1.0f }
-		};
+		const XrVector3f rayAxis = { 0.0f, 0.0f, -1.0f };
+		const RayHit bestHit = testRayAxis(rayAxis);
 
-		RayHit bestHit{};
-		int bestAxis = -1;
-		for (int i = 0; i < 2; ++i)
+		if (bestHit.valid)
 		{
-			const RayHit hit = testRayAxis(candidateAxes[i]);
-			if (!hit.valid) continue;
-			if (bestAxis < 0 ||
-				hit.overflow < bestHit.overflow ||
-				(hit.overflow == bestHit.overflow && hit.t < bestHit.t))
-			{
-				bestAxis = i;
-				bestHit = hit;
-			}
-		}
-
-		if (bestAxis >= 0 && bestHit.valid)
-		{
+			const bool inside = bestHit.overflow <= 0.0001f;
 			const float mappedU = 1.0f - bestHit.unclampedU;
 			const float mappedV = 1.0f - bestHit.unclampedV;
-			const int mouseXUnclamped = (int)std::lround(mappedU * (float)(xrVirtualScreenWidth - 1));
-			const int mouseYUnclamped = (int)std::lround(mappedV * (float)(xrVirtualScreenHeight - 1));
-			const int mouseX = clamp<int>(mouseXUnclamped, 0, (int)xrVirtualScreenWidth - 1);
-			const int mouseY = clamp<int>(mouseYUnclamped, 0, (int)xrVirtualScreenHeight - 1);
-			const int guiMouseX = mouseX;
-			const int guiMouseY = mouseY;
+			float u = clamp<float>(mappedU, 0.0f, 1.0f);
+			float v = clamp<float>(mappedV, 0.0f, 1.0f);
+			const int mouseX = clamp<int>((int)std::lround(u * (float)(xrVirtualScreenWidth - 1)), 0, (int)xrVirtualScreenWidth - 1);
+			const int mouseY = clamp<int>((int)std::lround(v * (float)(xrVirtualScreenHeight - 1)), 0, (int)xrVirtualScreenHeight - 1);
 			if (vr_openxr_debug_sizes)
 			{
 				static int pointerDebugTicker = 0;
@@ -3118,25 +3183,19 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 					const int guiW = screen ? screen->GetWidth() : 0;
 					const int guiH = screen ? screen->GetHeight() : 0;
 					Printf("XR_MENU_PTR axis=%d t=%.3f local=(%.3f,%.3f) half=(%.3f,%.3f) uvRaw=(%.3f,%.3f) uvMap=(%.3f,%.3f) ovf=%.3f virt=%ux%u vis=(%d,%d) gui=%dx%d guiPos=(%d,%d)\n",
-						bestAxis,
+						0,
 						bestHit.t,
 						bestHit.localX, bestHit.localY,
 						screenWidth * 0.5f, screenHeight * 0.5f,
 						bestHit.unclampedU, bestHit.unclampedV,
-						mappedU, mappedV,
+						u, v,
 						bestHit.overflow,
 						xrVirtualScreenWidth, xrVirtualScreenHeight,
 						mouseX, mouseY,
 						guiW, guiH,
-						guiMouseX, guiMouseY);
+						mouseX, mouseY);
 				}
 			}
-
-			xrMenuPointerActive = true;
-			xrMenuPointerHasHit = true;
-			xrMenuPointerX = (float)mouseX;
-			xrMenuPointerY = (float)mouseY;
-			menu_allow_mouse_override = true;
 
 			// Build a world-space quad layer representing a laser beam from
 			// controller pose to the virtual-screen hit point.
@@ -3165,47 +3224,42 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 				xrMenuPointerBeamVisible = true;
 			}
 
-			if (!xrMenuPointerHadPos || guiMouseX != xrMenuPointerLastX || guiMouseY != xrMenuPointerLastY)
+			const bool dragHoldActive = xrMenuPointerLastLeftDown || xrMenuPointerLastRightDown;
+			const bool allowClampedInteraction = inside || dragHoldActive;
+			if (allowClampedInteraction)
 			{
-				PostGuiMouseEvent(EV_GUI_MouseMove, guiMouseX, guiMouseY);
-				xrMenuPointerLastX = guiMouseX;
-				xrMenuPointerLastY = guiMouseY;
-				xrMenuPointerHadPos = true;
-			}
+				xrMenuPointerActive = true;
+				xrMenuPointerHasHit = true;
+				xrMenuPointerX = (float)mouseX;
+				xrMenuPointerY = (float)mouseY;
+				menu_allow_mouse_override = true;
 
-			if (handInput[pointerHand].select != xrMenuPointerLastLeftDown)
-			{
-				PostGuiMouseEvent(handInput[pointerHand].select ? EV_GUI_LButtonDown : EV_GUI_LButtonUp, xrMenuPointerLastX, xrMenuPointerLastY);
-				xrMenuPointerLastLeftDown = handInput[pointerHand].select;
-			}
-			// If vr_mouse_in_menu is disabled, grip acts as a temporary "hold to use mouse"
-			// modifier, so do not also emit right-click from the same button.
-			const bool emitRightClick = *vr_mouse_in_menu;
-			if (emitRightClick && handInput[pointerHand].grip != xrMenuPointerLastRightDown)
-			{
-				PostGuiMouseEvent(handInput[pointerHand].grip ? EV_GUI_RButtonDown : EV_GUI_RButtonUp, xrMenuPointerLastX, xrMenuPointerLastY);
-				xrMenuPointerLastRightDown = handInput[pointerHand].grip;
-			}
-			else if (!emitRightClick)
-			{
-				xrMenuPointerLastRightDown = false;
-			}
-		}
-		else
-		{
-			// Keep a visible fallback cursor/beam while in menu mode so the
-			// pointer path stays debuggable even if the current controller forward
-			// axis does not intersect the virtual-screen plane.
-			if (!xrMenuPointerHadPos)
-			{
-				xrMenuPointerLastX = (int)xrVirtualScreenWidth / 2;
-				xrMenuPointerLastY = (int)xrVirtualScreenHeight / 2;
+				if (!xrMenuPointerHadPos || mouseX != xrMenuPointerLastX || mouseY != xrMenuPointerLastY)
+				{
+					PostGuiMouseEvent(EV_GUI_MouseMove, mouseX, mouseY);
+					xrMenuPointerLastX = mouseX;
+					xrMenuPointerLastY = mouseY;
+				}
 				xrMenuPointerHadPos = true;
+
+				if (handInput[pointerHand].select != xrMenuPointerLastLeftDown)
+				{
+					PostGuiMouseEvent(handInput[pointerHand].select ? EV_GUI_LButtonDown : EV_GUI_LButtonUp, xrMenuPointerLastX, xrMenuPointerLastY);
+					xrMenuPointerLastLeftDown = handInput[pointerHand].select;
+				}
+				// If vr_mouse_in_menu is disabled, grip acts as a temporary "hold to use mouse"
+				// modifier, so do not also emit right-click from the same button.
+				const bool emitRightClick = *vr_mouse_in_menu;
+				if (emitRightClick && handInput[pointerHand].grip != xrMenuPointerLastRightDown)
+				{
+					PostGuiMouseEvent(handInput[pointerHand].grip ? EV_GUI_RButtonDown : EV_GUI_RButtonUp, xrMenuPointerLastX, xrMenuPointerLastY);
+					xrMenuPointerLastRightDown = handInput[pointerHand].grip;
+				}
+				else if (!emitRightClick)
+				{
+					xrMenuPointerLastRightDown = false;
+				}
 			}
-			xrMenuPointerActive = true;
-			xrMenuPointerHasHit = true;
-			xrMenuPointerX = (float)xrMenuPointerLastX;
-			xrMenuPointerY = (float)xrMenuPointerLastY;
 		}
 
 		// Allow scrolling long menus with right-thumbstick vertical movement,
@@ -3288,7 +3342,7 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 				player->mo->AttackPos.X = mat[3][0];
 				player->mo->AttackPos.Y = mat[3][2];
 				player->mo->AttackPos.Z = mat[3][1];
-				player->mo->AttackPitch = DAngle::fromDeg(VR_UseScreenLayer()
+				player->mo->AttackPitch = DAngle::fromDeg(ShouldUseScreenLayerForCurrentFrame()
 					? -weaponangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees()
 					: -weaponangles[PITCH]);
 				player->mo->AttackAngle = DAngle::fromDeg(-90 + GetViewpointYaw() + (weaponangles[YAW] - playerYaw));
@@ -3301,7 +3355,7 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 				player->mo->OffhandPos.X = matOffhand[3][0];
 				player->mo->OffhandPos.Y = matOffhand[3][2];
 				player->mo->OffhandPos.Z = matOffhand[3][1];
-				player->mo->OffhandPitch = DAngle::fromDeg(VR_UseScreenLayer()
+				player->mo->OffhandPitch = DAngle::fromDeg(ShouldUseScreenLayerForCurrentFrame()
 					? -offhandangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees()
 					: -offhandangles[PITCH]);
 				player->mo->OffhandAngle = DAngle::fromDeg(-90 + GetViewpointYaw() + (offhandangles[YAW] - playerYaw));
@@ -3444,7 +3498,10 @@ bool VKOpenXRDeviceMode::BeginXRFrame() const
 	const uint64_t nextFrame = xrFrameCounter + 1;
 	++xrFrameCounter;
 
-	if (xrSession == XR_NULL_HANDLE || xrSwapchain == XR_NULL_HANDLE || xrVkDevice == nullptr)
+	if (xrSession == XR_NULL_HANDLE || xrVkDevice == nullptr)
+		return false;
+
+	if (xrSwapchain == XR_NULL_HANDLE && !CreateSwapchain())
 		return false;
 
 	if (gamestate == GS_LEVEL && (r_viewpoint.camera == nullptr || r_viewpoint.ViewLevel == nullptr))
@@ -3891,15 +3948,20 @@ void VKOpenXRDeviceMode::Present() const
 
 void VKOpenXRDeviceMode::AdjustViewport(DFrameBuffer* screen) const
 {
-	if (screen == nullptr) return;
-	if (!mInVRSceneRender) return;
+	if (screen == nullptr)
+		return;
+	if (!mInVRSceneRender)
+		return;
 
-	// Preserve the normal VR viewport scaling contract here instead of forcing
-	// the scene to the XR recommended eye size. The XR swapchain itself already
-	// carries the eye-image dimensions, and rewriting the framebuffer viewport
-	// here can distort/zoom the scene and break 2D overlay composition when the
-	// desktop resolution or scaling changes.
-	VRMode::AdjustViewport(screen);
+	int width = 0;
+	int height = 0;
+	if (!GetRecommendedRenderSize(width, height))
+	{
+		VRMode::AdjustViewport(screen);
+		return;
+	}
+
+	ApplyOpenXRGameplayViewport(screen, width, height);
 }
 
 void VKOpenXRDeviceMode::AdjustPlayerSprites(FRenderState& state, int hand) const
@@ -4010,9 +4072,9 @@ void VKOpenXRDeviceMode::updateVirtualScreenLayer() const
 	xrHasPrevHeadSampleForRecenter = true;
 
 	const float distance = std::max(0.25f, 2.5f + vr_overlayscreen_dist);
-	const float screenWidth = std::max(0.1f, 1.0f + vr_overlayscreen_size);
-	const float aspect = (xrVirtualScreenHeight > 0) ? (float)xrVirtualScreenWidth / (float)xrVirtualScreenHeight : 1.0f;
-	const float screenHeight = std::max(0.1f, screenWidth / std::max(aspect, 0.01f));
+	float screenWidth = 0.0f;
+	float screenHeight = 0.0f;
+	GetOpenXRVirtualScreenMeters(xrVirtualScreenWidth, xrVirtualScreenHeight, screenWidth, screenHeight);
 	const XrQuaternionf flipRotation = MakeAxisAngleQuaternion({ 0.0f, 0.0f, 1.0f }, (float)M_PI);
 	const XrVector3f worldUp = { 0.0f, 1.0f, 0.0f };
 	const XrVector3f yawForward = NormalizeVector({ headForward.x, 0.0f, headForward.z });
@@ -4156,7 +4218,9 @@ bool VKOpenXRDeviceMode::ShouldRenderVirtualScreen() const
 {
 	const int effectiveOverlayMode = (vr_overlayscreen == 0) ? 2 : vr_overlayscreen;
 	const bool overlayEnabled = (effectiveOverlayMode > 0) || vr_overlayscreen_always;
-	return (gamestate != GS_LEVEL || menuactive != MENU_Off || cinemamode || ConsoleState != c_up || vr_overlayscreen_always) && overlayEnabled;
+	return ShouldUseScreenLayerForCurrentFrame() &&
+		(gamestate != GS_LEVEL || menuactive != MENU_Off || cinemamode || ConsoleState != c_up || vr_overlayscreen_always) &&
+		overlayEnabled;
 }
 
 bool VKOpenXRDeviceMode::RenderVirtualScreen() const
@@ -4867,7 +4931,7 @@ bool VKOpenXRDeviceMode::GetHandTransform(int hand, VSMatrix* mat) const
 		mat->translate(-offset[0], (hmdPosition[1] + offset[1] + (float)vr_height_adjust) / (float)pixelstretch, offset[2]);
 		mat->scale(1, 1 / (float)pixelstretch, 1);
 
-		if (VR_UseScreenLayer())
+		if (ShouldUseScreenLayerForCurrentFrame())
 		{
 			mat->rotate(-90 + r_viewpoint.Angles.Yaw.Degrees() + (angles[1] - playerYaw), 0, 1, 0);
 			mat->rotate(-angles[0] - r_viewpoint.Angles.Pitch.Degrees(), 1, 0, 0);

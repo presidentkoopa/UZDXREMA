@@ -37,6 +37,12 @@ protected:
 class VKOpenXRDeviceMode : public VRMode
 {
 public:
+	enum class FrameRenderMode
+	{
+		GameplayEyes,
+		VirtualScreen
+	};
+
 	friend class VKOpenXRDeviceEyePose;
 	static const VRMode& getInstance();
 
@@ -60,7 +66,9 @@ public:
 	virtual bool RenderVirtualScreen() const override;
 	virtual void FinalizeEyeImage(VulkanRenderDevice* fb, int eyeIndex) const override;
 	virtual bool RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage* dstImage) const override;
-	bool GetRecommendedRenderSize(int& outWidth, int& outHeight) const;
+	bool GetRecommendedRenderSize(int& outWidth, int& outHeight) const override;
+	virtual bool ShouldUseRecommendedRenderSizeThisFrame() const override;
+	virtual bool ShouldUseScreenLayerForCurrentFrame() const override;
 	
 	virtual bool GetHandTransform(int hand, VSMatrix* out) const override;
 	virtual bool RenderPlayerSpritesInScene() const { return true; }
@@ -88,6 +96,8 @@ protected:
 	void DestroyOpenXR() const;
 
 	void updateVirtualScreenLayer() const;
+	FrameRenderMode DetermineFrameRenderMode() const;
+	void ApplyFrameRenderMode(FrameRenderMode mode) const;
 	bool ShouldRenderVirtualScreen() const;
 	void PurgeDeferredOpenXRResources() const;
 
@@ -97,6 +107,7 @@ protected:
 	mutable bool isOpenXRReady = false;
 	mutable bool isSessionRunning = false;
 	mutable bool isSessionReadyToBegin = false;
+	mutable FrameRenderMode mFrameRenderMode = FrameRenderMode::VirtualScreen;
 	mutable bool mInVRSceneRender = false;
 	mutable bool mInVirtualScreenRender = false;
 	mutable uint32_t sceneWidth = 0;

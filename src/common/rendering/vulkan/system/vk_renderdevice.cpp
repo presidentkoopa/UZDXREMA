@@ -59,7 +59,6 @@
 #include "vulkan/textures/vk_framebuffer.h"
 #include <zvulkan/vulkanswapchain.h>
 
-bool VR_UseScreenLayer();
 extern bool cinemamode;
 #include <zvulkan/vulkanbuilders.h>
 #include <zvulkan/vulkansurface.h>
@@ -238,23 +237,23 @@ void VulkanRenderDevice::Update()
 	Flush3D.Clock();
 
 	const auto vrmode = VRMode::GetVRModeCached(true);
-	bool xrFrameBegan = false;
-	if (vrmode != nullptr && vrmode->IsVR())
-	{
-		vrmode->SetUp();
-		xrFrameBegan = vrmode->BeginXRFrame();
-	}
 	auto* postprocess = GetPostprocess();
 	if (postprocess)
 	{
 		if (vrmode != nullptr && vrmode->IsVR())
 		{
 			const int eyeCount = vrmode->mEyeCount > 0 ? vrmode->mEyeCount : 1;
-			const bool suppressSceneEye2D = VR_UseScreenLayer() || cinemamode;
+			const bool suppressSceneEye2D = vrmode->ShouldUseScreenLayerForCurrentFrame() || cinemamode;
+			const bool useGameplayEyeViewport = vrmode->ShouldUseRecommendedRenderSizeThisFrame() && !vrmode->IsRenderingVirtualScreen();
+			const IntRect savedScreenViewport = mScreenViewport;
 			FirstEye();
 			for (int eye_ix = 0; eye_ix < eyeCount; ++eye_ix)
 			{
 				const auto eye = (eye_ix >= 0 && eye_ix < 2) ? vrmode->mEyes[eye_ix] : nullptr;
+				if (useGameplayEyeViewport)
+				{
+					mScreenViewport = mSceneViewport;
+				}
 				postprocess->SetActiveRenderTarget();
 				if (eye != nullptr)
 				{
@@ -264,7 +263,7 @@ void VulkanRenderDevice::Update()
 				{
 					Draw2D(true);
 				}
-				if (!VR_UseScreenLayer() && !vrmode->IsRenderingVirtualScreen() && eye != nullptr)
+				if (!vrmode->ShouldUseScreenLayerForCurrentFrame() && !vrmode->IsRenderingVirtualScreen() && eye != nullptr)
 				{
 					eye->AdjustHud();
 				}
@@ -276,6 +275,7 @@ void VulkanRenderDevice::Update()
 				if (eye_ix + 1 < eyeCount)
 					NextEye(eyeCount);
 			}
+			mScreenViewport = savedScreenViewport;
 			vrmode->RenderVirtualScreen();
 			twod->Clear();
 		}
@@ -295,10 +295,11 @@ void VulkanRenderDevice::Update()
 	mCommands->WaitForCommands(true);
 	mCommands->UpdateGpuStats();
 
-	if (vrmode != nullptr && vrmode->IsVR() && xrFrameBegan)
+	if (vrmode != nullptr && vrmode->IsVR() && mXRFrameBeganThisFrame)
 	{
 		vrmode->AcquireXRSwapchain();
 	}
+	mXRFrameBeganThisFrame = false;
 
 	Super::Update();
 }
@@ -549,24 +550,57 @@ TArray<uint8_t> VulkanRenderDevice::GetScreenshotBuffer(int &pitch, ESSType &col
 
 void VulkanRenderDevice::BeginFrame()
 {
-	SetViewportRects(nullptr);
-	if (mSceneViewport.width == 0 || mSceneViewport.height == 0)
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	mXRFrameBeganThisFrame = false;
+	if (vrmode != nullptr && vrmode->IsVR())
 	{
-		mSceneViewport.width = mScreenViewport.width;
-		mSceneViewport.height = mScreenViewport.height;
-		mSceneViewport.left = 0;
-		mSceneViewport.top = 0;
+		vrmode->SetUp();
+		mXRFrameBeganThisFrame = vrmode->BeginXRFrame();
+	}
+
+	SetViewportRects(nullptr);
+	int bufferScreenWidth = mScreenViewport.width;
+	int bufferScreenHeight = mScreenViewport.height;
+	int bufferSceneWidth = mSceneViewport.width;
+	int bufferSceneHeight = mSceneViewport.height;
+	if (vrmode != nullptr && vrmode->IsVR() && mXRFrameBeganThisFrame && vrmode->ShouldUseRecommendedRenderSizeThisFrame())
+	{
+		int recommendedWidth = 0;
+		int recommendedHeight = 0;
+		if (vrmode->GetRecommendedRenderSize(recommendedWidth, recommendedHeight))
+		{
+			bufferSceneWidth = recommendedWidth;
+			bufferSceneHeight = recommendedHeight;
+			bufferScreenWidth = recommendedWidth;
+			bufferScreenHeight = recommendedHeight;
+		}
+	}
+	if (bufferSceneWidth == 0 || bufferSceneHeight == 0)
+	{
+		bufferSceneWidth = bufferScreenWidth;
+		bufferSceneHeight = bufferScreenHeight;
 	}
 
 	mViewpoints->Clear();
 	mCommands->BeginFrame();
 	mTextureManager->BeginFrame();
 	mScreenBuffers->BeginFrame(
-		mScreenViewport.width, mScreenViewport.height,
-		mSceneViewport.width, mSceneViewport.height);
+		bufferScreenWidth, bufferScreenHeight,
+		bufferSceneWidth, bufferSceneHeight);
 	mSaveBuffers->BeginFrame(SAVEPICWIDTH, SAVEPICHEIGHT, SAVEPICWIDTH, SAVEPICHEIGHT);
 	mRenderState->BeginFrame();
 	mDescriptorSetManager->BeginFrame();
+}
+
+void VulkanRenderDevice::SetViewportRects(IntRect *bounds)
+{
+	Super::SetViewportRects(bounds);
+
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	if (vrmode != nullptr && vrmode->IsVR() && vrmode->ShouldUseRecommendedRenderSizeThisFrame())
+	{
+		vrmode->AdjustViewport(this);
+	}
 }
 
 void VulkanRenderDevice::InitLightmap(int LMTextureSize, int LMTextureCount, TArray<uint16_t>& LMTextureData)

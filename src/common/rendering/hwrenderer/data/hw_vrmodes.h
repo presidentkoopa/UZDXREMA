@@ -110,6 +110,9 @@ struct VRMode
 
 	virtual bool IsMono() const { return mEyeCount == 1; }
 	virtual bool IsVR() const { return false; }
+	virtual bool GetRecommendedRenderSize(int& outWidth, int& outHeight) const { outWidth = 0; outHeight = 0; return false; }
+	virtual bool ShouldUseRecommendedRenderSizeThisFrame() const { return false; }
+	virtual bool ShouldUseScreenLayerForCurrentFrame() const { return false; }
 	virtual void AdjustPlayerSprites(FRenderState &state, int hand = 0) const {};
 	virtual void UnAdjustPlayerSprites(FRenderState &state) const {};
 	virtual void AdjustCrossHair() const {}

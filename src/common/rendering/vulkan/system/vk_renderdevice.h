@@ -70,6 +70,7 @@ public:
 	void SetLevelMesh(hwrenderer::LevelMesh* mesh) override;
 	void UpdateShadowMap() override;
 	void SetSaveBuffers(bool yes) override;
+	void SetViewportRects(IntRect *bounds) override;
 	void ImageTransitionScene(bool unknown) override;
 	void SetActiveRenderTarget() override;
 	void FirstEye() override;
@@ -117,6 +118,7 @@ private:
 	VkRenderBuffers *mActiveRenderBuffers = nullptr;
 
 	bool mVSync = false;
+	bool mXRFrameBeganThisFrame = false;
 };
 
 class CVulkanError : public CEngineError
