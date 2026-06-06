@@ -864,6 +864,22 @@ static void PostRemappedControllerAxisTransitions(
 	resolveCardinalStates(oldValue, oldLeft, oldRight, oldDown, oldUp);
 	resolveCardinalStates(newValue, newLeft, newRight, newDown, newUp);
 
+	auto emitTransition = [&](bool oldState, bool newState, int oldBaseKey, int newBaseKey)
+	{
+		if (oldBaseKey == newBaseKey)
+		{
+			PostControllerKeyTransition(oldState, newState, oldBaseKey);
+			return;
+		}
+
+		// If the grip modifier flips while the stick is still held, switch the
+		// virtual key cleanly instead of leaving the old layer latched.
+		if (oldState)
+			PostControllerKeyTransition(true, false, oldBaseKey);
+		if (newState)
+			PostControllerKeyTransition(false, true, newBaseKey);
+	};
+
 	const int oldLeftKey = oldModifier ? modifiedLeftKey : baseLeftKey;
 	const int oldRightKey = oldModifier ? modifiedRightKey : baseRightKey;
 	const int oldDownKey = oldModifier ? modifiedDownKey : baseDownKey;
@@ -873,10 +889,10 @@ static void PostRemappedControllerAxisTransitions(
 	const int newDownKey = newModifier ? modifiedDownKey : baseDownKey;
 	const int newUpKey = newModifier ? modifiedUpKey : baseUpKey;
 
-	PostControllerKeyTransition(oldLeft, newLeft, oldLeftKey);
-	PostControllerKeyTransition(oldRight, newRight, oldRightKey);
-	PostControllerKeyTransition(oldDown, newDown, oldDownKey);
-	PostControllerKeyTransition(oldUp, newUp, oldUpKey);
+	emitTransition(oldLeft, newLeft, oldLeftKey, newLeftKey);
+	emitTransition(oldRight, newRight, oldRightKey, newRightKey);
+	emitTransition(oldDown, newDown, oldDownKey, newDownKey);
+	emitTransition(oldUp, newUp, oldUpKey, newUpKey);
 }
 
 static float NonLinearFilter(float value)
@@ -3035,7 +3051,12 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		}
 		PostRemappedControllerKeyTransition(xrLastThumbClickState[hand], handInput[hand].thumbClick, modifierOld, modifierNew, thumbBaseKey, thumbAltKey);
 		const int thumbClickKey = (hand == 1) ? KEY_PAD_RTHUMB : KEY_PAD_LTHUMB;
-		PostControllerKeyTransition(xrLastThumbClickState[hand], handInput[hand].thumbClick, thumbClickKey);
+		// The combo layer already emits the mapped thumb-click action, so keep the
+		// raw button from leaking through while the dominant grip is acting as a modifier.
+		if (!(*vr_secondary_button_mappings && dominantGripModifierNew))
+		{
+			PostControllerKeyTransition(xrLastThumbClickState[hand], handInput[hand].thumbClick, thumbClickKey);
+		}
 		if (dominantHand)
 		{
 			PostRemappedControllerKeyTransition(face1Old, face1Pressed, dominantGripModifierOld, dominantGripModifierNew, face1BaseKey, face1AltKey);
