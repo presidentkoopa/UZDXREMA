@@ -223,6 +223,7 @@ EXTERN_CVAR(Bool, vr_menu_pointer);
 EXTERN_CVAR(Bool, vr_mouse_in_menu);
 EXTERN_CVAR(Color, vr_menu_pointer_color);
 CVAR(Float, vr_openvr_menu_pointer_pitch_bias, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Float, vr_openvr_menu_pointer_tip_offset, 0.035f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 
 EXTERN_CVAR(Bool, vr_use_alternate_mapping);
 EXTERN_CVAR(Bool, vr_secondary_button_mappings);
@@ -3303,6 +3304,7 @@ namespace s3d
 						float unclampedU = 0.0f;
 						float unclampedV = 0.0f;
 						float overflow = 0.0f;
+						HmdVector3_t origin = { 0.0f, 0.0f, 0.0f };
 						HmdVector3_t hit = { 0.0f, 0.0f, 0.0f };
 						HmdVector3_t rayDir = { 0.0f, 0.0f, 0.0f };
 					};
@@ -3316,11 +3318,13 @@ namespace s3d
 						{
 							rayDir = Normalize3(RotateAroundAxis(rayDir, controllerRight, biasDeg * (float)(M_PI / 180.0)));
 						}
+						const float tipOffset = std::max(0.0f, (float)vr_openvr_menu_pointer_tip_offset);
+						const HmdVector3_t rayStart = Add3(rayOrigin, Scale3(rayDir, tipOffset));
 						const float denom = Dot3(rayDir, planeNormal);
 						if (fabsf(denom) <= 1e-4f) return out;
-						const float t = Dot3(Sub3(planeOrigin, rayOrigin), planeNormal) / denom;
+						const float t = Dot3(Sub3(planeOrigin, rayStart), planeNormal) / denom;
 						if (t <= 0.05f) return out;
-						const HmdVector3_t hit = Add3(rayOrigin, Scale3(rayDir, t));
+						const HmdVector3_t hit = Add3(rayStart, Scale3(rayDir, t));
 						const HmdVector3_t local = Sub3(hit, planeOrigin);
 						const float lx = Dot3(local, planeRight);
 						const float ly = Dot3(local, planeUp);
@@ -3338,6 +3342,7 @@ namespace s3d
 						out.unclampedU = u;
 						out.unclampedV = v;
 						out.overflow = overflow;
+						out.origin = rayStart;
 						out.hit = hit;
 						out.rayDir = rayDir;
 						return out;
@@ -3363,7 +3368,7 @@ namespace s3d
 						const int mouseX = clamp((int)std::lround(u * (renderW - 1)), 0, renderW - 1);
 						const int mouseY = clamp((int)std::lround(v * (renderH - 1)), 0, renderH - 1);
 						openvrMenuPointerBeamVisible = true;
-						openvrMenuPointerBeamStart = rayOrigin;
+						openvrMenuPointerBeamStart = bestHit.origin;
 						openvrMenuPointerBeamEnd = bestHit.hit;
 						openvrMenuPointerHit = bestHit.hit;
 						const bool dragHoldActive = openvrMenuPointerLastTriggerDown;
