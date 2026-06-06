@@ -51,6 +51,7 @@ public:
 	OpenVREyePose(int eye, float shiftFactor, float scaleFactor);
 	virtual ~OpenVREyePose() override;
 	virtual VSMatrix GetProjection(FLOATTYPE fov, FLOATTYPE aspectRatio, FLOATTYPE fovRatio, bool iso_ortho) const override;
+	virtual DAngle GetRenderFov(DAngle fallback) const override;
 	virtual VSMatrix GetHUDProjection() const override;
 	DVector3 GetViewShift(FRenderViewpoint& vp) const override;
 	virtual void AdjustHud() const override;
@@ -68,6 +69,7 @@ protected:
 	openvr::Texture_t* eyeTexture;
 	mutable uint32_t framebuffer;
 	int eye;
+	float renderFovDegrees = 90.0f;
 
 	mutable const openvr::TrackedDevicePose_t * currentPose;
 };

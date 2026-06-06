@@ -1180,6 +1180,15 @@ VSMatrix VKOpenXRDeviceEyePose::GetProjection(FLOATTYPE fov, FLOATTYPE aspectRat
 	return projection;
 }
 
+DAngle VKOpenXRDeviceEyePose::GetRenderFov(DAngle fallback) const
+{
+	const float fovAdjust = DEG2RAD(clamp<float>(vr_openxr_fov_adjust_deg, -30.0f, 30.0f));
+	const float horizontalFov = (currentFov.angleRight - currentFov.angleLeft) + 2.0f * fovAdjust;
+	const float verticalFov = (currentFov.angleUp - currentFov.angleDown) + 2.0f * fovAdjust;
+	const float renderFovDegrees = std::max(horizontalFov, verticalFov) * (180.0f / (float)M_PI);
+	return renderFovDegrees > 0.0f ? DAngle::fromDeg(renderFovDegrees) : fallback;
+}
+
 DVector3 VKOpenXRDeviceEyePose::GetViewShift(FRenderViewpoint& vp) const
 {
 	auto& mode = const_cast<VKOpenXRDeviceMode&>((const VKOpenXRDeviceMode&)VKOpenXRDeviceMode::getInstance());

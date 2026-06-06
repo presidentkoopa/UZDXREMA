@@ -1113,6 +1113,11 @@ namespace s3d
 		return projectionMatrix;
 	}
 
+	DAngle OpenVREyePose::GetRenderFov(DAngle fallback) const
+	{
+		return renderFovDegrees > 0.0f ? DAngle::fromDeg(renderFovDegrees) : fallback;
+	}
+
 	void OpenVREyePose::initialize(VR_IVRSystem_FnTable* vrsystem)
 	{
 		float zNear = screen->GetZNear(); // 5.0;
@@ -1128,7 +1133,10 @@ namespace s3d
 		projectionMatrix.loadIdentity();
 		projectionMatrix.multMatrix(&proj_transpose.m[0][0]);
 
-		fov = 2.0*atan( 1.0/projection.m[1][1] ) * 180.0 / M_PI;
+		const float horizontalFov = 2.0f * RAD2DEG(atanf(1.0f / projection.m[0][0]));
+		const float verticalFov = 2.0f * RAD2DEG(atanf(1.0f / projection.m[1][1]));
+		renderFovDegrees = std::max(horizontalFov, verticalFov);
+		fov = verticalFov;
 
 		HmdMatrix34_t eyeToHead = vrsystem->GetEyeToHeadTransform(EVREye(eye));
 		vSMatrixFromHmdMatrix34(eyeToHeadTransform, eyeToHead);

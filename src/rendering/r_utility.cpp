@@ -184,17 +184,12 @@ FRenderViewpoint::FRenderViewpoint()
 
 DAngle FRenderViewpoint::GetFieldOfView() const
 {
-#if defined(USE_OPENVR) || defined(USE_OPENXR)
-	return DAngle::fromDeg(QzDoom_GetFOV());
-#endif
 	return FieldOfView;
 }
 
 void FRenderViewpoint::SetFieldOfView(DAngle newfov)
 {
-#if !defined(USE_OPENVR) && !defined(USE_OPENXR)
 	FieldOfView = newfov;
-#endif
 }
 
 

@@ -72,6 +72,7 @@ struct VREyeInfo
 	virtual ~VREyeInfo() {}
 
 	virtual VSMatrix GetProjection(float fov, float aspectRatio, float fovRatio, bool iso_ortho) const;
+	virtual DAngle GetRenderFov(DAngle fallback) const;
 	virtual VSMatrix GetHUDProjection() const;
 	virtual DVector3 GetViewShift(FRenderViewpoint& vp) const;
 	virtual void SetUp() const { m_isActive = true; }

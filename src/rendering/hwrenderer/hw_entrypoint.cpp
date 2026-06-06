@@ -173,7 +173,7 @@ sector_t* RenderViewpoint(FRenderViewpoint& mainvp, AActor* camera, IntRect* bou
 		// Only used by the GLES2 renderer
 		RenderState.SetSpecialColormap(cm, flash);
 
-		di->Viewpoint.SetFieldOfView(DAngle::fromDeg(fov));	// Set the real FOV for the current scene (it's not necessarily the same as the global setting in r_viewpoint)
+		di->Viewpoint.SetFieldOfView(eye->GetRenderFov(DAngle::fromDeg(fov)));	// Match the clipper FOV to the active eye projection in VR.
 
 		// Stereo mode specific perspective projection
 		float inv_iso_dist = 1.0f;

@@ -20,6 +20,7 @@ public:
 	VKOpenXRDeviceEyePose(int eye);
 	virtual ~VKOpenXRDeviceEyePose() override;
 	virtual VSMatrix GetProjection(FLOATTYPE fov, FLOATTYPE aspectRatio, FLOATTYPE fovRatio, bool iso_ortho) const override;
+	virtual DAngle GetRenderFov(DAngle fallback) const override;
 	virtual VSMatrix GetHUDProjection() const override;
 	DVector3 GetViewShift(FRenderViewpoint& vp) const override;
 	virtual void SetUp() const override;

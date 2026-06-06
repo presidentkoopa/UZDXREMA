@@ -707,6 +707,11 @@ VSMatrix VREyeInfo::GetProjection(float fov, float aspectRatio, float fovRatio, 
 	}
 }
 
+DAngle VREyeInfo::GetRenderFov(DAngle fallback) const
+{
+	return fallback;
+}
+
 VSMatrix VREyeInfo::GetHUDProjection() const
 {
 	VSMatrix mat;
