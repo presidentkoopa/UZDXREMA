@@ -198,6 +198,7 @@ protected:
 	mutable uint32_t xrPresentWidth = 0;
 	mutable uint32_t xrPresentHeight = 0;
 	mutable int64_t xrSwapchainFormat = VK_FORMAT_UNDEFINED;
+	mutable int64_t xrVirtualScreenSwapchainFormat = VK_FORMAT_UNDEFINED;
 	mutable XrSwapchain xrVirtualScreenSwapchain = XR_NULL_HANDLE;
 	mutable XrSwapchain xrVirtualScreenBackdropSwapchain = XR_NULL_HANDLE;
 	mutable XrSwapchain xrMenuPointerBeamSwapchain = XR_NULL_HANDLE;

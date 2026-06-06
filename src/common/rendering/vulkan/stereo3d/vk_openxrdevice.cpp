@@ -1113,6 +1113,44 @@ static int64_t SelectSwapchainFormat(const std::vector<int64_t>& runtimeFormats,
 	return runtimeFormats.empty() ? (int64_t)VK_FORMAT_B8G8R8A8_UNORM : runtimeFormats[0];
 }
 
+static int64_t SelectFlatSwapchainFormat(const std::vector<int64_t>& runtimeFormats, VkFormat preferredFormat)
+{
+	auto hasFormat = [&](int64_t format) -> bool
+	{
+		return std::find(runtimeFormats.begin(), runtimeFormats.end(), format) != runtimeFormats.end();
+	};
+
+	const VkFormat preferredUnorm =
+		(preferredFormat == VK_FORMAT_R8G8B8A8_SRGB) ? VK_FORMAT_R8G8B8A8_UNORM :
+		(preferredFormat == VK_FORMAT_B8G8R8A8_SRGB) ? VK_FORMAT_B8G8R8A8_UNORM :
+		(preferredFormat == VK_FORMAT_R8G8B8A8_UNORM) ? VK_FORMAT_R8G8B8A8_UNORM :
+		(preferredFormat == VK_FORMAT_B8G8R8A8_UNORM) ? VK_FORMAT_B8G8R8A8_UNORM :
+		VK_FORMAT_UNDEFINED;
+	const VkFormat preferredSrgb =
+		(preferredFormat == VK_FORMAT_R8G8B8A8_UNORM) ? VK_FORMAT_R8G8B8A8_SRGB :
+		(preferredFormat == VK_FORMAT_B8G8R8A8_UNORM) ? VK_FORMAT_B8G8R8A8_SRGB :
+		(preferredFormat == VK_FORMAT_R8G8B8A8_SRGB) ? VK_FORMAT_R8G8B8A8_SRGB :
+		(preferredFormat == VK_FORMAT_B8G8R8A8_SRGB) ? VK_FORMAT_B8G8R8A8_SRGB :
+		VK_FORMAT_UNDEFINED;
+
+	const int64_t preferred[] = {
+		(int64_t)preferredUnorm,
+		(preferredUnorm == VK_FORMAT_B8G8R8A8_UNORM) ? (int64_t)VK_FORMAT_R8G8B8A8_UNORM : (int64_t)VK_FORMAT_B8G8R8A8_UNORM,
+		(preferredUnorm == VK_FORMAT_R8G8B8A8_UNORM) ? (int64_t)VK_FORMAT_B8G8R8A8_UNORM : (int64_t)VK_FORMAT_R8G8B8A8_UNORM,
+		(int64_t)preferredSrgb,
+		(preferredSrgb == VK_FORMAT_B8G8R8A8_SRGB) ? (int64_t)VK_FORMAT_R8G8B8A8_SRGB : (int64_t)VK_FORMAT_B8G8R8A8_SRGB,
+		(preferredSrgb == VK_FORMAT_R8G8B8A8_SRGB) ? (int64_t)VK_FORMAT_B8G8R8A8_SRGB : (int64_t)VK_FORMAT_R8G8B8A8_SRGB
+	};
+
+	for (int64_t format : preferred)
+	{
+		if (format != VK_FORMAT_UNDEFINED && hasFormat(format))
+			return format;
+	}
+
+	return SelectSwapchainFormat(runtimeFormats, preferredFormat);
+}
+
 static bool IsSRGBSwapchainFormat(VkFormat format)
 {
 	return format == VK_FORMAT_B8G8R8A8_SRGB || format == VK_FORMAT_R8G8B8A8_SRGB;
@@ -1951,11 +1989,16 @@ bool VKOpenXRDeviceMode::CreateSwapchain() const
 		xrEnumerateSwapchainFormats(xrSession, formatCount, &formatCount, runtimeFormats.data());
 	}
 	xrSwapchainFormat = SelectSwapchainFormat(runtimeFormats, preferredFormat);
+	xrVirtualScreenSwapchainFormat = SelectFlatSwapchainFormat(runtimeFormats, preferredFormat);
 	Printf("OpenXR: preferred scene swapchain format=%d selected=%d srgb=%d runtimeFormats=%u.\n",
 		(int)preferredFormat,
 		(int)xrSwapchainFormat,
 		IsSRGBSwapchainFormat((VkFormat)xrSwapchainFormat) ? 1 : 0,
 		formatCount);
+	Printf("OpenXR: preferred flat swapchain format=%d selected=%d srgb=%d.\n",
+		(int)preferredFormat,
+		(int)xrVirtualScreenSwapchainFormat,
+		IsSRGBSwapchainFormat((VkFormat)xrVirtualScreenSwapchainFormat) ? 1 : 0);
 
 	XrSwapchainCreateInfo swapchainInfo{ XR_TYPE_SWAPCHAIN_CREATE_INFO };
 	swapchainInfo.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
@@ -2079,7 +2122,7 @@ bool VKOpenXRDeviceMode::CreatePresentTextures(VulkanRenderDevice* vkfb) const
 
 bool VKOpenXRDeviceMode::CreateVirtualScreenSwapchain(uint32_t width, uint32_t height) const
 {
-	if (xrSession == XR_NULL_HANDLE || xrVkDevice == nullptr || xrSwapchainFormat == VK_FORMAT_UNDEFINED || width == 0 || height == 0)
+	if (xrSession == XR_NULL_HANDLE || xrVkDevice == nullptr || xrVirtualScreenSwapchainFormat == VK_FORMAT_UNDEFINED || width == 0 || height == 0)
 		return false;
 	if (xrVirtualScreenSwapchain != XR_NULL_HANDLE &&
 		xrVirtualScreenWidth == width &&
@@ -2097,7 +2140,7 @@ bool VKOpenXRDeviceMode::CreateVirtualScreenSwapchain(uint32_t width, uint32_t h
 
 	XrSwapchainCreateInfo swapchainInfo{ XR_TYPE_SWAPCHAIN_CREATE_INFO };
 	swapchainInfo.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
-	swapchainInfo.format = xrSwapchainFormat;
+	swapchainInfo.format = xrVirtualScreenSwapchainFormat;
 	swapchainInfo.sampleCount = 1;
 	swapchainInfo.width = width;
 	swapchainInfo.height = height;
@@ -2142,7 +2185,7 @@ bool VKOpenXRDeviceMode::CreateVirtualScreenSwapchain(uint32_t width, uint32_t h
 			(int)width, (int)height, 1, 1);
 		texture.View = ImageViewBuilder()
 			.Type(VK_IMAGE_VIEW_TYPE_2D)
-			.Image(texture.Image.get(), (VkFormat)xrSwapchainFormat)
+			.Image(texture.Image.get(), (VkFormat)xrVirtualScreenSwapchainFormat)
 			.DebugName("OpenXR.VirtualScreenView")
 			.Create(xrVkDevice.get());
 	}
@@ -2155,7 +2198,7 @@ bool VKOpenXRDeviceMode::CreateVirtualScreenSwapchain(uint32_t width, uint32_t h
 
 bool VKOpenXRDeviceMode::CreateVirtualScreenBackdropSwapchain(uint32_t width, uint32_t height) const
 {
-	if (xrSession == XR_NULL_HANDLE || xrVkDevice == nullptr || xrSwapchainFormat == VK_FORMAT_UNDEFINED || width == 0 || height == 0)
+	if (xrSession == XR_NULL_HANDLE || xrVkDevice == nullptr || xrVirtualScreenSwapchainFormat == VK_FORMAT_UNDEFINED || width == 0 || height == 0)
 		return false;
 	if (xrVirtualScreenBackdropSwapchain != XR_NULL_HANDLE &&
 		xrVirtualScreenWidth == width &&
@@ -2173,7 +2216,7 @@ bool VKOpenXRDeviceMode::CreateVirtualScreenBackdropSwapchain(uint32_t width, ui
 
 	XrSwapchainCreateInfo swapchainInfo{ XR_TYPE_SWAPCHAIN_CREATE_INFO };
 	swapchainInfo.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
-	swapchainInfo.format = xrSwapchainFormat;
+	swapchainInfo.format = xrVirtualScreenSwapchainFormat;
 	swapchainInfo.sampleCount = 1;
 	swapchainInfo.width = width;
 	swapchainInfo.height = height;
@@ -2218,7 +2261,7 @@ bool VKOpenXRDeviceMode::CreateVirtualScreenBackdropSwapchain(uint32_t width, ui
 			(int)width, (int)height, 1, 1);
 		texture.View = ImageViewBuilder()
 			.Type(VK_IMAGE_VIEW_TYPE_2D)
-			.Image(texture.Image.get(), (VkFormat)xrSwapchainFormat)
+			.Image(texture.Image.get(), (VkFormat)xrVirtualScreenSwapchainFormat)
 			.DebugName("OpenXR.VirtualScreenBackdropView")
 			.Create(xrVkDevice.get());
 	}
@@ -2439,6 +2482,7 @@ void VKOpenXRDeviceMode::DestroyOpenXR() const
 	xrViewCount = 0;
 	xrCurrentImageIndex = -1;
 	xrSwapchainFormat = VK_FORMAT_UNDEFINED;
+	xrVirtualScreenSwapchainFormat = VK_FORMAT_UNDEFINED;
 	xrPresentWidth = 0;
 	xrPresentHeight = 0;
 	xrFrameState = { XR_TYPE_FRAME_STATE };
@@ -2657,6 +2701,7 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 	static float previousHmdYaw = 0;
 	static bool havePreviousYaw = false;
 	const float currentHmdYaw = hmdorientation[1] + snapTurn;
+	const bool lockGameplayViewToScreenLayer = ShouldUseScreenLayerForCurrentFrame();
 	if (!havePreviousYaw)
 	{
 		previousHmdYaw = currentHmdYaw;
@@ -2664,10 +2709,13 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 		havePreviousYaw = true;
 	}
 	float hmdYawDeltaDegrees = currentHmdYaw - previousHmdYaw;
-	G_AddViewAngle(mAngleFromRadians((float)DEG2RAD(-hmdYawDeltaDegrees)));
+	if (!lockGameplayViewToScreenLayer)
+	{
+		G_AddViewAngle(mAngleFromRadians((float)DEG2RAD(-hmdYawDeltaDegrees)));
+	}
 	previousHmdYaw = currentHmdYaw;
 
-	if (gamestate == GS_LEVEL && menuactive == MENU_Off)
+	if (!lockGameplayViewToScreenLayer && gamestate == GS_LEVEL && menuactive == MENU_Off)
 	{
 		doomYaw += hmdYawDeltaDegrees;
 		vp.HWAngles.Roll = FAngle::fromDeg(-r);
@@ -4418,7 +4466,7 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 	vkfb->mOutputLetterbox = vkfb->mScreenViewport;
 	vkfb->mGameScreenWidth = (int)screenWidth;
 	vkfb->mGameScreenHeight = (int)screenHeight;
-	renderState->SetRenderTarget(&target, nullptr, (int)screenWidth, (int)screenHeight, (VkFormat)xrSwapchainFormat, VK_SAMPLE_COUNT_1_BIT);
+	renderState->SetRenderTarget(&target, nullptr, (int)screenWidth, (int)screenHeight, (VkFormat)xrVirtualScreenSwapchainFormat, VK_SAMPLE_COUNT_1_BIT);
 	// Render the virtual-screen texture as a regular 2D target. The VR layer
 	// compositor will handle the actual head-locked presentation.
 	screen->mViewpoints->Set2D(*renderState, (int)screenWidth, (int)screenHeight);
@@ -4470,8 +4518,9 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 	const int32_t bounceWidth = bounce.Image != nullptr ? bounce.Image->width : 0;
 	const int32_t bounceHeight = bounce.Image != nullptr ? bounce.Image->height : 0;
 
-	// Run the same present-shader shaping used by the OpenXR eye present path
-	// so the virtual-screen quad matches headset tone/color tuning.
+	// Run the same OpenXR headset-facing present bias used by the eye images so
+	// the virtual-screen quad can share the tuned gamma/contrast/brightness/
+	// saturation response instead of relying on desktop-style flat output.
 	if (postprocess != nullptr && targetWidth > 0 && targetHeight > 0 && bounceWidth > 0 && bounceHeight > 0)
 	{
 		VkImageTransition()
@@ -4499,16 +4548,16 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 		IntRect fullTargetRect = { 0, 0, targetWidth, targetHeight };
 		postprocess->DrawPresentTextureToImage(
 			&target,
-			(VkFormat)xrSwapchainFormat,
+			(VkFormat)xrVirtualScreenSwapchainFormat,
 			fullTargetRect,
-			false,
+			true,
 			false,
 			1.0f,
 			1.0f,
 			0.0f,
 			0.0f,
 			cmdbuffer,
-			false);
+			true);
 		postprocess->SetCurrentPipelineImage(previousPipelineImage);
 	}
 
