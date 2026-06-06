@@ -627,25 +627,20 @@ static VSMatrix BuildOpenXREyeProjection(const XrFovf& fov, float nearZ, float f
 	const float tanDown = std::tan(adjustedFov.angleDown);
 	const float tanWidth = tanRight - tanLeft;
 	const float tanHeight = tanUp - tanDown;
+	const float offsetZ = nearZ;
 
 	FLOATTYPE m[16];
 	memset(m, 0, sizeof(m));
 
-	// Use the OpenXR SDK's asymmetric frustum layout, but keep the engine's
-	// existing projection convention. Feeding raw Vulkan clip-space here flips
-	// the 3D scene because the renderer's matrix path still expects the
-	// OpenGL-style Y/depth form at this stage.
+	// This renderer stage consumes an OpenGL-style [-1,1] Z projection even
+	// when the final submitted image goes through a Vulkan/OpenXR bridge.
 	m[0] = 2.0f / tanWidth;
 	m[5] = 2.0f / tanHeight;
-	// Doom's existing view/projection path expects the horizontal asymmetric
-	// center term with the opposite sign from the raw OpenXR helper output.
-	// Using the SDK sign here makes the scene diverge/cross-eye while the rest
-	// of the layer pipeline remains correct.
-	m[8] = -(tanRight + tanLeft) / tanWidth;
+	m[8] = (tanRight + tanLeft) / tanWidth;
 	m[9] = (tanUp + tanDown) / tanHeight;
-	m[10] = -(farZ + nearZ) / (farZ - nearZ);
+	m[10] = -(farZ + offsetZ) / (farZ - nearZ);
 	m[11] = -1.0f;
-	m[14] = -(2.0f * farZ * nearZ) / (farZ - nearZ);
+	m[14] = -(farZ * (nearZ + offsetZ)) / (farZ - nearZ);
 
 	VSMatrix matrix;
 	matrix.loadMatrix(m);
@@ -1149,19 +1144,36 @@ VSMatrix VKOpenXRDeviceEyePose::GetProjection(FLOATTYPE fov, FLOATTYPE aspectRat
 
 DVector3 VKOpenXRDeviceEyePose::GetViewShift(FRenderViewpoint& vp) const
 {
-	(void)vp;
 	auto& mode = const_cast<VKOpenXRDeviceMode&>((const VKOpenXRDeviceMode&)VKOpenXRDeviceMode::getInstance());
 	const float hmdHeight = GetHmdAdjustedHeightInMapUnit(mode.xrUsingStageSpace ? false : mode.xrHasLocalHeightAnchor, mode.xrLocalHeightAnchor);
 	const float playerHeight = (r_viewpoint.camera && r_viewpoint.camera->player) ? GetDoomPlayerHeightWithoutCrouch(r_viewpoint.camera->player) : hmdHeight;
 	DVector3 shift = { 0.0, 0.0, hmdHeight - playerHeight };
+
+	if (eye >= 0 && (size_t)eye < mode.xrViews.size())
+	{
+		const XrQuaternionf headOrientation = mode.xrViews[0].pose.orientation;
+		const XrVector3f headRight = NormalizeVector(RotateVector(headOrientation, { 1.0f, 0.0f, 0.0f }));
+		const XrVector3f eyeOffsetMeters = {
+			currentEyePose.position.x - hmdPosition[0],
+			currentEyePose.position.y - hmdPosition[1],
+			currentEyePose.position.z - hmdPosition[2]
+		};
+
+		const double pixelstretch = r_viewpoint.ViewLevel ? r_viewpoint.ViewLevel->pixelstretch : 1.2;
+		const double stereoShift = DotVector(eyeOffsetMeters, headRight) * vr_vunits_per_meter * vr_openxr_eye_shift_scale * pixelstretch;
+		const double yaw = DEG2RAD(vp.HWAngles.Yaw.Degrees());
+		shift.X += -cos(yaw) * stereoShift;
+		shift.Y += sin(yaw) * stereoShift;
+	}
 
 	if (vr_debug_projection_compare)
 	{
 		static bool loggedShift[2] = { false, false };
 		if (eye >= 0 && eye < 2 && !loggedShift[eye])
 		{
-			Printf("VR_PROJ OpenXR eye=%d shift=(%.3f, %.3f, %.3f) hmdPos=(%.3f, %.3f, %.3f) hmdHeight=%.3f playerHeight=%.3f stage=%d\n",
+			Printf("VR_PROJ OpenXR eye=%d shift=(%.3f, %.3f, %.3f) eyePos=(%.4f, %.4f, %.4f) hmdPos=(%.4f, %.4f, %.4f) hmdHeight=%.3f playerHeight=%.3f stage=%d\n",
 				eye, (double)shift.X, (double)shift.Y, (double)shift.Z,
+				(double)currentEyePose.position.x, (double)currentEyePose.position.y, (double)currentEyePose.position.z,
 				(double)hmdPosition[0], (double)hmdPosition[1], (double)hmdPosition[2],
 				hmdHeight, playerHeight, mode.xrUsingStageSpace ? 1 : 0);
 			loggedShift[eye] = true;
@@ -1389,13 +1401,30 @@ VSMatrix VKOpenXRDeviceEyePose::GetHUDProjection() const
 
 	const float hudStereo = getHUDValue<FFloatCVarRef>(vr_automap_stereo, vr_hud_stereo);
 	const float stereoSeparation =
-		(vr_ipd * 0.5f) * vr_vunits_per_meter * hudStereo * (eye == 1 ? 1.0f : -1.0f);
+		(vr_ipd * 0.5f) * vr_vunits_per_meter * hudStereo * (eye == 1 ? -1.0f : 1.0f);
 	hudProjection.translate(stereoSeparation, 0.0f, 0.0f);
 
 	hudProjection.scale(-vr_vunits_per_meter, vr_vunits_per_meter, -vr_vunits_per_meter);
 
 	const double pixelstretch = r_viewpoint.ViewLevel ? r_viewpoint.ViewLevel->pixelstretch : 1.2;
 	hudProjection.scale(1.0, (FLOATTYPE)pixelstretch, 1.0);
+
+	if (eye >= 0)
+	{
+		const auto& mode = const_cast<VKOpenXRDeviceMode&>((const VKOpenXRDeviceMode&)VKOpenXRDeviceMode::getInstance());
+		if ((size_t)eye < mode.xrViews.size())
+		{
+			const XrQuaternionf headOrientation = mode.xrViews[0].pose.orientation;
+			const XrVector3f eyeOffsetMeters = {
+				currentEyePose.position.x - hmdPosition[0],
+				currentEyePose.position.y - hmdPosition[1],
+				currentEyePose.position.z - hmdPosition[2]
+			};
+			const XrVector3f localEyeOffset = RotateVector(ConjugateQuaternion(headOrientation), eyeOffsetMeters);
+			// Match OpenVR's eye-to-head transform contribution so HUD depth, size, and stereo
+			hudProjection.translate(localEyeOffset.x, localEyeOffset.y, localEyeOffset.z);
+		}
+	}
 
 	if (getHUDValue<FBoolCVarRef>(vr_automap_fixed_roll, vr_hud_fixed_roll))
 	{
@@ -3783,8 +3812,7 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 
 	for (uint32_t layer = 0; layer < xrViewCount; ++layer)
 	{
-		// Intentional eye-order correction for this Vulkan/OpenXR bridge.
-		const uint32_t sourceEye = xrViewCount - 1 - layer;
+		const uint32_t sourceEye = layer;
 		if (sourceEye >= xrPresentTextures.size() || xrPresentTextures[sourceEye].Image == nullptr)
 		{
 			Printf("OpenXR frame %llu: Skipping eye %u - missing prepared eye image %u\n",
