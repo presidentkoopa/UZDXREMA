@@ -43,6 +43,7 @@
 #include "hw_lightbuffer.h"
 #include "hw_bonebuffer.h"
 #include "hw_vrmodes.h"
+#include "hw_vrwheel.h"
 #include "hw_clipper.h"
 #include "v_draw.h"
 #include "a_corona.h"
@@ -1071,6 +1072,7 @@ void HWDrawInfo::DrawScene(int drawmode)
 	{
 		DrawPlayerSprites(IsHUDModelForPlayerAvailable(players[consoleplayer].camera->player), RenderState);
 		vrmode->DrawMountedHud(this, RenderState);
+		VRWheel_Draw(this, RenderState);
 	}
 
 	if (applySSAO && RenderState.GetPassType() == GBUFFER_PASS)

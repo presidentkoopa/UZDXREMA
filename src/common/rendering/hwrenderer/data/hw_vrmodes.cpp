@@ -66,6 +66,7 @@
 #include "d_player.h"
 #include "actorinlines.h"
 #include "LSMatrix.h"
+#include "hw_vrwheel.h"
 #include "gl/stereo3d/gl_openvr.h"
 #include "gl/stereo3d/gl_openxrdevice.h"
 #include "vulkan/stereo3d/vk_openxrdevice.h"

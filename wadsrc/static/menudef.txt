@@ -782,6 +782,7 @@ OptionMenu "WeaponsControlMenu" protected
 	Control    "$CNTRLMNU_OFFHAND_PREVIOUSWEAPON" , "weapprev 1"
 	Control    "$CNTRLMNU_SWITCH_TO_OFFHAND", "switchhand 1"
 	Control    "$CNTRLMNU_SWITCH_TO_MAINHAND", "switchhand 0"
+	Control    "$CNTRLMNU_WHEEL_WEAPONS"     , "+vrweaponwheel"
 
 	StaticText ""
 	Control    "$CNTRLMNU_SLOT1"          , "slot 1"
@@ -818,6 +819,7 @@ OptionMenu "WeaponsDoubleControlMenu" protected
 	DoubleControl    "$CNTRLMNU_OFFHAND_PREVIOUSWEAPON" , "weapprev 1"
 	DoubleControl    "$CNTRLMNU_SWITCH_TO_OFFHAND", "switchhand 1"
 	DoubleControl    "$CNTRLMNU_SWITCH_TO_MAINHAND", "switchhand 0"
+	DoubleControl    "$CNTRLMNU_WHEEL_WEAPONS"     , "+vrweaponwheel"
 
 	StaticText ""
 	DoubleControl    "$CNTRLMNU_SLOT1"          , "slot 1"
@@ -851,6 +853,7 @@ OptionMenu "InventoryControlsMenu" protected
 	StaticText ""
 	Control    "$CNTRLMNU_NEXTITEM"     , "invnext"
 	Control    "$CNTRLMNU_PREVIOUSITEM" , "invprev"
+	Control    "$CNTRLMNU_WHEEL_ITEMS" 	, "+vrinvwheel"
 
 	StaticText ""
 	Control    "$CNTRLMNU_DROPITEM"     , "invdrop"
@@ -883,6 +886,7 @@ OptionMenu "InventoryDoubleControlsMenu" protected
 	StaticText ""
 	DoubleControl    "$CNTRLMNU_NEXTITEM"     , "invnext"
 	DoubleControl    "$CNTRLMNU_PREVIOUSITEM" , "invprev"
+	DoubleControl    "$CNTRLMNU_WHEEL_ITEMS" 	, "+vrinvwheel"
 
 	StaticText ""
 	DoubleControl    "$CNTRLMNU_DROPITEM"     , "invdrop"
@@ -2937,6 +2941,44 @@ OptionMenu VRWeaponOptions protected
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar r_PlayerSprites3DMode gl_fatItemWidth vr_2dweaponOffsetX vr_2dweaponOffsetY vr_2dweaponOffsetZ vr_2dweaponScale"
 }
 
+OptionValue "WheelListOption"
+{
+	0, "Only Available"
+	1, "All"
+}
+
+OptionMenu VRWeaponWheelOptions protected
+{
+	Title "Weapon/Item Wheel Options"
+	
+	StaticText ""
+	StaticText "Open Wheel", gold
+	Control    "$CNTRLMNU_WHEEL_WEAPONS"    , "+vrweaponwheel"
+	Control    "$CNTRLMNU_WHEEL_ITEMS" 		, "+vrinvwheel"
+
+	StaticText ""
+	StaticText "Wheel Appearence", gold
+	ColorPicker "Icon Background Color", 	"vr_wheel_icon_bg_color"
+	ColorPicker "Icon Highlight Color",   	"vr_wheel_icon_select_color"
+	Slider "Wheel Icon Scale", 				"vr_wheel_icon_scale", 0.1, 5.0, 0.1, 1
+	Slider "Wheel Radius", 					"vr_wheel_radius", 3, 30, 1, 0
+	Slider "Distance From Hand", 			"vr_wheel_distance", -0.5, 1.0, 0.05, 2
+	Slider "Move X Offset", 				"vr_wheel_xoffset", -0.3, 0.3, 0.01, 2
+	Slider "Move Y Offset", 				"vr_wheel_yoffset", -0.3, 0.3, 0.01, 2
+	Slider "Wheel Time Slow",				"vr_wheel_time_slow", 0.0, 1.0, 0.1, 1
+	StaticText "Setting this to 0 will freeze time when wheel is open", "Brown"
+	StaticText " "
+
+	StaticText ""
+	StaticText "Other Options", gold
+	Option "Show Weapons/Items", 			"vr_wheel_weapon_all", "WheelListOption"
+	Option "Switch Hand", 					"vr_wheel_switch_hands", "YesNo"
+	StaticText "Lets you switch hands for weapon and item wheel", "Brown"
+	Option "Wheel Sounds", 					"vr_wheel_sound", "OnOff"
+	
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_wheel_icon_bg_color vr_wheel_icon_select_color vr_wheel_icon_scale vr_wheel_radius vr_wheel_distance vr_wheel_xoffset vr_wheel_yoffset vr_wheel_time_slow vr_wheel_weapon_all vr_wheel_switch_hands vr_wheel_sound"
+}
+
 OptionMenu VROptionsMenu protected
 {
 	Title "VR OPTIONS"
@@ -2948,11 +2990,12 @@ OptionMenu VROptionsMenu protected
 	}
 	Submenu "VR HUD/Automap Options",   "VRHUDOptions"
 	Submenu "VR Weapon Options",        "VRWeaponOptions"
+	Submenu "Weapon/Item Wheel Options",  "VRWeaponWheelOptions"
 	StaticText ""
 	StaticText "Misc", gold
 	ifOption(OpenVR, OpenXR)
 	{
-		Option "$VRPREFMNU_DESKTOP",        "vr_desktop_view", "DesktopViewModes"
+		Option "$VRPREFMNU_DESKTOP",    "vr_desktop_view", "DesktopViewModes"
 	}
 	Slider "$VRPREFMNU_WORLDSCALE",     "vr_vunits_per_meter", 1, 60, 1, 0
 	Slider "Height Adjust",		        "vr_height_adjust", -0.5, 1.0, 0.01, 2

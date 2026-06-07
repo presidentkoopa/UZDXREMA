@@ -1260,6 +1260,7 @@ set (PCH_SOURCES
 	common/rendering/hwrenderer/data/hw_modelvertexbuffer.cpp
 	common/rendering/hwrenderer/data/hw_cvars.cpp
 	common/rendering/hwrenderer/data/hw_vrmodes.cpp
+	common/rendering/hwrenderer/data/hw_vrwheel.cpp
 	common/rendering/hwrenderer/data/hw_lightbuffer.cpp
 	common/rendering/hwrenderer/data/hw_bonebuffer.cpp
 	common/rendering/hwrenderer/data/hw_aabbtree.cpp

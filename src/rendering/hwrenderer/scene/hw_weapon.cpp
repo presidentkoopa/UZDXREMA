@@ -41,6 +41,7 @@
 #include "hw_material.h"
 #include "hw_lighting.h"
 #include "hw_cvars.h"
+#include "hw_vrwheel.h"
 #include "hw_vrmodes.h"
 #include "hwrenderer/scene/hw_drawinfo.h"
 #include "hwrenderer/scene/hw_drawstructs.h"
@@ -54,6 +55,7 @@ EXTERN_CVAR(Float, transsouls)
 EXTERN_CVAR(Int, gl_fuzztype)
 EXTERN_CVAR(Bool, r_drawplayersprites)
 EXTERN_CVAR(Bool, r_deathcamera)
+EXTERN_CVAR(Bool, vr_wheel_hide_hand_weapon)
 //To force translucency for weapon sprites, tex->GetTranslucency returns false result for 32 bit PNG
 CVAR(Bool, r_transparentPlayerSprites, true, CVAR_ARCHIVE)
 
@@ -324,7 +326,12 @@ void HWDrawInfo::DrawPlayerSprites(bool hudModelStep, FRenderState &state)
 	{
 		if (!vrmode->IsVR() && (!!hudsprite.mframe) != hudModelStep) continue;
 		if (!hudsprite.mframe && isSoftwareLighting(oldlightmode)) SetFallbackLightMode();	// Software lighting cannot handle 2D content.
-		if (!hudsprite.mframe) vrmode->AdjustPlayerSprites(state, hudsprite.weapon->GetCaller() == hudsprite.owner->player->OffhandWeapon);
+		const bool offhandWeapon = !hudsprite.mframe && hudsprite.weapon != nullptr && hudsprite.owner != nullptr && hudsprite.owner->player != nullptr &&
+			hudsprite.weapon->GetCaller() == hudsprite.owner->player->OffhandWeapon;
+		const int hand = offhandWeapon ? VR_OFFHAND : VR_MAINHAND;
+		if (vr_wheel_hide_hand_weapon && VRWheel_ShouldSuppressWeaponHand(hand))
+			continue;
+		if (!hudsprite.mframe) vrmode->AdjustPlayerSprites(state, offhandWeapon);
 		DrawPSprite(&hudsprite, state);
 		if (!hudsprite.mframe) vrmode->UnAdjustPlayerSprites(state);
 		lightmode = oldlightmode;
