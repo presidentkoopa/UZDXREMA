@@ -786,7 +786,7 @@ bool VRMode::RenderPlayerSpritesInScene() const
 
 void VRMode::SetUp() const
 {
-	player_t* player = r_viewpoint.camera ? r_viewpoint.camera->player : nullptr;
+	player_t* player = &players[consoleplayer];
 	if (player && player->mo)
 	{
 		player->PlayInVR = IsVR();
@@ -808,7 +808,7 @@ void VRMode::SetUp() const
 //---------------------------------------------------------------------------
 bool VRMode::GetWeaponTransform(VSMatrix* out, int hand_weapon) const
 {
-	player_t * player = r_viewpoint.camera ? r_viewpoint.camera->player : nullptr;
+	player_t* player = &players[consoleplayer];
 	bool autoReverse = true;
 	if (player)
 	{
@@ -930,7 +930,7 @@ ADD_STAT(vrstats)
 {
 	FString out;
 
-	player_t* player = r_viewpoint.camera ? r_viewpoint.camera->player : nullptr;
+	player_t* player = &players[consoleplayer];
 	if (player && player->mo)
 	{
 		out.AppendFormat("AttackPos: X=%2.f, Y=%2.f, Z=%2.f\n"

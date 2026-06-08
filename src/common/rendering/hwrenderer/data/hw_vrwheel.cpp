@@ -701,7 +701,7 @@ namespace
 	static void OpenWheel(EVRWheelType type)
 	{
 		auto vrmode = VRMode::GetVRModeCached(true);
-		auto player = r_viewpoint.camera ? r_viewpoint.camera->player : &players[consoleplayer];
+		auto player = &players[consoleplayer];
 		if (vrmode == nullptr || !vrmode->IsVR() || player == nullptr || player->mo == nullptr)
 		{
 			return;
@@ -1204,6 +1204,12 @@ void VRWheel_CloseInventory()
 	CloseWheel(EVRWheelType::Inventory);
 }
 
+void VRWheel_Reset()
+{
+	ReleaseWheelTimeControl();
+	ResetWheel();
+}
+
 bool VRWheel_IsActive()
 {
 	return GVRWheel.Type != EVRWheelType::None;
@@ -1251,7 +1257,7 @@ void VRWheel_Draw(HWDrawInfo* di, FRenderState& state)
 		return;
 	}
 
-	auto player = r_viewpoint.camera ? r_viewpoint.camera->player : &players[consoleplayer];
+	auto player = &players[consoleplayer];
 	if (player == nullptr || player->mo == nullptr || player->health <= 0)
 	{
 		return;

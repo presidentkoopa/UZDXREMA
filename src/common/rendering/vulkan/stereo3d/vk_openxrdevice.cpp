@@ -1193,7 +1193,8 @@ DVector3 VKOpenXRDeviceEyePose::GetViewShift(FRenderViewpoint& vp) const
 {
 	auto& mode = const_cast<VKOpenXRDeviceMode&>((const VKOpenXRDeviceMode&)VKOpenXRDeviceMode::getInstance());
 	const float hmdHeight = GetHmdAdjustedHeightInMapUnit(mode.xrUsingStageSpace ? false : mode.xrHasLocalHeightAnchor, mode.xrLocalHeightAnchor);
-	const float playerHeight = (r_viewpoint.camera && r_viewpoint.camera->player) ? GetDoomPlayerHeightWithoutCrouch(r_viewpoint.camera->player) : hmdHeight;
+	const player_t* player = &players[consoleplayer];
+	const float playerHeight = (player && player->mo) ? GetDoomPlayerHeightWithoutCrouch(player) : hmdHeight;
 	DVector3 shift = { 0.0, 0.0, hmdHeight - playerHeight };
 
 	if (eye >= 0 && (size_t)eye < mode.xrViews.size())
@@ -2586,10 +2587,10 @@ void VKOpenXRDeviceMode::SetUp() const
 
 	UpdateControllerState();
 
-	player_t* player = r_viewpoint.camera ? r_viewpoint.camera->player : nullptr;
-	if (gamestate == GS_LEVEL && resetDoomYaw && r_viewpoint.camera != nullptr)
+	player_t* player = &players[consoleplayer];
+	if (gamestate == GS_LEVEL && resetDoomYaw && player != nullptr && player->mo != nullptr)
 	{
-		doomYaw = (float)r_viewpoint.camera->Angles.Yaw.Degrees();
+		doomYaw = (float)player->mo->Angles.Yaw.Degrees();
 		resetDoomYaw = false;
 	}
 	else if (gamestate != GS_LEVEL || menuactive != MENU_Off
@@ -2684,10 +2685,14 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 		positional_movementForward = rotated.X;
 	}
 
-	if (!xrUsingStageSpace && !xrHasLocalHeightAnchor && r_viewpoint.camera && r_viewpoint.camera->player)
+	if (!xrUsingStageSpace && !xrHasLocalHeightAnchor)
 	{
-		xrLocalHeightAnchor = GetDoomPlayerHeightWithoutCrouch(r_viewpoint.camera->player) - GetRawHmdHeightInMapUnit();
-		xrHasLocalHeightAnchor = true;
+		const player_t* player = &players[consoleplayer];
+		if (player != nullptr && player->mo != nullptr)
+		{
+			xrLocalHeightAnchor = GetDoomPlayerHeightWithoutCrouch(player) - GetRawHmdHeightInMapUnit();
+			xrHasLocalHeightAnchor = true;
+		}
 	}
 
 	if (gamestate != GS_LEVEL || menuactive != MENU_Off || r_viewpoint.camera == nullptr || r_viewpoint.ViewLevel == nullptr)
@@ -2696,7 +2701,7 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 	if (vr_debug_projection_compare)
 	{
 		const float pixelstretch = r_viewpoint.ViewLevel ? (float)r_viewpoint.ViewLevel->pixelstretch : 1.2f;
-		const player_t* player = r_viewpoint.camera->player;
+		const player_t* player = &players[consoleplayer];
 		const double playerHeight = player ? GetDoomPlayerHeightWithoutCrouch(player) : 0.0;
 		const double rawHeight = GetRawHmdHeightInMapUnit();
 		const double adjustedHeight = GetHmdAdjustedHeightInMapUnit(xrUsingStageSpace ? false : xrHasLocalHeightAnchor, xrLocalHeightAnchor);
@@ -3425,7 +3430,7 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 	emitGameplayHandButtons(1, true);
 	if (gameplayMode)
 	{
-		player_t* player = r_viewpoint.camera ? r_viewpoint.camera->player : nullptr;
+		player_t* player = &players[consoleplayer];
 		if (player && player->mo)
 		{
 			const float hmdHeight = GetHmdAdjustedHeightInMapUnit(xrUsingStageSpace ? false : xrHasLocalHeightAnchor, xrLocalHeightAnchor);
@@ -5023,7 +5028,7 @@ bool VKOpenXRDeviceMode::RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage
 bool VKOpenXRDeviceMode::GetHandTransform(int hand, VSMatrix* mat) const
 {
 	double pixelstretch = r_viewpoint.ViewLevel ? r_viewpoint.ViewLevel->pixelstretch : 1.2;
-	player_t* player = r_viewpoint.camera ? r_viewpoint.camera->player : nullptr;
+	player_t* player = &players[consoleplayer];
 	if (player)
 	{
 		const bool rightHanded = IsRightHandedVrControls();
@@ -5056,7 +5061,7 @@ bool VKOpenXRDeviceMode::GetHandTransform(int hand, VSMatrix* mat) const
 
 bool VKOpenXRDeviceMode::GetTeleportLocation(DVector3 &out) const
 {
-	player_t* player = r_viewpoint.camera ? r_viewpoint.camera->player : nullptr;
+	player_t* player = &players[consoleplayer];
 	if (vr_teleport &&
 		ready_teleport &&
 		(player && player->mo->health > 0) &&

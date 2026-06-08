@@ -37,6 +37,7 @@
 #include "d_main.h"
 #include "g_level.h"
 #include "g_game.h"
+#include "common/rendering/hwrenderer/data/hw_vrwheel.h"
 #include "s_sound.h"
 #include "d_event.h"
 #include "m_random.h"
@@ -2051,6 +2052,8 @@ void G_ReadSnapshots(FResourceFile *resf)
 			}
 		}
 	}
+
+	VRWheel_Reset();
 }
 
 //==========================================================================
