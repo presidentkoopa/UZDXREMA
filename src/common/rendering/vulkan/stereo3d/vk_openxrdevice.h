@@ -70,6 +70,7 @@ public:
 	bool GetRecommendedRenderSize(int& outWidth, int& outHeight) const override;
 	virtual bool ShouldUseRecommendedRenderSizeThisFrame() const override;
 	virtual bool ShouldUseScreenLayerForCurrentFrame() const override;
+	virtual bool IsInitialized() const override;
 	
 	virtual bool GetHandTransform(int hand, VSMatrix* out) const override;
 	virtual bool RenderPlayerSpritesInScene() const { return true; }
@@ -106,6 +107,8 @@ protected:
 
 	mutable bool isSetup;
 	mutable bool isOpenXRReady = false;
+	mutable uint64_t xrInitProbeFrameTime = UINT64_MAX;
+	mutable bool xrInitProbeResult = false;
 	mutable bool isSessionRunning = false;
 	mutable bool isSessionReadyToBegin = false;
 	mutable FrameRenderMode mFrameRenderMode = FrameRenderMode::VirtualScreen;

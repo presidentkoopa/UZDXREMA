@@ -115,6 +115,7 @@ EXTERN_CVAR(Float, vr_automap_mount_scale);
 EXTERN_CVAR(Int, vr_automap_border);
 EXTERN_CVAR(Color, vr_automap_border_color);
 EXTERN_CVAR(Int, vr_desktop_view);
+EXTERN_CVAR(Int, vr_mode);
 EXTERN_CVAR(Bool, vr_swap_eyes);
 EXTERN_CVAR(Bool, vr_automap_use_hud);
 EXTERN_CVAR(Int, vr_overlayscreen);
@@ -1386,6 +1387,34 @@ const VRMode& VKOpenXRDeviceMode::getInstance()
 	return instance;
 }
 
+static void DisableOpenXRModeForCurrentRun(const char* reason)
+{
+	if (vr_mode == VR_OPENXR_MOBILE)
+	{
+		Printf("OpenXR unavailable: %s. Falling back to vr_mode 0.\n", reason);
+		vr_mode = VR_MONO;
+	}
+}
+
+bool VKOpenXRDeviceMode::IsInitialized() const
+{
+	if (isOpenXRReady)
+		return true;
+
+	const uint64_t frameTime = screen != nullptr ? screen->FrameTime : 0;
+	if (xrInitProbeFrameTime == frameTime)
+		return xrInitProbeResult;
+
+	OpenXRVulkanBootstrapInfo xrInfo;
+	xrInitProbeResult = QueryOpenXRVulkanBootstrapInfo(xrInfo);
+	xrInitProbeFrameTime = frameTime;
+	if (!xrInitProbeResult)
+	{
+		DisableOpenXRModeForCurrentRun("runtime probe failed");
+	}
+	return xrInitProbeResult;
+}
+
 bool VKOpenXRDeviceMode::GetRecommendedRenderSize(int& outWidth, int& outHeight) const
 {
 	int width = 0;
@@ -1536,7 +1565,10 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 {
 	auto fail = [&]() -> bool
 	{
+		xrInitProbeFrameTime = screen != nullptr ? screen->FrameTime : 0;
+		xrInitProbeResult = false;
 		DestroyOpenXR();
+		DisableOpenXRModeForCurrentRun("initialization failed");
 		return false;
 	};
 
@@ -1974,6 +2006,8 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	sceneHeight = xrViewConfigs[0].recommendedImageRectHeight;
 
 	isOpenXRReady = true;
+	xrInitProbeFrameTime = screen != nullptr ? screen->FrameTime : 0;
+	xrInitProbeResult = true;
 	return true;
 }
 

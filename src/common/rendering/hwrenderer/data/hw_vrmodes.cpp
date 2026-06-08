@@ -610,7 +610,8 @@ const VRMode *VRMode::GetVRMode(bool toscreen)
 		if (V_GetBackend() == 1)
 		{
 			Printf("VRMode select: choosing Vulkan/OpenXR mode 15.\n");
-			return &s3d::VKOpenXRDeviceMode::getInstance();
+			const VRMode& vrmode = s3d::VKOpenXRDeviceMode::getInstance();
+			return vrmode.IsInitialized() ? &vrmode : &vrmi_mono;
 		}
 		Printf("VRMode select: Vulkan/OpenXR requested but backend is not Vulkan.\n");
 		return &vrmi_mono;

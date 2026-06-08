@@ -1198,8 +1198,10 @@ void D_Display ()
 
 	if (nodrawers || screen == NULL)
 		return; 				// for comparative timing / profiling
-	
-	if (!AppActive && (screen->IsFullscreen() || !vid_activeinbackground))
+
+	auto vrmode = VRMode::GetVRModeCached(true);
+	if (!AppActive && (screen->IsFullscreen() || !vid_activeinbackground) &&
+		(vrmode == nullptr || !vrmode->IsVR()))
 	{
 		return;
 	}
@@ -1216,7 +1218,6 @@ void D_Display ()
 	{
 		players[consoleplayer].camera = players[consoleplayer].mo;
 	}
-	auto vrmode = VRMode::GetVRModeCached(true);
     auto &vp = r_viewpoint;
 	if (viewactive)
 	{

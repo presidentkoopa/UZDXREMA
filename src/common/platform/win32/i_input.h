@@ -40,6 +40,7 @@ bool I_InitInput (void *hwnd);
 void I_ShutdownInput ();
 
 void I_GetEvent();
+bool I_AllowBackgroundGameInput();
 
 enum
 {
