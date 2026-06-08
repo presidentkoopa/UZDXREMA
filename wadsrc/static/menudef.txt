@@ -2947,6 +2947,12 @@ OptionValue "WheelListOption"
 	1, "All"
 }
 
+OptionValue "WheelIconModelOption"
+{
+	0, "Off"
+	1, "When Available"
+}
+
 OptionValue "WheelItemSelectOption"
 {
 	0, "Touch"
@@ -2976,17 +2982,26 @@ OptionMenu VRWeaponWheelOptions protected
 	StaticText " "
 
 	StaticText ""
-	StaticText "Other Options", gold
+	StaticText "Wheel Selection", gold
 	Option "Show Weapons/Items", 			"vr_wheel_weapon_all", "WheelListOption"
 	Option "Switch Hand", 					"vr_wheel_switch_hands", "YesNo"
 	StaticText "Lets you switch hands for weapon and item wheel", "Brown"
-	Option "Wheel Sounds", 					"vr_wheel_sound", "OnOff"
-	Option "Hide Weapon in Hand", 			"vr_wheel_hide_hand_weapon", "YesNo"
 	Option "Selection Mode", 				"vr_wheel_selection_type", "WheelItemSelectOption"
 	Slider "Aim Select Angle", 				"vr_wheel_select_angle", 10.0, 90.0, 0.5, 1, vr_wheel_selection_type
 	Slider "Aim Select Deadzone", 			"vr_wheel_deadzone", 0.1, 5.0, 0.1, 1, vr_wheel_selection_type
+	
 	StaticText ""
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_wheel_icon_bg_color vr_wheel_icon_select_color vr_wheel_icon_scale vr_wheel_radius vr_wheel_distance vr_wheel_xoffset vr_wheel_yoffset vr_wheel_time_slow vr_wheel_weapon_all vr_wheel_switch_hands vr_wheel_sound vr_wheel_hide_hand_weapon vr_wheel_selection_type vr_wheel_select_angle vr_wheel_deadzone"
+	StaticText "Other Options", gold
+	Option "Wheel Sounds", 					"vr_wheel_sound", "OnOff"
+	Option "Hide Weapon in Hand", 			"vr_wheel_hide_hand_weapon", "YesNo"
+	Option "Load Model For Icons", 			"vr_wheel_icon_load_model", "WheelIconModelOption"
+	Slider "Model Icon Scale Adjust", 		"vr_wheel_icon_model_scale", 0.1, 10.0, 0.1, 1, vr_wheel_icon_load_model
+	Slider "Model Icon Angle", 				"vr_wheel_icon_model_yaw", -180.0, 180.0, 1.0, 0, vr_wheel_icon_load_model
+	Slider "Model Icon X Offset", 			"vr_wheel_icon_model_xoffset", -100.0, 100.0, 1.0, 0, vr_wheel_icon_load_model
+	Slider "Model Icon Z Offset", 			"vr_wheel_icon_model_zoffset", -100.0, 100.0, 1.0, 0, vr_wheel_icon_load_model
+	StaticText ""
+
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_wheel_icon_bg_color vr_wheel_icon_select_color vr_wheel_icon_scale vr_wheel_radius vr_wheel_distance vr_wheel_xoffset vr_wheel_yoffset vr_wheel_time_slow vr_wheel_weapon_all vr_wheel_switch_hands vr_wheel_selection_type vr_wheel_select_angle vr_wheel_deadzone vr_wheel_sound vr_wheel_hide_hand_weapon vr_wheel_icon_load_model vr_wheel_icon_model_scale vr_wheel_icon_model_yaw vr_wheel_icon_model_xoffset vr_wheel_icon_model_zoffset"
 }
 
 OptionMenu VROptionsMenu protected

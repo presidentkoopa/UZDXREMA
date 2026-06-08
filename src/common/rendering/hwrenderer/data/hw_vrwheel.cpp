@@ -22,7 +22,9 @@
 #include "sound/s_doomsound.h"
 #include <QzDoom/VrCommon.h>
 #include "hw_vrmodes.h"
+#include "r_data/models.h"
 #include "rendering/hwrenderer/scene/hw_drawinfo.h"
+#include "rendering/hwrenderer/hw_models.h"
 #include "r_data/sprites.h"
 #include "r_utility.h"
 
@@ -34,8 +36,10 @@ CVAR(Bool, vr_wheel_weapon_all, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_wheel_switch_hands, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_wheel_hide_hand_weapon, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_wheel_sound, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, vr_wheel_icon_load_model, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Color, vr_wheel_icon_bg_color, (int)MAKEARGB(128, 63, 63, 63), CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Color, vr_wheel_icon_select_color, (int)MAKEARGB(160, 255, 208, 0), CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Color, vr_wheel_icon_disable_color, (int)MAKEARGB(160, 96, 16, 16), CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_distance, 0.05f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CUSTOM_CVAR(Float, vr_wheel_time_slow, 0.3f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
@@ -56,9 +60,15 @@ CVAR(Float, vr_wheel_xoffset, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_yoffset, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_radius, 8.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_deadzone, 0.30f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, vr_wheel_icon_scale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_wheel_icon_scale, 1.2f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_wheel_icon_model_scale, 0.8f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_wheel_icon_model_yaw, -135.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_wheel_icon_model_xoffset, -40.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_wheel_icon_model_zoffset, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_select_angle, 30.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, vr_wheel_selection_type, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+void RenderFrameModels(FModelRenderer* renderer, FLevelLocals* Level, const FSpriteModelFrame* smf, const FState* curState, const int curTics, FTranslationID translation, AActor* actor);
 
 namespace
 {
@@ -73,6 +83,8 @@ namespace
 	{
 		AActor* Item = nullptr;
 		FGameTexture* Icon = nullptr;
+		FSpriteModelFrame* ModelFrame = nullptr;
+		FState* ModelState = nullptr;
 		bool Selectable = false;
 		bool Owned = false;
 	};
@@ -81,6 +93,8 @@ namespace
 	{
 		EVRWheelType Type = EVRWheelType::None;
 		int AnchorHand = VR_MAINHAND;
+		AActor* Owner = nullptr;
+		FLevelLocals* Level = nullptr;
 		VSMatrix Transform;
 		DVector3 HeadLocalOffset = {};
 		DAngle OpenYaw = nullAngle;
@@ -96,6 +110,7 @@ namespace
 	VRWheelState GVRWheel;
 
 	static void UpdateHover(player_t* player);
+	static void ReleaseWheelTimeControl();
 
 	static DVector3 ToGamePoint(const double* xyz)
 	{
@@ -365,6 +380,23 @@ namespace
 		return nullptr;
 	}
 
+	static FState* FindFirstUsableStateFrame(FState* state)
+	{
+		for (int steps = 0; state != nullptr && steps < 16; ++steps, state = state->GetNextState())
+		{
+			if (state->sprite <= 0 || state->sprite >= (int)sprites.Size())
+			{
+				continue;
+			}
+			if (memcmp(sprites[state->sprite].name, "TNT1", 4) == 0 || memcmp(sprites[state->sprite].name, "NULL", 4) == 0 || sprites[state->sprite].numframes <= state->GetFrame())
+			{
+				continue;
+			}
+			return state;
+		}
+		return nullptr;
+	}
+
 	static FGameTexture* ResolveWheelIcon(AActor* item)
 	{
 		if (item == nullptr)
@@ -401,6 +433,31 @@ namespace
 				return ResolveStateIcon(readyState);
 			}
 		}
+		return nullptr;
+	}
+
+	static FSpriteModelFrame* ResolveWheelModel(AActor* item, bool owned, FState*& outState)
+	{
+		outState = nullptr;
+		if (!vr_wheel_icon_load_model || item == nullptr)
+		{
+			return nullptr;
+		}
+
+		// For wheel models icons, probe the first usable non-empty frame from Ready state
+		outState = FindFirstUsableStateFrame(item->FindState(NAME_Ready));
+		if (outState == nullptr)
+		{
+			return nullptr;
+		}
+
+		auto modelFrame = FindModelFrame(item, outState->sprite, outState->GetFrame(), false);
+		if (modelFrame != nullptr && owned && item->Level != nullptr)
+		{
+			return modelFrame;
+		}
+
+		outState = nullptr;
 		return nullptr;
 	}
 
@@ -464,7 +521,9 @@ namespace
 	static void AddWheelEntry(TArray<VRWheelEntry>& entries, AActor* item, bool owned, bool selectable)
 	{
 		auto icon = ResolveWheelIcon(item);
-		if (item == nullptr || icon == nullptr)
+		FState* modelState = nullptr;
+		auto modelFrame = ResolveWheelModel(item, owned, modelState);
+		if (item == nullptr || (icon == nullptr && modelFrame == nullptr))
 		{
 			return;
 		}
@@ -472,6 +531,8 @@ namespace
 		VRWheelEntry entry;
 		entry.Item = item;
 		entry.Icon = icon;
+		entry.ModelFrame = modelFrame;
+		entry.ModelState = modelState;
 		entry.Selectable = selectable;
 		entry.Owned = owned;
 		entries.Push(entry);
@@ -550,6 +611,32 @@ namespace
 		GVRWheel = {};
 	}
 
+	static bool IsWheelOwnerValid(player_t* player)
+	{
+		if (GVRWheel.Type == EVRWheelType::None)
+		{
+			return true;
+		}
+
+		if (player == nullptr || player->mo == nullptr)
+		{
+			return false;
+		}
+
+		return GVRWheel.Owner == player->mo && GVRWheel.Level == player->mo->Level;
+	}
+
+	static void InvalidateWheelIfOwnerChanged(player_t* player)
+	{
+		if (IsWheelOwnerValid(player))
+		{
+			return;
+		}
+
+		ReleaseWheelTimeControl();
+		ResetWheel();
+	}
+
 	static void SetGameTimeScale(double scale)
 	{
 		FString value;
@@ -623,6 +710,8 @@ namespace
 
 		GVRWheel.Type = type;
 		GVRWheel.AnchorHand = anchorHand;
+		GVRWheel.Owner = player->mo;
+		GVRWheel.Level = player->mo->Level;
 		CaptureHeadLockedAnchor(initialCenter);
 		GetHandAimAngles(player, anchorHand, GVRWheel.OpenYaw, GVRWheel.OpenPitch);
 		GVRWheel.HoveredIndex = -1;
@@ -801,6 +890,60 @@ namespace
 		state.Draw(DT_TriangleStrip, vert.second, 4);
 	}
 
+	static void DrawWheelModel(HWDrawInfo* di, FRenderState& state, const VRWheelEntry& entry, const DVector3& center, const DVector3& wheelForward, float iconSize)
+	{
+		if (di == nullptr || entry.Item == nullptr || entry.ModelFrame == nullptr || entry.ModelState == nullptr || entry.Item->Level == nullptr)
+		{
+			return;
+		}
+
+		const unsigned int smfFlags = entry.ModelFrame->getFlags(entry.Item->modelData);
+		FTranslationID translation = NO_TRANSLATION;
+		if (!(smfFlags & MDL_IGNORETRANSLATION))
+		{
+			translation = entry.Item->Translation;
+		}
+
+		const float wheelModelScale = max(0.01f, iconSize * 0.025f * max(0.01f, (float)vr_wheel_icon_model_scale));
+		const float scaleFactorX = -entry.Item->Scale.X * entry.ModelFrame->xscale * wheelModelScale;
+		const float scaleFactorY = entry.Item->Scale.X * entry.ModelFrame->yscale * wheelModelScale;
+		const float scaleFactorZ = entry.Item->Scale.Y * entry.ModelFrame->zscale * wheelModelScale;
+		const float yaw = (float)wheelForward.Angle().Degrees();
+
+		VSMatrix objectToWorldMatrix;
+		objectToWorldMatrix.loadIdentity();
+		objectToWorldMatrix.translate((FLOATTYPE)center.X, (FLOATTYPE)center.Z, (FLOATTYPE)center.Y);
+		objectToWorldMatrix.rotate(-(yaw - (float)vr_wheel_icon_model_yaw), 0, 1, 0);
+		objectToWorldMatrix.scale(scaleFactorX, scaleFactorZ, scaleFactorY);
+		objectToWorldMatrix.translate(
+			vr_wheel_icon_model_xoffset + (entry.ModelFrame->xoffset / entry.ModelFrame->xscale),
+			entry.ModelFrame->zoffset / entry.ModelFrame->zscale,
+			vr_wheel_icon_model_zoffset + (entry.ModelFrame->yoffset / entry.ModelFrame->yscale));
+		objectToWorldMatrix.rotate(-entry.ModelFrame->angleoffset, 0, 1, 0);
+		objectToWorldMatrix.rotate(entry.ModelFrame->pitchoffset, 0, 0, 1);
+		objectToWorldMatrix.rotate(-entry.ModelFrame->rolloffset, 1, 0, 0);
+
+		FHWModelRenderer renderer(di, state, -1);
+		const bool mirrored = (scaleFactorX * scaleFactorY * scaleFactorZ) < 0.0f;
+		state.SetRenderStyle(STYLE_Normal);
+		state.EnableTexture(true);
+		state.SetTextureMode(TM_NORMAL);
+		state.AlphaFunc(Alpha_GEqual, 0.5f);
+		state.SetColorAlpha(0xffffff, 1.0f, 0);
+		state.EnableDepthTest(true);
+		state.SetDepthMask(true);
+		state.EnableBrightmap(true);
+		state.SetCulling(Cull_None);
+		state.ClearDepthBias();
+		state.ResetColor();
+		state.SetObjectColor(0xffffffff);
+		state.SetAddColor(0);
+		renderer.BeginDrawModel(DefaultRenderStyle(), (int)smfFlags, objectToWorldMatrix, mirrored);
+		RenderFrameModels(&renderer, entry.Item->Level, entry.ModelFrame, entry.ModelState, 0, translation, entry.Item);
+		renderer.EndDrawModel(DefaultRenderStyle(), (int)smfFlags);
+		state.SetVertexBuffer(screen->mVertexData);
+	}
+
 	static void UpdateHover(player_t* player)
 	{
 		GVRWheel.HoveredIndex = -1;
@@ -971,6 +1114,8 @@ void VRWheel_Draw(HWDrawInfo* di, FRenderState& state)
 		return;
 	}
 
+	InvalidateWheelIfOwnerChanged(player);
+
 	if (menuactive != MENU_Off || ConsoleState != c_up || VR_UseScreenLayer())
 	{
 		return;
@@ -1011,6 +1156,10 @@ void VRWheel_Draw(HWDrawInfo* di, FRenderState& state)
 		RPART(vr_wheel_icon_select_color),
 		GPART(vr_wheel_icon_select_color),
 		BPART(vr_wheel_icon_select_color)));
+	const PalEntry disabledBgColor = PalEntry(MAKEARGB(160,
+		RPART(vr_wheel_icon_disable_color),
+		GPART(vr_wheel_icon_disable_color),
+		BPART(vr_wheel_icon_disable_color)));
 
 	if (vr_wheel_selection_type == 0)
 	{
@@ -1039,8 +1188,18 @@ void VRWheel_Draw(HWDrawInfo* di, FRenderState& state)
 		float iconHeight = iconSize;
 		GetIconQuadSize(entry.Icon, iconSize, iconWidth, iconHeight);
 
-		DrawWorldDisc(di, state, iconCenter, wheelRight, wheelUp, backdropSize * 0.50f, i == GVRWheel.HoveredIndex ? selectedBgColor : bgColor);
-		DrawWorldQuad(di, state, iconCenter, wheelRight, wheelUp, iconWidth, iconHeight, entry.Icon, iconColor, true, true);
+		const PalEntry backdropColor = i == GVRWheel.HoveredIndex
+			? selectedBgColor
+			: (entry.Selectable ? bgColor : disabledBgColor);
+		DrawWorldDisc(di, state, iconCenter, wheelRight, wheelUp, backdropSize * 0.50f, backdropColor);
+		if (entry.ModelFrame != nullptr)
+		{
+			DrawWheelModel(di, state, entry, iconCenter, wheelForward, iconSize);
+		}
+		else
+		{
+			DrawWorldQuad(di, state, iconCenter, wheelRight, wheelUp, iconWidth, iconHeight, entry.Icon, iconColor, true, true);
+		}
 	}
 
 	state.EnableTexture(true);
