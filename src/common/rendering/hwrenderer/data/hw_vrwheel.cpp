@@ -37,6 +37,7 @@ CVAR(Bool, vr_wheel_switch_hands, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_wheel_hide_hand_weapon, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_wheel_sound, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_wheel_icon_load_model, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, vr_wheel_auto_split, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Color, vr_wheel_icon_bg_color, (int)MAKEARGB(128, 63, 63, 63), CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Color, vr_wheel_icon_select_color, (int)MAKEARGB(160, 255, 208, 0), CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Color, vr_wheel_icon_disable_color, (int)MAKEARGB(160, 96, 16, 16), CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -105,6 +106,21 @@ namespace
 		bool TimeControlFrozen = false;
 		double SavedTimeScale = 1.0;
 		TArray<VRWheelEntry> Entries;
+	};
+
+	struct VRWheelRingLayout
+	{
+		int StartIndex = 0;
+		int Count = 0;
+		float Radius = 0.0f;
+		float IconSize = 0.0f;
+		double AngleOffset = 0.0;
+	};
+
+	struct VRWheelLayoutInfo
+	{
+		int RingCount = 0;
+		VRWheelRingLayout Rings[2];
 	};
 
 	VRWheelState GVRWheel;
@@ -944,6 +960,117 @@ namespace
 		state.SetVertexBuffer(screen->mVertexData);
 	}
 
+	static float GetWheelIconSizeForCount(int count, float ringRadius)
+	{
+		const float baseSize = clamp<float>(2.0f * max(0.1f, (float)vr_wheel_icon_scale), 0.5f, 4.0f);
+		if (count <= 1)
+		{
+			return baseSize;
+		}
+
+		// Keep the default feel for small wheels, then shrink toward the slot chord
+		// length once the wheel becomes crowded.
+		const double slotChord = 2.0 * double(ringRadius) * sin(M_PI / double(count));
+		const float maxBackdropSize = max(0.4f, float(slotChord * 0.82));
+		const float autoSize = clamp<float>(maxBackdropSize / 1.45f, 0.25f, baseSize);
+		return autoSize;
+	}
+
+	static VRWheelLayoutInfo BuildWheelLayoutInfo(int count)
+	{
+		VRWheelLayoutInfo layout = {};
+		if (count <= 0)
+		{
+			return layout;
+		}
+
+		const float innerRadius = max(5.0f, (float)vr_wheel_radius);
+		if (!vr_wheel_auto_split || count <= 15)
+		{
+			layout.RingCount = 1;
+			layout.Rings[0].StartIndex = 0;
+			layout.Rings[0].Count = count;
+			layout.Rings[0].Radius = innerRadius;
+			layout.Rings[0].IconSize = GetWheelIconSizeForCount(count, innerRadius);
+			layout.Rings[0].AngleOffset = 0.0;
+			return layout;
+		}
+
+		const int innerCount = (count + 1) / 2;
+		const int outerCount = count - innerCount;
+		layout.RingCount = outerCount > 0 ? 2 : 1;
+		layout.Rings[0].StartIndex = 0;
+		layout.Rings[0].Count = innerCount;
+		layout.Rings[0].Radius = innerRadius;
+		layout.Rings[0].IconSize = GetWheelIconSizeForCount(innerCount, innerRadius);
+		layout.Rings[0].AngleOffset = 0.0;
+
+		if (outerCount > 0)
+		{
+			const float innerBackdrop = layout.Rings[0].IconSize * 1.45f;
+			float outerRadius = innerRadius + innerBackdrop + 2.0f;
+			float outerIconSize = GetWheelIconSizeForCount(outerCount, outerRadius);
+			const float outerBackdrop = outerIconSize * 1.45f;
+			outerRadius = innerRadius + (innerBackdrop * 0.65f) + (outerBackdrop * 0.65f) + 1.25f;
+			outerIconSize = GetWheelIconSizeForCount(outerCount, outerRadius);
+
+			layout.Rings[1].StartIndex = innerCount;
+			layout.Rings[1].Count = outerCount;
+			layout.Rings[1].Radius = outerRadius;
+			layout.Rings[1].IconSize = outerIconSize;
+			layout.Rings[1].AngleOffset = outerCount > 0 ? (M_PI / double(outerCount)) : 0.0;
+		}
+
+		return layout;
+	}
+
+	static const VRWheelRingLayout* FindRingForEntry(const VRWheelLayoutInfo& layout, int index, int& localIndex)
+	{
+		for (int ring = 0; ring < layout.RingCount; ++ring)
+		{
+			const auto& ringLayout = layout.Rings[ring];
+			if (index >= ringLayout.StartIndex && index < ringLayout.StartIndex + ringLayout.Count)
+			{
+				localIndex = index - ringLayout.StartIndex;
+				return &ringLayout;
+			}
+		}
+		localIndex = -1;
+		return nullptr;
+	}
+
+	static double GetWheelEntryAngle(const VRWheelRingLayout& ring, int localIndex)
+	{
+		const double slice = (2.0 * M_PI) / double(max(1, ring.Count));
+		return (M_PI * 0.5) - (slice * localIndex) + ring.AngleOffset;
+	}
+
+	static double DotProduct(const DVector3& a, const DVector3& b)
+	{
+		return a.X * b.X + a.Y * b.Y + a.Z * b.Z;
+	}
+
+	static int GetAimRingIndex(player_t* player, const VRWheelLayoutInfo& layout, const DVector3& center, const DVector3& wheelRight, const DVector3& wheelUp)
+	{
+		if (layout.RingCount <= 1)
+		{
+			return 0;
+		}
+
+		DVector3 touchPoint;
+		if (!GetTouchPoint(player, touchPoint))
+		{
+			return 0;
+		}
+
+		const DVector3 delta = touchPoint - center;
+		const double planeX = DotProduct(delta, wheelRight);
+		const double planeY = DotProduct(delta, wheelUp);
+		const double radialDistance = sqrt((planeX * planeX) + (planeY * planeY));
+		const double switchRadius = layout.Rings[0].Radius * 0.58;
+		return radialDistance <= switchRadius ? 0 : 1;
+	}
+
 	static void UpdateHover(player_t* player)
 	{
 		GVRWheel.HoveredIndex = -1;
@@ -977,22 +1104,27 @@ namespace
 			}
 
 			const int count = GVRWheel.Entries.Size();
-			const float ringRadius = max(5.0f, (float)vr_wheel_radius);
-			const float iconSize = clamp<float>(2.0f * max(0.1f, (float)vr_wheel_icon_scale), 0.5f, 4.0f);
-			const float backdropSize = iconSize * 1.45f;
-			const float iconRadius = backdropSize * 0.50f;
-			const float touchRadius = backdropSize * 0.25f;
-			const float selectDistance = iconRadius + touchRadius;
-			const double slice = (2.0 * M_PI) / double(count);
+			const VRWheelLayoutInfo layout = BuildWheelLayoutInfo(count);
 
 			int hoveredIndex = -1;
 			double hoveredDistanceSq = DBL_MAX;
 			for (int i = 0; i < count; ++i)
 			{
-				const double angle = (M_PI * 0.5) - (slice * i);
+				int localIndex = -1;
+				const auto* ring = FindRingForEntry(layout, i, localIndex);
+				if (ring == nullptr)
+				{
+					continue;
+				}
+
+				const float backdropSize = ring->IconSize * 1.45f;
+				const float iconRadius = backdropSize * 0.50f;
+				const float touchRadius = backdropSize * 0.25f;
+				const float selectDistance = iconRadius + touchRadius;
+				const double angle = GetWheelEntryAngle(*ring, localIndex);
 				const DVector3 iconCenter = center
-					+ wheelRight * (cos(angle) * ringRadius)
-					+ wheelUp * (sin(angle) * ringRadius);
+					+ wheelRight * (cos(angle) * ring->Radius)
+					+ wheelUp * (sin(angle) * ring->Radius);
 				const double distanceSq = (touchPoint - iconCenter).LengthSquared();
 				if (distanceSq <= double(selectDistance * selectDistance) && distanceSq < hoveredDistanceSq)
 				{
@@ -1028,10 +1160,21 @@ namespace
 			return;
 		}
 
-		const double slice = (2.0 * M_PI) / double(GVRWheel.Entries.Size());
+		const VRWheelLayoutInfo layout = BuildWheelLayoutInfo(GVRWheel.Entries.Size());
+		DVector3 center;
+		DVector3 wheelRight;
+		DVector3 wheelUp;
+		DVector3 wheelForward;
+		const bool hasWheelLayout = GetWheelLayout(center, wheelRight, wheelUp, wheelForward);
 		double angle = atan2(y, x) - M_PI * 0.5;
 		if (angle < 0.0) angle += 2.0 * M_PI;
-		const int hover = int(angle / slice) % GVRWheel.Entries.Size();
+		const int ringIndex = hasWheelLayout ? GetAimRingIndex(player, layout, center, wheelRight, wheelUp) : (layout.RingCount > 1 && len >= 0.75 ? 1 : 0);
+		const VRWheelRingLayout& ring = layout.Rings[ringIndex];
+		const double ringAngle = angle - ring.AngleOffset;
+		const double normalizedAngle = ringAngle < 0.0 ? ringAngle + 2.0 * M_PI : ringAngle;
+		const double slice = (2.0 * M_PI) / double(max(1, ring.Count));
+		const int localHover = int(normalizedAngle / slice) % max(1, ring.Count);
+		const int hover = ring.StartIndex + localHover;
 		if (hover >= 0 && hover < GVRWheel.Entries.Size())
 		{
 			GVRWheel.HoveredIndex = hover;
@@ -1143,11 +1286,14 @@ void VRWheel_Draw(HWDrawInfo* di, FRenderState& state)
 	}
 
 	const int count = GVRWheel.Entries.Size();
-	const float ringRadius = max(5.0f, (float)vr_wheel_radius);
-	const float iconSize = clamp<float>(2.0f * max(0.1f, (float)vr_wheel_icon_scale), 0.5f, 4.0f);
-	const float backdropSize = iconSize * 1.45f;
-	const float touchIndicatorRadius = backdropSize * 0.25f;
-	const double slice = (2.0 * M_PI) / double(count);
+	const VRWheelLayoutInfo layout = BuildWheelLayoutInfo(count);
+	const float maxIconSize = layout.RingCount > 1
+		? max(layout.Rings[0].IconSize, layout.Rings[1].IconSize)
+		: layout.Rings[0].IconSize;
+	const float touchIndicatorRadius = (maxIconSize * 1.45f) * 0.25f;
+	const float centerIndicatorRadius = maxIconSize * 0.38f;
+	const float outerIndicatorRadius = centerIndicatorRadius * 1.85f;
+	const float outerIndicatorInnerRadius = centerIndicatorRadius * 1.20f;
 	const PalEntry bgColor = PalEntry(MAKEARGB(128,
 		RPART(vr_wheel_icon_bg_color),
 		GPART(vr_wheel_icon_bg_color),
@@ -1169,14 +1315,32 @@ void VRWheel_Draw(HWDrawInfo* di, FRenderState& state)
 			DrawWorldDisc(di, state, touchPoint, wheelRight, wheelUp, touchIndicatorRadius, selectedBgColor);
 		}
 	}
+	else if (layout.RingCount > 1)
+	{
+		const int ringIndex = GetAimRingIndex(player, layout, center, wheelRight, wheelUp);
+		const PalEntry innerColor = ringIndex == 0 ? selectedBgColor : bgColor;
+		const PalEntry outerColor = ringIndex == 1 ? selectedBgColor : bgColor;
+		DrawWorldDisc(di, state, center, wheelRight, wheelUp, outerIndicatorRadius, outerColor);
+		DrawWorldDisc(di, state, center, wheelRight, wheelUp, outerIndicatorInnerRadius, bgColor);
+		DrawWorldDisc(di, state, center, wheelRight, wheelUp, centerIndicatorRadius, innerColor);
+	}
 
 	for (int i = 0; i < count; ++i)
 	{
 		const auto& entry = GVRWheel.Entries[i];
-		const double angle = (M_PI * 0.5) - (slice * i);
+		int localIndex = -1;
+		const auto* ring = FindRingForEntry(layout, i, localIndex);
+		if (ring == nullptr)
+		{
+			continue;
+		}
+
+		const float iconSize = ring->IconSize;
+		const float backdropSize = iconSize * 1.45f;
+		const double angle = GetWheelEntryAngle(*ring, localIndex);
 		const DVector3 iconCenter = center
-			+ wheelRight * (cos(angle) * ringRadius)
-			+ wheelUp * (sin(angle) * ringRadius);
+			+ wheelRight * (cos(angle) * ring->Radius)
+			+ wheelUp * (sin(angle) * ring->Radius);
 
 		PalEntry iconColor = entry.Selectable ? PalEntry(235, 255, 255, 255) : PalEntry(115, 180, 180, 180);
 		if (i == GVRWheel.HoveredIndex)

@@ -2986,6 +2986,8 @@ OptionMenu VRWeaponWheelOptions protected
 	Option "Show Weapons/Items", 			"vr_wheel_weapon_all", "WheelListOption"
 	Option "Switch Hand", 					"vr_wheel_switch_hands", "YesNo"
 	StaticText "Lets you switch hands for weapon and item wheel", "Brown"
+	Option "Auto Split List", 				"vr_wheel_auto_split", "YesNo"
+	StaticText "Auto split list into two wheels if too many items", "Brown"
 	Option "Selection Mode", 				"vr_wheel_selection_type", "WheelItemSelectOption"
 	Slider "Aim Select Angle", 				"vr_wheel_select_angle", 10.0, 90.0, 0.5, 1, vr_wheel_selection_type
 	Slider "Aim Select Deadzone", 			"vr_wheel_deadzone", 0.1, 5.0, 0.1, 1, vr_wheel_selection_type
