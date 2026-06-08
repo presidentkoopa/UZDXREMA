@@ -2947,6 +2947,12 @@ OptionValue "WheelListOption"
 	1, "All"
 }
 
+OptionValue "WheelItemSelectOption"
+{
+	0, "Touch"
+	1, "Aim"
+}
+
 OptionMenu VRWeaponWheelOptions protected
 {
 	Title "Weapon/Item Wheel Options"
@@ -2975,8 +2981,12 @@ OptionMenu VRWeaponWheelOptions protected
 	Option "Switch Hand", 					"vr_wheel_switch_hands", "YesNo"
 	StaticText "Lets you switch hands for weapon and item wheel", "Brown"
 	Option "Wheel Sounds", 					"vr_wheel_sound", "OnOff"
-	
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_wheel_icon_bg_color vr_wheel_icon_select_color vr_wheel_icon_scale vr_wheel_radius vr_wheel_distance vr_wheel_xoffset vr_wheel_yoffset vr_wheel_time_slow vr_wheel_weapon_all vr_wheel_switch_hands vr_wheel_sound"
+	Option "Hide Weapon in Hand", 			"vr_wheel_hide_hand_weapon", "YesNo"
+	Option "Selection Mode", 				"vr_wheel_selection_type", "WheelItemSelectOption"
+	Slider "Aim Select Angle", 				"vr_wheel_select_angle", 10.0, 90.0, 0.5, 1, vr_wheel_selection_type
+	Slider "Aim Select Deadzone", 			"vr_wheel_deadzone", 0.1, 5.0, 0.1, 1, vr_wheel_selection_type
+	StaticText ""
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_wheel_icon_bg_color vr_wheel_icon_select_color vr_wheel_icon_scale vr_wheel_radius vr_wheel_distance vr_wheel_xoffset vr_wheel_yoffset vr_wheel_time_slow vr_wheel_weapon_all vr_wheel_switch_hands vr_wheel_sound vr_wheel_hide_hand_weapon vr_wheel_selection_type vr_wheel_select_angle vr_wheel_deadzone"
 }
 
 OptionMenu VROptionsMenu protected

@@ -36,7 +36,7 @@ CVAR(Bool, vr_wheel_hide_hand_weapon, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_wheel_sound, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Color, vr_wheel_icon_bg_color, (int)MAKEARGB(128, 63, 63, 63), CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Color, vr_wheel_icon_select_color, (int)MAKEARGB(160, 255, 208, 0), CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, vr_wheel_distance, 0.2f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_wheel_distance, 0.05f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CUSTOM_CVAR(Float, vr_wheel_time_slow, 0.3f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0.0f)
@@ -57,7 +57,8 @@ CVAR(Float, vr_wheel_yoffset, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_radius, 8.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_deadzone, 0.30f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_icon_scale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, vr_wheel_select_angle, 22.5f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_wheel_select_angle, 30.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, vr_wheel_selection_type, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 namespace
 {
@@ -268,6 +269,12 @@ namespace
 			+ right * (vr_wheel_xoffset * handSign * doomUnitsPerMeter)
 			+ up * (vr_wheel_yoffset * doomUnitsPerMeter);
 		return true;
+	}
+
+	static bool GetTouchPoint(player_t* player, DVector3& out)
+	{
+		DVector3 unusedDir;
+		return GetHandPose(player, GVRWheel.AnchorHand, out, unusedDir);
 	}
 
 	static void CaptureHeadLockedAnchor(const DVector3& center)
@@ -809,6 +816,56 @@ namespace
 			return;
 		}
 
+		if (vr_wheel_selection_type == 0)
+		{
+			DVector3 center;
+			DVector3 wheelRight;
+			DVector3 wheelUp;
+			DVector3 wheelForward;
+			if (!GetWheelLayout(center, wheelRight, wheelUp, wheelForward))
+			{
+				return;
+			}
+
+			DVector3 touchPoint;
+			if (!GetTouchPoint(player, touchPoint))
+			{
+				return;
+			}
+
+			const int count = GVRWheel.Entries.Size();
+			const float ringRadius = max(5.0f, (float)vr_wheel_radius);
+			const float iconSize = clamp<float>(2.0f * max(0.1f, (float)vr_wheel_icon_scale), 0.5f, 4.0f);
+			const float backdropSize = iconSize * 1.45f;
+			const float iconRadius = backdropSize * 0.50f;
+			const float touchRadius = backdropSize * 0.25f;
+			const float selectDistance = iconRadius + touchRadius;
+			const double slice = (2.0 * M_PI) / double(count);
+
+			int hoveredIndex = -1;
+			double hoveredDistanceSq = DBL_MAX;
+			for (int i = 0; i < count; ++i)
+			{
+				const double angle = (M_PI * 0.5) - (slice * i);
+				const DVector3 iconCenter = center
+					+ wheelRight * (cos(angle) * ringRadius)
+					+ wheelUp * (sin(angle) * ringRadius);
+				const double distanceSq = (touchPoint - iconCenter).LengthSquared();
+				if (distanceSq <= double(selectDistance * selectDistance) && distanceSq < hoveredDistanceSq)
+				{
+					hoveredIndex = i;
+					hoveredDistanceSq = distanceSq;
+				}
+			}
+
+			if (hoveredIndex >= 0)
+			{
+				GVRWheel.HoveredIndex = hoveredIndex;
+				GVRWheel.HoverValid = GVRWheel.Entries[hoveredIndex].Selectable;
+			}
+			return;
+		}
+
 		DAngle aimYaw;
 		DAngle aimPitch;
 		GetHandAimAngles(player, GVRWheel.AnchorHand, aimYaw, aimPitch);
@@ -944,6 +1001,7 @@ void VRWheel_Draw(HWDrawInfo* di, FRenderState& state)
 	const float ringRadius = max(5.0f, (float)vr_wheel_radius);
 	const float iconSize = clamp<float>(2.0f * max(0.1f, (float)vr_wheel_icon_scale), 0.5f, 4.0f);
 	const float backdropSize = iconSize * 1.45f;
+	const float touchIndicatorRadius = backdropSize * 0.25f;
 	const double slice = (2.0 * M_PI) / double(count);
 	const PalEntry bgColor = PalEntry(MAKEARGB(128,
 		RPART(vr_wheel_icon_bg_color),
@@ -953,6 +1011,15 @@ void VRWheel_Draw(HWDrawInfo* di, FRenderState& state)
 		RPART(vr_wheel_icon_select_color),
 		GPART(vr_wheel_icon_select_color),
 		BPART(vr_wheel_icon_select_color)));
+
+	if (vr_wheel_selection_type == 0)
+	{
+		DVector3 touchPoint;
+		if (GetTouchPoint(player, touchPoint))
+		{
+			DrawWorldDisc(di, state, touchPoint, wheelRight, wheelUp, touchIndicatorRadius, selectedBgColor);
+		}
+	}
 
 	for (int i = 0; i < count; ++i)
 	{
