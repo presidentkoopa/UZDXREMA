@@ -173,7 +173,17 @@ namespace
 			return;
 		}
 
-		vrmode->Vibrate(35.0f, hand, intensity);
+		if (hand != VR_MAINHAND && hand != VR_OFFHAND)
+		{
+			hand = VR_MAINHAND;
+		}
+
+		const bool rightHanded = vr_control_scheme < 10;
+		const int hapticChannel = rightHanded
+			? (hand == VR_MAINHAND ? 1 : 0)
+			: hand;
+
+		vrmode->Vibrate(35.0f, hapticChannel, intensity);
 	}
 
 	static int GetPreferredAnchorHand(EVRWheelType type)

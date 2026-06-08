@@ -5095,6 +5095,21 @@ void VKOpenXRDeviceMode::StopHaptics() const
 	xrHapticIntensity[0] = xrHapticIntensity[1] = 0.0f;
 }
 
+static XrDuration MakeOpenXRHapticDuration(double remainingMs)
+{
+	// XR_MIN_HAPTIC_DURATION is valid, but several runtimes are much more reliable when we
+	// send a small finite pulse and re-issue it while the local timer is still active.
+	constexpr double kMinPulseMs = 1.0;
+	constexpr double kMaxPulseMs = 10.0;
+
+	if (remainingMs < kMinPulseMs)
+		remainingMs = kMinPulseMs;
+	else if (remainingMs > kMaxPulseMs)
+		remainingMs = kMaxPulseMs;
+
+	return static_cast<XrDuration>(std::llround(remainingMs * 1000000.0));
+}
+
 void VKOpenXRDeviceMode::ProcessHaptics() const
 {
 	if (!vr_enable_haptics || xrSession == XR_NULL_HANDLE || xrHapticAction == XR_NULL_HANDLE || !isSessionRunning)
@@ -5127,7 +5142,7 @@ void VKOpenXRDeviceMode::ProcessHaptics() const
 		XrHapticVibration vibration{ XR_TYPE_HAPTIC_VIBRATION };
 		vibration.amplitude = clamp<float>(xrHapticIntensity[hand], 0.0f, 1.0f);
 		vibration.frequency = XR_FREQUENCY_UNSPECIFIED;
-		vibration.duration = XR_MIN_HAPTIC_DURATION;
+		vibration.duration = MakeOpenXRHapticDuration(xrHapticDuration[hand]);
 
 		XrHapticActionInfo actionInfo{ XR_TYPE_HAPTIC_ACTION_INFO };
 		actionInfo.action = xrHapticAction;
