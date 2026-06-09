@@ -1589,9 +1589,11 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	{
 		return fail();
 	}
+	OpenXRVulkanBootstrapInfo xrBootstrapInfo;
+	const bool hasBootstrapInfo = QueryOpenXRVulkanBootstrapInfo(xrBootstrapInfo);
 	// Some runtimes expose the loader DLL but do not support Vulkan OpenXR.
-	const bool hasVulkanEnable = HasOpenXRExtension(XR_KHR_VULKAN_ENABLE_EXTENSION_NAME);
-	const bool hasVulkanEnable2 = HasOpenXRExtension(XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME);
+	const bool hasVulkanEnable = hasBootstrapInfo ? xrBootstrapInfo.supportsVulkanEnable : HasOpenXRExtension(XR_KHR_VULKAN_ENABLE_EXTENSION_NAME);
+	const bool hasVulkanEnable2 = hasBootstrapInfo ? xrBootstrapInfo.supportsVulkanEnable2 : HasOpenXRExtension(XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME);
 	if (!hasVulkanEnable && !hasVulkanEnable2)
 	{
 		Printf("OpenXR: runtime does not advertise %s or %s, skipping OpenXR initialization.\n",
@@ -1605,12 +1607,21 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 		extensions.push_back(XR_KHR_VULKAN_ENABLE_EXTENSION_NAME);
 	if (hasVulkanEnable2)
 		extensions.push_back(XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME);
-	xrHasEquirectBackdrop = HasOpenXRExtension(XR_KHR_COMPOSITION_LAYER_EQUIRECT_EXTENSION_NAME);
+	auto bootstrapHasExtension = [&](const char* extensionName)
+	{
+		if (!hasBootstrapInfo)
+		{
+			return HasOpenXRExtension(extensionName);
+		}
+		const auto hasExt = [&](const std::string& name) { return name == extensionName; };
+		return std::any_of(xrBootstrapInfo.requiredInstanceExtensions.begin(), xrBootstrapInfo.requiredInstanceExtensions.end(), hasExt);
+	};
+	xrHasEquirectBackdrop = bootstrapHasExtension(XR_KHR_COMPOSITION_LAYER_EQUIRECT_EXTENSION_NAME);
 	if (xrHasEquirectBackdrop)
 	{
 		extensions.push_back(XR_KHR_COMPOSITION_LAYER_EQUIRECT_EXTENSION_NAME);
 	}
-	xrHasFBColorSpace = HasOpenXRExtension(XR_FB_COLOR_SPACE_EXTENSION_NAME);
+	xrHasFBColorSpace = bootstrapHasExtension(XR_FB_COLOR_SPACE_EXTENSION_NAME);
 	if (xrHasFBColorSpace)
 	{
 		extensions.push_back(XR_FB_COLOR_SPACE_EXTENSION_NAME);

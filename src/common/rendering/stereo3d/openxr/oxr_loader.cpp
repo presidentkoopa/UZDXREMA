@@ -69,18 +69,12 @@ bool IsOpenXRPresent()
 	{
 		done = true;
 		FString libname = NicePath("$PROGDIR/" OPENXRLIB);
-		Printf("OpenXR loader: probing '%s' then '%s'.\n", libname.GetChars(), OPENXRLIB);
-		auto probe = LoadLibraryA(libname.GetChars());
-		if (probe != nullptr)
-		{
-			FreeLibrary(probe);
-			Printf("OpenXR loader: probe load succeeded.\n");
-		}
-		else
-		{
-			Printf("OpenXR loader: probe load failed: %s\n", GetWindowsErrorString().GetChars());
-		}
+		Printf("OpenXR loader: loading '%s' then '%s'.\n", libname.GetChars(), OPENXRLIB);
 		cached_result = OpenXRModule.Load({ libname.GetChars(), OPENXRLIB });
+		if (!cached_result)
+		{
+			Printf("OpenXR loader: load failed: %s\n", GetWindowsErrorString().GetChars());
+		}
 		Printf("OpenXR loader: present=%d.\n", cached_result ? 1 : 0);
 	}
 	return cached_result;
@@ -249,11 +243,21 @@ namespace
 
 bool QueryOpenXRVulkanBootstrapInfo(OpenXRVulkanBootstrapInfo& outInfo)
 {
-	outInfo = {};
-	OpenXRTmpBootstrapContext ctx;
-	const bool ok = CreateBootstrapContext(ctx, &outInfo);
-	DestroyBootstrapContext(ctx);
-	return ok;
+	static bool cached = false;
+	static bool cachedOk = false;
+	static OpenXRVulkanBootstrapInfo cachedInfo;
+
+	if (!cached)
+	{
+		cached = true;
+		cachedInfo = {};
+		OpenXRTmpBootstrapContext ctx;
+		cachedOk = CreateBootstrapContext(ctx, &cachedInfo);
+		DestroyBootstrapContext(ctx);
+	}
+
+	outInfo = cachedInfo;
+	return cachedOk;
 }
 
 bool QueryOpenXRVulkanPreferredPhysicalDevice(VkInstance instance, VkPhysicalDevice& outPhysicalDevice)
