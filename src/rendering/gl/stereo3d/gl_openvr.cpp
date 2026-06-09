@@ -3324,8 +3324,8 @@ namespace s3d
 						const float screenWidthMeters = baseOverlayWidthMeters * std::max(1.0f, overlayRightScale);
 						const int renderW = std::max(1, screen->GetWidth());
 						const int renderH = std::max(1, screen->GetHeight());
-						const float screenHeightMeters = screenWidthMeters * ((float)renderH / (float)renderW) * 1.05;
-						const float halfW = screenWidthMeters * 0.5f;
+						const float screenHeightMeters = screenWidthMeters * ((float)renderH / (float)renderW * 1.15); // extra x1.5 fixes mouse vertical position
+						const float halfW = screenWidthMeters * 0.56f; // x0.5 actually drifts mouse position horizontally
 						const float halfH = screenHeightMeters * 0.5f;
 
 					struct RayHit
