@@ -93,7 +93,7 @@ void VkPPRenderState::Draw()
 	if (Output.Type == PPTextureType::NextPipelineTexture)
 	{
 		auto pp = fb->GetPostprocess();
-		pp->mCurrentPipelineImage = (pp->mCurrentPipelineImage + 1) % VkRenderBuffers::NumPipelineImages;
+		pp->AdvancePipelineImage();
 	}
 }
 

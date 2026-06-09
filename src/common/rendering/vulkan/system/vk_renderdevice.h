@@ -119,6 +119,8 @@ private:
 
 	bool mVSync = false;
 	bool mXRFrameBeganThisFrame = false;
+	int mCurrentEyeIndex = 0;
+	int mEyeFinalPipelineImage[2] = { 0, 2 };
 };
 
 class CVulkanError : public CEngineError

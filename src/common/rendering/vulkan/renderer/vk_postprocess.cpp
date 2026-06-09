@@ -60,6 +60,17 @@ VkPostprocess::~VkPostprocess()
 {
 }
 
+int VkPostprocess::GetNextPipelineImage() const
+{
+	if (mPipelinePairSize <= 1)
+	{
+		return mCurrentPipelineImage;
+	}
+
+	const int localIndex = std::max(0, mCurrentPipelineImage - mPipelinePairStart);
+	return mPipelinePairStart + ((localIndex + 1) % mPipelinePairSize);
+}
+
 void VkPostprocess::SetActiveRenderTarget()
 {
 	Printf("OpenXR: SetActiveRenderTarget mCurrentPipelineImage=%d\n", mCurrentPipelineImage);
@@ -406,4 +417,32 @@ void VkPostprocess::SetCurrentPipelineImage(int index)
 	}
 
 	mCurrentPipelineImage = ((index % count) + count) % count;
+}
+
+void VkPostprocess::SetPipelineImagePair(int start, int size)
+{
+	const int count = VkRenderBuffers::NumPipelineImages;
+	if (count <= 0)
+	{
+		mPipelinePairStart = 0;
+		mPipelinePairSize = 1;
+		mCurrentPipelineImage = 0;
+		return;
+	}
+
+	mPipelinePairStart = ((start % count) + count) % count;
+	mPipelinePairSize = std::clamp(size, 1, count);
+
+	// Clamp the current image into the active pair so the caller can swap
+	// pair ownership without accidentally sampling another eye's history.
+	const int pairEnd = mPipelinePairStart + mPipelinePairSize;
+	if (mCurrentPipelineImage < mPipelinePairStart || mCurrentPipelineImage >= pairEnd)
+	{
+		mCurrentPipelineImage = mPipelinePairStart;
+	}
+}
+
+void VkPostprocess::AdvancePipelineImage()
+{
+	mCurrentPipelineImage = GetNextPipelineImage();
 }

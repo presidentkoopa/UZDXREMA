@@ -246,10 +246,11 @@ void VulkanRenderDevice::Update()
 			const bool suppressSceneEye2D = vrmode->ShouldUseScreenLayerForCurrentFrame() || cinemamode;
 			const bool useGameplayEyeViewport = vrmode->ShouldUseRecommendedRenderSizeThisFrame() && !vrmode->IsRenderingVirtualScreen();
 			const IntRect savedScreenViewport = mScreenViewport;
-			FirstEye();
 			for (int eye_ix = 0; eye_ix < eyeCount; ++eye_ix)
 			{
 				const auto eye = (eye_ix >= 0 && eye_ix < 2) ? vrmode->mEyes[eye_ix] : nullptr;
+				postprocess->SetPipelineImagePair((eye_ix % 2) * 2, 2);
+				postprocess->SetCurrentPipelineImage(mEyeFinalPipelineImage[eye_ix % 2]);
 				if (useGameplayEyeViewport)
 				{
 					mScreenViewport = mSceneViewport;
@@ -272,8 +273,6 @@ void VulkanRenderDevice::Update()
 					Draw2D(false);
 				}
 				vrmode->FinalizeEyeImage(this, eye_ix);
-				if (eye_ix + 1 < eyeCount)
-					NextEye(eyeCount);
 			}
 			mScreenViewport = savedScreenViewport;
 			vrmode->RenderVirtualScreen();
@@ -346,6 +345,7 @@ void VulkanRenderDevice::PostProcessScene(bool swscene, int fixedcm, float flash
 {
 	if (!swscene) mPostprocess->BlitSceneToPostprocess(); // Copy the resulting scene to the current post process texture
 	mPostprocess->PostProcessScene(fixedcm, flash, afterBloomDrawEndScene2D);
+	mEyeFinalPipelineImage[mCurrentEyeIndex % 2] = mPostprocess->GetCurrentPipelineImage();
 }
 
 const char* VulkanRenderDevice::DeviceName() const
@@ -518,13 +518,28 @@ void VulkanRenderDevice::SetActiveRenderTarget()
 void VulkanRenderDevice::FirstEye()
 {
 	if (mPostprocess)
+	{
+		mCurrentEyeIndex = 0;
+		mPostprocess->SetPipelineImagePair(0, 2);
 		mPostprocess->SetCurrentPipelineImage(0);
+	}
 }
 
 void VulkanRenderDevice::NextEye(int eyecount)
 {
 	if (mPostprocess)
-		mPostprocess->NextEye(eyecount);
+	{
+		if (eyecount > 1)
+		{
+			mCurrentEyeIndex = (mCurrentEyeIndex + 1) % eyecount;
+		}
+		else
+		{
+			mCurrentEyeIndex = 0;
+		}
+		mPostprocess->SetPipelineImagePair((mCurrentEyeIndex % 2) * 2, 2);
+		mPostprocess->SetCurrentPipelineImage((mCurrentEyeIndex % 2) * 2);
+	}
 }
 
 TArray<uint8_t> VulkanRenderDevice::GetScreenshotBuffer(int &pitch, ESSType &color_type, float &gamma)
@@ -552,6 +567,9 @@ void VulkanRenderDevice::BeginFrame()
 {
 	const auto vrmode = VRMode::GetVRModeCached(true);
 	mXRFrameBeganThisFrame = false;
+	mCurrentEyeIndex = 0;
+	mEyeFinalPipelineImage[0] = 0;
+	mEyeFinalPipelineImage[1] = 2;
 	if (vrmode != nullptr && vrmode->IsVR())
 	{
 		vrmode->SetUp();

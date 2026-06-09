@@ -4803,7 +4803,7 @@ void VKOpenXRDeviceMode::FinalizeEyeImage(VulkanRenderDevice* vkfb, int eyeIndex
 	if (vr_debug_projection_compare || vr_openxr_debug_present || vr_openxr_debug_sizes)
 	{
 		auto* buffers = vkfb->GetBuffers();
-		const auto* sourceTexture = (buffers && pipelineImageIndex >= 0 && pipelineImageIndex < 2)
+		const auto* sourceTexture = (buffers && pipelineImageIndex >= 0 && pipelineImageIndex < VkRenderBuffers::NumPipelineImages)
 			? buffers->PipelineImage[pipelineImageIndex].Image.get()
 			: nullptr;
 		const auto* targetTexture = (eyeIndex >= 0 && eyeIndex < (int)xrPresentTextures.size())

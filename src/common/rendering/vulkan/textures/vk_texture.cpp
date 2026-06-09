@@ -89,7 +89,7 @@ VkTextureImage* VkTextureManager::GetTexture(const PPTextureType& type, PPTextur
 	{
 		int idx = fb->GetPostprocess()->GetCurrentPipelineImage();
 		if (type == PPTextureType::NextPipelineTexture)
-			idx = (idx + 1) % VkRenderBuffers::NumPipelineImages;
+			idx = fb->GetPostprocess()->GetNextPipelineImage();
 
 		return &fb->GetBuffers()->PipelineImage[idx];
 	}

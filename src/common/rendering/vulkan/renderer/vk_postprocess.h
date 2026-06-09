@@ -41,13 +41,18 @@ public:
 	void DrawPresentTextureToImage(VkTextureImage *image, VkFormat outputFormat, const IntRect &box, bool applyGamma, bool screenshot, float sourceScaleX, float sourceScaleY, float sourceOffsetX, float sourceOffsetY, VulkanCommandBuffer *cmdbuffer, bool applyOpenXrBias = true);
 
 	int GetCurrentPipelineImage() const { return mCurrentPipelineImage; }
+	int GetNextPipelineImage() const;
 	void SetCurrentPipelineImage(int index);
+	void SetPipelineImagePair(int start, int size = 2);
+	void AdvancePipelineImage();
 	void NextEye(int eyeCount);
 
 private:
 	VulkanRenderDevice* fb = nullptr;
 
 	int mCurrentPipelineImage = 0;
+	int mPipelinePairStart = 0;
+	int mPipelinePairSize = 2;
 
 	friend class VkPPRenderState;
 };
