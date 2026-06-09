@@ -2122,6 +2122,7 @@ namespace s3d
 			HandleUIVRButton(lastState, newState, openvr::vr::k_EButton_ApplicationMenu, GK_BACKSPACE);
 		}
 		else {
+			const bool dominantHand = (vr_control_scheme < 10) ? (role == 1) : (role == 0);
 
 			if (axisTrackpad != -1)
 			{
@@ -2135,7 +2136,19 @@ namespace s3d
 			}
 
 			// k_EButton_Grip === k_EButton_IndexController_A
-			HandleVRButton(lastState, newState, openvr::vr::k_EButton_Grip, KEY_PAD_LSHOULDER, role * (KEY_PAD_RSHOULDER - KEY_PAD_LSHOULDER));
+			if (vr_secondary_button_mappings && dominantHand)
+			{
+				const int gripKey = KEY_PAD_LSHOULDER + role * (KEY_PAD_RSHOULDER - KEY_PAD_LSHOULDER);
+				Joy_GenerateButtonEvents(
+					(lastState.ulButtonPressed & (1LL << openvr::vr::k_EButton_Grip)) ? 1 : 0,
+					0,
+					1,
+					&gripKey);
+			}
+			else
+			{
+				HandleVRButton(lastState, newState, openvr::vr::k_EButton_Grip, KEY_PAD_LSHOULDER, role * (KEY_PAD_RSHOULDER - KEY_PAD_LSHOULDER));
+			}
 
 			// k_EButton_ApplicationMenu / k_EButton_IndexController_B
 			HandleVRButton(lastState, newState, openvr::vr::k_EButton_ApplicationMenu, KEY_PAD_BACK, role * (KEY_PAD_START - KEY_PAD_BACK));
@@ -2341,35 +2354,45 @@ namespace s3d
 
 			//Off-hand specific stuff
 			{
-				//Teleport - only does anything if vr_teleport cvar is true
-				if (vr_teleport) {
-					if ((pSecondaryTrackedRemoteOld->rAxis[axisJoystick].y > 0.7f) && !ready_teleport) {
-						ready_teleport = true;
-					} else if ((pSecondaryTrackedRemoteOld->rAxis[axisJoystick].y < 0.7f) && ready_teleport) {
-						ready_teleport = false;
-						trigger_teleport = true;
-					}
+				const bool suppressOffhandLocomotion = dominantGripPushedNew;
+				if (suppressOffhandLocomotion)
+				{
+					ready_teleport = false;
+					remote_movementSideways = 0.0f;
+					remote_movementForward = 0.0f;
 				}
+				else
+				{
+					//Teleport - only does anything if vr_teleport cvar is true
+					if (vr_teleport) {
+						if ((pSecondaryTrackedRemoteOld->rAxis[axisJoystick].y > 0.7f) && !ready_teleport) {
+							ready_teleport = true;
+						} else if ((pSecondaryTrackedRemoteOld->rAxis[axisJoystick].y < 0.7f) && ready_teleport) {
+							ready_teleport = false;
+							trigger_teleport = true;
+						}
+					}
 
-				//Apply a filter and quadratic scaler so small movements are easier to make
-				//and we don't get movement jitter when the joystick doesn't quite center properly
-				float dist = length(pSecondaryTrackedRemoteNew->rAxis[axisJoystick].x, pSecondaryTrackedRemoteNew->rAxis[axisJoystick].y);
-				float nlf = nonLinearFilter(dist);
-				dist = (dist > 1.0f) ? dist : 1.0f;
-				float x = nlf * (pSecondaryTrackedRemoteNew->rAxis[axisJoystick].x / dist);
-				float y = nlf * (pSecondaryTrackedRemoteNew->rAxis[axisJoystick].y / dist);
+					//Apply a filter and quadratic scaler so small movements are easier to make
+					//and we don't get movement jitter when the joystick doesn't quite center properly
+					float dist = length(pSecondaryTrackedRemoteNew->rAxis[axisJoystick].x, pSecondaryTrackedRemoteNew->rAxis[axisJoystick].y);
+					float nlf = nonLinearFilter(dist);
+					dist = (dist > 1.0f) ? dist : 1.0f;
+					float x = nlf * (pSecondaryTrackedRemoteNew->rAxis[axisJoystick].x / dist);
+					float y = nlf * (pSecondaryTrackedRemoteNew->rAxis[axisJoystick].y / dist);
 
-				//Apply a simple deadzone
-				bool player_moving = (fabs(x) + fabs(y)) > 0.05f;
-				x = player_moving ? x : 0;
-				y = player_moving ? y : 0;
+					//Apply a simple deadzone
+					bool player_moving = (fabs(x) + fabs(y)) > 0.05f;
+					x = player_moving ? x : 0;
+					y = player_moving ? y : 0;
 
-				//Adjust to be off-hand controller oriented
-				//vec2_t v;
-				//rotateAboutOrigin(x, y, controllerYawHeading, v);
+					//Adjust to be off-hand controller oriented
+					//vec2_t v;
+					//rotateAboutOrigin(x, y, controllerYawHeading, v);
 
-				remote_movementSideways = x;
-				remote_movementForward = y;
+					remote_movementSideways = x;
+					remote_movementForward = y;
+				}
 			}
 
 			if (!VR_UseScreenLayer() && !dominantGripPushedNew)
