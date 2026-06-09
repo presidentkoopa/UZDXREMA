@@ -416,9 +416,9 @@ struct XrSafeSourceRect
 
 static void GetStableOpenXRVirtualScreenSize(uint32_t& width, uint32_t& height)
 {
-	// Keep the virtual screen live with the current game resolution, but fold
-	// it into a stable 4:3 surface so the controller ray and menu pixels stay
-	// in the same coordinate space while the game is running.
+	// Keep the virtual screen aligned with the live UI render size. The menu code still lays itself out
+	// from the active screen dimensions, so forcing the OpenXR quad into a synthetic 4:3 target can make
+	// the visible menu narrower than the pointer/raycast area.
 	constexpr uint32_t kFallbackW = 960;
 	constexpr uint32_t kFallbackH = 720;
 	constexpr uint32_t kMinW = 640;
@@ -427,8 +427,13 @@ static void GetStableOpenXRVirtualScreenSize(uint32_t& width, uint32_t& height)
 	constexpr uint32_t kMaxH = 2048;
 	constexpr uint64_t kMaxPixels = 2048ull * 1536ull;
 
-	uint32_t sourceW = (uint32_t)std::max(0, DisplayWidth);
-	uint32_t sourceH = (uint32_t)std::max(0, DisplayHeight);
+	uint32_t sourceW = (screen != nullptr) ? (uint32_t)std::max(0, screen->GetWidth()) : 0u;
+	uint32_t sourceH = (screen != nullptr) ? (uint32_t)std::max(0, screen->GetHeight()) : 0u;
+	if (sourceW == 0 || sourceH == 0)
+	{
+		sourceW = (uint32_t)std::max(0, DisplayWidth);
+		sourceH = (uint32_t)std::max(0, DisplayHeight);
+	}
 	if (sourceW == 0 || sourceH == 0)
 	{
 		sourceW = (uint32_t)std::max(0, (int)vid_defwidth);
@@ -445,17 +450,6 @@ static void GetStableOpenXRVirtualScreenSize(uint32_t& width, uint32_t& height)
 
 	uint32_t targetW = sourceW;
 	uint32_t targetH = sourceH;
-	if ((uint64_t)sourceW * 3ull <= (uint64_t)sourceH * 4ull)
-	{
-		targetH = (uint32_t)std::floor((double)sourceW * 3.0 / 4.0);
-	}
-	else
-	{
-		targetW = (uint32_t)std::floor((double)sourceH * 4.0 / 3.0);
-	}
-
-	targetW = std::clamp(targetW, kMinW, kMaxW);
-	targetH = std::clamp(targetH, kMinH, kMaxH);
 
 	uint64_t pixels = (uint64_t)targetW * (uint64_t)targetH;
 	if (pixels > kMaxPixels)
@@ -485,7 +479,8 @@ static void GetOpenXRVirtualScreenMeters(uint32_t renderW, uint32_t renderH, flo
 	}
 
 	widthMeters = baseWidthMeters;
-	heightMeters = std::max(0.1f, baseWidthMeters * ((float)renderH / (float)std::max(renderW, 1u)) * 1.05f);
+	// Match the texture aspect exactly. Any extra height fudge makes pointer hit area drift away from rendered menu edges
+	heightMeters = std::max(0.1f, baseWidthMeters * ((float)renderH / (float)std::max(renderW, 1u)));
 }
 
 static float YawDegFromForward(const XrVector3f& forwardIn)
@@ -3244,6 +3239,22 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 	xrMenuPointerBeamLength = 0.0f;
 	menu_allow_mouse_override = false;
 	const bool keybindCaptureMode = menuactive == MENU_WaitKey;
+
+	// Keep the virtual screen pose in sync with the current frame before casting the OpenXR menu pointer ray.
+	// Otherwise the ray/beam can intersect last frame's quad transform while the actual menu layer is updated
+	// later in the frame, which shows up as the beam and cursor no longer meeting.
+	if (menuMode && ShouldUseScreenLayerForCurrentFrame())
+	{
+		uint32_t virtualScreenWidth = 0;
+		uint32_t virtualScreenHeight = 0;
+		GetStableOpenXRVirtualScreenSize(virtualScreenWidth, virtualScreenHeight);
+		if (virtualScreenWidth > 0 && virtualScreenHeight > 0)
+		{
+			xrVirtualScreenWidth = virtualScreenWidth;
+			xrVirtualScreenHeight = virtualScreenHeight;
+			updateVirtualScreenLayer();
+		}
+	}
 
 	const int pointerHand = 1; // Always use the right controller for virtual menu mouse.
 	const bool vrMouseEnabled = !keybindCaptureMode && (*vr_mouse_in_menu || handInput[pointerHand].grip);
