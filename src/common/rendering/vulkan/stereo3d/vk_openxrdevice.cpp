@@ -3643,6 +3643,7 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			rightProfile.GetChars());
 		LogBoundSourcesForAction(xrInstance, xrSession, xrSelectAction, "select");
 		LogBoundSourcesForAction(xrInstance, xrSession, xrGripAction, "grip");
+		LogBoundSourcesForAction(xrInstance, xrSession, xrHapticAction, "haptic");
 		LogBoundSourcesForAction(xrInstance, xrSession, xrMenuAction, "menu");
 		LogBoundSourcesForAction(xrInstance, xrSession, xrAAction, "A");
 		LogBoundSourcesForAction(xrInstance, xrSession, xrBAction, "B");
@@ -5177,6 +5178,7 @@ void VKOpenXRDeviceMode::ProcessHaptics() const
 	}
 
 	static auto lastUpdate = std::chrono::steady_clock::now();
+	static XrResult lastHapticError[2] = { XR_SUCCESS, XR_SUCCESS };
 	const auto now = std::chrono::steady_clock::now();
 	const double elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastUpdate).count();
 	lastUpdate = now;
@@ -5209,11 +5211,25 @@ void VKOpenXRDeviceMode::ProcessHaptics() const
 		if (XR_SUCCEEDED(result))
 		{
 			xrHapticActive[hand] = true;
+			lastHapticError[hand] = XR_SUCCESS;
 		}
-		else if (xrHapticActive[hand])
+		else
 		{
-			xrStopHapticFeedback(xrSession, &actionInfo);
-			xrHapticActive[hand] = false;
+			if (lastHapticError[hand] != result)
+			{
+				Printf("OpenXR: xrApplyHapticFeedback failed for %s hand result=%d amplitude=%.3f duration_ns=%lld\n",
+					hand == 0 ? "left" : "right",
+					(int)result,
+					(double)vibration.amplitude,
+					(long long)vibration.duration);
+				lastHapticError[hand] = result;
+			}
+
+			if (xrHapticActive[hand])
+			{
+				xrStopHapticFeedback(xrSession, &actionInfo);
+				xrHapticActive[hand] = false;
+			}
 		}
 
 		if (xrHapticDuration[hand] > 0.0)
