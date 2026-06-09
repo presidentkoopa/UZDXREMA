@@ -1058,6 +1058,10 @@ void G_AddViewAngle (int yaw, bool mouse)
 	LocalViewAngle -= yaw;
 	if (yaw != 0)
 	{
+		if (!vrApplyingHmdYaw)
+		{
+			resetDoomYaw = true;
+		}
 		LocalKeyboardTurner = !mouse;
 	}
 }

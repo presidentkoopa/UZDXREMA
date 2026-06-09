@@ -2759,7 +2759,9 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 	float hmdYawDeltaDegrees = currentHmdYaw - previousHmdYaw;
 	if (!lockGameplayViewToScreenLayer)
 	{
+		vrApplyingHmdYaw = true;
 		G_AddViewAngle(mAngleFromRadians((float)DEG2RAD(-hmdYawDeltaDegrees)));
+		vrApplyingHmdYaw = false;
 	}
 	previousHmdYaw = currentHmdYaw;
 

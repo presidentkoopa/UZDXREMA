@@ -1982,7 +1982,9 @@ namespace s3d
 				havePreviousYaw = true;
 			}
 			hmdYawDeltaDegrees = hmdYaw - previousHmdYaw;
+			vrApplyingHmdYaw = true;
 			G_AddViewAngle(mAngleFromRadians(DEG2RAD(-hmdYawDeltaDegrees)));
+			vrApplyingHmdYaw = false;
 			previousHmdYaw = hmdYaw;
 		}
 

@@ -17,6 +17,7 @@ vec3_t hmdorientation;
 vec3_t positionDeltaThisFrame;
 
 bool weaponStabilised;
+bool vrApplyingHmdYaw;
 bool resetDoomYaw;
 bool resetPreviousPitch;
 // bool shutdown;

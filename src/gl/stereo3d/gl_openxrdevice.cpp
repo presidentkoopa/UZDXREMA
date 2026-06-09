@@ -237,7 +237,7 @@ namespace s3d
         outViewShift[0] = outViewShift[1] = outViewShift[2] = 0;
 
         vec3_t angles;
-        VectorSet(angles, vp.HWAngles.Pitch.Degrees(),  getViewpointYaw(), vp.HWAngles.Roll.Degrees());
+        VectorSet(angles, vp.HWAngles.Pitch.Degrees(), getViewpointYaw(), vp.HWAngles.Roll.Degrees());
 
         vec3_t v_forward, v_right, v_up;
         AngleVectors(angles, v_forward, v_right, v_up);
@@ -738,7 +738,9 @@ namespace s3d
                 havePreviousYaw = true;
             }
             hmdYawDeltaDegrees = yaw - previousHmdYaw;
+            vrApplyingHmdYaw = true;
             G_AddViewAngle(mAngleFromRadians(DEG2RAD(-hmdYawDeltaDegrees)));
+            vrApplyingHmdYaw = false;
             previousHmdYaw = yaw;
         }
 
