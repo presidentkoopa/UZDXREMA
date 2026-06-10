@@ -362,9 +362,9 @@ OptionMenu CommandLineProfileMenu protected
 OptionMenu "OptionsMenu" protected
 {
 	Title "$OPTMNU_TITLE"
-	Submenu "Info & Credits", 			"InfoAndCreditsMenu"
-	Submenu "Quick Menu",				"QuickMenu"
-	Submenu "VR Options",				"VROptionsMenu"
+	Submenu "$OPTMNU_INFOCREDITS", 		"InfoAndCreditsMenu"
+	Submenu "$OPTMNU_QUICKMENU",		"QuickMenu"
+	Submenu "$VRPREFMNU_TITLE",			"VROptionsMenu"
 	StaticText " "
 	Submenu "$OPTMNU_CONTROLS",			"CustomizeControls"
 	IfNotOption(OpenXR)
@@ -1274,7 +1274,7 @@ OptionMenu "VideoOptions" protected
 	Submenu "$GLMNU_TEXOPT", 			"GLTextureGLOptions"
 	Submenu "$GLMNU_DYNLIGHT",			"GLLightOptions"
 	StaticText " "
-	Option "Refresh Rate",                      "vid_refreshrate", "RefreshRate"
+	Option "$VIDMNU_REFRESHRATE",               "vid_refreshrate", "RefreshRate"
 	StaticText " "
 	Slider "$DSPLYMNU_SCREENSIZE",				"screenblocks", 				3.0, 12.0, 1.0, 0
 
@@ -1625,7 +1625,7 @@ OptionMenu "MiscOptions" protected
 	StaticText " "
 	Option "$MISCMNU_ALWAYSTALLY",				"sv_alwaystally", "AlwaysTally"
 	StaticText ""
-	Option "Show FPS on HUD",		                "vid_fps", "OnOff"
+	Option "$VIDMNU_SHOWFPSONHUD",		        "vid_fps", "OnOff"
 	Option "Lock FrameRate (IF LOW PERF.)",         "cl_capfps", "OnOff"
 	StaticText " "
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar k_mergekeys k_allowfullscreentoggle queryiwad nocheats allcheats disableautosave saveloadconfirmation autosavecount quicksaverotation quicksaverotationcount dehload enablescriptscreenshot setslotstrict nointerscrollabort gl_cachenodes gl_cachetime clearnodecache m_quickexit showendoom menu_hideextreme sv_alwaystally cl_capfps"
@@ -2776,23 +2776,23 @@ OptionMenu CustomResolutionMenu protected
 
 OptionValue ControlMode
 {
-	0, "GZDoomVR (Valve Index)"
-	1, "QuestZDoom (Meta Quest, PICO)"
+	0, "$OPTVAL_VR_GZDOOMVR"
+	1, "$OPTVAL_VR_QUESTZDOOM"
 }
 
 OptionValue ControlScheme
 {
-	0, "Right-Handed"
-	10, "Left-Handed (A)"
-	11, "Left-Handed (B)"
+	0, "$OPTVAL_VR_RIGHT_HANDED"
+	10, "$OPTVAL_VR_LEFT_HANDED_A"
+	11, "$OPTVAL_VR_LEFT_HANDED_B"
 }
 
 OptionValue "Sprites3DMode"
 {
-	0, "Crossed"
-	1, "Back Only"	
-	2, "Item Only"	
-	3, "Fat Item"
+	0, "$OPTVAL_VR_CROSSED"
+	1, "$OPTVAL_VR_BACK_ONLY"	
+	2, "$OPTVAL_VR_ITEM_ONLY"	
+	3, "$OPTVAL_VR_FAT_ITEM"
 }
 
 OptionValue RefreshRate
@@ -2807,30 +2807,30 @@ OptionValue RefreshRate
 
 OptionValue "CinemaScreenFollow"
 {
-	0, "Disabled"
-	1, "Stationary"	
-	2, "Stationary (follow)"	
-	3, "Follow Head movement"	
-	4, "Follow Main Hand"	
-	5, "Follow Offhand"
+	0, "$OPTVAL_VR_DISABLED"
+	1, "$OPTVAL_VR_STATIONARY"	
+	2, "$OPTVAL_VR_STATIONARY_FOLLOW"	
+	3, "$OPTVAL_VR_FOLLOW_HEAD_MOVEMENT"	
+	4, "$OPTVAL_VR_FOLLOW_MAIN_HAND"	
+	5, "$OPTVAL_VR_FOLLOW_OFFHAND"
 }
 
 OptionValue "CinemaScreenBG"
 {
-	0, "Black"
-	1, "Red"
-	2, "Green"
-	3, "Blue"
-	4, "Teal"
-	5, "Grey"
+	0, "$OPTVAL_VR_BLACK"
+	1, "$TXT_COLOR_RED"
+	2, "$TXT_COLOR_GREEN"
+	3, "$TXT_COLOR_BLUE"
+	4, "$OPTVAL_VR_TEAL"
+	5, "$OPTVAL_VR_GREY"
 }
 
 OptionValue "DesktopViewModes"
 {
-	-1, "Disabled"
-	0, "Side-By-Side"
-	1, "Left Eye"
-	2, "Right Eye"
+	-1, "$OPTVAL_VR_DISABLED"
+	0, "$OPTVAL_VR_SIDE_BY_SIDE"
+	1, "$OPTVAL_VR_LEFT_EYE"
+	2, "$OPTVAL_VR_RIGHT_EYE"
 }
 
 OptionMenu CinemaModeOptions protected
@@ -2850,80 +2850,80 @@ OptionMenu CinemaModeOptions protected
 
 OptionValue "HUDMountOption"
 {
-	0, "Main Hand"
-	1, "Off-Hand"
+	0, "$OPTVAL_VR_MAIN_HAND"
+	1, "$OPTVAL_VR_OFF_HAND"
 }
 
 OptionMenu VRHUDOptions protected
 {
-	Title "VR HUD OPTIONS"
+	Title "$VRHUDMNU_TITLE"
 
 	StaticText ""
 	StaticText "HUD", gold
 	StaticText ""
-	Slider "VR HUD Scale",		        "vr_hud_scale", 0.05, 1.0, 0.05, 2
-	ScaleSlider "VR HUD Item Scale", 	"hud_scale", -1.0, 8.0, 1.0, "$SCALEMNU_USEUI", "$SCALEMNU_USEFS"
-	ScaleSlider "VR Alt-HUD Item Scale","hud_althudscale", 0.0, 8.0, 1.0, "$SCALEMNU_USEUI"
+	Slider "$VRHUDMNU_HUD_SCALE",		        "vr_hud_scale", 0.05, 1.0, 0.05, 2
+	ScaleSlider "$VRHUDMNU_HUD_ITEM_SCALE", 	"hud_scale", -1.0, 8.0, 1.0, "$SCALEMNU_USEUI", "$SCALEMNU_USEFS"
+	ScaleSlider "$VRHUDMNU_ALT_HUD_ITEM_SCALE","hud_althudscale", 0.0, 8.0, 1.0, "$SCALEMNU_USEUI"
 	StaticText ""
-	Slider "VR HUD Stereo Effect",		"vr_hud_stereo", 0.0, 5.0, 0.1, 2
+	Slider "$VRHUDMNU_HUD_STEREO_EFFECT",		"vr_hud_stereo", 0.0, 5.0, 0.1, 2
 	Slider "$VRHUDMNU_HUDDISTANCE",		"vr_hud_distance", 0.4, 3, 0.05, 2
-	Slider "VR HUD Pitch Rotate",		"vr_hud_rotate", 0.0, 50.0, 1.0, 2
-	Option "VR HUD Fix Pitch",		"vr_hud_fixed_pitch", "OnOff"
-	Option "VR HUD Fix Roll",		"vr_hud_fixed_roll", "OnOff"
+	Slider "$VRHUDMNU_HUD_PITCH_ROTATE",		"vr_hud_rotate", 0.0, 50.0, 1.0, 2
+	Option "$VRHUDMNU_HUD_FIX_PITCH",		"vr_hud_fixed_pitch", "OnOff"
+	Option "$VRHUDMNU_HUD_FIX_ROLL",		"vr_hud_fixed_roll", "OnOff"
 	StaticText ""
-	Option "Portable HUD",			"vr_hud_mount", "OnOff"
-	Option "Mount HUD on",			"vr_hud_mount_pos", "HUDMountOption", "vr_hud_mount"
-	Slider "Portable HUD Scale",		"vr_hud_mount_scale", 0.05, 1.0, 0.05, 2, "vr_hud_mount"
-	Slider "Portable HUD Distance",		"vr_hud_mount_yoffset", -1.0, 1.0, 0.05, 2, "vr_hud_mount"
-	Slider "horizontal Offset",		"vr_hud_mount_xoffset", -1.0, 1.0, 0.05, 2, "vr_hud_mount"
-	Slider "Vertical Offset",		"vr_hud_mount_zoffset", -1.0, 1.0, 0.05, 2, "vr_hud_mount"
-	Slider "Portable HUD pitch",		"vr_hud_mount_pitch", -180, 180, 5, 0, "vr_hud_mount"
-	Slider "Portable HUD angle",		"vr_hud_mount_yaw", -180, 180, 1, 0, "vr_hud_mount"
-	Option "Roll with controller",		"vr_hud_mount_roll", "OnOff", "vr_hud_mount"
+	Option "$VRHUDMNU_PORTABLE_HUD",			"vr_hud_mount", "OnOff"
+	Option "$VRHUDMNU_MOUNT_HUD_ON",			"vr_hud_mount_pos", "HUDMountOption", "vr_hud_mount"
+	Slider "$VRHUDMNU_PORTABLE_HUD_SCALE",		"vr_hud_mount_scale", 0.05, 1.0, 0.05, 2, "vr_hud_mount"
+	Slider "$VRHUDMNU_PORTABLE_HUD_DISTANCE",		"vr_hud_mount_yoffset", -1.0, 1.0, 0.05, 2, "vr_hud_mount"
+	Slider "$VRHUDMNU_HORIZONTAL_OFFSET",		"vr_hud_mount_xoffset", -1.0, 1.0, 0.05, 2, "vr_hud_mount"
+	Slider "$VRHUDMNU_VERTICAL_OFFSET",		"vr_hud_mount_zoffset", -1.0, 1.0, 0.05, 2, "vr_hud_mount"
+	Slider "$VRHUDMNU_PORTABLE_HUD_PITCH",		"vr_hud_mount_pitch", -180, 180, 5, 0, "vr_hud_mount"
+	Slider "$VRHUDMNU_PORTABLE_HUD_ANGLE",		"vr_hud_mount_yaw", -180, 180, 1, 0, "vr_hud_mount"
+	Option "$VRHUDMNU_ROLL_WITH_CONTROLLER",		"vr_hud_mount_roll", "OnOff", "vr_hud_mount"
 	StaticText ""
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_hud_scale hud_scale hud_althudscale vr_hud_stereo vr_hud_distance vr_hud_rotate vr_hud_fixed_pitch vr_hud_fixed_roll vr_hud_mount vr_hud_mount_pos vr_hud_mount_scale vr_hud_mount_yoffset vr_hud_mount_xoffset vr_hud_mount_zoffset vr_hud_mount_pitch vr_hud_mount_yaw vr_hud_mount_roll"
 
 	StaticText ""
-	StaticText "Automap", gold
+	StaticText "$OPTVAL_AUTOMAP", gold
 	StaticText ""
-	Option "VR Automap Use HUD Settings",   "vr_automap_use_hud", "YesNo"
+	Option "$VRHUDMNU_AUTOMAP_USE_HUD_SETTINGS",   "vr_automap_use_hud", "YesNo"
 	StaticText ""
-	Slider "VR Automap Scale",		        "vr_automap_scale", 0.05, 1.0, 0.05, 2
-	Slider "VR Automap Stereo Effect",		"vr_automap_stereo", 0.0, 5.0, 0.1, 2
+	Slider "$VRHUDMNU_AUTOMAP_SCALE",		        "vr_automap_scale", 0.05, 1.0, 0.05, 2
+	Slider "$VRHUDMNU_AUTOMAP_STEREO_EFFECT",		"vr_automap_stereo", 0.0, 5.0, 0.1, 2
 	Slider "$VRHUDMNU_AUTOMAPDISTANCE",		"vr_automap_distance", 0.4, 3, 0.05, 2
-	Slider "VR Automap Pitch Rotate",		"vr_automap_rotate", 0.0, 50.0, 1.0, 2
-	Option "VR Automap Fix Pitch",		    "vr_automap_fixed_pitch", "OnOff"
-	Option "VR Automap Fix Roll",		    "vr_automap_fixed_roll", "OnOff"
+	Slider "$VRHUDMNU_AUTOMAP_PITCH_ROTATE",		"vr_automap_rotate", 0.0, 50.0, 1.0, 2
+	Option "$VRHUDMNU_AUTOMAP_FIX_PITCH",		    "vr_automap_fixed_pitch", "OnOff"
+	Option "$VRHUDMNU_AUTOMAP_FIX_ROLL",		    "vr_automap_fixed_roll", "OnOff"
 	StaticText ""
-	Option "Portable Automap",		"vr_automap_mount", "OnOff"
-	Option "Mount Map on",			"vr_automap_mount_pos", "HUDMountOption", "vr_automap_mount"
-	Slider "Portable Map Scale",		"vr_automap_mount_scale", 0.05, 1.0, 0.05, 2, "vr_automap_mount"
-	Slider "Portable Map Distance",		"vr_automap_mount_yoffset", -1.0, 1.0, 0.05, 2, "vr_automap_mount"
-	Slider "horizontal Offset",		"vr_automap_mount_xoffset", -1.0, 1.0, 0.05, 2, "vr_automap_mount"
-	Slider "Vertical Offset",		"vr_automap_mount_zoffset", -1.0, 1.0, 0.05, 2, "vr_automap_mount"
-	Slider "Portable Map pitch",		"vr_automap_mount_pitch", -180, 180, 1, 0, "vr_automap_mount"
-	Slider "Portable Map angle",		"vr_automap_mount_yaw", -180, 180, 1, 0, "vr_automap_mount"
-	Option "Roll with controller",		"vr_automap_mount_roll", "OnOff", "vr_automap_mount"
-	Slider "Portable Map Border",		"vr_automap_border", 0, 5, 1, 0, "vr_automap_mount"
-	ColorPicker "Map Border Color",		"vr_automap_border_color", "vr_automap_mount"
+	Option "$VRHUDMNU_PORTABLE_AUTOMAP",		"vr_automap_mount", "OnOff"
+	Option "$VRHUDMNU_MOUNT_MAP_ON",			"vr_automap_mount_pos", "HUDMountOption", "vr_automap_mount"
+	Slider "$VRHUDMNU_PORTABLE_MAP_SCALE",		"vr_automap_mount_scale", 0.05, 1.0, 0.05, 2, "vr_automap_mount"
+	Slider "$VRHUDMNU_PORTABLE_MAP_DISTANCE",		"vr_automap_mount_yoffset", -1.0, 1.0, 0.05, 2, "vr_automap_mount"
+	Slider "$VRHUDMNU_HORIZONTAL_OFFSET",		"vr_automap_mount_xoffset", -1.0, 1.0, 0.05, 2, "vr_automap_mount"
+	Slider "$VRHUDMNU_VERTICAL_OFFSET",		"vr_automap_mount_zoffset", -1.0, 1.0, 0.05, 2, "vr_automap_mount"
+	Slider "$VRHUDMNU_PORTABLE_MAP_PITCH",		"vr_automap_mount_pitch", -180, 180, 1, 0, "vr_automap_mount"
+	Slider "$VRHUDMNU_PORTABLE_MAP_ANGLE",		"vr_automap_mount_yaw", -180, 180, 1, 0, "vr_automap_mount"
+	Option "$VRHUDMNU_ROLL_WITH_CONTROLLER",		"vr_automap_mount_roll", "OnOff", "vr_automap_mount"
+	Slider "$VRHUDMNU_PORTABLE_MAP_BORDER",		"vr_automap_border", 0, 5, 1, 0, "vr_automap_mount"
+	ColorPicker "$VRHUDMNU_MAP_BORDER_COLOR",		"vr_automap_border_color", "vr_automap_mount"
 	StaticText ""
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_automap_use_hud vr_automap_scale vr_automap_stereo vr_automap_distance vr_automap_rotate vr_automap_fixed_pitch vr_automap_fixed_roll vr_automap_border vr_automap_border_color vr_automap_mount vr_automap_mount_pos vr_automap_mount_scale vr_automap_mount_yoffset vr_automap_mount_xoffset vr_automap_mount_zoffset vr_automap_mount_pitch vr_automap_mount_yaw vr_automap_mount_roll"
 }
 
 OptionMenu VRWeaponOptions protected
 {
-	Title "VR Weapon Options"
+	Title "$VRWEAPONMNU_TITLE"
 	
 	StaticText ""
-	StaticText "Global options", gold
-	Option "Recoil",		        "vr_recoil", "OnOff"
-	Slider "Pitch Adjust",			"vr_weaponRotate", -45, 45, 5, 2
-	Slider "Sprite/Model Scale",	"vr_weaponScale", 0.1, 3.0, 0.1, 2
+	StaticText "$VRWEAPONMNU_GLOBAL_OPTIONS", gold
+	Option "$VRWEAPONMNU_RECOIL",		        "vr_recoil", "OnOff"
+	Slider "$VRWEAPONMNU_PITCH_ADJUST",			"vr_weaponRotate", -45, 45, 5, 2
+	Slider "$VRWEAPONMNU_SPRITE_MODEL_SCALE",	"vr_weaponScale", 0.1, 3.0, 0.1, 2
 	StaticText " "
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_recoil vr_weaponRotate vr_weaponScale"
 
 	StaticText " "
-	StaticText "3d model options", gold
+	StaticText "$VRWEAPONMNU_3D_MODEL_OPTIONS", gold
 	Slider "$DSPLYMNU_WEAPOFSX",	"vr_3dweaponOffsetX", -10, 10, 0.1, 2
 	Slider "$DSPLYMNU_WEAPOFSY",	"vr_3dweaponOffsetY", -10, 10, 0.1, 2
 	Slider "$DSPLYMNU_WEAPOFSZ",	"vr_3dweaponOffsetZ", -10, 10, 0.1, 2
@@ -2931,9 +2931,9 @@ OptionMenu VRWeaponOptions protected
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_3dweaponOffsetX vr_3dweaponOffsetY vr_3dweaponOffsetZ"
 
 	StaticText " "
-	StaticText "Sprite options", gold
-	Option "Sprite 3D",				"r_PlayerSprites3DMode", "Sprites3DMode"
-	Slider "Fat Item Width",		"gl_fatItemWidth", 0.1, 1.0, 0.1, 2
+	StaticText "$VRWEAPONMNU_SPRITE_OPTIONS", gold
+	Option "$VRWEAPONMNU_SPRITE_3D",				"r_PlayerSprites3DMode", "Sprites3DMode"
+	Slider "$VRWEAPONMNU_FAT_ITEM_WIDTH",		"gl_fatItemWidth", 0.1, 1.0, 0.1, 2
 	Slider "$DSPLYMNU_WEAPOFSX",	"vr_2dweaponOffsetX", -10, 10, 0.1, 2
 	Slider "$DSPLYMNU_WEAPOFSY",	"vr_2dweaponOffsetY", -10, 10, 0.1, 2
 	Slider "$DSPLYMNU_WEAPOFSZ",	"vr_2dweaponOffsetZ", -10, 10, 0.1, 2
@@ -2945,65 +2945,65 @@ OptionMenu VRWeaponOptions protected
 
 OptionValue "WheelListOption"
 {
-	0, "Only Available"
-	1, "All"
+	0, "$OPTVAL_VR_ONLY_AVAILABLE"
+	1, "$OPTVAL_VR_ALL"
 }
 
 OptionValue "WheelIconModelOption"
 {
-	0, "Off"
-	1, "When Available"
+	0, "$OPTVAL_OFF"
+	1, "$OPTVAL_VR_WHEN_AVAILABLE"
 }
 
 OptionValue "WheelItemSelectOption"
 {
-	0, "Touch"
-	1, "Aim"
+	0, "$OPTVAL_VR_TOUCH"
+	1, "$OPTVAL_VR_AIM"
 }
 
 OptionMenu VRWeaponWheelOptions protected
 {
-	Title "Weapon/Item Wheel Options"
+	Title "$VRWHEELMNU_TITLE"
 	
 	StaticText ""
-	StaticText "Open Wheel", gold
+	StaticText "$VRWHEELMNU_OPEN_WHEEL", gold
 	Control    "$CNTRLMNU_WHEEL_MAINWEAPONS"    , "+vrweaponwheel"
 	Control    "$CNTRLMNU_WHEEL_OFFHAND_WEAPONS" , "+vroffhandweaponwheel"
 	Control    "$CNTRLMNU_WHEEL_ITEMS" 		, "+vrinvwheel"
 
 	StaticText ""
-	StaticText "Wheel Appearence", gold
-	ColorPicker "Icon Background Color", 	"vr_wheel_icon_bg_color"
-	ColorPicker "Icon Highlight Color",   	"vr_wheel_icon_select_color"
-	Slider "Wheel Icon Scale", 				"vr_wheel_icon_scale", 0.1, 5.0, 0.1, 1
-	Slider "Wheel Radius", 					"vr_wheel_radius", 3, 30, 1, 0
-	Slider "Distance From Hand", 			"vr_wheel_distance", -0.5, 1.0, 0.05, 2
-	Slider "Move X Offset", 				"vr_wheel_xoffset", -0.3, 0.3, 0.01, 2
-	Slider "Move Y Offset", 				"vr_wheel_yoffset", -0.3, 0.3, 0.01, 2
-	Slider "Wheel Time Slow",				"vr_wheel_time_slow", 0.0, 1.0, 0.1, 1
-	StaticText "Setting this to 0 will freeze time when wheel is open", "Brown"
+	StaticText "$VRWHEELMNU_WHEEL_APPEARANCE", gold
+	ColorPicker "$VRWHEELMNU_ICON_BACKGROUND_COLOR", 	"vr_wheel_icon_bg_color"
+	ColorPicker "$VRWHEELMNU_ICON_HIGHLIGHT_COLOR",   	"vr_wheel_icon_select_color"
+	Slider "$VRWHEELMNU_WHEEL_ICON_SCALE", 				"vr_wheel_icon_scale", 0.1, 5.0, 0.1, 1
+	Slider "$VRWHEELMNU_WHEEL_RADIUS", 					"vr_wheel_radius", 3, 30, 1, 0
+	Slider "$VRWHEELMNU_DISTANCE_FROM_HAND", 			"vr_wheel_distance", -0.5, 1.0, 0.05, 2
+	Slider "$VRWHEELMNU_MOVE_X_OFFSET", 				"vr_wheel_xoffset", -0.3, 0.3, 0.01, 2
+	Slider "$VRWHEELMNU_MOVE_Y_OFFSET", 				"vr_wheel_yoffset", -0.3, 0.3, 0.01, 2
+	Slider "$VRWHEELMNU_WHEEL_TIME_SLOW",				"vr_wheel_time_slow", 0.0, 1.0, 0.1, 1
+	StaticText "$VRWHEELMNU_FREEZE_TIME_HELP", "Brown"
 	StaticText " "
 
 	StaticText ""
-	StaticText "Wheel Selection", gold
-	Option "Show Weapons/Items", 			"vr_wheel_weapon_all", "WheelListOption"
-	Option "Item Wheel Hand Switch", 		"vr_wheel_switch_hands", "YesNo"
-	StaticText "Lets you switch hands for item wheel only", "Brown"
-	Option "Auto Split List", 				"vr_wheel_auto_split", "YesNo"
-	StaticText "Auto split list into two wheels if too many items", "Brown"
-	Option "Selection Mode", 				"vr_wheel_selection_type", "WheelItemSelectOption"
-	Slider "Aim Select Angle", 				"vr_wheel_select_angle", 10.0, 90.0, 0.5, 1, vr_wheel_selection_type
-	Slider "Aim Select Deadzone", 			"vr_wheel_deadzone", 0.1, 5.0, 0.1, 1, vr_wheel_selection_type
+	StaticText "$VRWHEELMNU_WHEEL_SELECTION", gold
+	Option "$VRWHEELMNU_SHOW_WEAPONS_ITEMS", 			"vr_wheel_weapon_all", "WheelListOption"
+	Option "$VRWHEELMNU_ITEM_WHEEL_HAND_SWITCH", 		"vr_wheel_switch_hands", "YesNo"
+	StaticText "$VRWHEELMNU_SWITCH_HANDS_HELP", "Brown"
+	Option "$VRWHEELMNU_AUTO_SPLIT_LIST", 				"vr_wheel_auto_split", "YesNo"
+	StaticText "$VRWHEELMNU_AUTO_SPLIT_HELP", "Brown"
+	Option "$VRWHEELMNU_SELECTION_MODE", 				"vr_wheel_selection_type", "WheelItemSelectOption"
+	Slider "$VRWHEELMNU_AIM_SELECT_ANGLE", 				"vr_wheel_select_angle", 10.0, 90.0, 0.5, 1, vr_wheel_selection_type
+	Slider "$VRWHEELMNU_AIM_SELECT_DEADZONE", 			"vr_wheel_deadzone", 0.1, 5.0, 0.1, 1, vr_wheel_selection_type
 	
 	StaticText ""
-	StaticText "Other Options", gold
-	Option "Wheel Sounds", 					"vr_wheel_sound", "OnOff"
-	Option "Hide Weapon in Hand", 			"vr_wheel_hide_hand_weapon", "YesNo"
-	Option "Load Model For Icons", 			"vr_wheel_icon_load_model", "WheelIconModelOption"
-	Slider "Model Icon Scale Adjust", 		"vr_wheel_icon_model_scale", 0.1, 10.0, 0.1, 1, vr_wheel_icon_load_model
-	Slider "Model Icon Angle", 				"vr_wheel_icon_model_yaw", -180.0, 180.0, 1.0, 0, vr_wheel_icon_load_model
-	Slider "Model Icon X Offset", 			"vr_wheel_icon_model_xoffset", -100.0, 100.0, 1.0, 0, vr_wheel_icon_load_model
-	Slider "Model Icon Z Offset", 			"vr_wheel_icon_model_zoffset", -100.0, 100.0, 1.0, 0, vr_wheel_icon_load_model
+	StaticText "$VRWHEELMNU_OTHER_OPTIONS", gold
+	Option "$VRWHEELMNU_WHEEL_SOUNDS", 					"vr_wheel_sound", "OnOff"
+	Option "$VRWHEELMNU_HIDE_WEAPON_IN_HAND", 			"vr_wheel_hide_hand_weapon", "YesNo"
+	Option "$VRWHEELMNU_LOAD_MODEL_FOR_ICONS", 			"vr_wheel_icon_load_model", "WheelIconModelOption"
+	Slider "$VRWHEELMNU_MODEL_ICON_SCALE_ADJUST", 		"vr_wheel_icon_model_scale", 0.1, 10.0, 0.1, 1, vr_wheel_icon_load_model
+	Slider "$VRWHEELMNU_MODEL_ICON_ANGLE", 				"vr_wheel_icon_model_yaw", -180.0, 180.0, 1.0, 0, vr_wheel_icon_load_model
+	Slider "$VRWHEELMNU_MODEL_ICON_X_OFFSET", 			"vr_wheel_icon_model_xoffset", -100.0, 100.0, 1.0, 0, vr_wheel_icon_load_model
+	Slider "$VRWHEELMNU_MODEL_ICON_Z_OFFSET", 			"vr_wheel_icon_model_zoffset", -100.0, 100.0, 1.0, 0, vr_wheel_icon_load_model
 	StaticText ""
 
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_wheel_icon_bg_color vr_wheel_icon_select_color vr_wheel_icon_scale vr_wheel_radius vr_wheel_distance vr_wheel_xoffset vr_wheel_yoffset vr_wheel_time_slow vr_wheel_weapon_all vr_wheel_switch_hands vr_wheel_selection_type vr_wheel_select_angle vr_wheel_deadzone vr_wheel_sound vr_wheel_hide_hand_weapon vr_wheel_icon_load_model vr_wheel_icon_model_scale vr_wheel_icon_model_yaw vr_wheel_icon_model_xoffset vr_wheel_icon_model_zoffset"
@@ -3011,71 +3011,71 @@ OptionMenu VRWeaponWheelOptions protected
 
 OptionMenu VROptionsMenu protected
 {
-	Title "VR OPTIONS"
+	Title "$VRPREFMNU_TITLE"
 
 	StaticText ""
 	ifOption(OpenVR, OpenXR)
 	{
 		Submenu "$VRCMODEMNU_TITLE",        "CinemaModeOptions"
 	}
-	Submenu "VR HUD/Automap Options",   "VRHUDOptions"
-	Submenu "VR Weapon Options",        "VRWeaponOptions"
-	Submenu "Weapon/Item Wheel Options",  "VRWeaponWheelOptions"
+	Submenu "$VRHUDMNU_HUDAUTOMAPOPTIONS",   "VRHUDOptions"
+	Submenu "$VRWEAPONMNU_TITLE",        "VRWeaponOptions"
+	Submenu "$VRWHEELMNU_TITLE",  "VRWeaponWheelOptions"
 	StaticText ""
-	StaticText "Misc", gold
+	StaticText "$VRPREFMNU_MISC", gold
 	ifOption(OpenVR, OpenXR)
 	{
 		Option "$VRPREFMNU_DESKTOP",    "vr_desktop_view", "DesktopViewModes"
 	}
 	Slider "$VRPREFMNU_WORLDSCALE",     "vr_vunits_per_meter", 1, 60, 1, 0
-	Slider "Height Adjust",		        "vr_height_adjust", -0.5, 1.0, 0.01, 2
+	Slider "$VRPREFMNU_HEIGHT_ADJUST",		        "vr_height_adjust", -0.5, 1.0, 0.01, 2
 	ifOption(OpenXR)
 	{
 		StaticText ""
-		StaticText "Display Adjust", gold
-		Slider "Adjust Gamma",     		"vr_openxr_present_gamma_bias", -2, 2, 0.01, 2
-		Slider "Adjust Contrast",     	"vr_openxr_present_contrast_bias", -2, 2, 0.01, 2
-		Slider "Adjust Brightness",     "vr_openxr_present_brightness_bias", -2, 2, 0.01, 2
-		Slider "Adjust Saturation",     "vr_openxr_present_saturation_bias", -2, 2, 0.01, 2
+		StaticText "$VRPREFMNU_DISPLAY_ADJUST", gold
+		Slider "$VRPREFMNU_ADJUST_GAMMA",     		"vr_openxr_present_gamma_bias", -2, 2, 0.01, 2
+		Slider "$VRPREFMNU_ADJUST_CONTRAST",     	"vr_openxr_present_contrast_bias", -2, 2, 0.01, 2
+		Slider "$VRPREFMNU_ADJUST_BRIGHTNESS",     "vr_openxr_present_brightness_bias", -2, 2, 0.01, 2
+		Slider "$VRPREFMNU_ADJUST_SATURATION",     "vr_openxr_present_saturation_bias", -2, 2, 0.01, 2
 	}
 	StaticText " "
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_desktop_view vr_vunits_per_meter vr_height_adjust vr_openxr_present_gamma_bias vr_openxr_present_contrast_bias vr_openxr_present_brightness_bias vr_openxr_present_saturation_bias"
 	StaticText ""
-	StaticText "VR Controls", gold
+	StaticText "$VRPREFMNU_VR_CONTROLS", gold
 	ifOption(OpenVR, OpenXR)
 	{
-		Option "Control Mode",			"vr_joy_mode", "ControlMode"
+		Option "$VRPREFMNU_CONTROL_MODE",			"vr_joy_mode", "ControlMode"
 	}
-	Option "Control Scheme",			"vr_control_scheme", "ControlScheme"
-	Option "Switch Thumbsticks",		"vr_switch_sticks", "OnOff", vr_joy_mode
-	Option "Virtual Mouse",				"vr_mouse_in_menu", "OnOff"
-	ColorPicker "Mouse Pointer",		"vr_menu_pointer_color"
-	Option "Secondary Button Mappings",	"vr_secondary_button_mappings", "OnOff", vr_joy_mode
-	Option "Two Handed Weapons",		"vr_two_handed_weapons", "OnOff"
+	Option "$VRPREFMNU_CONTROL_SCHEME",			"vr_control_scheme", "ControlScheme"
+	Option "$VRPREFMNU_SWITCH_THUMBSTICKS",		"vr_switch_sticks", "OnOff", vr_joy_mode
+	Option "$VRPREFMNU_VIRTUAL_MOUSE",				"vr_mouse_in_menu", "OnOff"
+	ColorPicker "$VRPREFMNU_MOUSE_POINTER",		"vr_menu_pointer_color"
+	Option "$VRPREFMNU_SECONDARY_BUTTON_MAPPINGS",	"vr_secondary_button_mappings", "OnOff", vr_joy_mode
+	Option "$VRPREFMNU_TWO_HANDED_WEAPONS",		"vr_two_handed_weapons", "OnOff"
 	StaticText " "
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_control_scheme vr_switch_sticks vr_mouse_in_menu vr_menu_pointer_color vr_secondary_button_mappings vr_two_handed_weapons"
 
 	StaticText ""
-	StaticText "Locomotion", gold
-	Option "Off-hand Move Direction",	"vr_move_use_offhand", "OnOff"
-	Option "Use Teleport",		        "vr_teleport", "OnOff"
-	Option "Slidey movement (Momentum)","vr_momentum", "OnOff"
-	Option "Crouch using button",       "vr_crouch_use_button", "OnOff"
-	ScaleSlider "Walk Speed",           "vr_move_speed", 0, 50, 1, "Multiplier active"
-	Slider "Walk Multiplier",           "vr_walk_multiplier", 0.5, 2.0, 0.01, 2, use_walk_multiplier
-	Slider "Run Multiplier",	        "vr_run_multiplier", 0.5, 2.0, 0.01, 2
-	StaticText "Set the walking speed to 0 to use the multiplier", brown
+	StaticText "$VRPREFMNU_LOCOMOTION", gold
+	Option "$VRPREFMNU_OFF_HAND_MOVE_DIRECTION",	"vr_move_use_offhand", "OnOff"
+	Option "$VRPREFMNU_USE_TELEPORT",		        "vr_teleport", "OnOff"
+	Option "$VRPREFMNU_SLIDEY_MOVEMENT_MOMENTUM","vr_momentum", "OnOff"
+	Option "$VRPREFMNU_CROUCH_USING_BUTTON",       "vr_crouch_use_button", "OnOff"
+	ScaleSlider "$VRPREFMNU_WALK_SPEED",           "vr_move_speed", 0, 50, 1, "$VRPREFMNU_MULTIPLIER_ACTIVE"
+	Slider "$VRPREFMNU_WALK_MULTIPLIER",           "vr_walk_multiplier", 0.5, 2.0, 0.01, 2, use_walk_multiplier
+	Slider "$VRPREFMNU_RUN_MULTIPLIER",	        "vr_run_multiplier", 0.5, 2.0, 0.01, 2
+	StaticText "$VRPREFMNU_WALK_SPEED_HELP", brown
 	StaticText ""
-	Slider "Snap-turn Angle",		    "vr_snapTurn", 0.0, 90.0, 1.0, 2
-	StaticText "Set Snap-Turn <= 10 for \"Smooth\" Turn", "Brown"
+	Slider "$VRPREFMNU_SNAP_TURN_ANGLE",		    "vr_snapTurn", 0.0, 90.0, 1.0, 2
+	StaticText "$VRPREFMNU_SNAP_TURN_HELP", "Brown"
 	StaticText " "
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_move_use_offhand vr_teleport vr_momentum vr_crouch_use_button vr_move_speed vr_walk_multiplier vr_run_multiplier vr_snapTurn"
 
 	StaticText ""
-	StaticText "Haptics", gold
-	Slider "Item Pickup Haptic Level",		"vr_pickup_haptic_level", 0.0, 1.0, 0.1, 2
-	Slider "Quake Haptic Level",			"vr_quake_haptic_level", 0.0, 1.0, 0.1, 2
-	Slider "External Haptics Intensity",	"ext_haptic_level_global_intensity", 0.0, 2.0, 0.1, 2
+	StaticText "$VRPREFMNU_HAPTICS", gold
+	Slider "$VRPREFMNU_ITEM_PICKUP_HAPTIC_LEVEL",		"vr_pickup_haptic_level", 0.0, 1.0, 0.1, 2
+	Slider "$VRPREFMNU_QUAKE_HAPTIC_LEVEL",			"vr_quake_haptic_level", 0.0, 1.0, 0.1, 2
+	Slider "$VRPREFMNU_EXTERNAL_HAPTICS_INTENSITY",	"ext_haptic_level_global_intensity", 0.0, 2.0, 0.1, 2
 	StaticText " "
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_pickup_haptic_level vr_quake_haptic_level ext_haptic_level_global_intensity"
 }
@@ -3620,10 +3620,10 @@ OptionValue "os_isanyof_values"
 
 OptionMenu QuickMenu protected
 {
-	Title "QUESTZDOOM Quick Menu"
+	Title "$QZDMNU_QUICK_TITLE"
 
 	StaticText " "
-	Option "Refresh Rate", "vid_refreshrate", "RefreshRate"
+	Option "$VIDMNU_REFRESHRATE", "vid_refreshrate", "RefreshRate"
 	StaticText "Change the refresh rate, recommended 72Hz.", "Brown"
 	
 	StaticText " "
@@ -3651,7 +3651,7 @@ OptionMenu QuickMenu protected
 	StaticText "Set to None for unfiltered pixel appearance.", "Brown"
 	
 	StaticText " "
-	Option "Show FPS on HUD", "vid_fps", "OnOff"
+	Option "$VIDMNU_SHOWFPSONHUD", "vid_fps", "OnOff"
 	StaticText "Option retained only for the current session.", "Brown"
 	
 	StaticText " "
@@ -3671,105 +3671,106 @@ OptionMenu QuickMenu protected
  *
  *=======================================*/
 
- OptionMenu "InfoAndCreditsMenu"
+OptionMenu "InfoAndCreditsMenu"
 { 
-	//Title		"QUESTZDOOM INFO AND CREDITS"
+	Title "$INFOCREDMNU_TITLE"
 	StaticPatch 52, -20, "QZDOOM"
 	Position 120
-	Submenu		"INFORMATION AND INSTRUCTIONS", "QuestZDoomInstructions", 0, 1
-	Submenu		"CREDITS", "QuestZDoomCredits", 0, 1
+	Submenu		"$INFOCREDMNU_INSTRUCTIONS", "QuestZDoomInstructions", 0, 1
+	Submenu		"$INFOCREDMNU_CREDITS", "QuestZDoomCredits", 0, 1
 }
 
 OptionMenu "QuestZDoomInstructions"
 { 
-	//Title		"QUESTZDOOM INFO AND CREDITS"
+	Title "$INFOCREDMNU_TITLE"
 	StaticPatch 52, -20, "QZDOOM"
 	Position 120
-	StaticText	"===== INFORMATION AND INSTRUCTIONS ====="
+	StaticText	"$INFOCREDMNU_INSTRUCTIONS_HEADER"
 	StaticText	""
-	StaticText	"QUESTZDOOM IS AN ENGINE PORT OF THE POPULAR LZDOOM/GZDOOM", "White"
-	StaticText	"ENGINE FOR THE OCULUS QUEST VIRTUAL REALITY HEADSET.", "White"
+	StaticText	"$INFOCREDMNU_LINE_1", "White"
+	StaticText	"$INFOCREDMNU_LINE_2", "White"
 	StaticText	""
-	StaticText	"WE RECOMMEND USING THE QUESTZDOOM LAUNCHER TO GET"
-	StaticText	"THE BEST EXPERIENCE POSSIBLE. THE LAUNCHER CAN ALSO"
-	StaticText	"BE DOWNLOADED FROM SIDEQUEST."
+	StaticText	"$INFOCREDMNU_LINE_3"
+	StaticText	"$INFOCREDMNU_LINE_4"
+	StaticText	"$INFOCREDMNU_LINE_5"
 	StaticText	""
-	StaticText	"1. INSTALL QUESTZDOOM FROM SIDEQUEST", "White"
-	StaticText	"2. INSTALL QUESTZDOOM LAUCHNER FROM SIDEQUEST", "White"
-	StaticText	"3. START THE QUESTZDOOM LAUNCHER", "White"
+	StaticText	"$INFOCREDMNU_LINE_6", "White"
+	StaticText	"$INFOCREDMNU_LINE_7", "White"
+	StaticText	"$INFOCREDMNU_LINE_8", "White"
 	StaticText	""
-	StaticText	"ON FIRST RUN YOU WILL NEED TO ACCEPT THE PERMISSIONS"
-	StaticText	"FOR BOTH APPLICATIONS TO ACCESS THE LOCAL FILE SYSTEM."
+	StaticText	"$INFOCREDMNU_LINE_9"
+	StaticText	"$INFOCREDMNU_LINE_10"
 	StaticText	""
-	StaticText	"YOU CAN NOW START TO DOWNLOAD AND USE GAMES AND MODS", "White"
-	StaticText	"DIRECTLY FROM THE QUESTZDOOM LAUNCHER.", "White"
+	StaticText	"$INFOCREDMNU_LINE_11", "White"
+	StaticText	"$INFOCREDMNU_LINE_12", "White"
 	StaticText	""
-	StaticText	"CLICK ON DOWNLOAD CORE GAMES AND CHOOSE THE GAME YOU WANT.", "White"
-	StaticText	"THEN CLICK DOWNLOAD MODS AND DOWNLOAD SOME MODS IF YOU WANT.", "White"
-	StaticText	"AFTER SELECTION, CLICK ON LAUNCH GAME.", "White"
+	StaticText	"$INFOCREDMNU_LINE_13", "White"
+	StaticText	"$INFOCREDMNU_LINE_14", "White"
+	StaticText	"$INFOCREDMNU_LINE_15", "White"
 	StaticText	""
-	StaticText	"FOR BEGINNERS WE RECOMMEND THE GAME FREEDOOM2", "White"
-	StaticText	"WITH THE MODS BRUTAL DOOM AND VR WEAPONS", "White"
+	StaticText	"$INFOCREDMNU_LINE_16", "White"
+	StaticText	"$INFOCREDMNU_LINE_17", "White"
 	StaticText	""
-	StaticText	"NEVERTHELESS FOR THE BEST EXPERIENCE WE SUGGEST TO INSTALL"
-	StaticText	"THE ORIGINAL DOOM AND DOOM2 WAD FILE. YOU CAN FIND FURTHER"
-	StaticText	"INSTRUCTIONS IN THE LAUNCHER AND ON REDDIT R/QUESTZDOOM"
+	StaticText	"$INFOCREDMNU_LINE_18"
+	StaticText	"$INFOCREDMNU_LINE_19"
+	StaticText	"$INFOCREDMNU_LINE_20"
 	StaticText	""
 }
 
 OptionMenu "QuestZDoomCredits"
 { 
-	//Title		"QUESTZDOOM INFO AND CREDITS"
+	Title "$INFOCREDMNU_TITLE"
 	StaticPatch 52, -20, "QZDOOM"
 	Position 120
-	StaticText	"===== CREDITS ====="
+	StaticText	"$INFOCREDMNU_CREDITS_HEADER"
 	StaticText	""
 	StaticText	"DRBEEF"
 	StaticText	"EMANUELE DISCO"
 	StaticText	"ERMAC"
-	StaticText	"QUESTZDOOM", "White"
+	StaticText	"DOOM XR (QUESTZDOOM)", "White"
 	StaticText	""
 	StaticText	"BAGGYG"
 	StaticText	"QUESTZDOOM LAUNCHER", "White"
 	StaticText	""
 	StaticText	"VR_BUMMSER"
-	StaticText	"MOD AND WAD TESTING, COMMUNITY DUDE", "White"
+	StaticText	"$INFOCREDMNU_CREDITS_LINE_1", "White"
 	StaticText	""
 	StaticText	"DANIEL TEICH"
-	StaticText	"GRAPHICS, ARTWORK, ULTIMATE CHEAT MENU MOD", "White"
+	StaticText	"$INFOCREDMNU_CREDITS_LINE_2", "White"
 	StaticText	""
 	StaticText	"AJANTAJU"
-	StaticText	"VR WEAPON MODEL PACKS", "White"
+	StaticText	"ERMAC"
+	StaticText	"$INFOCREDMNU_CREDITS_LINE_3", "White"
 	StaticText	""
 	StaticText	"CHRIS COLLINS"
-	StaticText	"GENERALUSERGS SOUNDFONT", "White"
+	StaticText	"$INFOCREDMNU_CREDITS_LINE_4", "White"
 	StaticText	""
 	StaticText	"Fishbiter"
 	StaticText	"HH76"
 	StaticText	"Gerald Buttinger"
 	StaticText	"ERMAC"
-	StaticText	"GZDOOM PCVR PORT", "White"
+	StaticText	"$INFOCREDMNU_CREDITS_LINE_5", "White"
 	StaticText	""
 	StaticText	"EMILE BELANGER"
-	StaticText	"LZDOOM ANDROID PORT", "White"
+	StaticText	"$INFOCREDMNU_CREDITS_LINE_6", "White"
 	StaticText	""
 	StaticText	"M8F (MMAULWURFF)"
-	StaticText	"LASER SIGHT MOD", "White"
+	StaticText	"$INFOCREDMNU_CREDITS_LINE_7", "White"
 	StaticText	""
 	StaticText	"FREEDOOM / FRAGGLE"
-	StaticText	"FREEDOOM DOWNLOAD ACCESS", "White"
+	StaticText	"$INFOCREDMNU_CREDITS_LINE_8", "White"
 	StaticText	""
-	StaticText	"THE ZDOOM TEAMS"
-	StaticText	"FOR THE AWESOME ENGINE!", "White"
+	StaticText	"$INFOCREDMNU_CREDITS_LINE_9"
+	StaticText	"$INFOCREDMNU_CREDITS_LINE_10", "White"
 	StaticText	""
-	StaticText	"All GZ3DOOM PC VR PROJECT PARTICIPANTS"
-	StaticText	"6DOF WEAPON LOGIC, MODEL AND SPRITE RENDERING", "White"
+	StaticText	"$INFOCREDMNU_CREDITS_LINE_11"
+	StaticText	"$INFOCREDMNU_CREDITS_LINE_12", "White"
 	StaticText	""
-	StaticText	"THE SIDEQUEST TEAM"
-	StaticText	"FOR SIDEQUEST!", "White"
+	StaticText	"$INFOCREDMNU_CREDITS_LINE_13"
+	StaticText	"$INFOCREDMNU_CREDITS_LINE_14", "White"
 	StaticText	""
-	StaticText	"ALSO WE WANT TO THANK ALL DEDICATED"
-	StaticText	"CLOSED BETA TESTERS!"
+	StaticText	"$INFOCREDMNU_CREDITS_LINE_15"
+	StaticText	"$INFOCREDMNU_CREDITS_LINE_16"
 }
 
 OptionValue "UseModes"
