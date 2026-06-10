@@ -20,6 +20,8 @@
 #include "common/utility/i_time.h"
 #include "g_statusbar/sbar.h"
 #include "sound/s_doomsound.h"
+#include "vm.h"
+#include "playsim/p_pspr.h"
 #include <QzDoom/VrCommon.h>
 #include "hw_vrmodes.h"
 #include "r_data/models.h"
@@ -76,7 +78,8 @@ namespace
 	enum class EVRWheelType
 	{
 		None,
-		Weapon,
+		MainWeapon,
+		OffhandWeapon,
 		Inventory
 	};
 
@@ -127,6 +130,19 @@ namespace
 
 	static void UpdateHover(player_t* player);
 	static void ReleaseWheelTimeControl();
+	static void MoveWeaponToHand(player_t* player, AActor* weapon, bool targetOffhand)
+	{
+		if (player == nullptr || player->mo == nullptr || weapon == nullptr)
+		{
+			return;
+		}
+
+		IFVIRTUALPTRNAME(player->mo, NAME_PlayerPawn, MoveWeaponToHand)
+		{
+			VMValue param[] = { player->mo, weapon, targetOffhand ? 1 : 0 };
+			VMCall(func, param, 3, nullptr, 0);
+		}
+	}
 
 	static DVector3 ToGamePoint(const double* xyz)
 	{
@@ -188,11 +204,20 @@ namespace
 
 	static int GetPreferredAnchorHand(EVRWheelType type)
 	{
-		if (type == EVRWheelType::Weapon)
+		if (type == EVRWheelType::MainWeapon)
 		{
-			return vr_wheel_switch_hands ? VR_OFFHAND : VR_MAINHAND;
+			return VR_MAINHAND;
+		}
+		if (type == EVRWheelType::OffhandWeapon)
+		{
+			return VR_OFFHAND;
 		}
 		return vr_wheel_switch_hands ? VR_MAINHAND : VR_OFFHAND;
+	}
+
+	static bool IsWeaponWheelType(EVRWheelType type)
+	{
+		return type == EVRWheelType::MainWeapon || type == EVRWheelType::OffhandWeapon;
 	}
 
 	static bool GetHandPose(player_t* player, int abstractHand, DVector3& pos, DVector3& dir)
@@ -618,7 +643,7 @@ namespace
 
 	static void RefreshEntries(player_t* player)
 	{
-		if (GVRWheel.Type == EVRWheelType::Weapon)
+		if (IsWeaponWheelType(GVRWheel.Type))
 		{
 			BuildWeaponEntries(player, GVRWheel.Entries);
 		}
@@ -771,12 +796,13 @@ namespace
 			return;
 		}
 
-		if (GVRWheel.Type == EVRWheelType::Weapon)
+		if (IsWeaponWheelType(GVRWheel.Type))
 		{
-			auto weapon = entry.Item->IsKindOf(NAME_Weapon) ? entry.Item : player->mo->FindInventory(entry.Item->GetClass());
-			if (weapon != nullptr && weapon != player->ReadyWeapon)
+			auto weapon = player->mo->FindInventory(entry.Item->GetClass());
+			if (weapon != nullptr)
 			{
-				player->PendingWeapon = weapon;
+				const bool targetOffhand = GVRWheel.Type == EVRWheelType::OffhandWeapon;
+				MoveWeaponToHand(player, weapon, targetOffhand);
 			}
 		}
 		else if (GVRWheel.Type == EVRWheelType::Inventory)
@@ -1196,12 +1222,22 @@ namespace
 
 void VRWheel_OpenWeapon()
 {
-	OpenWheel(EVRWheelType::Weapon);
+	OpenWheel(EVRWheelType::MainWeapon);
 }
 
 void VRWheel_CloseWeapon()
 {
-	CloseWheel(EVRWheelType::Weapon);
+	CloseWheel(EVRWheelType::MainWeapon);
+}
+
+void VRWheel_OpenOffhandWeapon()
+{
+	OpenWheel(EVRWheelType::OffhandWeapon);
+}
+
+void VRWheel_CloseOffhandWeapon()
+{
+	CloseWheel(EVRWheelType::OffhandWeapon);
 }
 
 void VRWheel_OpenInventory()

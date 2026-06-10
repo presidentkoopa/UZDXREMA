@@ -782,7 +782,8 @@ OptionMenu "WeaponsControlMenu" protected
 	Control    "$CNTRLMNU_OFFHAND_PREVIOUSWEAPON" , "weapprev 1"
 	Control    "$CNTRLMNU_SWITCH_TO_OFFHAND", "switchhand 1"
 	Control    "$CNTRLMNU_SWITCH_TO_MAINHAND", "switchhand 0"
-	Control    "$CNTRLMNU_WHEEL_WEAPONS"     , "+vrweaponwheel"
+	Control    "$CNTRLMNU_WHEEL_MAINWEAPONS" , "+vrweaponwheel"
+	Control    "$CNTRLMNU_WHEEL_OFFHAND_WEAPONS" , "+vroffhandweaponwheel"
 
 	StaticText ""
 	Control    "$CNTRLMNU_SLOT1"          , "slot 1"
@@ -819,7 +820,8 @@ OptionMenu "WeaponsDoubleControlMenu" protected
 	DoubleControl    "$CNTRLMNU_OFFHAND_PREVIOUSWEAPON" , "weapprev 1"
 	DoubleControl    "$CNTRLMNU_SWITCH_TO_OFFHAND", "switchhand 1"
 	DoubleControl    "$CNTRLMNU_SWITCH_TO_MAINHAND", "switchhand 0"
-	DoubleControl    "$CNTRLMNU_WHEEL_WEAPONS"     , "+vrweaponwheel"
+	DoubleControl    "$CNTRLMNU_WHEEL_MAINWEAPONS" , "+vrweaponwheel"
+	DoubleControl    "$CNTRLMNU_WHEEL_OFFHAND_WEAPONS" , "+vroffhandweaponwheel"
 
 	StaticText ""
 	DoubleControl    "$CNTRLMNU_SLOT1"          , "slot 1"
@@ -2965,7 +2967,8 @@ OptionMenu VRWeaponWheelOptions protected
 	
 	StaticText ""
 	StaticText "Open Wheel", gold
-	Control    "$CNTRLMNU_WHEEL_WEAPONS"    , "+vrweaponwheel"
+	Control    "$CNTRLMNU_WHEEL_MAINWEAPONS"    , "+vrweaponwheel"
+	Control    "$CNTRLMNU_WHEEL_OFFHAND_WEAPONS" , "+vroffhandweaponwheel"
 	Control    "$CNTRLMNU_WHEEL_ITEMS" 		, "+vrinvwheel"
 
 	StaticText ""
@@ -2984,8 +2987,8 @@ OptionMenu VRWeaponWheelOptions protected
 	StaticText ""
 	StaticText "Wheel Selection", gold
 	Option "Show Weapons/Items", 			"vr_wheel_weapon_all", "WheelListOption"
-	Option "Switch Hand", 					"vr_wheel_switch_hands", "YesNo"
-	StaticText "Lets you switch hands for weapon and item wheel", "Brown"
+	Option "Item Wheel Hand Switch", 		"vr_wheel_switch_hands", "YesNo"
+	StaticText "Lets you switch hands for item wheel only", "Brown"
 	Option "Auto Split List", 				"vr_wheel_auto_split", "YesNo"
 	StaticText "Auto split list into two wheels if too many items", "Brown"
 	Option "Selection Mode", 				"vr_wheel_selection_type", "WheelItemSelectOption"

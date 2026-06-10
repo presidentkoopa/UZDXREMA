@@ -419,6 +419,18 @@ static int Cmd_VRWeaponWheelUp(CCmdFuncPtr)
 	return CCMD_OK;
 }
 
+static int Cmd_VROffhandWeaponWheelDown(CCmdFuncPtr)
+{
+	VRWheel_OpenOffhandWeapon();
+	return CCMD_OK;
+}
+
+static int Cmd_VROffhandWeaponWheelUp(CCmdFuncPtr)
+{
+	VRWheel_CloseOffhandWeapon();
+	return CCMD_OK;
+}
+
 static int Cmd_VRInventoryWheelDown(CCmdFuncPtr)
 {
 	VRWheel_OpenInventory();
@@ -437,8 +449,10 @@ namespace
 	{
 		FVRWheelCommandRegistration()
 		{
-			C_RegisterFunction("+vrweaponwheel", "Opens the VR weapon wheel while held.", Cmd_VRWeaponWheelDown);
-			C_RegisterFunction("-vrweaponwheel", "Closes the VR weapon wheel.", Cmd_VRWeaponWheelUp);
+			C_RegisterFunction("+vrweaponwheel", "Opens the VR main-hand weapon wheel while held.", Cmd_VRWeaponWheelDown);
+			C_RegisterFunction("-vrweaponwheel", "Closes the VR main-hand weapon wheel.", Cmd_VRWeaponWheelUp);
+			C_RegisterFunction("+vroffhandweaponwheel", "Opens the VR offhand weapon wheel while held.", Cmd_VROffhandWeaponWheelDown);
+			C_RegisterFunction("-vroffhandweaponwheel", "Closes the VR offhand weapon wheel.", Cmd_VROffhandWeaponWheelUp);
 			C_RegisterFunction("+vrinvwheel", "Opens the VR inventory wheel while held.", Cmd_VRInventoryWheelDown);
 			C_RegisterFunction("-vrinvwheel", "Closes the VR inventory wheel.", Cmd_VRInventoryWheelUp);
 		}

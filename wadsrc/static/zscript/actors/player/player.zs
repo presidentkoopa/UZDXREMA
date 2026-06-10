@@ -2502,6 +2502,69 @@ class PlayerPawn : Actor
 		}
 	}
 
+	static bool WeaponsMatch(Weapon a, Weapon b)
+	{
+		if (a == null || b == null)
+		{
+			return false;
+		}
+
+		if (a == b || a.GetClass() == b.GetClass() || a.SisterWeapon == b || b.SisterWeapon == a)
+		{
+			return true;
+		}
+
+		if (a.SisterWeapon != null && a.SisterWeapon.GetClass() == b.GetClass())
+		{
+			return true;
+		}
+		if (b.SisterWeapon != null && b.SisterWeapon.GetClass() == a.GetClass())
+		{
+			return true;
+		}
+		return false;
+	}
+
+	virtual void MoveWeaponToHand(Weapon weap, int hand = 0)
+	{
+		if (weap == null || player.playerstate != PST_LIVE)
+		{
+			return;
+		}
+
+		if (weap.bNoHandSwitch && weap.bOffhandWeapon != (hand == 1))
+		{
+			return;
+		}
+
+		let sourceweap = hand == 1 ? player.ReadyWeapon : player.OffhandWeapon;
+		if (WeaponsMatch(sourceweap, weap))
+		{
+			SwitchWeaponHand(hand);
+			return;
+		}
+
+		let targetweap = hand == 1 ? player.OffhandWeapon : player.ReadyWeapon;
+		if (WeaponsMatch(targetweap, weap))
+		{
+			return;
+		}
+
+		let targetcurrent = hand == 1 ? player.OffhandWeapon : player.ReadyWeapon;
+		weap.bOffhandWeapon = hand == 1;
+		if (weap.SisterWeapon != null)
+		{
+			weap.SisterWeapon.bOffhandWeapon = weap.bOffhandWeapon;
+		}
+		player.PendingWeapon = weap;
+		if (targetcurrent != null)
+		{
+			DropWeapon(hand);
+			return;
+		}
+		BringUpWeapon();
+	}
+
 	//===========================================================================
 	//
 	// FindMostRecentWeapon
