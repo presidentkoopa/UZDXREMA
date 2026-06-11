@@ -484,6 +484,8 @@ HWDecal *HWDrawInfo::AddDecal(bool onmirror)
 
 void HWDrawInfo::CreateScene(bool drawpsprites)
 {
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	const bool isVRScene = vrmode != nullptr && vrmode->IsVR();
 	const auto &vp = Viewpoint;
 	angle_t a1 = FrustumAngle(); // horizontally clip the back of the viewport
 	mClipper->SafeAddClipRangeRealAngles(vp.Angles.Yaw.BAMs() + a1, vp.Angles.Yaw.BAMs() - a1);
@@ -500,6 +502,7 @@ void HWDrawInfo::CreateScene(bool drawpsprites)
 	// reset the portal manager
 	portalState.StartFrame();
 
+	if (isVRScene) VRSceneBuild.Clock();
 	ProcessAll.Clock();
 
 	// clip the scene and fill the drawlists
@@ -512,14 +515,17 @@ void HWDrawInfo::CreateScene(bool drawpsprites)
 	// These cannot be multithreaded when the time comes because all these depend
 	// on the global 'validcount' variable.
 
+	if (isVRScene) VRScenePostBSP.Clock();
 	HandleMissingTextures(in_area);	// Missing upper/lower textures
 	HandleHackedSubsectors();	// open sector hacks for deep water
 	PrepareUnhandledMissingTextures();
 	DispatchRenderHacks();
+	if (isVRScene) VRScenePostBSP.Unclock();
 	screen->mLights->Unmap();
 	screen->mVertexData->Unmap();
 
 	ProcessAll.Unclock();
+	if (isVRScene) VRSceneBuild.Unclock();
 
 }
 
@@ -534,6 +540,9 @@ void HWDrawInfo::CreateScene(bool drawpsprites)
 void HWDrawInfo::RenderScene(FRenderState &state)
 {
 	const auto &vp = Viewpoint;
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	const bool isVRScene = vrmode != nullptr && vrmode->IsVR();
+	if (isVRScene) VRSceneDraw.Clock();
 	RenderAll.Clock();
 
 	state.SetDepthMask(true);
@@ -583,6 +592,7 @@ void HWDrawInfo::RenderScene(FRenderState &state)
 	DrawDecals(state, Decals[0]);
 
 	RenderAll.Unclock();
+	if (isVRScene) VRSceneDraw.Unclock();
 }
 
 //-----------------------------------------------------------------------------
@@ -593,6 +603,9 @@ void HWDrawInfo::RenderScene(FRenderState &state)
 
 void HWDrawInfo::RenderTranslucent(FRenderState &state)
 {
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	const bool isVRScene = vrmode != nullptr && vrmode->IsVR();
+	if (isVRScene) VRSceneDraw.Clock();
 	RenderAll.Clock();
 
 	// final pass: translucent stuff
@@ -611,6 +624,7 @@ void HWDrawInfo::RenderTranslucent(FRenderState &state)
 	state.SetDepthMask(true);
 
 	RenderAll.Unclock();
+	if (isVRScene) VRSceneDraw.Unclock();
 }
 
 

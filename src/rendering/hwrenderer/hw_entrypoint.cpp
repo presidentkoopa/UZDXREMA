@@ -152,6 +152,8 @@ sector_t* RenderViewpoint(FRenderViewpoint& mainvp, AActor* camera, IntRect* bou
 			continue;
 		}
 		eye->SetUp();
+		const bool isVRScene = vrmode->IsVR();
+		if (isVRScene) VRSceneEyes.Clock();
 		screen->SetViewportRects(bounds);
 
 		if (mainview) // Bind the scene frame buffer and turn on draw buffers used by ssao
@@ -214,6 +216,7 @@ sector_t* RenderViewpoint(FRenderViewpoint& mainvp, AActor* camera, IntRect* bou
 		di->EndDrawInfo();
 		eye->TearDown();
 		screen->NextEye(eyeCount);
+		if (isVRScene) VRSceneEyes.Unclock();
 	}
 	vrmode->TearDown();
 	

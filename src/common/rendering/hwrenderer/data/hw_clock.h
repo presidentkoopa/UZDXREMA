@@ -9,6 +9,7 @@ extern glcycle_t RenderFlat,SetupFlat;
 extern glcycle_t RenderSprite,SetupSprite;
 extern glcycle_t All, Finish, PortalAll, Bsp;
 extern glcycle_t ProcessAll, PostProcess;
+extern glcycle_t VRSceneEyes, VRSceneBuild, VRSubsectors, VRLineBuild, VRThingBuild, VRFlatBuild, VRScenePostBSP, VRPlayerSprites, VRSceneDraw, VREyeComposite, VRFinalizeEye, VRSubmit;
 extern glcycle_t RenderAll;
 extern glcycle_t Dirty;
 extern glcycle_t drawcalls, twoD, Flush3D;

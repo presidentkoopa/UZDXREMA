@@ -46,6 +46,7 @@ glcycle_t RenderFlat,SetupFlat;
 glcycle_t RenderSprite,SetupSprite;
 glcycle_t All, Finish, PortalAll, Bsp;
 glcycle_t ProcessAll, PostProcess;
+glcycle_t VRSceneEyes, VRSceneBuild, VRSubsectors, VRLineBuild, VRThingBuild, VRFlatBuild, VRScenePostBSP, VRPlayerSprites, VRSceneDraw, VREyeComposite, VRFinalizeEye, VRSubmit;
 glcycle_t RenderAll;
 glcycle_t Dirty;
 glcycle_t drawcalls;
@@ -66,6 +67,18 @@ void ResetProfilingData()
 	RenderAll.Reset();
 	ProcessAll.Reset();
 	PostProcess.Reset();
+	VRSceneEyes.Reset();
+	VRSceneBuild.Reset();
+	VRSubsectors.Reset();
+	VRLineBuild.Reset();
+	VRThingBuild.Reset();
+	VRFlatBuild.Reset();
+	VRScenePostBSP.Reset();
+	VRPlayerSprites.Reset();
+	VRSceneDraw.Reset();
+	VREyeComposite.Reset();
+	VRFinalizeEye.Reset();
+	VRSubmit.Reset();
 	RenderWall.Reset();
 	SetupWall.Reset();
 	ClipWall.Reset();
@@ -99,6 +112,10 @@ static void AppendRenderTimes(FString &str)
 		"F: Render=%2.3f, Setup=%2.3f\n"
 		"S: Render=%2.3f, Setup=%2.3f\n"
 		"2D: %2.3f Finish3D: %2.3f\n"
+		"VR: SceneEyes=%2.3f SceneBuild=%2.3f SceneDraw=%2.3f\n"
+		"VR: Subsectors=%2.3f Lines=%2.3f Things=%2.3f Flats=%2.3f\n"
+		"VR: PostBSP=%2.3f PlayerSprites=%2.3f\n"
+		"VR: EyeComposite=%2.3f FinalizeEye=%2.3f Submit=%2.3f\n"
 		"Main thread total=%2.3f, Main thread waiting=%2.3f Worker thread total=%2.3f, Worker thread waiting=%2.3f\n"
 		"All=%2.3f, Render=%2.3f, Setup=%2.3f, Portal=%2.3f, Drawcalls=%2.3f, Postprocess=%2.3f, Finish=%2.3f\n",
 		bsp, clipwall,
@@ -106,6 +123,10 @@ static void AppendRenderTimes(FString &str)
 		RenderFlat.TimeMS(), SetupFlat.TimeMS(),
 		RenderSprite.TimeMS(), SetupSprite.TimeMS(), 
 		twoD.TimeMS(), Flush3D.TimeMS() - twoD.TimeMS(),
+		VRSceneEyes.TimeMS(), VRSceneBuild.TimeMS(), VRSceneDraw.TimeMS(),
+		VRSubsectors.TimeMS(), VRLineBuild.TimeMS(), VRThingBuild.TimeMS(), VRFlatBuild.TimeMS(),
+		VRScenePostBSP.TimeMS(), VRPlayerSprites.TimeMS(),
+		VREyeComposite.TimeMS(), VRFinalizeEye.TimeMS(), VRSubmit.TimeMS(),
 		MTWait.TimeMS() + Bsp.TimeMS(), MTWait.TimeMS(), WTTotal.TimeMS(), WTTotal.TimeMS() - setupwall - SetupFlat.TimeMS() - SetupSprite.TimeMS(),
 		All.TimeMS() + Finish.TimeMS(), RenderAll.TimeMS(),	ProcessAll.TimeMS(), PortalAll.TimeMS(), drawcalls.TimeMS(), PostProcess.TimeMS(), Finish.TimeMS());
 }

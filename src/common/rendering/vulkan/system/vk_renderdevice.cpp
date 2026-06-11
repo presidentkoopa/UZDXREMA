@@ -246,6 +246,7 @@ void VulkanRenderDevice::Update()
 			const bool suppressSceneEye2D = vrmode->ShouldUseScreenLayerForCurrentFrame() || cinemamode;
 			const bool useGameplayEyeViewport = vrmode->ShouldUseRecommendedRenderSizeThisFrame() && !vrmode->IsRenderingVirtualScreen();
 			const IntRect savedScreenViewport = mScreenViewport;
+			VREyeComposite.Clock();
 			for (int eye_ix = 0; eye_ix < eyeCount; ++eye_ix)
 			{
 				const auto eye = (eye_ix >= 0 && eye_ix < 2) ? vrmode->mEyes[eye_ix] : nullptr;
@@ -274,6 +275,7 @@ void VulkanRenderDevice::Update()
 				}
 				vrmode->FinalizeEyeImage(this, eye_ix);
 			}
+			VREyeComposite.Unclock();
 			mScreenViewport = savedScreenViewport;
 			vrmode->RenderVirtualScreen();
 			twod->Clear();

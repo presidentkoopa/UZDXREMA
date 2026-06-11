@@ -530,9 +530,12 @@ void HWDrawInfo::AddPolyobjs(subsector_t *sub)
 
 void HWDrawInfo::AddLines(subsector_t * sub, sector_t * sector)
 {
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	const bool isVRScene = vrmode != nullptr && vrmode->IsVR();
 	currentsector = sector;
 	currentsubsector = sub;
 
+	if (isVRScene) VRLineBuild.Clock();
 	ClipWall.Clock();
 	if (sub->polys != nullptr)
 	{
@@ -557,6 +560,7 @@ void HWDrawInfo::AddLines(subsector_t * sub, sector_t * sector)
 		}
 	}
 	ClipWall.Unclock();
+	if (isVRScene) VRLineBuild.Unclock();
 }
 
 //==========================================================================
@@ -602,6 +606,9 @@ void HWDrawInfo::AddSpecialPortalLines(subsector_t * sub, sector_t * sector, lin
 
 void HWDrawInfo::RenderThings(subsector_t * sub, sector_t * sector)
 {
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	const bool isVRScene = vrmode != nullptr && vrmode->IsVR();
+	if (isVRScene) VRThingBuild.Clock();
 	sector_t * sec=sub->sector;
 	// Handle all things in sector.
 	const auto &vp = Viewpoint;
@@ -671,10 +678,14 @@ void HWDrawInfo::RenderThings(subsector_t * sub, sector_t * sector)
 
 		sprite.Process(this, thing, sector, in_area, true);
 	}
+	if (isVRScene) VRThingBuild.Unclock();
 }
 
 void HWDrawInfo::RenderParticles(subsector_t *sub, sector_t *front)
 {
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	const bool isVRScene = vrmode != nullptr && vrmode->IsVR();
+	if (isVRScene) VRThingBuild.Clock();
 	SetupSprite.Clock();
 	for (uint32_t i = 0; i < sub->sprites.Size(); i++)
 	{
@@ -702,6 +713,7 @@ void HWDrawInfo::RenderParticles(subsector_t *sub, sector_t *front)
 		sprite.ProcessParticle(this, &Level->Particles[i], front, nullptr);
 	}
 	SetupSprite.Unclock();
+	if (isVRScene) VRThingBuild.Unclock();
 }
 
 
@@ -716,6 +728,9 @@ void HWDrawInfo::RenderParticles(subsector_t *sub, sector_t *front)
 
 void HWDrawInfo::DoSubsector(subsector_t * sub)
 {
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	const bool isVRScene = vrmode != nullptr && vrmode->IsVR();
+	if (isVRScene) VRSubsectors.Clock();
 	sector_t * sector;
 	sector_t * fakesector;
 	
@@ -727,11 +742,23 @@ void HWDrawInfo::DoSubsector(subsector_t * sub)
 #endif
 
 	sector=sub->sector;
-	if (!sector) return;
+	if (!sector)
+	{
+		if (isVRScene) VRSubsectors.Unclock();
+		return;
+	}
 
 	// If the mapsections differ this subsector can't possibly be visible from the current view point
-	if (!CurrentMapSections[sub->mapsection]) return;
-	if (sub->flags & SSECF_POLYORG) return;	// never render polyobject origin subsectors because their vertices no longer are where one may expect.
+	if (!CurrentMapSections[sub->mapsection])
+	{
+		if (isVRScene) VRSubsectors.Unclock();
+		return;
+	}
+	if (sub->flags & SSECF_POLYORG)
+	{
+		if (isVRScene) VRSubsectors.Unclock();
+		return;
+	}	// never render polyobject origin subsectors because their vertices no longer are where one may expect.
 
 	if (ss_renderflags[sub->Index()] & SSRF_SEEN)
 	{
@@ -740,11 +767,19 @@ void HWDrawInfo::DoSubsector(subsector_t * sub)
 		// range this subsector spans before going on.
 		UnclipSubsector(sub);
 	}
-	if (mClipper->IsBlocked()) return;	// if we are inside a stacked sector portal which hasn't unclipped anything yet.
+	if (mClipper->IsBlocked())
+	{
+		if (isVRScene) VRSubsectors.Unclock();
+		return;
+	}	// if we are inside a stacked sector portal which hasn't unclipped anything yet.
 
 	fakesector=hw_FakeFlat(sector, in_area, false);
 
-	if(Viewpoint.IsAllowedOoB() && sector->isSecret() && sector->wasSecret() && !r_radarclipper) return;
+	if(Viewpoint.IsAllowedOoB() && sector->isSecret() && sector->wasSecret() && !r_radarclipper)
+	{
+		if (isVRScene) VRSubsectors.Unclock();
+		return;
+	}
 
 	// cull everything if subsector outside all relevant clippers
 	if (Viewpoint.IsAllowedOoB() && (sub->polys == nullptr))
@@ -813,7 +848,11 @@ void HWDrawInfo::DoSubsector(subsector_t * sub)
 			seg++;
 		}
 		// Skip subsector if outside vertical or horizontal clippers or is in unexplored territory (fog of war)
-		if(!pitchvisible || !anglevisible || (!radarvisible && r_radarclipper)) return;
+		if(!pitchvisible || !anglevisible || (!radarvisible && r_radarclipper))
+		{
+			if (isVRScene) VRSubsectors.Unclock();
+			return;
+		}
 	}
 
 	if (mClipPortal)
@@ -824,6 +863,7 @@ void HWDrawInfo::DoSubsector(subsector_t * sub)
 			auto line = mClipPortal->ClipLine();
 			// The subsector is out of range, but we still have to check lines that lie directly on the boundary and may expose their upper or lower parts.
 			if (line) AddSpecialPortalLines(sub, fakesector, line);
+			if (isVRScene) VRSubsectors.Unclock();
 			return;
 		}
 	}
@@ -921,9 +961,11 @@ void HWDrawInfo::DoSubsector(subsector_t * sub)
 					{
 						HWFlat flat;
 						flat.section = sub->section;
+						if (isVRScene) VRFlatBuild.Clock();
 						SetupFlat.Clock();
 						flat.ProcessSector(this, fakesector);
 						SetupFlat.Unclock();
+						if (isVRScene) VRFlatBuild.Unclock();
 					}
 				}
 				// mark subsector as processed - but mark for rendering only if it has an actual area.
@@ -967,6 +1009,7 @@ void HWDrawInfo::DoSubsector(subsector_t * sub)
 			}
 		}
 	}
+	if (isVRScene) VRSubsectors.Unclock();
 }
 
 
@@ -1096,5 +1139,10 @@ void HWDrawInfo::RenderBSP(void *node, bool drawpsprites)
 	if (mCurrentPortal != nullptr) mCurrentPortal->RenderAttached(this);
 
 	if (drawpsprites)
+	{
+		const bool isVRScene = vrmode->IsVR();
+		if (isVRScene) VRPlayerSprites.Clock();
 		PreparePlayerSprites(Viewpoint.sector, in_area);
+		if (isVRScene) VRPlayerSprites.Unclock();
+	}
 }

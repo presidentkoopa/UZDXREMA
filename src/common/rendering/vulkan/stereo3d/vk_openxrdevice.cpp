@@ -1,6 +1,7 @@
 #include "vk_openxrdevice.h"
 
 #include "common/rendering/stereo3d/openxr/oxr_loader.h"
+#include "hw_clock.h"
 #include "v_video.h"
 #include "hw_cvars.h"
 #include "vulkan/system/vk_renderdevice.h"
@@ -134,6 +135,23 @@ namespace s3d {
 
 namespace
 {
+class ScopedCycleTimer
+{
+public:
+	explicit ScopedCycleTimer(glcycle_t& timer) : mTimer(timer)
+	{
+		mTimer.Clock();
+	}
+
+	~ScopedCycleTimer()
+	{
+		mTimer.Unclock();
+	}
+
+private:
+	glcycle_t& mTimer;
+};
+
 constexpr XrViewConfigurationType viewType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
 constexpr XrEnvironmentBlendMode environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
 XrSessionState xrSessionState = XR_SESSION_STATE_UNKNOWN;
@@ -3911,6 +3929,7 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 	Printf("OpenXR frame %llu: about to draw XR layers to swapchain image %u.\n",
 		(unsigned long long)xrFrameCounter, imageIndex);
 
+	ScopedCycleTimer cycle(VRSubmit);
 	vkResetCommandPool(xrVkDevice->device, xrVkCommandPool->pool, 0);
 	xrVkCommandBuffer->begin();
 
@@ -4811,6 +4830,7 @@ void VKOpenXRDeviceMode::FinalizeEyeImage(VulkanRenderDevice* vkfb, int eyeIndex
 	auto* postprocess = vkfb->GetPostprocess();
 	if (!postprocess)
 		return;
+	ScopedCycleTimer cycle(VRFinalizeEye);
 	const int pipelineImageIndex = postprocess->GetCurrentPipelineImage();
 	const XrSafeSourceRect sourceRect = GetSafeXrSourceRect(vkfb);
 	static bool xrLoggedPresentFormat = false;
