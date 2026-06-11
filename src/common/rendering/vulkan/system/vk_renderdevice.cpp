@@ -365,6 +365,15 @@ void VulkanRenderDevice::SetVSync(bool vsync)
 	mVSync = vsync;
 }
 
+void VulkanRenderDevice::NewRefreshRate()
+{
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	if (vrmode != nullptr && vrmode->IsVR())
+	{
+		vrmode->ApplyRefreshRate();
+	}
+}
+
 void VulkanRenderDevice::PrecacheMaterial(FMaterial *mat, int translation)
 {
 	if (mat->Source()->GetUseType() == ETextureType::SWCanvas) return;

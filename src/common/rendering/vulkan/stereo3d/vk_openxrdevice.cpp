@@ -83,6 +83,7 @@ EXTERN_CVAR(Bool, vr_openxr_debug_weapon);
 EXTERN_CVAR(Int, vr_openxr_debug_submit_mode);
 EXTERN_CVAR(Bool, vr_openxr_multiview);
 EXTERN_CVAR(Bool, vr_desktop_view_openxr_render);
+EXTERN_CVAR(Int, vid_refreshrate);
 EXTERN_CVAR(Float, vr_snapTurn);
 EXTERN_CVAR(Bool, vr_move_use_offhand);
 EXTERN_CVAR(Bool, vr_switch_sticks);
@@ -168,6 +169,11 @@ PFN_xrGetVulkanGraphicsRequirementsKHR_t xrGetVulkanGraphicsRequirementsKHR_inst
 PFN_xrGetVulkanGraphicsDeviceKHR_t xrGetVulkanGraphicsDeviceKHR_inst = nullptr;
 PFN_xrGetVulkanGraphicsRequirements2KHR_t xrGetVulkanGraphicsRequirements2KHR_inst = nullptr;
 PFN_xrGetVulkanGraphicsDevice2KHR_t xrGetVulkanGraphicsDevice2KHR_inst = nullptr;
+#ifdef XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME
+PFN_xrEnumerateDisplayRefreshRatesFB xrEnumerateDisplayRefreshRatesFB_inst = nullptr;
+PFN_xrGetDisplayRefreshRateFB xrGetDisplayRefreshRateFB_inst = nullptr;
+PFN_xrRequestDisplayRefreshRateFB xrRequestDisplayRefreshRateFB_inst = nullptr;
+#endif
 
 static const std::vector<XrExtensionProperties>& GetOpenXRExtensions()
 {
@@ -1805,6 +1811,13 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	{
 		extensions.push_back(XR_FB_COLOR_SPACE_EXTENSION_NAME);
 	}
+#ifdef XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME
+	xrHasDisplayRefreshRate = bootstrapHasExtension(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME);
+	if (xrHasDisplayRefreshRate)
+	{
+		extensions.push_back(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME);
+	}
+#endif
 	XrApplicationInfo appInfo{};
 	appInfo.apiVersion = XR_API_VERSION_1_0;
 	appInfo.applicationVersion = 1;
@@ -1835,6 +1848,18 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	loadProc("xrGetVulkanGraphicsDeviceKHR", reinterpret_cast<PFN_xrVoidFunction*>(&xrGetVulkanGraphicsDeviceKHR_inst));
 	loadProc("xrGetVulkanGraphicsRequirements2KHR", reinterpret_cast<PFN_xrVoidFunction*>(&xrGetVulkanGraphicsRequirements2KHR_inst));
 	loadProc("xrGetVulkanGraphicsDevice2KHR", reinterpret_cast<PFN_xrVoidFunction*>(&xrGetVulkanGraphicsDevice2KHR_inst));
+#ifdef XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME
+	if (xrHasDisplayRefreshRate)
+	{
+		loadProc("xrEnumerateDisplayRefreshRatesFB", reinterpret_cast<PFN_xrVoidFunction*>(&xrEnumerateDisplayRefreshRatesFB_inst));
+		loadProc("xrGetDisplayRefreshRateFB", reinterpret_cast<PFN_xrVoidFunction*>(&xrGetDisplayRefreshRateFB_inst));
+		loadProc("xrRequestDisplayRefreshRateFB", reinterpret_cast<PFN_xrVoidFunction*>(&xrRequestDisplayRefreshRateFB_inst));
+		if (xrEnumerateDisplayRefreshRatesFB_inst == nullptr || xrRequestDisplayRefreshRateFB_inst == nullptr)
+		{
+			xrHasDisplayRefreshRate = false;
+		}
+	}
+#endif
 
 	XrSystemGetInfo systemInfo{ XR_TYPE_SYSTEM_GET_INFO };
 	systemInfo.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
@@ -2694,6 +2719,12 @@ void VKOpenXRDeviceMode::DestroyOpenXR() const
 	isSetup = false;
 	xrHasEquirectBackdrop = false;
 	xrHasFBColorSpace = false;
+#ifdef XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME
+	xrHasDisplayRefreshRate = false;
+	xrLoggedDisplayRefreshRates = false;
+	xrRequestedDisplayRefreshRate = 0.0f;
+	xrCurrentDisplayRefreshRate = 0.0f;
+#endif
 	xrMultiviewProbed = false;
 	xrMultiviewSupported = false;
 	xrMultiviewUsesCoreVulkan = false;
@@ -2898,6 +2929,10 @@ void VKOpenXRDeviceMode::PollXREvents() const
 				xrEndSession(xrSession);
 				isSessionRunning = false;
 				isSessionReadyToBegin = false;
+#ifdef XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME
+				xrRequestedDisplayRefreshRate = 0.0f;
+				xrCurrentDisplayRefreshRate = 0.0f;
+#endif
 			}
 			else if (ev->state == XR_SESSION_STATE_LOSS_PENDING || ev->state == XR_SESSION_STATE_EXITING)
 			{
@@ -3881,11 +3916,90 @@ void VKOpenXRDeviceMode::TearDown() const
 	StopHaptics();
 }
 
+void VKOpenXRDeviceMode::ApplyRefreshRate() const
+{
+#ifdef XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME
+	if (!xrHasDisplayRefreshRate || xrSession == XR_NULL_HANDLE || !isSessionRunning ||
+		xrEnumerateDisplayRefreshRatesFB_inst == nullptr || xrRequestDisplayRefreshRateFB_inst == nullptr)
+	{
+		return;
+	}
+
+	uint32_t rateCount = 0;
+	XrResult xrResult = xrEnumerateDisplayRefreshRatesFB_inst(xrSession, 0, &rateCount, nullptr);
+	if (XR_FAILED(xrResult) || rateCount == 0)
+		return;
+
+	std::vector<float> rates(rateCount, 0.0f);
+	xrResult = xrEnumerateDisplayRefreshRatesFB_inst(xrSession, rateCount, &rateCount, rates.data());
+	if (XR_FAILED(xrResult) || rateCount == 0)
+		return;
+
+	const float requestedRate = (float)std::max(0, (int)vid_refreshrate);
+	float selectedRate = rates[0];
+	float bestDelta = std::fabs(selectedRate - requestedRate);
+	for (uint32_t i = 1; i < rateCount; ++i)
+	{
+		const float delta = std::fabs(rates[i] - requestedRate);
+		if (delta < bestDelta)
+		{
+			selectedRate = rates[i];
+			bestDelta = delta;
+		}
+	}
+
+	if (!xrLoggedDisplayRefreshRates)
+	{
+		FString rateList;
+		for (uint32_t i = 0; i < rateCount; ++i)
+		{
+			if (i > 0)
+				rateList += ", ";
+			rateList.AppendFormat("%.0f", (double)rates[i]);
+		}
+		Printf("OpenXR: supported display refresh rates: %s Hz\n", rateList.GetChars());
+		xrLoggedDisplayRefreshRates = true;
+	}
+
+	if (std::fabs(xrRequestedDisplayRefreshRate - selectedRate) < 0.01f)
+		return;
+
+	xrResult = xrRequestDisplayRefreshRateFB_inst(xrSession, selectedRate);
+	if (XR_SUCCEEDED(xrResult))
+	{
+		xrRequestedDisplayRefreshRate = selectedRate;
+		if (xrGetDisplayRefreshRateFB_inst != nullptr)
+		{
+			float currentRate = 0.0f;
+			if (XR_SUCCEEDED(xrGetDisplayRefreshRateFB_inst(xrSession, &currentRate)))
+				xrCurrentDisplayRefreshRate = currentRate;
+			else
+				xrCurrentDisplayRefreshRate = selectedRate;
+		}
+		else
+		{
+			xrCurrentDisplayRefreshRate = selectedRate;
+		}
+
+		Printf("OpenXR: requested display refresh rate %.0f Hz (menu=%d, current=%.0f Hz)\n",
+			(double)selectedRate,
+			(int)vid_refreshrate,
+			(double)(xrCurrentDisplayRefreshRate > 0.0f ? xrCurrentDisplayRefreshRate : selectedRate));
+	}
+	else
+	{
+		Printf("OpenXR: failed to request display refresh rate %d Hz.\n", (int)vid_refreshrate);
+	}
+#endif
+}
+
 bool VKOpenXRDeviceMode::SubmitFrame() const
 {
 	if (!BeginXRFrame())
 		return false;
-	return AcquireXRSwapchain();
+	if (!AcquireXRSwapchain())
+		return false;
+	return true;
 }
 
 bool VKOpenXRDeviceMode::BeginXRFrame() const
@@ -3910,7 +4024,10 @@ bool VKOpenXRDeviceMode::BeginXRFrame() const
 		beginInfo.primaryViewConfigurationType = viewType;
 		XrResult r = xrBeginSession(xrSession, &beginInfo);
 		if (XR_SUCCEEDED(r))
+		{
 			isSessionRunning = true;
+			ApplyRefreshRate();
+		}
 		else
 			return false;
 		isSessionReadyToBegin = false;

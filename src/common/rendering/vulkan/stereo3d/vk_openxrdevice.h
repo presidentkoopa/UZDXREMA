@@ -58,6 +58,7 @@ public:
 	virtual void Present() const override;
 	virtual void PollXREvents() const override;
 	virtual bool BeginXRFrame() const override;
+	virtual void ApplyRefreshRate() const override;
 	virtual bool AcquireXRSwapchain() const override;
 	virtual bool SubmitFrame() const override;
 	virtual bool SupportsMultiview() const override { return xrMultiviewSupported; }
@@ -245,6 +246,12 @@ protected:
 	mutable bool xrMenuPointerLastLeftDown = false;
 	mutable bool xrMenuPointerLastRightDown = false;
 	mutable bool xrLoggedDesktopViewportMismatch = false;
+#ifdef XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME
+	mutable bool xrHasDisplayRefreshRate = false;
+	mutable bool xrLoggedDisplayRefreshRates = false;
+	mutable float xrRequestedDisplayRefreshRate = 0.0f;
+	mutable float xrCurrentDisplayRefreshRate = 0.0f;
+#endif
 	mutable bool mSetUpInProgress = false;
 	mutable uint64_t xrFrameCounter = 0;
 	mutable bool xrHasFBColorSpace = false;

@@ -137,6 +137,7 @@ struct VRMode
 	virtual void Present() const;
 	virtual void PollXREvents() const {}
 	virtual bool BeginXRFrame() const { return true; }
+	virtual void ApplyRefreshRate() const {}
 	virtual bool AcquireXRSwapchain() const { return true; }
 	virtual bool SubmitFrame() const { return true; }
 
