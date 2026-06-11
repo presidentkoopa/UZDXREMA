@@ -184,6 +184,7 @@ struct HWDrawInfo
 	area_t	in_area;
 	fixed_t viewx, viewy;	// since the nodes are still fixed point, keeping the view position  also fixed point for node traversal is faster.
 	bool multithread;
+	bool IsVRScene = false;
 
 private:
     // For ProcessLowerMiniseg
@@ -204,6 +205,7 @@ private:
 	void AddPolyobjs(subsector_t *sub);
 	void AddLines(subsector_t * sub, sector_t * sector);
 	void AddSpecialPortalLines(subsector_t * sub, sector_t * sector, linebase_t *line);
+	void ProcessVisibleSubsector(subsector_t* sub, sector_t* sector, sector_t* fakesector);
 	public:
 	void RenderThings(subsector_t * sub, sector_t * sector);
 	void RenderParticles(subsector_t *sub, sector_t *front);

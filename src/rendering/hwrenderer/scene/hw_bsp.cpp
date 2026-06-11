@@ -33,7 +33,6 @@
 #include "po_man.h"
 #include "m_fixed.h"
 #include "ctpl.h"
-#include "texturemanager.h"
 #include "hwrenderer/scene/hw_fakeflat.h"
 #include "hwrenderer/scene/hw_clipper.h"
 #include "hwrenderer/scene/hw_drawstructs.h"
@@ -156,6 +155,7 @@ void HWDrawInfo::WorkerThread()
 
 		case RenderJob::WallJob:
 		{
+			Clocker wallJobTimer(WTWallJobs);
 			HWWall wall;
 			SetupWall.Clock();
 			wall.sub = job->sub;
@@ -163,7 +163,7 @@ void HWDrawInfo::WorkerThread()
 			front = hw_FakeFlat(job->sub->sector, in_area, false);
 			auto seg = job->seg;
 			auto backsector = seg->backsector;
-			if (!backsector && seg->linedef->isVisualPortal() && seg->sidedef == seg->linedef->sidedef[0]) // For one-sided portals use the portal's destination sector as backsector.
+			if (!backsector && seg->linedef != nullptr && seg->linedef->isVisualPortal() && seg->sidedef == seg->linedef->sidedef[0]) // For one-sided portals use the portal's destination sector as backsector.
 			{
 				auto portal = seg->linedef->getPortal();
 				backsector = portal->mDestination->frontsector;
@@ -195,6 +195,7 @@ void HWDrawInfo::WorkerThread()
 
 		case RenderJob::FlatJob:
 		{
+			Clocker flatJobTimer(WTFlatJobs);
 			HWFlat flat;
 			SetupFlat.Clock();
 			flat.section = job->sub->section;
@@ -205,17 +206,21 @@ void HWDrawInfo::WorkerThread()
 		}
 
 		case RenderJob::SpriteJob:
+			WTThingJobs.Clock();
 			SetupSprite.Clock();
 			front = hw_FakeFlat(job->sub->sector, in_area, false);
 			RenderThings(job->sub, front);
 			SetupSprite.Unclock();
+			WTThingJobs.Unclock();
 			break;
 
 		case RenderJob::ParticleJob:
+			WTThingJobs.Clock();
 			SetupSprite.Clock();
 			front = hw_FakeFlat(job->sub->sector, in_area, false);
 			RenderParticles(job->sub, front);
 			SetupSprite.Unclock();
+			WTThingJobs.Unclock();
 			break;
 
 		case RenderJob::PortalJob:
@@ -289,7 +294,35 @@ void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
 	}
 #endif
 
+	struct ScopedVRLineTimer
+	{
+		glcycle_t* Timer = nullptr;
+
+		~ScopedVRLineTimer()
+		{
+			Stop();
+		}
+
+		void Start(glcycle_t& timer)
+		{
+			Stop();
+			Timer = &timer;
+			Timer->Clock();
+		}
+
+		void Stop()
+		{
+			if (Timer != nullptr)
+			{
+				Timer->Unclock();
+				Timer = nullptr;
+			}
+		}
+	};
+
+	ScopedVRLineTimer vrLineTimer;
 	sector_t * backsector = nullptr;
+	const bool isVisualPortalLine = seg->linedef != nullptr && seg->linedef->isVisualPortal();
 
 	if (portalclip)
 	{
@@ -297,6 +330,7 @@ void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
 		if (clipres == PClip_InFront) return;
 	}
 
+	if (IsVRScene) vrLineTimer.Start(VRLineClip);
 	auto &clipper = *mClipper;
 	angle_t startAngle = clipper.GetClipAngle(seg->v2);
 	angle_t endAngle = clipper.GetClipAngle(seg->v1);
@@ -352,6 +386,10 @@ void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
 
 	if (!Viewpoint.IsAllowedOoB() || (!r_radarclipper || (Level->flags3 & LEVEL3_NOFOGOFWAR) || clipperr.SafeCheckRange(startAngleR, endAngleR)))
 		currentsubsector->flags |= SSECMF_DRAWN;
+	if (IsVRScene)
+	{
+		vrLineTimer.Start(VRLineDecide);
+	}
 
 	uint8_t ispoly = uint8_t(seg->sidedef->Flags & WALLF_POLYOBJ);
 
@@ -381,13 +419,16 @@ void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
 	{
 		if (currentsector->sectornum == seg->backsector->sectornum)
 		{
-			if (!seg->linedef->isVisualPortal())
+			if (!isVisualPortalLine)
 			{
-				auto tex = TexMan.GetGameTexture(seg->sidedef->GetTexture(side_t::mid), true);
-				if (!tex || !tex->isValid()) 
+				const bool hasValidTexture = seg->sidedef != nullptr && seg->sidedef->GetTexture(side_t::mid).isValid();
+				if (!hasValidTexture)
 				{
 					// nothing to do here!
-					seg->linedef->validcount=validcount;
+					if (seg->linedef != nullptr)
+					{
+						seg->linedef->validcount = validcount;
+					}
 					return;
 				}
 			}
@@ -399,7 +440,6 @@ void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
 			if (in_area == area_default) in_area = hw_CheckViewArea(seg->v1, seg->v2, seg->frontsector, seg->backsector);
 
 			backsector = hw_FakeFlat(seg->backsector, in_area, true);
-
 			if (hw_CheckClip(seg->sidedef, currentsector, backsector))
 			{
 				if(!Viewpoint.IsAllowedOoB() && !(seg->sidedef->Flags & WALLF_DITHERTRANS_MID))
@@ -413,11 +453,17 @@ void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
 		backsector = currentsector;
 	}
 
-	seg->linedef->flags |= ML_MAPPED;
-
-	if (ispoly || seg->linedef->validcount!=validcount) 
+	if (seg->linedef != nullptr)
 	{
-		if (!ispoly) seg->linedef->validcount=validcount;
+		seg->linedef->flags |= ML_MAPPED;
+	}
+
+	if (ispoly || seg->linedef == nullptr || seg->linedef->validcount != validcount) 
+	{
+		if (!ispoly && seg->linedef != nullptr)
+		{
+			seg->linedef->validcount = validcount;
+		}
 
 		if (gl_render_walls)
 		{
@@ -530,12 +576,10 @@ void HWDrawInfo::AddPolyobjs(subsector_t *sub)
 
 void HWDrawInfo::AddLines(subsector_t * sub, sector_t * sector)
 {
-	const auto vrmode = VRMode::GetVRModeCached(true);
-	const bool isVRScene = vrmode != nullptr && vrmode->IsVR();
 	currentsector = sector;
 	currentsubsector = sub;
 
-	if (isVRScene) VRLineBuild.Clock();
+	if (IsVRScene) VRLineBuild.Clock();
 	ClipWall.Clock();
 	if (sub->polys != nullptr)
 	{
@@ -560,7 +604,7 @@ void HWDrawInfo::AddLines(subsector_t * sub, sector_t * sector)
 		}
 	}
 	ClipWall.Unclock();
-	if (isVRScene) VRLineBuild.Unclock();
+	if (IsVRScene) VRLineBuild.Unclock();
 }
 
 //==========================================================================
@@ -606,9 +650,7 @@ void HWDrawInfo::AddSpecialPortalLines(subsector_t * sub, sector_t * sector, lin
 
 void HWDrawInfo::RenderThings(subsector_t * sub, sector_t * sector)
 {
-	const auto vrmode = VRMode::GetVRModeCached(true);
-	const bool isVRScene = vrmode != nullptr && vrmode->IsVR();
-	if (isVRScene) VRThingBuild.Clock();
+	if (IsVRScene) VRThingBuild.Clock();
 	sector_t * sec=sub->sector;
 	// Handle all things in sector.
 	const auto &vp = Viewpoint;
@@ -678,14 +720,12 @@ void HWDrawInfo::RenderThings(subsector_t * sub, sector_t * sector)
 
 		sprite.Process(this, thing, sector, in_area, true);
 	}
-	if (isVRScene) VRThingBuild.Unclock();
+	if (IsVRScene) VRThingBuild.Unclock();
 }
 
 void HWDrawInfo::RenderParticles(subsector_t *sub, sector_t *front)
 {
-	const auto vrmode = VRMode::GetVRModeCached(true);
-	const bool isVRScene = vrmode != nullptr && vrmode->IsVR();
-	if (isVRScene) VRThingBuild.Clock();
+	if (IsVRScene) VRThingBuild.Clock();
 	SetupSprite.Clock();
 	for (uint32_t i = 0; i < sub->sprites.Size(); i++)
 	{
@@ -713,7 +753,152 @@ void HWDrawInfo::RenderParticles(subsector_t *sub, sector_t *front)
 		sprite.ProcessParticle(this, &Level->Particles[i], front, nullptr);
 	}
 	SetupSprite.Unclock();
-	if (isVRScene) VRThingBuild.Unclock();
+	if (IsVRScene) VRThingBuild.Unclock();
+}
+
+void HWDrawInfo::ProcessVisibleSubsector(subsector_t* sub, sector_t* sector, sector_t* fakesector)
+{
+	if (sector->validcount != validcount)
+	{
+		CheckUpdate(screen->mVertexData, sector);
+	}
+
+	// [RH] Add particles
+	if (gl_render_things && (sub->sprites.Size() > 0 || Level->ParticlesInSubsec[sub->Index()] != NO_PARTICLE))
+	{
+		if (multithread)
+		{
+			jobQueue.AddJob(RenderJob::ParticleJob, sub, nullptr);
+		}
+		else
+		{
+			SetupSprite.Clock();
+			RenderParticles(sub, fakesector);
+			SetupSprite.Unclock();
+		}
+	}
+
+	AddLines(sub, fakesector);
+
+	// BSP is traversed by subsector.
+	// A sector might have been split into several
+	//	subsectors during BSP building.
+	// Thus we check whether it was already added.
+	if (sector->validcount != validcount)
+	{
+		// Well, now it will be done.
+		sector->validcount = validcount;
+		sector->MoreFlags |= SECMF_DRAWN;
+
+		if (gl_render_things && (sector->touching_renderthings || sector->sectorportal_thinglist))
+		{
+			if (multithread)
+			{
+				jobQueue.AddJob(RenderJob::SpriteJob, sub, nullptr);
+			}
+			else
+			{
+				SetupSprite.Clock();
+				RenderThings(sub, fakesector);
+				SetupSprite.Unclock();
+			}
+		}
+		if (r_dithertransparency && Viewpoint.IsAllowedOoB() && (RTnum < MAXDITHERACTORS) && mCurrentPortal == nullptr)
+		{
+			// [DVR] Not parallelizable due to variables RTnum and RenderedTargets[]
+			for (auto p = sector->touching_renderthings; p != nullptr; p = p->m_snext)
+			{
+				auto thing = p->m_thing;
+				if (thing->validcount == validcount) continue; // Don't double count
+				if (((thing->flags3 & MF3_ISMONSTER) && !(thing->flags & MF_CORPSE)) || (thing->flags & MF_MISSILE))
+				{
+					if (RTnum < MAXDITHERACTORS) RenderedTargets[RTnum++] = thing;
+					else break;
+				}
+			}
+		}
+	}
+
+	if (gl_render_flats)
+	{
+		// Subsectors with only 2 lines cannot have any area
+		if (sub->numlines > 2 || (sub->hacked & 1))
+		{
+			// Exclude the case when it tries to render a sector with a heightsec
+			// but undetermined heightsec state. This can only happen if the
+			// subsector is obstructed but not excluded due to a large bounding box.
+			// Due to the way a BSP works such a subsector can never be visible
+			if (!sector->GetHeightSec() || in_area != area_default)
+			{
+				if (sector != sub->render_sector)
+				{
+					sector = sub->render_sector;
+					// the planes of this subsector are faked to belong to another sector
+					// This means we need the heightsec parts and light info of the render sector, not the actual one.
+					fakesector = hw_FakeFlat(sector, in_area, false);
+				}
+
+				uint8_t& srf = section_renderflags[Level->sections.SectionIndex(sub->section)];
+				if (!(srf & SSRF_PROCESSED))
+				{
+					srf |= SSRF_PROCESSED;
+
+					if (multithread)
+					{
+						jobQueue.AddJob(RenderJob::FlatJob, sub);
+					}
+					else
+					{
+						HWFlat flat;
+						flat.section = sub->section;
+						if (IsVRScene) VRFlatBuild.Clock();
+						SetupFlat.Clock();
+						flat.ProcessSector(this, fakesector);
+						SetupFlat.Unclock();
+						if (IsVRScene) VRFlatBuild.Unclock();
+					}
+				}
+				// mark subsector as processed - but mark for rendering only if it has an actual area.
+				ss_renderflags[sub->Index()] =
+					(sub->numlines > 2) ? SSRF_PROCESSED | SSRF_RENDERALL : SSRF_PROCESSED;
+				if (sub->hacked & 1) AddHackedSubsector(sub);
+
+				// This is for portal coverage.
+				FSectorPortalGroup* portal;
+
+				// AddSubsectorToPortal cannot be called here when using multithreaded processing,
+				// because the wall processing code in the worker can also modify the portal state.
+				// To avoid costly synchronization for every access to the portal list,
+				// the call to AddSubsectorToPortal will be deferred to the worker.
+				// (GetPortalGruop only accesses static sector data so this check can be done here, restricting the new job to the minimum possible extent.)
+				portal = fakesector->GetPortalGroup(sector_t::ceiling);
+				if (portal != nullptr)
+				{
+					if (multithread)
+					{
+						jobQueue.AddJob(RenderJob::PortalJob, sub, (seg_t*)portal);
+					}
+					else
+					{
+						AddSubsectorToPortal(portal, sub);
+					}
+				}
+
+				portal = fakesector->GetPortalGroup(sector_t::floor);
+				if (portal != nullptr)
+				{
+					if (multithread)
+					{
+						jobQueue.AddJob(RenderJob::PortalJob, sub, (seg_t*)portal);
+					}
+					else
+					{
+						AddSubsectorToPortal(portal, sub);
+					}
+				}
+			}
+		}
+	}
 }
 
 
@@ -728,9 +913,8 @@ void HWDrawInfo::RenderParticles(subsector_t *sub, sector_t *front)
 
 void HWDrawInfo::DoSubsector(subsector_t * sub)
 {
-	const auto vrmode = VRMode::GetVRModeCached(true);
-	const bool isVRScene = vrmode != nullptr && vrmode->IsVR();
-	if (isVRScene) VRSubsectors.Clock();
+	if (IsVRScene) VRSubsectors.Clock();
+	if (IsVRScene) VRSubsectorCull.Clock();
 	sector_t * sector;
 	sector_t * fakesector;
 	
@@ -744,19 +928,22 @@ void HWDrawInfo::DoSubsector(subsector_t * sub)
 	sector=sub->sector;
 	if (!sector)
 	{
-		if (isVRScene) VRSubsectors.Unclock();
+		if (IsVRScene) VRSubsectorCull.Unclock();
+		if (IsVRScene) VRSubsectors.Unclock();
 		return;
 	}
 
 	// If the mapsections differ this subsector can't possibly be visible from the current view point
 	if (!CurrentMapSections[sub->mapsection])
 	{
-		if (isVRScene) VRSubsectors.Unclock();
+		if (IsVRScene) VRSubsectorCull.Unclock();
+		if (IsVRScene) VRSubsectors.Unclock();
 		return;
 	}
 	if (sub->flags & SSECF_POLYORG)
 	{
-		if (isVRScene) VRSubsectors.Unclock();
+		if (IsVRScene) VRSubsectorCull.Unclock();
+		if (IsVRScene) VRSubsectors.Unclock();
 		return;
 	}	// never render polyobject origin subsectors because their vertices no longer are where one may expect.
 
@@ -769,7 +956,8 @@ void HWDrawInfo::DoSubsector(subsector_t * sub)
 	}
 	if (mClipper->IsBlocked())
 	{
-		if (isVRScene) VRSubsectors.Unclock();
+		if (IsVRScene) VRSubsectorCull.Unclock();
+		if (IsVRScene) VRSubsectors.Unclock();
 		return;
 	}	// if we are inside a stacked sector portal which hasn't unclipped anything yet.
 
@@ -777,7 +965,8 @@ void HWDrawInfo::DoSubsector(subsector_t * sub)
 
 	if(Viewpoint.IsAllowedOoB() && sector->isSecret() && sector->wasSecret() && !r_radarclipper)
 	{
-		if (isVRScene) VRSubsectors.Unclock();
+		if (IsVRScene) VRSubsectorCull.Unclock();
+		if (IsVRScene) VRSubsectors.Unclock();
 		return;
 	}
 
@@ -850,7 +1039,8 @@ void HWDrawInfo::DoSubsector(subsector_t * sub)
 		// Skip subsector if outside vertical or horizontal clippers or is in unexplored territory (fog of war)
 		if(!pitchvisible || !anglevisible || (!radarvisible && r_radarclipper))
 		{
-			if (isVRScene) VRSubsectors.Unclock();
+			if (IsVRScene) VRSubsectorCull.Unclock();
+			if (IsVRScene) VRSubsectors.Unclock();
 			return;
 		}
 	}
@@ -863,153 +1053,16 @@ void HWDrawInfo::DoSubsector(subsector_t * sub)
 			auto line = mClipPortal->ClipLine();
 			// The subsector is out of range, but we still have to check lines that lie directly on the boundary and may expose their upper or lower parts.
 			if (line) AddSpecialPortalLines(sub, fakesector, line);
-			if (isVRScene) VRSubsectors.Unclock();
+			if (IsVRScene) VRSubsectorCull.Unclock();
+			if (IsVRScene) VRSubsectors.Unclock();
 			return;
 		}
 	}
-
-	if (sector->validcount != validcount)
-	{
-		CheckUpdate(screen->mVertexData, sector);
-	}
-
-	// [RH] Add particles
-	if (gl_render_things && (sub->sprites.Size() > 0 || Level->ParticlesInSubsec[sub->Index()] != NO_PARTICLE))
-	{
-		if (multithread)
-		{
-			jobQueue.AddJob(RenderJob::ParticleJob, sub, nullptr);
-		}
-		else
-		{
-			SetupSprite.Clock();
-			RenderParticles(sub, fakesector);
-			SetupSprite.Unclock();
-		}
-	}
-
-	AddLines(sub, fakesector);
-
-	// BSP is traversed by subsector.
-	// A sector might have been split into several
-	//	subsectors during BSP building.
-	// Thus we check whether it was already added.
-	if (sector->validcount != validcount)
-	{
-		// Well, now it will be done.
-		sector->validcount = validcount;
-		sector->MoreFlags |= SECMF_DRAWN;
-
-		if (gl_render_things && (sector->touching_renderthings || sector->sectorportal_thinglist))
-		{
-			if (multithread)
-			{
-				jobQueue.AddJob(RenderJob::SpriteJob, sub, nullptr);
-			}
-			else
-			{
-				SetupSprite.Clock();
-				RenderThings(sub, fakesector);
-				SetupSprite.Unclock();
-			}
-		}
-		if (r_dithertransparency && Viewpoint.IsAllowedOoB() && (RTnum < MAXDITHERACTORS) && mCurrentPortal == nullptr)
-		{
-			// [DVR] Not parallelizable due to variables RTnum and RenderedTargets[]
-			for (auto p = sector->touching_renderthings; p != nullptr; p = p->m_snext)
-			{
-				auto thing = p->m_thing;
-				if (thing->validcount == validcount) continue; // Don't double count
-				if (((thing->flags3 & MF3_ISMONSTER) && !(thing->flags & MF_CORPSE)) || (thing->flags & MF_MISSILE))
-				{
-					if (RTnum < MAXDITHERACTORS) RenderedTargets[RTnum++] = thing;
-					else break;
-				}
-			}
-		}
-	}
-
-	if (gl_render_flats)
-	{
-		// Subsectors with only 2 lines cannot have any area
-		if (sub->numlines>2 || (sub->hacked&1)) 
-		{
-			// Exclude the case when it tries to render a sector with a heightsec
-			// but undetermined heightsec state. This can only happen if the
-			// subsector is obstructed but not excluded due to a large bounding box.
-			// Due to the way a BSP works such a subsector can never be visible
-			if (!sector->GetHeightSec() || in_area!=area_default)
-			{
-				if (sector != sub->render_sector)
-				{
-					sector = sub->render_sector;
-					// the planes of this subsector are faked to belong to another sector
-					// This means we need the heightsec parts and light info of the render sector, not the actual one.
-					fakesector = hw_FakeFlat(sector, in_area, false);
-				}
-
-				uint8_t &srf = section_renderflags[Level->sections.SectionIndex(sub->section)];
-				if (!(srf & SSRF_PROCESSED))
-				{
-					srf |= SSRF_PROCESSED;
-
-					if (multithread)
-					{
-						jobQueue.AddJob(RenderJob::FlatJob, sub);
-					}
-					else
-					{
-						HWFlat flat;
-						flat.section = sub->section;
-						if (isVRScene) VRFlatBuild.Clock();
-						SetupFlat.Clock();
-						flat.ProcessSector(this, fakesector);
-						SetupFlat.Unclock();
-						if (isVRScene) VRFlatBuild.Unclock();
-					}
-				}
-				// mark subsector as processed - but mark for rendering only if it has an actual area.
-				ss_renderflags[sub->Index()] = 
-					(sub->numlines > 2) ? SSRF_PROCESSED|SSRF_RENDERALL : SSRF_PROCESSED;
-				if (sub->hacked & 1) AddHackedSubsector(sub);
-
-				// This is for portal coverage.
-				FSectorPortalGroup *portal;
-
-				// AddSubsectorToPortal cannot be called here when using multithreaded processing,
-				// because the wall processing code in the worker can also modify the portal state.
-				// To avoid costly synchronization for every access to the portal list,
-				// the call to AddSubsectorToPortal will be deferred to the worker.
-				// (GetPortalGruop only accesses static sector data so this check can be done here, restricting the new job to the minimum possible extent.)
-				portal = fakesector->GetPortalGroup(sector_t::ceiling);
-				if (portal != nullptr)
-				{
-					if (multithread)
-					{
-						jobQueue.AddJob(RenderJob::PortalJob, sub, (seg_t *)portal);
-					}
-					else
-					{
-						AddSubsectorToPortal(portal, sub);
-					}
-				}
-
-				portal = fakesector->GetPortalGroup(sector_t::floor);
-				if (portal != nullptr)
-				{
-					if (multithread)
-					{
-						jobQueue.AddJob(RenderJob::PortalJob, sub, (seg_t *)portal);
-					}
-					else
-					{
-						AddSubsectorToPortal(portal, sub);
-					}
-				}
-			}
-		}
-	}
-	if (isVRScene) VRSubsectors.Unclock();
+	if (IsVRScene) VRSubsectorCull.Unclock();
+	if (IsVRScene) VRSubsectorVisible.Clock();
+	ProcessVisibleSubsector(sub, sector, fakesector);
+	if (IsVRScene) VRSubsectorVisible.Unclock();
+	if (IsVRScene) VRSubsectors.Unclock();
 }
 
 
@@ -1101,8 +1154,8 @@ void HWDrawInfo::RenderBSP(void *node, bool drawpsprites)
 
 	validcount++;	// used for processing sidedefs only once by the renderer.
 
-	const auto vrmode = VRMode::GetVRModeCached(true);
-	multithread = gl_multithread && !vrmode->IsVR();
+	const bool allowVRMultithread = IsVRScene && vr_scene_multithread;
+	multithread = gl_multithread && (!IsVRScene || allowVRMultithread);
 	if (multithread)
 	{
 		jobQueue.ReleaseAll();
@@ -1140,9 +1193,8 @@ void HWDrawInfo::RenderBSP(void *node, bool drawpsprites)
 
 	if (drawpsprites)
 	{
-		const bool isVRScene = vrmode->IsVR();
-		if (isVRScene) VRPlayerSprites.Clock();
+		if (IsVRScene) VRPlayerSprites.Clock();
 		PreparePlayerSprites(Viewpoint.sector, in_area);
-		if (isVRScene) VRPlayerSprites.Unclock();
+		if (IsVRScene) VRPlayerSprites.Unclock();
 	}
 }

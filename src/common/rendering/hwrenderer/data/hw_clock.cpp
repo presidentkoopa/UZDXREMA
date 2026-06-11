@@ -46,12 +46,13 @@ glcycle_t RenderFlat,SetupFlat;
 glcycle_t RenderSprite,SetupSprite;
 glcycle_t All, Finish, PortalAll, Bsp;
 glcycle_t ProcessAll, PostProcess;
-glcycle_t VRSceneEyes, VRSceneBuild, VRSubsectors, VRLineBuild, VRThingBuild, VRFlatBuild, VRScenePostBSP, VRPlayerSprites, VRSceneDraw, VREyeComposite, VRFinalizeEye, VRSubmit;
+glcycle_t VRSceneEyes, VRSceneBuild, VRSubsectors, VRSubsectorCull, VRSubsectorVisible, VRLineBuild, VRLineClip, VRLineDecide, VRThingBuild, VRFlatBuild, VRScenePostBSP, VRPlayerSprites, VRSceneDraw, VREyeComposite, VRFinalizeEye, VRSubmit;
 glcycle_t RenderAll;
 glcycle_t Dirty;
 glcycle_t drawcalls;
 glcycle_t twoD, Flush3D;
 glcycle_t MTWait, WTTotal;
+glcycle_t WTWallJobs, WTFlatJobs, WTThingJobs;
 int vertexcount, flatvertices, flatprimitives;
 
 int rendered_lines,rendered_flats,rendered_sprites,render_vertexsplit,render_texsplit,rendered_decals, rendered_portals, rendered_commandbuffers;
@@ -70,7 +71,11 @@ void ResetProfilingData()
 	VRSceneEyes.Reset();
 	VRSceneBuild.Reset();
 	VRSubsectors.Reset();
+	VRSubsectorCull.Reset();
+	VRSubsectorVisible.Reset();
 	VRLineBuild.Reset();
+	VRLineClip.Reset();
+	VRLineDecide.Reset();
 	VRThingBuild.Reset();
 	VRFlatBuild.Reset();
 	VRScenePostBSP.Reset();
@@ -89,6 +94,9 @@ void ResetProfilingData()
 	drawcalls.Reset();
 	MTWait.Reset();
 	WTTotal.Reset();
+	WTWallJobs.Reset();
+	WTFlatJobs.Reset();
+	WTThingJobs.Reset();
 
 	flatvertices=flatprimitives=vertexcount=0;
 	render_texsplit=render_vertexsplit=rendered_lines=rendered_flats=rendered_sprites=rendered_decals=rendered_portals = 0;
@@ -106,6 +114,8 @@ static void AppendRenderTimes(FString &str)
 	double setupwall = SetupWall.TimeMS();
 	double clipwall = ClipWall.TimeMS();
 	double bsp = Bsp.TimeMS() - ClipWall.TimeMS();
+	double vrThingBuild = VRThingBuild.TimeMS() + WTThingJobs.TimeMS();
+	double vrFlatBuild = VRFlatBuild.TimeMS() + WTFlatJobs.TimeMS();
 
 	str.AppendFormat("BSP = %2.3f, Clip=%2.3f\n"
 		"W: Render=%2.3f, Setup=%2.3f\n"
@@ -114,6 +124,8 @@ static void AppendRenderTimes(FString &str)
 		"2D: %2.3f Finish3D: %2.3f\n"
 		"VR: SceneEyes=%2.3f SceneBuild=%2.3f SceneDraw=%2.3f\n"
 		"VR: Subsectors=%2.3f Lines=%2.3f Things=%2.3f Flats=%2.3f\n"
+		"VR: SubCull=%2.3f SubVisible=%2.3f\n"
+		"VR: LineClip=%2.3f LineDecide=%2.3f\n"
 		"VR: PostBSP=%2.3f PlayerSprites=%2.3f\n"
 		"VR: EyeComposite=%2.3f FinalizeEye=%2.3f Submit=%2.3f\n"
 		"Main thread total=%2.3f, Main thread waiting=%2.3f Worker thread total=%2.3f, Worker thread waiting=%2.3f\n"
@@ -124,7 +136,9 @@ static void AppendRenderTimes(FString &str)
 		RenderSprite.TimeMS(), SetupSprite.TimeMS(), 
 		twoD.TimeMS(), Flush3D.TimeMS() - twoD.TimeMS(),
 		VRSceneEyes.TimeMS(), VRSceneBuild.TimeMS(), VRSceneDraw.TimeMS(),
-		VRSubsectors.TimeMS(), VRLineBuild.TimeMS(), VRThingBuild.TimeMS(), VRFlatBuild.TimeMS(),
+		VRSubsectors.TimeMS(), VRLineBuild.TimeMS(), vrThingBuild, vrFlatBuild,
+		VRSubsectorCull.TimeMS(), VRSubsectorVisible.TimeMS(),
+		VRLineClip.TimeMS(), VRLineDecide.TimeMS(),
 		VRScenePostBSP.TimeMS(), VRPlayerSprites.TimeMS(),
 		VREyeComposite.TimeMS(), VRFinalizeEye.TimeMS(), VRSubmit.TimeMS(),
 		MTWait.TimeMS() + Bsp.TimeMS(), MTWait.TimeMS(), WTTotal.TimeMS(), WTTotal.TimeMS() - setupwall - SetupFlat.TimeMS() - SetupSprite.TimeMS(),

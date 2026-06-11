@@ -74,3 +74,4 @@ EXTERN_CVAR(Bool, gl_no_ssbo)
 
 EXTERN_CVAR(Bool, r_radarclipper)
 EXTERN_CVAR(Bool, r_dithertransparency)
+EXTERN_CVAR(Bool, vr_scene_multithread)
