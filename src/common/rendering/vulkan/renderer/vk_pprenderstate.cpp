@@ -126,13 +126,20 @@ void VkPPRenderState::DrawToImage(VkTextureImage *image, VkFormat outputFormat, 
 		.AddImage(image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, false)
 		.Execute(cmdbuffer);
 
-	auto &framebuffer = image->PPFramebuffer;
+	const bool useLayerView = image->Image != nullptr && image->Image->layerCount > 1;
+	const int layerIndex = useLayerView ? fb->GetCurrentEyeLayer() : -1;
+	const VulkanImageView* outputView = useLayerView ? image->GetLayerView(layerIndex) : image->GetFramebufferView();
+
+	VkTextureImage::VkPPOutputFramebufferKey framebufferKey = {};
+	framebufferKey.LayerIndex = layerIndex;
+	framebufferKey.DepthStencilMode = 0;
+	auto &framebuffer = image->PPOutputFramebuffers[framebufferKey];
 	if (!framebuffer)
 	{
 		FramebufferBuilder builder;
 		builder.RenderPass(passSetup->RenderPass.get());
 		builder.Size(framebufferWidth, framebufferHeight);
-		builder.AddAttachment(image->GetFramebufferView());
+		builder.AddAttachment(const_cast<VulkanImageView*>(outputView));
 		builder.DebugName("VkPPRenderPassSetup.CustomFramebuffer");
 		framebuffer = builder.Create(fb->device.get());
 	}
