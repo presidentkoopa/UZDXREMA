@@ -73,15 +73,19 @@ int VkPostprocess::GetNextPipelineImage() const
 
 void VkPostprocess::SetActiveRenderTarget()
 {
-	Printf("OpenXR: SetActiveRenderTarget mCurrentPipelineImage=%d\n", mCurrentPipelineImage);
+	if (vr_openxr_debug_present || vr_openxr_debug_sizes)
+	{
+		Printf("OpenXR: SetActiveRenderTarget mCurrentPipelineImage=%d\n", mCurrentPipelineImage);
+	}
 	auto buffers = fb->GetBuffers();
+	const int layerIndex = buffers->GetPipelineLayers() > 1 ? fb->GetCurrentEyeLayer() : 0;
 
 	VkImageTransition()
 		.AddImage(&buffers->PipelineImage[mCurrentPipelineImage], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, false)
 		.AddImage(&buffers->PipelineDepthStencil, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, false)
 		.Execute(fb->GetCommands()->GetDrawCommands());
 
-	fb->GetRenderState()->SetRenderTarget(&buffers->PipelineImage[mCurrentPipelineImage], buffers->PipelineDepthStencil.View.get(), buffers->GetWidth(), buffers->GetHeight(), VK_FORMAT_R16G16B16A16_SFLOAT, VK_SAMPLE_COUNT_1_BIT);
+	fb->GetRenderState()->SetRenderTarget(&buffers->PipelineImage[mCurrentPipelineImage], buffers->PipelineDepthStencil.GetLayerView(layerIndex), buffers->GetWidth(), buffers->GetHeight(), VK_FORMAT_R16G16B16A16_SFLOAT, VK_SAMPLE_COUNT_1_BIT, 1, 0, layerIndex);
 }
 
 void VkPostprocess::PostProcessScene(int fixedcm, float flash, const std::function<void()> &afterBloomDrawEndScene2D)
@@ -112,16 +116,18 @@ void VkPostprocess::BlitSceneToPostprocess()
 	if (buffers->GetSceneSamples() != VK_SAMPLE_COUNT_1_BIT)
 	{
 		auto sceneColor = buffers->SceneColor.Image.get();
+		const uint32_t sceneLayer = buffers->GetSceneLayers() > 1 ? (uint32_t)fb->GetCurrentEyeLayer() : 0u;
+		const uint32_t pipelineLayer = buffers->GetPipelineLayers() > 1 ? (uint32_t)fb->GetCurrentEyeLayer() : 0u;
 		VkImageResolve resolve = {};
 		resolve.srcOffset = { 0, 0, 0 };
 		resolve.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		resolve.srcSubresource.mipLevel = 0;
-		resolve.srcSubresource.baseArrayLayer = 0;
+		resolve.srcSubresource.baseArrayLayer = sceneLayer;
 		resolve.srcSubresource.layerCount = 1;
 		resolve.dstOffset = { 0, 0, 0 };
 		resolve.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		resolve.dstSubresource.mipLevel = 0;
-		resolve.dstSubresource.baseArrayLayer = 0;
+		resolve.dstSubresource.baseArrayLayer = pipelineLayer;
 		resolve.dstSubresource.layerCount = 1;
 		resolve.extent = { (uint32_t)sceneColor->width, (uint32_t)sceneColor->height, 1 };
 		cmdbuffer->resolveImage(
@@ -132,18 +138,20 @@ void VkPostprocess::BlitSceneToPostprocess()
 	else
 	{
 		auto sceneColor = buffers->SceneColor.Image.get();
+		const uint32_t sceneLayer = buffers->GetSceneLayers() > 1 ? (uint32_t)fb->GetCurrentEyeLayer() : 0u;
+		const uint32_t pipelineLayer = buffers->GetPipelineLayers() > 1 ? (uint32_t)fb->GetCurrentEyeLayer() : 0u;
 		VkImageBlit blit = {};
 		blit.srcOffsets[0] = { 0, 0, 0 };
 		blit.srcOffsets[1] = { sceneColor->width, sceneColor->height, 1 };
 		blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		blit.srcSubresource.mipLevel = 0;
-		blit.srcSubresource.baseArrayLayer = 0;
+		blit.srcSubresource.baseArrayLayer = sceneLayer;
 		blit.srcSubresource.layerCount = 1;
 		blit.dstOffsets[0] = { 0, 0, 0 };
 		blit.dstOffsets[1] = { sceneColor->width, sceneColor->height, 1 };
 		blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		blit.dstSubresource.mipLevel = 0;
-		blit.dstSubresource.baseArrayLayer = 0;
+		blit.dstSubresource.baseArrayLayer = pipelineLayer;
 		blit.dstSubresource.layerCount = 1;
 		cmdbuffer->blitImage(
 			sceneColor->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -170,6 +178,8 @@ void VkPostprocess::BlitCurrentToImage(VkTextureImage *dstimage, VkImageLayout f
 
 	auto srcimage = &fb->GetBuffers()->PipelineImage[mCurrentPipelineImage];
 	auto cmdbuffer = fb->GetCommands()->GetDrawCommands();
+	const uint32_t srcLayer = srcimage->Image && srcimage->Image->layerCount > 1 ? (uint32_t)fb->GetCurrentEyeLayer() : 0u;
+	const uint32_t dstLayer = dstimage->Image && dstimage->Image->layerCount > 1 ? (uint32_t)fb->GetCurrentEyeLayer() : 0u;
 
 	VkImageTransition()
 		.AddImage(srcimage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
@@ -181,13 +191,13 @@ void VkPostprocess::BlitCurrentToImage(VkTextureImage *dstimage, VkImageLayout f
 	blit.srcOffsets[1] = { srcimage->Image->width, srcimage->Image->height, 1 };
 	blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	blit.srcSubresource.mipLevel = 0;
-	blit.srcSubresource.baseArrayLayer = 0;
+	blit.srcSubresource.baseArrayLayer = srcLayer;
 	blit.srcSubresource.layerCount = 1;
 	blit.dstOffsets[0] = { 0, 0, 0 };
 	blit.dstOffsets[1] = { dstimage->Image->width, dstimage->Image->height, 1 };
 	blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	blit.dstSubresource.mipLevel = 0;
-	blit.dstSubresource.baseArrayLayer = 0;
+	blit.dstSubresource.baseArrayLayer = dstLayer;
 	blit.dstSubresource.layerCount = 1;
 
 	cmdbuffer->blitImage(

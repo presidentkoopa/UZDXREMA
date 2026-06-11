@@ -35,6 +35,7 @@
 #include "vulkan/system/vk_buffer.h"
 #include "flatvertices.h"
 #include "hw_viewpointuniforms.h"
+#include "hwrenderer/data/hw_viewpointbuffer.h"
 #include "v_2ddrawer.h"
 
 VkDescriptorSetManager::VkDescriptorSetManager(VulkanRenderDevice* fb) : fb(fb)
@@ -80,8 +81,10 @@ void VkDescriptorSetManager::UpdateHWBufferSet()
 		HWBufferSet = HWBufferDescriptorPool->allocate(HWBufferSetLayout.get());
 	}
 
+	const size_t viewpointRange = screen->mViewpoints ? (size_t)screen->mViewpoints->GetBlockSize() * 2 : sizeof(HWViewpointUniforms);
+
 	WriteDescriptors()
-		.AddBuffer(HWBufferSet.get(), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, fb->GetBufferManager()->ViewpointUBO->mBuffer.get(), 0, sizeof(HWViewpointUniforms))
+		.AddBuffer(HWBufferSet.get(), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, fb->GetBufferManager()->ViewpointUBO->mBuffer.get(), 0, viewpointRange)
 		.AddBuffer(HWBufferSet.get(), 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, fb->GetBufferManager()->MatrixBuffer->UniformBuffer->mBuffer.get(), 0, sizeof(MatricesUBO))
 		.AddBuffer(HWBufferSet.get(), 2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, fb->GetBufferManager()->StreamBuffer->UniformBuffer->mBuffer.get(), 0, sizeof(StreamUBO))
 		.AddBuffer(HWBufferSet.get(), 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fb->GetBufferManager()->LightBufferSSO->mBuffer.get())
@@ -205,8 +208,9 @@ VulkanDescriptorSet* VkDescriptorSetManager::GetInput(VkPPRenderPassSetup* passS
 		const PPTextureInput& input = textures[index];
 		VulkanSampler* sampler = fb->GetSamplerManager()->Get(input.Filter, input.Wrap);
 		VkTextureImage* tex = fb->GetTextureManager()->GetTexture(input.Type, input.Texture);
+		VulkanImageView* view = fb->GetTextureManager()->GetTextureView(input.Type, input.Texture, tex->DepthOnlyView != nullptr);
 
-		write.AddCombinedImageSampler(descriptors.get(), index, tex->DepthOnlyView ? tex->DepthOnlyView.get() : tex->View.get(), sampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		write.AddCombinedImageSampler(descriptors.get(), index, view, sampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 		imageTransition.AddImage(tex, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false);
 	}
 

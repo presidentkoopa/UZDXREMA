@@ -26,6 +26,7 @@ public:
 	void SetLightmap(int LMTextureSize, int LMTextureCount, const TArray<uint16_t>& LMTextureData);
 
 	VkTextureImage* GetTexture(const PPTextureType& type, PPTexture* tex);
+	VulkanImageView* GetTextureView(const PPTextureType& type, PPTexture* tex, bool depthOnly);
 	VkFormat GetTextureFormat(PPTexture* texture);
 
 	void AddTexture(VkHardwareTexture* texture);

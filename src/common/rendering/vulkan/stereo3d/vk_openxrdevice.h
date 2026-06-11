@@ -23,6 +23,7 @@ public:
 	virtual DAngle GetRenderFov(DAngle fallback) const override;
 	virtual VSMatrix GetHUDProjection() const override;
 	DVector3 GetViewShift(FRenderViewpoint& vp) const override;
+	virtual void AdjustViewpointUniforms(HWViewpointUniforms& uniforms) const override;
 	virtual void SetUp() const override;
 	virtual void TearDown() const override;
 	virtual void AdjustHud() const override;
@@ -59,6 +60,10 @@ public:
 	virtual bool BeginXRFrame() const override;
 	virtual bool AcquireXRSwapchain() const override;
 	virtual bool SubmitFrame() const override;
+	virtual bool SupportsMultiview() const override { return xrMultiviewSupported; }
+	virtual bool ShouldUseMultiviewThisFrame() const override;
+	virtual int GetMultiviewLayerCount() const override;
+	virtual uint32_t GetMultiviewViewMask() const override;
 	virtual void AdjustViewport(DFrameBuffer* screen) const override;
 	virtual void AdjustPlayerSprites(FRenderState& state, int hand = 0) const override;
 	virtual void UnAdjustPlayerSprites(FRenderState& state) const override;
@@ -244,6 +249,11 @@ protected:
 	mutable uint64_t xrFrameCounter = 0;
 	mutable bool xrHasFBColorSpace = false;
 	mutable bool xrHasEquirectBackdrop = false;
+	mutable bool xrMultiviewProbed = false;
+	mutable bool xrMultiviewSupported = false;
+	mutable bool xrMultiviewUsesCoreVulkan = false;
+	mutable uint32_t xrMultiviewMaxViewCount = 0;
+	mutable uint32_t xrMultiviewMaxInstanceIndex = 0;
     
 private:
 	typedef VRMode super;

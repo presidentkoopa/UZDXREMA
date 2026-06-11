@@ -222,6 +222,10 @@ DEFINE_ACTION_FUNCTION_NATIVE(DShape2D, PushTriangle, Shape2D_PushTriangle)
 int F2DDrawer::AddCommand(RenderCommand *data) 
 {
 	data->mScreenFade = screenFade;
+	if (data->mOutside2D)
+		mHasOutside2DCommands = true;
+	else
+		mHasInside2DCommands = true;
 	if (mData.Size() > 0 && data->isCompatible(mData.Last()))
 	{
 		// Merge with the last command.
@@ -1203,6 +1207,8 @@ void F2DDrawer::Clear()
 		mIndices.Clear();
 		mData.Clear();
 		mIsFirstPass = true;
+		mHasInside2DCommands = false;
+		mHasOutside2DCommands = false;
 	}
 	screenFade = 1.f;
 }

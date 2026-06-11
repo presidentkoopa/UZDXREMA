@@ -249,6 +249,7 @@ public:
 	void End() { isIn2D = false; }
 	bool HasBegun2D() { return isIn2D; }
 	void OnFrameDone();
+	bool HasCommandsForPass(bool outside2D) const { return outside2D ? mHasOutside2DCommands : mHasInside2DCommands; }
 
 	void ClearClipRect() { clipleft = cliptop = 0; clipwidth = clipheight = -1; }
 	void SetClipRect(int x, int y, int w, int h);
@@ -276,6 +277,8 @@ public:
 	}
 
 	bool mIsFirstPass = true;
+	bool mHasInside2DCommands = false;
+	bool mHasOutside2DCommands = false;
 };
 
 // DCanvas is already taken so using FCanvas instead.

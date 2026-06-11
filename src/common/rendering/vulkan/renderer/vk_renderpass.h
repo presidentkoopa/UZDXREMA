@@ -45,6 +45,8 @@ public:
 	int DepthStencil;
 	int Samples;
 	int DrawBuffers;
+	int Layers;
+	uint32_t ViewMask;
 	VkFormat DrawBufferFormat;
 
 	bool operator<(const VkRenderPassKey &other) const { return memcmp(this, &other, sizeof(VkRenderPassKey)) < 0; }
@@ -94,6 +96,8 @@ public:
 	int ShadowMapBuffers;
 	WhichDepthStencil StencilTest;
 	VkSampleCountFlagBits Samples;
+	int Layers;
+	uint32_t ViewMask;
 
 	bool operator<(const VkPPRenderPassKey& other) const { return memcmp(this, &other, sizeof(VkPPRenderPassKey)) < 0; }
 	bool operator==(const VkPPRenderPassKey& other) const { return memcmp(this, &other, sizeof(VkPPRenderPassKey)) == 0; }

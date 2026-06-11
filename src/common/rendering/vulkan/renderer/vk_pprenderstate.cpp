@@ -54,7 +54,7 @@ void VkPPRenderState::Draw()
 {
 	fb->GetRenderState()->EndRenderPass();
 
-	VkPPRenderPassKey key;
+	VkPPRenderPassKey key = {};
 	key.BlendMode = BlendMode;
 	key.InputTextures = Textures.Size();
 	key.Uniforms = Uniforms.Data.Size();
@@ -80,6 +80,8 @@ void VkPPRenderState::Draw()
 		key.StencilTest = WhichDepthStencil::None;
 		key.Samples = VK_SAMPLE_COUNT_1_BIT;
 	}
+	key.Layers = 1;
+	key.ViewMask = 0;
 
 	auto passSetup = fb->GetRenderPassManager()->GetPPRenderPass(key);
 
@@ -101,7 +103,7 @@ void VkPPRenderState::DrawToImage(VkTextureImage *image, VkFormat outputFormat, 
 {
 	fb->GetRenderState()->EndRenderPass();
 
-	VkPPRenderPassKey key;
+	VkPPRenderPassKey key = {};
 	key.BlendMode = BlendMode;
 	key.InputTextures = Textures.Size();
 	key.Uniforms = Uniforms.Data.Size();
@@ -111,6 +113,8 @@ void VkPPRenderState::DrawToImage(VkTextureImage *image, VkFormat outputFormat, 
 	key.OutputFormat = outputFormat;
 	key.StencilTest = WhichDepthStencil::None;
 	key.Samples = VK_SAMPLE_COUNT_1_BIT;
+	key.Layers = 1;
+	key.ViewMask = 0;
 
 	auto passSetup = fb->GetRenderPassManager()->GetPPRenderPass(key);
 
@@ -128,7 +132,7 @@ void VkPPRenderState::DrawToImage(VkTextureImage *image, VkFormat outputFormat, 
 		FramebufferBuilder builder;
 		builder.RenderPass(passSetup->RenderPass.get());
 		builder.Size(framebufferWidth, framebufferHeight);
-		builder.AddAttachment(image->View.get());
+		builder.AddAttachment(image->GetFramebufferView());
 		builder.DebugName("VkPPRenderPassSetup.CustomFramebuffer");
 		framebuffer = builder.Create(fb->device.get());
 	}

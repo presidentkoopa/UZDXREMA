@@ -3040,13 +3040,15 @@ OptionMenu VROptionsMenu protected
 	{
 		StaticText ""
 		StaticText "$VRPREFMNU_DISPLAY_ADJUST", gold
+		Option "VR multiview", "vr_openxr_multiview", "OnOff"
+		StaticText "Gates the experimental OpenXR Vulkan multiview path.", "Brown"
 		Slider "$VRPREFMNU_ADJUST_GAMMA",     		"vr_openxr_present_gamma_bias", -2, 2, 0.01, 2
 		Slider "$VRPREFMNU_ADJUST_CONTRAST",     	"vr_openxr_present_contrast_bias", -2, 2, 0.01, 2
 		Slider "$VRPREFMNU_ADJUST_BRIGHTNESS",     "vr_openxr_present_brightness_bias", -2, 2, 0.01, 2
 		Slider "$VRPREFMNU_ADJUST_SATURATION",     "vr_openxr_present_saturation_bias", -2, 2, 0.01, 2
 	}
 	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_desktop_view vr_vunits_per_meter vr_height_adjust vr_scene_multithread vr_openxr_present_gamma_bias vr_openxr_present_contrast_bias vr_openxr_present_brightness_bias vr_openxr_present_saturation_bias"
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_desktop_view vr_vunits_per_meter vr_height_adjust vr_scene_multithread vr_openxr_multiview vr_openxr_present_gamma_bias vr_openxr_present_contrast_bias vr_openxr_present_brightness_bias vr_openxr_present_saturation_bias"
 	StaticText ""
 	StaticText "$VRPREFMNU_VR_CONTROLS", gold
 	ifOption(OpenVR, OpenXR)
@@ -3677,6 +3679,12 @@ OptionMenu QuickMenu protected
 		Option "VR scene multithread", "vr_scene_multithread", "OnOff"
 		StaticText "Quick toggle for VR scene-build threading.", "Brown"
 	}
+	ifOption(OpenXR)
+	{
+		StaticText " "
+		Option "VR multiview", "vr_openxr_multiview", "OnOff"
+		StaticText "Quick toggle for the experimental OpenXR multiview path.", "Brown"
+	}
 }
 
 /*=======================================
@@ -3841,6 +3849,11 @@ OptionMenu "vkoptions"
 	StaticText ""
 	TextField "$VKMNU_DEVICE",			vk_device
 	Option "$VKMNU_HDR",				"vk_hdr", "OnOff"
+	ifOption(OpenXR)
+	{
+		Option "VR multiview",			"vr_openxr_multiview", "OnOff"
+		StaticText "Gate the experimental OpenXR Vulkan multiview path.", "Brown"
+	}
 }
 
 OptionValue "SpriteShadowModes"

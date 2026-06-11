@@ -80,6 +80,8 @@ EXTERN_CVAR(Bool, vr_debug_projection_compare);
 EXTERN_CVAR(Bool, vr_openxr_debug_sizes);
 EXTERN_CVAR(Bool, vr_openxr_debug_present);
 EXTERN_CVAR(Bool, vr_openxr_debug_weapon);
+EXTERN_CVAR(Int, vr_openxr_debug_submit_mode);
+EXTERN_CVAR(Bool, vr_openxr_multiview);
 EXTERN_CVAR(Float, vr_snapTurn);
 EXTERN_CVAR(Bool, vr_move_use_offhand);
 EXTERN_CVAR(Bool, vr_switch_sticks);
@@ -209,6 +211,15 @@ static bool HasOpenXRExtension(const char* extensionName)
 	return false;
 }
 
+static bool HasDeviceExtension(const VulkanPhysicalDevice& device, const char* extensionName)
+{
+	return std::any_of(device.Extensions.begin(), device.Extensions.end(),
+		[extensionName](const VkExtensionProperties& extension)
+		{
+			return strcmp(extension.extensionName, extensionName) == 0;
+		});
+}
+
 static bool ShouldRetryCreateSession(XrResult xrResult)
 {
 	// Retry only for transient runtime failures
@@ -241,6 +252,41 @@ static XrColorSpaceFB SelectPreferredColorSpace(const std::vector<XrColorSpaceFB
 static float DEG2RAD(float deg)
 {
 	return deg * (float)(M_PI / 180.0);
+}
+
+static uint32_t GetMaxRecommendedViewWidth(const std::vector<XrViewConfigurationView>& views)
+{
+	uint32_t width = 0;
+	for (const auto& view : views)
+	{
+		width = std::max(width, view.recommendedImageRectWidth);
+	}
+	return width;
+}
+
+static uint32_t GetMaxRecommendedViewHeight(const std::vector<XrViewConfigurationView>& views)
+{
+	uint32_t height = 0;
+	for (const auto& view : views)
+	{
+		height = std::max(height, view.recommendedImageRectHeight);
+	}
+	return height;
+}
+
+static bool HasMismatchedRecommendedViewExtents(const std::vector<XrViewConfigurationView>& views)
+{
+	if (views.size() < 2)
+		return false;
+
+	const uint32_t width = views[0].recommendedImageRectWidth;
+	const uint32_t height = views[0].recommendedImageRectHeight;
+	for (size_t i = 1; i < views.size(); ++i)
+	{
+		if (views[i].recommendedImageRectWidth != width || views[i].recommendedImageRectHeight != height)
+			return true;
+	}
+	return false;
 }
 
 static XrVector3f RotateVector(const XrQuaternionf& q, const XrVector3f& v)
@@ -314,6 +360,49 @@ static XrQuaternionf MultiplyQuaternion(const XrQuaternionf& a, const XrQuaterni
 static XrQuaternionf ConjugateQuaternion(const XrQuaternionf& q)
 {
 	return { -q.x, -q.y, -q.z, q.w };
+}
+
+static float DotQuaternion(const XrQuaternionf& a, const XrQuaternionf& b)
+{
+	return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+}
+
+static XrQuaternionf NormalizeQuaternion(const XrQuaternionf& q)
+{
+	const float length = std::sqrt(DotQuaternion(q, q));
+	if (length <= 0.0f)
+		return { 0.0f, 0.0f, 0.0f, 1.0f };
+
+	const float invLength = 1.0f / length;
+	return { q.x * invLength, q.y * invLength, q.z * invLength, q.w * invLength };
+}
+
+static XrQuaternionf GetCenteredViewOrientation(const std::vector<XrView>& views)
+{
+	if (views.empty())
+		return { 0.0f, 0.0f, 0.0f, 1.0f };
+	if (views.size() == 1)
+		return NormalizeQuaternion(views[0].pose.orientation);
+
+	XrQuaternionf accum = NormalizeQuaternion(views[0].pose.orientation);
+	for (size_t i = 1; i < views.size(); ++i)
+	{
+		XrQuaternionf q = NormalizeQuaternion(views[i].pose.orientation);
+		if (DotQuaternion(accum, q) < 0.0f)
+		{
+			q.x = -q.x;
+			q.y = -q.y;
+			q.z = -q.z;
+			q.w = -q.w;
+		}
+
+		accum.x += q.x;
+		accum.y += q.y;
+		accum.z += q.z;
+		accum.w += q.w;
+	}
+
+	return NormalizeQuaternion(accum);
 }
 
 static XrQuaternionf QuaternionFromBasis(const XrVector3f& xAxis, const XrVector3f& yAxis, const XrVector3f& zAxis)
@@ -586,6 +675,19 @@ static XrSafeSourceRect GetSafeXrSourceRect(VulkanRenderDevice* vkfb)
 	}
 
 	return result;
+}
+
+static const char* FrameRenderModeName(VKOpenXRDeviceMode::FrameRenderMode mode)
+{
+	switch (mode)
+	{
+	case VKOpenXRDeviceMode::FrameRenderMode::GameplayEyes:
+		return "GameplayEyes";
+	case VKOpenXRDeviceMode::FrameRenderMode::VirtualScreen:
+		return "VirtualScreen";
+	default:
+		return "Unknown";
+	}
 }
 
 static void AngleVectors(const float angles[3], float* forward, float* right, float* up)
@@ -1213,16 +1315,17 @@ DVector3 VKOpenXRDeviceEyePose::GetViewShift(FRenderViewpoint& vp) const
 
 	if (eye >= 0 && (size_t)eye < mode.xrViews.size())
 	{
-		const XrQuaternionf headOrientation = mode.xrViews[0].pose.orientation;
+		const XrQuaternionf headOrientation = GetCenteredViewOrientation(mode.xrViews);
 		const XrVector3f headRight = NormalizeVector(RotateVector(headOrientation, { 1.0f, 0.0f, 0.0f }));
 		const XrVector3f eyeOffsetMeters = {
 			currentEyePose.position.x - hmdPosition[0],
 			currentEyePose.position.y - hmdPosition[1],
 			currentEyePose.position.z - hmdPosition[2]
 		};
+		const XrVector3f localEyeOffset = RotateVector(ConjugateQuaternion(headOrientation), eyeOffsetMeters);
 
 		const double pixelstretch = r_viewpoint.ViewLevel ? r_viewpoint.ViewLevel->pixelstretch : 1.2;
-		const double stereoShift = DotVector(eyeOffsetMeters, headRight) * vr_vunits_per_meter * vr_openxr_eye_shift_scale * pixelstretch;
+		const double stereoShift = localEyeOffset.x * vr_vunits_per_meter * vr_openxr_eye_shift_scale * pixelstretch;
 		const double yaw = DEG2RAD(vp.HWAngles.Yaw.Degrees());
 		shift.X += -cos(yaw) * stereoShift;
 		shift.Y += sin(yaw) * stereoShift;
@@ -1243,6 +1346,47 @@ DVector3 VKOpenXRDeviceEyePose::GetViewShift(FRenderViewpoint& vp) const
 	}
 
 	return shift;
+}
+
+void VKOpenXRDeviceEyePose::AdjustViewpointUniforms(HWViewpointUniforms& uniforms) const
+{
+	auto& mode = const_cast<VKOpenXRDeviceMode&>((const VKOpenXRDeviceMode&)VKOpenXRDeviceMode::getInstance());
+	if (eye <= 0 || (size_t)eye >= mode.xrViews.size() || mode.xrViews.empty())
+	{
+		uniforms.CalcDependencies();
+		return;
+	}
+
+	const XrQuaternionf baseOrientation = GetCenteredViewOrientation(mode.xrViews);
+	const XrQuaternionf eyeOrientation = currentEyePose.orientation;
+	const XrQuaternionf relativeOrientation = MultiplyQuaternion(ConjugateQuaternion(baseOrientation), eyeOrientation);
+	const XrQuaternionf inverseRelativeOrientation = ConjugateQuaternion(relativeOrientation);
+
+	VSMatrix rotation;
+	rotation.loadIdentity();
+	rotation.multQuaternion(TVector4<FLOATTYPE>(
+		(FLOATTYPE)inverseRelativeOrientation.x,
+		(FLOATTYPE)inverseRelativeOrientation.y,
+		(FLOATTYPE)inverseRelativeOrientation.z,
+		(FLOATTYPE)inverseRelativeOrientation.w));
+	rotation.multMatrix(uniforms.mViewMatrix);
+	uniforms.mViewMatrix = rotation;
+	uniforms.CalcDependencies();
+
+	if (vr_debug_projection_compare)
+	{
+		static bool loggedEyeOrientationDelta[2] = { false, false };
+		if (eye < 2 && !loggedEyeOrientationDelta[eye])
+		{
+			float pitch = 0.0f;
+			float yaw = 0.0f;
+			float roll = 0.0f;
+			QuaternionToEuler(relativeOrientation, pitch, yaw, roll);
+			Printf("VR_PROJ OpenXR eye=%d relativeOrientation pitch=%.4f yaw=%.4f roll=%.4f\n",
+				eye, pitch, yaw, roll);
+			loggedEyeOrientationDelta[eye] = true;
+		}
+	}
 }
 
 void VKOpenXRDeviceEyePose::SetUp() const
@@ -2026,8 +2170,22 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	xrViews.resize(viewCount, { XR_TYPE_VIEW });
 	xrProjectionViews.resize(viewCount, { XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW });
 
-	sceneWidth = xrViewConfigs[0].recommendedImageRectWidth;
-	sceneHeight = xrViewConfigs[0].recommendedImageRectHeight;
+	sceneWidth = GetMaxRecommendedViewWidth(xrViewConfigs);
+	sceneHeight = GetMaxRecommendedViewHeight(xrViewConfigs);
+	if (HasMismatchedRecommendedViewExtents(xrViewConfigs))
+	{
+		for (uint32_t i = 0; i < viewCount; ++i)
+		{
+			Printf("OpenXR: view %u recommended extent=%ux%u sampleCount=%u.\n",
+				i,
+				xrViewConfigs[i].recommendedImageRectWidth,
+				xrViewConfigs[i].recommendedImageRectHeight,
+				xrViewConfigs[i].recommendedSwapchainSampleCount);
+		}
+		Printf("OpenXR: using shared stereo extent=%ux%u for array swapchains.\n",
+			sceneWidth, sceneHeight);
+	}
+	InitializeMultiview();
 
 	isOpenXRReady = true;
 	xrInitProbeFrameTime = screen != nullptr ? screen->FrameTime : 0;
@@ -2072,8 +2230,8 @@ bool VKOpenXRDeviceMode::CreateSwapchain() const
 	swapchainInfo.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
 	swapchainInfo.format = xrSwapchainFormat;
 	swapchainInfo.sampleCount = cfg.recommendedSwapchainSampleCount;
-	swapchainInfo.width = cfg.recommendedImageRectWidth;
-	swapchainInfo.height = cfg.recommendedImageRectHeight;
+	swapchainInfo.width = GetMaxRecommendedViewWidth(xrViewConfigs);
+	swapchainInfo.height = GetMaxRecommendedViewHeight(xrViewConfigs);
 	swapchainInfo.faceCount = 1;
 	swapchainInfo.arraySize = xrViewCount;
 	swapchainInfo.mipCount = 1;
@@ -2100,7 +2258,7 @@ bool VKOpenXRDeviceMode::CreateSwapchain() const
 			texture.Layout = VK_IMAGE_LAYOUT_UNDEFINED;
 			texture.AspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 			texture.Image = std::make_unique<VulkanImage>(xrVkDevice.get(), xrSwapchainImages[imageIndex].image, nullptr,
-				(int)cfg.recommendedImageRectWidth, (int)cfg.recommendedImageRectHeight, 1, (int)xrViewCount);
+				(int)swapchainInfo.width, (int)swapchainInfo.height, 1, (int)xrViewCount);
 			texture.View = ImageViewBuilder()
 				.Image(texture.Image.get(), (VkFormat)xrSwapchainFormat, VK_IMAGE_ASPECT_COLOR_BIT, 0, (int)layer, 1, 1)
 				.DebugName("OpenXRSwapchainLayerView")
@@ -2122,8 +2280,8 @@ bool VKOpenXRDeviceMode::CreatePresentTextures(VulkanRenderDevice* vkfb) const
 	if (!vkfb || xrSwapchainFormat == VK_FORMAT_UNDEFINED || xrViewCount == 0)
 		return false;
 
-	const uint32_t width = xrViewConfigs.empty() ? 0 : xrViewConfigs[0].recommendedImageRectWidth;
-	const uint32_t height = xrViewConfigs.empty() ? 0 : xrViewConfigs[0].recommendedImageRectHeight;
+	const uint32_t width = GetMaxRecommendedViewWidth(xrViewConfigs);
+	const uint32_t height = GetMaxRecommendedViewHeight(xrViewConfigs);
 	if (width == 0 || height == 0)
 		return false;
 
@@ -2493,6 +2651,11 @@ void VKOpenXRDeviceMode::DestroyOpenXR() const
 	isSetup = false;
 	xrHasEquirectBackdrop = false;
 	xrHasFBColorSpace = false;
+	xrMultiviewProbed = false;
+	xrMultiviewSupported = false;
+	xrMultiviewUsesCoreVulkan = false;
+	xrMultiviewMaxViewCount = 0;
+	xrMultiviewMaxInstanceIndex = 0;
 	xrUsingStageSpace = false;
 	xrHasLocalHeightAnchor = false;
 	xrLocalHeightAnchor = 0.0f;
@@ -3876,8 +4039,8 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		return XR_SUCCEEDED(endResult);
 	}
 
-	const uint32_t recommendedW = xrViewConfigs.empty() ? 0 : xrViewConfigs[0].recommendedImageRectWidth;
-	const uint32_t recommendedH = xrViewConfigs.empty() ? 0 : xrViewConfigs[0].recommendedImageRectHeight;
+	const uint32_t recommendedW = GetMaxRecommendedViewWidth(xrViewConfigs);
+	const uint32_t recommendedH = GetMaxRecommendedViewHeight(xrViewConfigs);
 	const uint32_t dstW = xrPresentWidth != 0 ? xrPresentWidth : recommendedW;
 	const uint32_t dstH = xrPresentHeight != 0 ? xrPresentHeight : recommendedH;
 	if (dstW == 0 || dstH == 0)
@@ -3926,8 +4089,11 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 			xrLoggedDesktopViewportMismatch = true;
 		}
 	}
-	Printf("OpenXR frame %llu: about to draw XR layers to swapchain image %u.\n",
-		(unsigned long long)xrFrameCounter, imageIndex);
+	if (vr_openxr_debug_present || vr_openxr_debug_sizes)
+	{
+		Printf("OpenXR frame %llu: about to draw XR layers to swapchain image %u.\n",
+			(unsigned long long)xrFrameCounter, imageIndex);
+	}
 
 	ScopedCycleTimer cycle(VRSubmit);
 	vkResetCommandPool(xrVkDevice->device, xrVkCommandPool->pool, 0);
@@ -3952,7 +4118,7 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 
 	for (uint32_t layer = 0; layer < xrViewCount; ++layer)
 	{
-		const uint32_t sourceEye = layer;
+		const uint32_t sourceEye = (vr_openxr_debug_submit_mode == 1 || vr_openxr_debug_submit_mode == 3) ? 0u : layer;
 		if (sourceEye >= xrPresentTextures.size() || xrPresentTextures[sourceEye].Image == nullptr)
 		{
 			Printf("OpenXR frame %llu: Skipping eye %u - missing prepared eye image %u\n",
@@ -4037,7 +4203,10 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 	}
 	XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
 	xrResult = xrReleaseSwapchainImage(xrSwapchain, &releaseInfo);
-	Printf("OpenXR frame %llu: xrReleaseSwapchainImage=%d.\n", (unsigned long long)xrFrameCounter, (int)xrResult);
+	if (vr_openxr_debug_present || vr_openxr_debug_sizes)
+	{
+		Printf("OpenXR frame %llu: xrReleaseSwapchainImage=%d.\n", (unsigned long long)xrFrameCounter, (int)xrResult);
+	}
 	if (XR_FAILED(xrResult))
 	{
 		XrFrameEndInfo endInfo{ XR_TYPE_FRAME_END_INFO };
@@ -4059,7 +4228,7 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 
 	for (uint32_t i = 0; i < xrViewCount; ++i)
 	{
-		const uint32_t viewIndex = i;
+		const uint32_t viewIndex = (vr_openxr_debug_submit_mode == 2 || vr_openxr_debug_submit_mode == 3) ? 0u : i;
 		const uint32_t arrayIndex = i;
 		xrProjectionViews[i].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
 		xrProjectionViews[i].pose = xrViews[viewIndex].pose;
@@ -4067,7 +4236,13 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		xrProjectionViews[i].subImage.swapchain = xrSwapchain;
 		xrProjectionViews[i].subImage.imageArrayIndex = arrayIndex;
 		xrProjectionViews[i].subImage.imageRect.offset = { 0, 0 };
-		xrProjectionViews[i].subImage.imageRect.extent = { (int32_t)xrViewConfigs[i].recommendedImageRectWidth, (int32_t)xrViewConfigs[i].recommendedImageRectHeight };
+		xrProjectionViews[i].subImage.imageRect.extent = { (int32_t)dstW, (int32_t)dstH };
+	}
+
+	if (vr_openxr_debug_present && vr_openxr_debug_submit_mode != 0)
+	{
+		Printf("XR_PRESENT_MAP debug submit mode=%d (1=left image to both, 2=left pose/fov to both, 3=both)\n",
+			(int)vr_openxr_debug_submit_mode);
 	}
 
 	XrCompositionLayerQuad backdropLayer{ XR_TYPE_COMPOSITION_LAYER_QUAD };
@@ -4567,7 +4742,10 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 	{
 		renderState->Clear(CT_Color);
 	}
-	screen->Draw2D(true);
+	if (twod != nullptr && twod->HasCommandsForPass(true))
+	{
+		screen->Draw2D(true);
+	}
 	if (xrMenuPointerActive && xrMenuPointerHasHit && twod != nullptr)
 	{
 		const float beamEndX = xrMenuPointerX;
@@ -4591,7 +4769,10 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 		}
 		twod->AddColorOnlyQuad((int)(beamEndX - 3.0f), (int)(beamEndY - 3.0f), 6, 6, PalEntry(255, cursorColor.r, cursorColor.g, cursorColor.b));
 	}
-	screen->Draw2D(false);
+	if (twod != nullptr && twod->HasCommandsForPass(false))
+	{
+		screen->Draw2D(false);
+	}
 	mInVirtualScreenRender = false;
 	renderState->EndRenderPass();
 	vkfb->mScreenViewport = savedScreenViewport;
@@ -5292,6 +5473,123 @@ void VKOpenXRDeviceMode::Vibrate(float duration, int channel, float intensity) c
 	ProcessHaptics();
 }
 
-void VKOpenXRDeviceMode::InitializeMultiview() const {}
+void VKOpenXRDeviceMode::InitializeMultiview() const
+{
+	xrMultiviewProbed = false;
+	xrMultiviewSupported = false;
+	xrMultiviewUsesCoreVulkan = false;
+	xrMultiviewMaxViewCount = 0;
+	xrMultiviewMaxInstanceIndex = 0;
+
+	if (!xrVkDevice || xrVkDevice->Instance == nullptr)
+	{
+		Printf("OpenXR multiview probe: skipped, Vulkan device is unavailable.\n");
+		return;
+	}
+
+	const auto& physicalDevice = xrVkDevice->PhysicalDevice;
+	const uint32_t apiVersion = xrVkDevice->Instance->ApiVersion;
+	const bool multiviewIsCore = apiVersion >= VK_API_VERSION_1_1;
+	const bool hasMultiviewExtension = HasDeviceExtension(physicalDevice, VK_KHR_MULTIVIEW_EXTENSION_NAME);
+	const bool hasMultiviewApiPath = multiviewIsCore || hasMultiviewExtension;
+	const bool multiviewFeature = physicalDevice.Features.Multiview.multiview == VK_TRUE;
+	const bool runtimeStereoViews = xrViewCount >= 2;
+
+	xrMultiviewProbed = true;
+	xrMultiviewUsesCoreVulkan = multiviewIsCore;
+	xrMultiviewMaxViewCount = physicalDevice.Properties.Multiview.maxMultiviewViewCount;
+	xrMultiviewMaxInstanceIndex = physicalDevice.Properties.Multiview.maxMultiviewInstanceIndex;
+	xrMultiviewSupported =
+		hasMultiviewApiPath &&
+		multiviewFeature &&
+		runtimeStereoViews &&
+		xrMultiviewMaxViewCount >= xrViewCount;
+
+	Printf("OpenXR multiview probe: api=%u.%u core=%d ext=%d feature=%d runtimeViews=%u maxViews=%u maxInstanceIndex=%u requested=%d eligible=%d\n",
+		VK_VERSION_MAJOR(apiVersion),
+		VK_VERSION_MINOR(apiVersion),
+		multiviewIsCore ? 1 : 0,
+		hasMultiviewExtension ? 1 : 0,
+		multiviewFeature ? 1 : 0,
+		xrViewCount,
+		xrMultiviewMaxViewCount,
+		xrMultiviewMaxInstanceIndex,
+		vr_openxr_multiview ? 1 : 0,
+		xrMultiviewSupported ? 1 : 0);
+
+	if (!xrMultiviewSupported)
+	{
+		if (!hasMultiviewApiPath)
+		{
+			Printf("OpenXR multiview probe: not eligible because Vulkan 1.1+ is unavailable and %s is not exposed.\n",
+				VK_KHR_MULTIVIEW_EXTENSION_NAME);
+		}
+		else if (!multiviewFeature)
+		{
+			Printf("OpenXR multiview probe: not eligible because the device does not expose the multiview feature bit.\n");
+		}
+		else if (!runtimeStereoViews)
+		{
+			Printf("OpenXR multiview probe: not eligible because the runtime reported only %u XR view(s).\n",
+				xrViewCount);
+		}
+		else if (xrMultiviewMaxViewCount < xrViewCount)
+		{
+			Printf("OpenXR multiview probe: not eligible because maxMultiviewViewCount=%u is smaller than xrViewCount=%u.\n",
+				xrMultiviewMaxViewCount, xrViewCount);
+		}
+	}
+}
+
+bool VKOpenXRDeviceMode::ShouldUseMultiviewThisFrame() const
+{
+	const bool shouldUse = vr_openxr_multiview &&
+		xrMultiviewSupported &&
+		mFrameRenderMode == FrameRenderMode::GameplayEyes &&
+		xrViewCount > 1;
+
+	static bool loggedOnce = false;
+	static bool lastRequested = false;
+	static bool lastSupported = false;
+	static FrameRenderMode lastFrameMode = FrameRenderMode::VirtualScreen;
+	static uint32_t lastViewCount = UINT32_MAX;
+	static bool lastShouldUse = false;
+	if (!loggedOnce ||
+		lastRequested != !!vr_openxr_multiview ||
+		lastSupported != xrMultiviewSupported ||
+		lastFrameMode != mFrameRenderMode ||
+		lastViewCount != xrViewCount ||
+		lastShouldUse != shouldUse)
+	{
+		Printf("OpenXR multiview status: requested=%d supported=%d frameMode=%s xrViews=%u shouldUse=%d\n",
+			vr_openxr_multiview ? 1 : 0,
+			xrMultiviewSupported ? 1 : 0,
+			FrameRenderModeName(mFrameRenderMode),
+			xrViewCount,
+			shouldUse ? 1 : 0);
+		loggedOnce = true;
+		lastRequested = !!vr_openxr_multiview;
+		lastSupported = xrMultiviewSupported;
+		lastFrameMode = mFrameRenderMode;
+		lastViewCount = xrViewCount;
+		lastShouldUse = shouldUse;
+	}
+
+	return shouldUse;
+}
+
+int VKOpenXRDeviceMode::GetMultiviewLayerCount() const
+{
+	return ShouldUseMultiviewThisFrame() ? (int)xrViewCount : 1;
+}
+
+uint32_t VKOpenXRDeviceMode::GetMultiviewViewMask() const
+{
+	if (!ShouldUseMultiviewThisFrame())
+		return 0;
+	if (xrViewCount >= 32)
+		return 0xffffffffu;
+	return (1u << xrViewCount) - 1u;
+}
 
 } // namespace s3d

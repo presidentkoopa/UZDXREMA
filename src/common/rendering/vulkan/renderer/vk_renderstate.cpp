@@ -537,7 +537,7 @@ void VkRenderState::EnableDrawBuffers(int count, bool apply)
 	}
 }
 
-void VkRenderState::SetRenderTarget(VkTextureImage *image, VulkanImageView *depthStencilView, int width, int height, VkFormat format, VkSampleCountFlagBits samples)
+void VkRenderState::SetRenderTarget(VkTextureImage *image, VulkanImageView *depthStencilView, int width, int height, VkFormat format, VkSampleCountFlagBits samples, int layers, uint32_t viewMask, int layerIndex)
 {
 	EndRenderPass();
 
@@ -547,6 +547,9 @@ void VkRenderState::SetRenderTarget(VkTextureImage *image, VulkanImageView *dept
 	mRenderTarget.Height = height;
 	mRenderTarget.Format = format;
 	mRenderTarget.Samples = samples;
+	mRenderTarget.Layers = layers;
+	mRenderTarget.ViewMask = viewMask;
+	mRenderTarget.LayerIndex = layerIndex;
 }
 
 void VkRenderState::BeginRenderPass(VulkanCommandBuffer *cmdbuffer)
@@ -556,21 +559,28 @@ void VkRenderState::BeginRenderPass(VulkanCommandBuffer *cmdbuffer)
 	key.Samples = mRenderTarget.Samples;
 	key.DrawBuffers = mRenderTarget.DrawBuffers;
 	key.DepthStencil = !!mRenderTarget.DepthStencil;
+	key.Layers = mRenderTarget.Layers;
+	key.ViewMask = mRenderTarget.ViewMask;
 
 	mPassSetup = fb->GetRenderPassManager()->GetRenderPass(key);
 
-	auto &framebuffer = mRenderTarget.Image->RSFramebuffers[key];
+	const bool useLayerView = mRenderTarget.Layers == 1 && mRenderTarget.ViewMask == 0;
+	VkTextureImage::VkRenderTargetFramebufferKey framebufferKey = {};
+	framebufferKey.PassKey = key;
+	framebufferKey.LayerIndex = useLayerView ? mRenderTarget.LayerIndex : -1;
+
+	auto &framebuffer = mRenderTarget.Image->RSFramebuffers[framebufferKey];
 	if (!framebuffer)
 	{
 		auto buffers = fb->GetBuffers();
 		FramebufferBuilder builder;
 		builder.RenderPass(mPassSetup->GetRenderPass(0));
-		builder.Size(mRenderTarget.Width, mRenderTarget.Height);
-		builder.AddAttachment(mRenderTarget.Image->View.get());
+		builder.Size(mRenderTarget.Width, mRenderTarget.Height, mRenderTarget.Layers);
+		builder.AddAttachment(useLayerView ? mRenderTarget.Image->GetLayerView(mRenderTarget.LayerIndex) : mRenderTarget.Image->GetFramebufferView());
 		if (key.DrawBuffers > 1)
-			builder.AddAttachment(buffers->SceneFog.View.get());
+			builder.AddAttachment(useLayerView ? buffers->SceneFog.GetLayerView(mRenderTarget.LayerIndex) : buffers->SceneFog.GetFramebufferView());
 		if (key.DrawBuffers > 2)
-			builder.AddAttachment(buffers->SceneNormal.View.get());
+			builder.AddAttachment(useLayerView ? buffers->SceneNormal.GetLayerView(mRenderTarget.LayerIndex) : buffers->SceneNormal.GetFramebufferView());
 		if (key.DepthStencil)
 			builder.AddAttachment(mRenderTarget.DepthStencil);
 		builder.DebugName("VkRenderPassSetup.Framebuffer");
