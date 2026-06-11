@@ -82,6 +82,7 @@ EXTERN_CVAR(Bool, vr_openxr_debug_present);
 EXTERN_CVAR(Bool, vr_openxr_debug_weapon);
 EXTERN_CVAR(Int, vr_openxr_debug_submit_mode);
 EXTERN_CVAR(Bool, vr_openxr_multiview);
+EXTERN_CVAR(Bool, vr_desktop_view_openxr_render);
 EXTERN_CVAR(Float, vr_snapTurn);
 EXTERN_CVAR(Bool, vr_move_use_offhand);
 EXTERN_CVAR(Bool, vr_switch_sticks);
@@ -606,6 +607,27 @@ static float ShortestAngleDeltaDeg(float a, float b)
 	if (d > 180.0f) d -= 360.0f;
 	if (d < -180.0f) d += 360.0f;
 	return d;
+}
+
+static bool ShouldPrepareDesktopMirrorEye(int eyeIndex)
+{
+	if (vr_desktop_view_openxr_render || vr_desktop_view == -1)
+		return false;
+
+	// Side-by-side mirror consumes both prepared eye textures. Single-eye mirror modes only
+	// ever sample one of them, so avoid the extra fullscreen pass for the unused eye.
+	if (vr_desktop_view != 1 && vr_desktop_view != 2)
+		return true;
+
+	const int mirroredEyeIndex = (vr_desktop_view == 1)
+		? (vr_swap_eyes ? 1 : 0)
+		: (vr_swap_eyes ? 0 : 1);
+	return eyeIndex == mirroredEyeIndex;
+}
+
+static bool ShouldUseDedicatedDesktopMirrorTextures()
+{
+	return !vr_desktop_view_openxr_render && vr_desktop_view != -1;
 }
 
 static XrSafeSourceRect GetSafeXrSourceRect(VulkanRenderDevice* vkfb)
@@ -2285,7 +2307,24 @@ bool VKOpenXRDeviceMode::CreatePresentTextures(VulkanRenderDevice* vkfb) const
 	if (width == 0 || height == 0)
 		return false;
 
-	if (xrPresentTextures.size() == xrViewCount && xrPresentWidth == width && xrPresentHeight == height)
+	const bool wantsDedicatedMirrorTextures = ShouldUseDedicatedDesktopMirrorTextures();
+	const bool hasPresentTextures = xrPresentTextures.size() == xrViewCount &&
+		std::all_of(xrPresentTextures.begin(), xrPresentTextures.end(),
+			[](const VkTextureImage& texture)
+			{
+				return texture.Image != nullptr;
+			});
+	const bool hasDedicatedMirrorTextures = xrMirrorPresentTextures.size() == xrViewCount &&
+		std::all_of(xrMirrorPresentTextures.begin(), xrMirrorPresentTextures.end(),
+			[](const VkTextureImage& texture)
+			{
+				return texture.Image != nullptr;
+			});
+
+	if (hasPresentTextures &&
+		xrPresentWidth == width &&
+		xrPresentHeight == height &&
+		wantsDedicatedMirrorTextures == hasDedicatedMirrorTextures)
 		return true;
 
 	if (!xrPresentTextures.empty())
@@ -2301,7 +2340,8 @@ bool VKOpenXRDeviceMode::CreatePresentTextures(VulkanRenderDevice* vkfb) const
 		texture.Reset(vkfb);
 
 	xrPresentTextures.resize(xrViewCount);
-	xrMirrorPresentTextures.resize(xrViewCount);
+	if (wantsDedicatedMirrorTextures)
+		xrMirrorPresentTextures.resize(xrViewCount);
 	xrPresentWidth = width;
 	xrPresentHeight = height;
 
@@ -2322,19 +2362,22 @@ bool VKOpenXRDeviceMode::CreatePresentTextures(VulkanRenderDevice* vkfb) const
 			.DebugName("OpenXRPresentTextureView")
 			.Create(vkfb->device.get());
 
-		auto& mirrorTexture = xrMirrorPresentTextures[i];
-		mirrorTexture.Layout = VK_IMAGE_LAYOUT_UNDEFINED;
-		mirrorTexture.AspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		mirrorTexture.Image = ImageBuilder()
-			.Format(presentFormat)
-			.Size(width, height)
-			.Usage(VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
-			.DebugName("OpenXRMirrorPresentTexture")
-			.Create(vkfb->device.get());
-		mirrorTexture.View = ImageViewBuilder()
-			.Image(mirrorTexture.Image.get(), presentFormat)
-			.DebugName("OpenXRMirrorPresentTextureView")
-			.Create(vkfb->device.get());
+		if (wantsDedicatedMirrorTextures)
+		{
+			auto& mirrorTexture = xrMirrorPresentTextures[i];
+			mirrorTexture.Layout = VK_IMAGE_LAYOUT_UNDEFINED;
+			mirrorTexture.AspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			mirrorTexture.Image = ImageBuilder()
+				.Format(presentFormat)
+				.Size(width, height)
+				.Usage(VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+				.DebugName("OpenXRMirrorPresentTexture")
+				.Create(vkfb->device.get());
+			mirrorTexture.View = ImageViewBuilder()
+				.Image(mirrorTexture.Image.get(), presentFormat)
+				.DebugName("OpenXRMirrorPresentTextureView")
+				.Create(vkfb->device.get());
+		}
 	}
 
 	if (!xrPresentTextures.empty() && xrPresentTextures[0].Image != nullptr)
@@ -5096,7 +5139,7 @@ void VKOpenXRDeviceMode::FinalizeEyeImage(VulkanRenderDevice* vkfb, int eyeIndex
 	targetBox.height = (int)xrPresentHeight;
 
 	// 1) Unbiased image for desktop mirror parity.
-	if (eyeIndex >= 0 && eyeIndex < (int)xrMirrorPresentTextures.size())
+	if (ShouldPrepareDesktopMirrorEye(eyeIndex) && eyeIndex >= 0 && eyeIndex < (int)xrMirrorPresentTextures.size())
 	{
 		postprocess->DrawPresentTextureToImage(
 			&xrMirrorPresentTextures[eyeIndex],
@@ -5129,23 +5172,27 @@ void VKOpenXRDeviceMode::FinalizeEyeImage(VulkanRenderDevice* vkfb, int eyeIndex
 
 bool VKOpenXRDeviceMode::RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage* dstImage) const
 {
-	if (!fb || !dstImage)
+	if (!fb || !dstImage || vr_desktop_view == -1)
 		return false;
 
 	auto* cmdbuffer = fb->GetCommands()->GetDrawCommands();
 	const bool sideBySide = vr_desktop_view != 1 && vr_desktop_view != 2;
 	const int leftSourceIndex = vr_swap_eyes ? 1 : 0;
 	const int rightSourceIndex = vr_swap_eyes ? 0 : 1;
+	const bool useDedicatedMirrorTextures = ShouldUseDedicatedDesktopMirrorTextures();
+	auto& mirrorSources = useDedicatedMirrorTextures ? xrMirrorPresentTextures : xrPresentTextures;
 
-	if (xrMirrorPresentTextures.empty() || xrMirrorPresentTextures[leftSourceIndex].Image == nullptr || (sideBySide && xrMirrorPresentTextures[rightSourceIndex].Image == nullptr))
+	if (mirrorSources.empty() ||
+		mirrorSources[leftSourceIndex].Image == nullptr ||
+		(sideBySide && mirrorSources[rightSourceIndex].Image == nullptr))
 		return false;
 
 	const bool hasBackdrop = xrVirtualScreenBackdropVisible &&
 		xrVirtualScreenBackdropImageIndex >= 0 &&
 		xrVirtualScreenBackdropImageIndex < (int)xrVirtualScreenBackdropTextures.size();
 
-	VkTextureImage* leftEyeSource = &xrMirrorPresentTextures[leftSourceIndex];
-	VkTextureImage* rightEyeSource = &xrMirrorPresentTextures[rightSourceIndex];
+	VkTextureImage* leftEyeSource = &mirrorSources[leftSourceIndex];
+	VkTextureImage* rightEyeSource = &mirrorSources[rightSourceIndex];
 	VkImageTransition()
 		.AddImage(leftEyeSource, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
 		.Execute(cmdbuffer);

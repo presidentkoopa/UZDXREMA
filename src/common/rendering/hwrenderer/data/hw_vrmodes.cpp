@@ -403,6 +403,7 @@ CVAR(Float, vr_openxr_render_scale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // Use the full screen viewport as XR present source by default to reduce
 // aspect-stretch upscaling artifacts compared to mSceneViewport.
 CVAR(Bool, vr_openxr_use_screen_viewport_for_submit, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVARD(Bool, vr_desktop_view_openxr_render, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "Reuse the XR-submitted present texture for the desktop mirror to skip the separate unbiased mirror pass")
 CVAR(Float, vr_openxr_present_gamma_bias, 1.95f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_openxr_present_contrast_bias, 0.85f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_openxr_present_brightness_bias, -0.15f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)

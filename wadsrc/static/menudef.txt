@@ -3023,6 +3023,10 @@ OptionMenu VROptionsMenu protected
 	Submenu "$VRWHEELMNU_TITLE",  "VRWeaponWheelOptions"
 	StaticText ""
 	StaticText "$VRPREFMNU_MISC", gold
+	ifOption(OpenXR)
+	{
+		Option "VR Render As Desktop View",    "vr_desktop_view_openxr_render", "YesNo"
+	}
 	ifOption(OpenVR, OpenXR)
 	{
 		Option "$VRPREFMNU_DESKTOP",    "vr_desktop_view", "DesktopViewModes"
