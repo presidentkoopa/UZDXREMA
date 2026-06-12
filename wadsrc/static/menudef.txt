@@ -397,6 +397,10 @@ OptionMenu "OptionsMenu" protected
 	SafeCommand	"$OPTMNU_WRITEINI",		"writeini"
 	
 	Command "$OPTMNU_CONSOLE",			"menuconsole"
+	ifOption(Developer1, Developer2)
+	{
+		Submenu "$DEVOPTMNU_TITLE",		"DeveloperOptionsMenu"
+	}
 	//Command "$OPTMNU_OPENCONFIG",		"openconfig"
 	//Command "$OPTMNU_OPENSCREENSHOTS",	"openscreenshots"
 	//Command "$OPTMNU_OPENSAVES",		"opensaves"
@@ -3092,6 +3096,36 @@ OptionMenu VROptionsMenu protected
 	Slider "$VRPREFMNU_EXTERNAL_HAPTICS_INTENSITY",	"ext_haptic_level_global_intensity", 0.0, 2.0, 0.1, 2
 	StaticText " "
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_pickup_haptic_level vr_quake_haptic_level ext_haptic_level_global_intensity"
+}
+
+OptionValue "OpenXRDebugSubmitMode"
+{
+	0, "$DEVOPTMNU_SUBMIT_MODE_DEFAULT"
+	1, "$DEVOPTMNU_SUBMIT_MODE_LEFT_IMAGE"
+	2, "$DEVOPTMNU_SUBMIT_MODE_LEFT_POSE"
+	3, "$DEVOPTMNU_SUBMIT_MODE_BOTH"
+}
+
+OptionMenu DeveloperOptionsMenu protected
+{
+	Title "$DEVOPTMNU_TITLE"
+
+	Option "$DEVOPTMNU_DISABLE_SSBO", "gl_no_ssbo", "YesNo"
+	ifOption(OpenXR)
+	{
+	Option "$DEVOPTMNU_DEBUG_SUBMIT_MODE", "vr_openxr_debug_submit_mode", "OpenXRDebugSubmitMode"
+	Slider "$DEVOPTMNU_RENDER_SCALE", "vr_openxr_render_scale", 0.25, 4.0, 0.05, 2
+	Slider "$DEVOPTMNU_FOV_ADJUST", "vr_openxr_fov_adjust_deg", -30.0, 30.0, 0.5, 1
+	Slider "$DEVOPTMNU_EYE_SHIFT_SCALE", "vr_openxr_eye_shift_scale", 0.1, 3.0, 0.05, 2
+	Option "$DEVOPTMNU_FORCE_RECOMMENDED_VIEWPORT", "vr_openxr_force_recommended_viewport", "OnOff"
+	Option "$DEVOPTMNU_USE_SCREEN_VIEWPORT_FOR_SUBMIT", "vr_openxr_use_screen_viewport_for_submit", "YesNo"
+	}
+	ifOption(OpenVR)
+	{
+		Slider "$DEVOPTMNU_MENU_POINTER_PITCH_BIAS", "vr_openvr_menu_pointer_pitch_bias", -45.0, 45.0, 1.0, 1
+		Slider "$DEVOPTMNU_MENU_POINTER_TIP_OFFSET", "vr_openvr_menu_pointer_tip_offset", 0.0, 0.15, 0.005, 3
+	}
+	Option "$DEVOPTMNU_HUD_DEBUG_BORDER", "vr_hud_debug_border", "OnOff"
 }
 
 
