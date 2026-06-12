@@ -82,6 +82,8 @@
 #include "c_console.h"
 #include "common/scripting/jit/jit.h"
 
+EXTERN_CVAR(Int, developer);
+
 using namespace OpenGLRenderer;
 
 extern thread_local bool isWorkerThread;
@@ -535,6 +537,30 @@ static float RAD2DEG(float rad)
 	return rad * float(180. / M_PI);
 }
 
+static const char* VRModeName(int mode)
+{
+	switch (mode)
+	{
+	case VR_MONO: return "mono";
+	case VR_GREENMAGENTA: return "greenmagenta";
+	case VR_REDCYAN: return "redcyan";
+	case VR_SIDEBYSIDEFULL: return "side-by-side-full";
+	case VR_SIDEBYSIDESQUISHED: return "side-by-side-squished";
+	case VR_LEFTEYEVIEW: return "left-eye";
+	case VR_RIGHTEYEVIEW: return "right-eye";
+	case VR_SIDEBYSIDELETTERBOX: return "side-by-side-letterbox";
+	case VR_TOPBOTTOM: return "top-bottom";
+	case VR_CHECKERINTERLEAVED: return "checker";
+#ifdef USE_OPENVR
+	case VR_OPENVR: return "openvr";
+#endif
+#ifdef USE_OPENXR
+	case VR_OPENXR_MOBILE: return "openxr";
+#endif
+	default: return "unknown";
+	}
+}
+
 const VRMode *VRMode::GetVRMode(bool toscreen)
 {
 	static VREyeInfo vrmi_mono_eyes[2] = { VREyeInfo(0.f, 1.f), VREyeInfo(0.f, 0.f) };
@@ -562,6 +588,20 @@ const VRMode *VRMode::GetVRMode(bool toscreen)
 #endif
 
 	int mode = !toscreen || (sysCallbacks.DisableTextureFilter && sysCallbacks.DisableTextureFilter()) ? 0 : vr_mode;
+	static int lastLoggedRequestedMode = -999999;
+	static int lastLoggedResolvedMode = -999999;
+	auto logModeSelect = [&](int requestedMode, int resolvedMode)
+	{
+		if (developer <= 0 || (requestedMode == lastLoggedRequestedMode && resolvedMode == lastLoggedResolvedMode))
+		{
+			return;
+		}
+		Printf("VRMode select: requested=%s(%d) resolved=%s(%d)\n",
+			VRModeName(requestedMode), requestedMode,
+			VRModeName(resolvedMode), resolvedMode);
+		lastLoggedRequestedMode = requestedMode;
+		lastLoggedResolvedMode = resolvedMode;
+	};
 
 	switch (mode)
 	{
@@ -598,10 +638,10 @@ const VRMode *VRMode::GetVRMode(bool toscreen)
 #ifdef USE_OPENVR
 	case VR_OPENVR:
 	{
-		// When calling a function of this class, ensure that you are using a pointer or reference to the derived class
-		Printf("VRMode select: choosing OpenVR mode 10.\n");
 		const VRMode &vrmode = s3d::OpenVRMode::getInstance();
-		return vrmode.IsInitialized() ? &vrmode : &vrmi_mono;
+		const bool initialized = vrmode.IsInitialized();
+		logModeSelect(mode, initialized ? mode : VR_MONO);
+		return initialized ? &vrmode : &vrmi_mono;
 		//return vrmi_openvr.IsInitialized() ? &vrmi_openvr : &vrmi_mono;
 	}
 #endif
@@ -609,11 +649,12 @@ const VRMode *VRMode::GetVRMode(bool toscreen)
 	case VR_OPENXR_MOBILE:
 		if (V_GetBackend() == 1)
 		{
-			Printf("VRMode select: choosing Vulkan/OpenXR mode 15.\n");
 			const VRMode& vrmode = s3d::VKOpenXRDeviceMode::getInstance();
-			return vrmode.IsInitialized() ? &vrmode : &vrmi_mono;
+			const bool initialized = vrmode.IsInitialized();
+			logModeSelect(mode, initialized ? mode : VR_MONO);
+			return initialized ? &vrmode : &vrmi_mono;
 		}
-		Printf("VRMode select: Vulkan/OpenXR requested but backend is not Vulkan.\n");
+		logModeSelect(mode, VR_MONO);
 		return &vrmi_mono;
 #endif
 	}

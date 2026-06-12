@@ -376,11 +376,8 @@ void VkPostprocess::UpdateShadowMap()
 
 void VkPostprocess::NextEye(int eyeCount)
 {
-	int oldImage = mCurrentPipelineImage;
 	if (eyeCount > 1)
 		mCurrentPipelineImage = (mCurrentPipelineImage + 1) % VkRenderBuffers::NumPipelineImages;
-	Printf("OpenXR: NextEye eyeCount=%d oldImage=%d newImage=%d\n",
-		eyeCount, oldImage, mCurrentPipelineImage);
 }
 
 void VkPostprocess::SetCurrentPipelineImage(int index)

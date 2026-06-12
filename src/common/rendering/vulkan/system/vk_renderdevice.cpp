@@ -614,10 +614,6 @@ void VulkanRenderDevice::BeginFrame()
 	{
 		eyeLayerCount = std::max(1, vrmode->GetMultiviewLayerCount());
 	}
-	static bool lastLoggedMultiviewState = false;
-	static int lastLoggedMultiviewLayers = 1;
-	static uint32_t lastLoggedMultiviewMask = 0;
-	static VkSampleCountFlagBits lastLoggedSceneSamples = VK_SAMPLE_COUNT_FLAG_BITS_MAX_ENUM;
 	const uint32_t multiviewMask = useMultiviewScene ? vrmode->GetMultiviewViewMask() : 0;
 	mScreenBuffers->BeginFrame(
 		bufferScreenWidth, bufferScreenHeight,
@@ -625,23 +621,6 @@ void VulkanRenderDevice::BeginFrame()
 		eyeLayerCount, eyeLayerCount);
 
 	const VkSampleCountFlagBits sceneSamples = mScreenBuffers->GetSceneSamples();
-	if (useMultiviewScene != lastLoggedMultiviewState ||
-		eyeLayerCount != lastLoggedMultiviewLayers ||
-		multiviewMask != lastLoggedMultiviewMask ||
-		sceneSamples != lastLoggedSceneSamples)
-	{
-		Printf("OpenXR frame path: multiview=%d layers=%d viewMask=0x%x xrFrame=%d sceneSamples=%d gl_multisample=%d\n",
-			useMultiviewScene ? 1 : 0,
-			eyeLayerCount,
-			(unsigned int)multiviewMask,
-			mXRFrameBeganThisFrame ? 1 : 0,
-			(int)sceneSamples,
-			(int)gl_multisample);
-		lastLoggedMultiviewState = useMultiviewScene;
-		lastLoggedMultiviewLayers = eyeLayerCount;
-		lastLoggedMultiviewMask = multiviewMask;
-		lastLoggedSceneSamples = sceneSamples;
-	}
 	mSaveBuffers->BeginFrame(SAVEPICWIDTH, SAVEPICHEIGHT, SAVEPICWIDTH, SAVEPICHEIGHT, 1, 1);
 	mRenderState->BeginFrame();
 	mDescriptorSetManager->BeginFrame();

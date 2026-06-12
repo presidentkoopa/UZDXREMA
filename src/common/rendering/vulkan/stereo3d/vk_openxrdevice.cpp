@@ -39,6 +39,8 @@
 #include <chrono>
 #include <vector>
 
+EXTERN_CVAR(Int, developer);
+
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
@@ -1162,14 +1164,16 @@ static void LogBoundSourcesForAction(XrInstance instance, XrSession session, XrA
 	uint32_t sourceCount = 0;
 	if (XR_FAILED(xrEnumerateBoundSourcesForAction(session, &enumerateInfo, 0, &sourceCount, nullptr)) || sourceCount == 0)
 	{
-		Printf("OpenXR: bound sources [%s] unavailable.\n", label);
+		if (developer > 0)
+			Printf("OpenXR: bound sources [%s] unavailable.\n", label);
 		return;
 	}
 
 	std::vector<XrPath> sources(sourceCount, XR_NULL_PATH);
 	if (XR_FAILED(xrEnumerateBoundSourcesForAction(session, &enumerateInfo, sourceCount, &sourceCount, sources.data())))
 	{
-		Printf("OpenXR: bound sources [%s] query failed.\n", label);
+		if (developer > 0)
+			Printf("OpenXR: bound sources [%s] query failed.\n", label);
 		return;
 	}
 
@@ -1182,7 +1186,8 @@ static void LogBoundSourcesForAction(XrInstance instance, XrSession session, XrA
 		list += source.GetChars();
 	}
 
-	Printf("OpenXR: bound sources [%s] = %s\n", label, list.GetChars());
+	if (developer > 0)
+		Printf("OpenXR: bound sources [%s] = %s\n", label, list.GetChars());
 }
 
 static void SuggestBindingsForProfile(XrInstance instance, XrPath profilePath, const char* profileName, const std::vector<XrActionSuggestedBinding>& bindings)
@@ -1195,15 +1200,14 @@ static void SuggestBindingsForProfile(XrInstance instance, XrPath profilePath, c
 	suggested.suggestedBindings = bindings.data();
 	suggested.countSuggestedBindings = (uint32_t)bindings.size();
 	const XrResult result = xrSuggestInteractionProfileBindings(instance, &suggested);
-	Printf("OpenXR: profile %s suggestion count=%u result=%d\n",
-		profileName != nullptr ? profileName : "<unknown>",
-		(unsigned)bindings.size(),
-		(int)result);
 	if (XR_FAILED(result))
 	{
-		Printf("OpenXR: xrSuggestInteractionProfileBindings failed for profile %s result=%d\n",
-			profileName != nullptr ? profileName : "<unknown>",
-			(int)result);
+		if (developer > 0)
+		{
+			Printf("OpenXR: xrSuggestInteractionProfileBindings failed for profile %s result=%d\n",
+				profileName != nullptr ? profileName : "<unknown>",
+				(int)result);
+		}
 	}
 }
 
@@ -1419,7 +1423,6 @@ void VKOpenXRDeviceEyePose::SetUp() const
 
 void VKOpenXRDeviceEyePose::TearDown() const
 {
-	Printf("OpenXR: TearDown called for eye=%d\n", eye);
 	VREyeInfo::TearDown();
 	if (eye == 1)
 	{
@@ -1873,7 +1876,8 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 				const XrColorSpaceFB requestedColorSpace = SelectPreferredColorSpace(supportedColorSpaces);
 				if (XR_SUCCEEDED(xrSetColorSpaceFB(xrSession, requestedColorSpace)))
 				{
-					Printf("OpenXR: requested FB color space %d from %u supported modes.\n", (int)requestedColorSpace, colorSpaceCount);
+					if (developer > 0)
+						Printf("OpenXR: requested FB color space %d from %u supported modes.\n", (int)requestedColorSpace, colorSpaceCount);
 				}
 			}
 		}
@@ -1888,7 +1892,6 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	if (XR_SUCCEEDED(xrCreateReferenceSpace(xrSession, &spaceInfo, &xrSpace)))
 	{
 		xrUsingStageSpace = true;
-		Printf("OpenXR: using STAGE reference space.\n");
 	}
 	else
 	{
@@ -1897,7 +1900,6 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 		{
 			return fail();
 		}
-		Printf("OpenXR: using LOCAL reference space fallback.\n");
 	}
 
 	if (xrSpace == XR_NULL_HANDLE)
@@ -2134,14 +2136,18 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	{
 		for (uint32_t i = 0; i < viewCount; ++i)
 		{
-			Printf("OpenXR: view %u recommended extent=%ux%u sampleCount=%u.\n",
-				i,
-				xrViewConfigs[i].recommendedImageRectWidth,
-				xrViewConfigs[i].recommendedImageRectHeight,
-				xrViewConfigs[i].recommendedSwapchainSampleCount);
+			if (developer > 0)
+			{
+				Printf("OpenXR: view %u recommended extent=%ux%u sampleCount=%u.\n",
+					i,
+					xrViewConfigs[i].recommendedImageRectWidth,
+					xrViewConfigs[i].recommendedImageRectHeight,
+					xrViewConfigs[i].recommendedSwapchainSampleCount);
+			}
 		}
-		Printf("OpenXR: using shared stereo extent=%ux%u for array swapchains.\n",
-			sceneWidth, sceneHeight);
+		if (developer > 0)
+			Printf("OpenXR: using shared stereo extent=%ux%u for array swapchains.\n",
+				sceneWidth, sceneHeight);
 	}
 	InitializeMultiview();
 
@@ -2174,15 +2180,6 @@ bool VKOpenXRDeviceMode::CreateSwapchain() const
 	}
 	xrSwapchainFormat = SelectSwapchainFormat(runtimeFormats, preferredFormat);
 	xrVirtualScreenSwapchainFormat = SelectFlatSwapchainFormat(runtimeFormats, preferredFormat);
-	Printf("OpenXR: preferred scene swapchain format=%d selected=%d srgb=%d runtimeFormats=%u.\n",
-		(int)preferredFormat,
-		(int)xrSwapchainFormat,
-		IsSRGBSwapchainFormat((VkFormat)xrSwapchainFormat) ? 1 : 0,
-		formatCount);
-	Printf("OpenXR: preferred flat swapchain format=%d selected=%d srgb=%d.\n",
-		(int)preferredFormat,
-		(int)xrVirtualScreenSwapchainFormat,
-		IsSRGBSwapchainFormat((VkFormat)xrVirtualScreenSwapchainFormat) ? 1 : 0);
 
 	XrSwapchainCreateInfo swapchainInfo{ XR_TYPE_SWAPCHAIN_CREATE_INFO };
 	swapchainInfo.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
@@ -2397,7 +2394,8 @@ bool VKOpenXRDeviceMode::CreateVirtualScreenSwapchain(uint32_t width, uint32_t h
 
 	xrVirtualScreenWidth = width;
 	xrVirtualScreenHeight = height;
-	Printf("OpenXR: created virtual screen swapchain %ux%u with %u images.\n", width, height, imageCount);
+	if (developer > 0)
+		Printf("OpenXR: created virtual screen swapchain %ux%u with %u images.\n", width, height, imageCount);
 	return true;
 }
 
@@ -2703,7 +2701,6 @@ void VKOpenXRDeviceMode::DestroyOpenXR() const
 	xrFrameState = { XR_TYPE_FRAME_STATE };
 	sceneWidth = 0;
 	sceneHeight = 0;
-	xrLoggedDesktopViewportMismatch = false;
 	xrVkSubmitFence.reset();
 	xrVkCommandBuffer.reset();
 	xrVkCommandPool.reset();
@@ -2967,14 +2964,6 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 	const int movementHand = *vr_switch_sticks ? mainHand : offHand;
 	const int turnHand = *vr_switch_sticks ? offHand : mainHand;
 	const bool useTrackpad = IsCurrentInteractionProfile(xrInstance, xrSession, xrRightHandPath, "vive_controller");
-	static bool loggedProfile = false;
-	if (!loggedProfile)
-	{
-		Printf("OpenXR: controller profile %s, locomotion=%s\n",
-			useTrackpad ? "vive/trackpad" : "thumbstick",
-			"left-move/right-turn");
-		loggedProfile = true;
-	}
 
 	OpenXRHandInputState handInput[2];
 	for (int hand = 0; hand < 2; ++hand)
@@ -3716,36 +3705,7 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 
 		}
 	}
-	static bool loggedBoundSources = false;
 	ProcessHaptics();
-	if (!loggedBoundSources)
-	{
-		auto getCurrentProfile = [&](XrPath handPath)
-		{
-			XrInteractionProfileState profileState{ XR_TYPE_INTERACTION_PROFILE_STATE };
-			if (XR_FAILED(xrGetCurrentInteractionProfile(xrSession, handPath, &profileState)) || profileState.interactionProfile == XR_NULL_PATH)
-				return FString("<unbound>");
-			return PathToString(xrInstance, profileState.interactionProfile);
-		};
-
-		const FString leftProfile = getCurrentProfile(xrLeftHandPath);
-		const FString rightProfile = getCurrentProfile(xrRightHandPath);
-		if (!strcmp(leftProfile.GetChars(), "<unbound>") && !strcmp(rightProfile.GetChars(), "<unbound>"))
-			return;
-
-		loggedBoundSources = true;
-		Printf("OpenXR: active interaction profiles left=%s right=%s\n",
-			leftProfile.GetChars(),
-			rightProfile.GetChars());
-		LogBoundSourcesForAction(xrInstance, xrSession, xrSelectAction, "select");
-		LogBoundSourcesForAction(xrInstance, xrSession, xrGripAction, "grip");
-		LogBoundSourcesForAction(xrInstance, xrSession, xrHapticAction, "haptic");
-		LogBoundSourcesForAction(xrInstance, xrSession, xrMenuAction, "menu");
-		LogBoundSourcesForAction(xrInstance, xrSession, xrAAction, "A");
-		LogBoundSourcesForAction(xrInstance, xrSession, xrBAction, "B");
-		LogBoundSourcesForAction(xrInstance, xrSession, xrXAction, "X");
-		LogBoundSourcesForAction(xrInstance, xrSession, xrYAction, "Y");
-	}
 }
 
 void VKOpenXRDeviceMode::TearDown() const
@@ -3794,7 +3754,8 @@ void VKOpenXRDeviceMode::ApplyRefreshRate() const
 				rateList += ", ";
 			rateList.AppendFormat("%.0f", (double)rates[i]);
 		}
-		Printf("OpenXR: supported display refresh rates: %s Hz\n", rateList.GetChars());
+		if (developer > 0)
+			Printf("OpenXR: supported display refresh rates: %s Hz\n", rateList.GetChars());
 		xrLoggedDisplayRefreshRates = true;
 	}
 
@@ -3818,14 +3779,18 @@ void VKOpenXRDeviceMode::ApplyRefreshRate() const
 			xrCurrentDisplayRefreshRate = selectedRate;
 		}
 
-		Printf("OpenXR: requested display refresh rate %.0f Hz (menu=%d, current=%.0f Hz)\n",
-			(double)selectedRate,
-			(int)vid_refreshrate,
-			(double)(xrCurrentDisplayRefreshRate > 0.0f ? xrCurrentDisplayRefreshRate : selectedRate));
+		if (developer > 0)
+		{
+			Printf("OpenXR: requested display refresh rate %.0f Hz (menu=%d, current=%.0f Hz)\n",
+				(double)selectedRate,
+				(int)vid_refreshrate,
+				(double)(xrCurrentDisplayRefreshRate > 0.0f ? xrCurrentDisplayRefreshRate : selectedRate));
+		}
 	}
 	else
 	{
-		Printf("OpenXR: failed to request display refresh rate %d Hz.\n", (int)vid_refreshrate);
+		if (developer > 0)
+			Printf("OpenXR: failed to request display refresh rate %d Hz.\n", (int)vid_refreshrate);
 	}
 #endif
 }
@@ -3945,22 +3910,12 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 
 	if (!shouldSubmitProjectionLayer || !sessionVisibleOrFocused)
 	{
-		if (!sessionVisibleOrFocused)
-			Printf("OpenXR frame %llu: submission skipped - session state=%d.\n", (unsigned long long)xrFrameCounter, (int)xrSessionState);
 		XrFrameEndInfo endInfo{ XR_TYPE_FRAME_END_INFO };
 		endInfo.displayTime = xrFrameState.predictedDisplayTime;
 		endInfo.environmentBlendMode = environmentBlendMode;
 		endInfo.layerCount = 0;
 		endInfo.layers = nullptr;
-		Printf("OpenXR frame %llu: Before xrEndFrame (empty layer).\n", (unsigned long long)xrFrameCounter);
 		XrResult endResult = xrEndFrame(xrSession, &endInfo);
-		Printf("OpenXR frame %llu: After xrEndFrame (%d).\n", (unsigned long long)xrFrameCounter, (int)endResult);
-		Printf("OpenXR frame %llu: shouldRender=%d presentImageIndex=%d gamestate=%d xrEndFrame=%d.\n",
-			(unsigned long long)xrFrameCounter,
-			xrFrameState.shouldRender ? 1 : 0,
-			framebufferManager ? framebufferManager->PresentImageIndex : -999,
-			(int)gamestate,
-			(int)endResult);
 		xrFrameInProgress = false;
 		return XR_SUCCEEDED(endResult);
 	}
@@ -3975,9 +3930,7 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		endInfo.environmentBlendMode = environmentBlendMode;
 		endInfo.layerCount = 0;
 		endInfo.layers = nullptr;
-		Printf("OpenXR frame %llu: Before xrEndFrame (acquire failed).\n", (unsigned long long)xrFrameCounter);
 		XrResult endResult = xrEndFrame(xrSession, &endInfo);
-		Printf("OpenXR frame %llu: After xrEndFrame (%d).\n", (unsigned long long)xrFrameCounter, (int)endResult);
 		xrFrameInProgress = false;
 		return false;
 	}
@@ -3995,9 +3948,7 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		endInfo.environmentBlendMode = environmentBlendMode;
 		endInfo.layerCount = 0;
 		endInfo.layers = nullptr;
-		Printf("OpenXR frame %llu: Before xrEndFrame (wait timeout).\n", (unsigned long long)xrFrameCounter);
 		XrResult endResult = xrEndFrame(xrSession, &endInfo);
-		Printf("OpenXR frame %llu: After xrEndFrame (%d).\n", (unsigned long long)xrFrameCounter, (int)endResult);
 		xrFrameInProgress = false;
 		return XR_SUCCEEDED(endResult);
 	}
@@ -4011,9 +3962,7 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		endInfo.environmentBlendMode = environmentBlendMode;
 		endInfo.layerCount = 0;
 		endInfo.layers = nullptr;
-		Printf("OpenXR frame %llu: Before xrEndFrame (wait failed).\n", (unsigned long long)xrFrameCounter);
 		XrResult endResult = xrEndFrame(xrSession, &endInfo);
-		Printf("OpenXR frame %llu: After xrEndFrame (%d).\n", (unsigned long long)xrFrameCounter, (int)endResult);
 		xrFrameInProgress = false;
 		return false;
 	}
@@ -4021,7 +3970,6 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 	auto* buffers = vkfb->GetBuffers();
 	if (buffers == nullptr || postprocess == nullptr)
 	{
-		Printf("OpenXR frame %llu: blit SKIPPED reason: missing postprocess source.\n", (unsigned long long)xrFrameCounter);
 		XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
 		xrReleaseSwapchainImage(xrSwapchain, &releaseInfo);
 
@@ -4030,9 +3978,7 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		endInfo.environmentBlendMode = environmentBlendMode;
 		endInfo.layerCount = 0;
 		endInfo.layers = nullptr;
-		Printf("OpenXR frame %llu: Before xrEndFrame (missing source buffer).\n", (unsigned long long)xrFrameCounter);
 		XrResult endResult = xrEndFrame(xrSession, &endInfo);
-		Printf("OpenXR frame %llu: After xrEndFrame (%d).\n", (unsigned long long)xrFrameCounter, (int)endResult);
 		return XR_SUCCEEDED(endResult);
 	}
 
@@ -4042,8 +3988,6 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 	const uint32_t dstH = xrPresentHeight != 0 ? xrPresentHeight : recommendedH;
 	if (dstW == 0 || dstH == 0)
 	{
-		Printf("OpenXR frame %llu: blit skipped - invalid XR destination dimensions present=%ux%u recommended=%ux%u.\n",
-			(unsigned long long)xrFrameCounter, dstW, dstH, recommendedW, recommendedH);
 		XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
 		xrReleaseSwapchainImage(xrSwapchain, &releaseInfo);
 
@@ -4052,28 +3996,11 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		endInfo.environmentBlendMode = environmentBlendMode;
 		endInfo.layerCount = 0;
 		endInfo.layers = nullptr;
-		Printf("OpenXR frame %llu: Before xrEndFrame (invalid XR destination dimensions).\n", (unsigned long long)xrFrameCounter);
 		XrResult endResult = xrEndFrame(xrSession, &endInfo);
-		Printf("OpenXR frame %llu: After xrEndFrame (%d).\n", (unsigned long long)xrFrameCounter, (int)endResult);
 		xrFrameInProgress = false;
 		return XR_SUCCEEDED(endResult);
 	}
 
-	if (!xrLoggedDesktopViewportMismatch)
-	{
-		const bool desktopDiffers = (vkfb->mOutputLetterbox.width != (int)dstW) || (vkfb->mOutputLetterbox.height != (int)dstH);
-		const bool screenDiffers = (vkfb->mScreenViewport.width != (int)dstW) || (vkfb->mScreenViewport.height != (int)dstH);
-		if (desktopDiffers || screenDiffers)
-		{
-			Printf("OpenXR: desktop viewport differs from XR sizing desktopVP=%dx%d screenVP=%dx%d sceneVP=%dx%d present=%ux%u recommended=%ux%u (XR blits stay on XR sizes)\n",
-				vkfb->mOutputLetterbox.width, vkfb->mOutputLetterbox.height,
-				vkfb->mScreenViewport.width, vkfb->mScreenViewport.height,
-				vkfb->mSceneViewport.width, vkfb->mSceneViewport.height,
-				dstW, dstH,
-				recommendedW, recommendedH);
-			xrLoggedDesktopViewportMismatch = true;
-		}
-	}
 	ScopedCycleTimer cycle(VRSubmit);
 	vkResetCommandPool(xrVkDevice->device, xrVkCommandPool->pool, 0);
 	xrVkCommandBuffer->begin();
@@ -4100,8 +4027,6 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		const uint32_t sourceEye = (vr_openxr_debug_submit_mode == 1 || vr_openxr_debug_submit_mode == 3) ? 0u : layer;
 		if (sourceEye >= xrPresentTextures.size() || xrPresentTextures[sourceEye].Image == nullptr)
 		{
-			Printf("OpenXR frame %llu: Skipping eye %u - missing prepared eye image %u\n",
-				(unsigned long long)xrFrameCounter, layer, sourceEye);
 			continue;
 		}
 
@@ -4111,8 +4036,6 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		const int32_t srcH = preparedEyeTexture ? preparedEyeTexture->height : 0;
 		if (srcW <= 0 || srcH <= 0)
 		{
-			Printf("OpenXR frame %llu: Skipping eye %u - invalid prepared eye image %u extent=%dx%d\n",
-				(unsigned long long)xrFrameCounter, layer, sourceEye, srcW, srcH);
 			continue;
 		}
 
@@ -4165,13 +4088,11 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 	VkResult submitResult = vkQueueSubmit(xrVkDevice->GraphicsQueue, 1, &submitInfo, xrVkSubmitFence->fence);
 	if (submitResult != VK_SUCCESS)
 	{
-		Printf("OpenXR frame %llu: blit submit failed.\n", (unsigned long long)xrFrameCounter);
 		return false;
 	}
 	VkResult waitResult = vkWaitForFences(xrVkDevice->device, 1, &xrVkSubmitFence->fence, VK_TRUE, std::numeric_limits<uint64_t>::max());
 	if (waitResult != VK_SUCCESS)
 	{
-		Printf("OpenXR frame %llu: blit fence wait failed.\n", (unsigned long long)xrFrameCounter);
 		return false;
 	}
 	XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
@@ -4183,9 +4104,7 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		endInfo.environmentBlendMode = environmentBlendMode;
 		endInfo.layerCount = 0;
 		endInfo.layers = nullptr;
-		Printf("OpenXR frame %llu: Before xrEndFrame (release failed).\n", (unsigned long long)xrFrameCounter);
 		XrResult endResult = xrEndFrame(xrSession, &endInfo);
-		Printf("OpenXR frame %llu: After xrEndFrame (%d).\n", (unsigned long long)xrFrameCounter, (int)endResult);
 		xrFrameInProgress = false;
 		return false;
 	}
@@ -4270,7 +4189,8 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 
 void VKOpenXRDeviceMode::Present() const
 {
-	Printf("OpenXR: Present called\n");
+	if (developer > 0)
+		Printf("OpenXR: Present called\n");
 }
 
 void VKOpenXRDeviceMode::AdjustViewport(DFrameBuffer* screen) const
@@ -4968,16 +4888,6 @@ void VKOpenXRDeviceMode::FinalizeEyeImage(VulkanRenderDevice* vkfb, int eyeIndex
 	ScopedCycleTimer cycle(VRFinalizeEye);
 	const int pipelineImageIndex = postprocess->GetCurrentPipelineImage();
 	const XrSafeSourceRect sourceRect = GetSafeXrSourceRect(vkfb);
-	static bool xrLoggedPresentFormat = false;
-	if (!xrLoggedPresentFormat)
-	{
-		Printf("OpenXR: finalize eye copy uses xrSwapchainFormat=%d srgb=%d presentTextureFormat=%d.\n",
-			(int)xrSwapchainFormat,
-			IsSRGBSwapchainFormat((VkFormat)xrSwapchainFormat) ? 1 : 0,
-			(int)xrSwapchainFormat);
-		xrLoggedPresentFormat = true;
-	}
-
 	postprocess->SetCurrentPipelineImage(pipelineImageIndex);
 
 	IntRect targetBox;
@@ -5378,7 +5288,6 @@ void VKOpenXRDeviceMode::InitializeMultiview() const
 
 	if (!xrVkDevice || xrVkDevice->Instance == nullptr)
 	{
-		Printf("OpenXR multiview probe: skipped, Vulkan device is unavailable.\n");
 		return;
 	}
 
@@ -5400,40 +5309,6 @@ void VKOpenXRDeviceMode::InitializeMultiview() const
 		runtimeStereoViews &&
 		xrMultiviewMaxViewCount >= xrViewCount;
 
-	Printf("OpenXR multiview probe: api=%u.%u core=%d ext=%d feature=%d runtimeViews=%u maxViews=%u maxInstanceIndex=%u requested=%d eligible=%d\n",
-		VK_VERSION_MAJOR(apiVersion),
-		VK_VERSION_MINOR(apiVersion),
-		multiviewIsCore ? 1 : 0,
-		hasMultiviewExtension ? 1 : 0,
-		multiviewFeature ? 1 : 0,
-		xrViewCount,
-		xrMultiviewMaxViewCount,
-		xrMultiviewMaxInstanceIndex,
-		vr_openxr_multiview ? 1 : 0,
-		xrMultiviewSupported ? 1 : 0);
-
-	if (!xrMultiviewSupported)
-	{
-		if (!hasMultiviewApiPath)
-		{
-			Printf("OpenXR multiview probe: not eligible because Vulkan 1.1+ is unavailable and %s is not exposed.\n",
-				VK_KHR_MULTIVIEW_EXTENSION_NAME);
-		}
-		else if (!multiviewFeature)
-		{
-			Printf("OpenXR multiview probe: not eligible because the device does not expose the multiview feature bit.\n");
-		}
-		else if (!runtimeStereoViews)
-		{
-			Printf("OpenXR multiview probe: not eligible because the runtime reported only %u XR view(s).\n",
-				xrViewCount);
-		}
-		else if (xrMultiviewMaxViewCount < xrViewCount)
-		{
-			Printf("OpenXR multiview probe: not eligible because maxMultiviewViewCount=%u is smaller than xrViewCount=%u.\n",
-				xrMultiviewMaxViewCount, xrViewCount);
-		}
-	}
 }
 
 bool VKOpenXRDeviceMode::ShouldUseMultiviewThisFrame() const
@@ -5442,34 +5317,6 @@ bool VKOpenXRDeviceMode::ShouldUseMultiviewThisFrame() const
 		xrMultiviewSupported &&
 		mFrameRenderMode == FrameRenderMode::GameplayEyes &&
 		xrViewCount > 1;
-
-	static bool loggedOnce = false;
-	static bool lastRequested = false;
-	static bool lastSupported = false;
-	static FrameRenderMode lastFrameMode = FrameRenderMode::VirtualScreen;
-	static uint32_t lastViewCount = UINT32_MAX;
-	static bool lastShouldUse = false;
-	if (!loggedOnce ||
-		lastRequested != !!vr_openxr_multiview ||
-		lastSupported != xrMultiviewSupported ||
-		lastFrameMode != mFrameRenderMode ||
-		lastViewCount != xrViewCount ||
-		lastShouldUse != shouldUse)
-	{
-		Printf("OpenXR multiview status: requested=%d supported=%d frameMode=%s xrViews=%u shouldUse=%d\n",
-			vr_openxr_multiview ? 1 : 0,
-			xrMultiviewSupported ? 1 : 0,
-			FrameRenderModeName(mFrameRenderMode),
-			xrViewCount,
-			shouldUse ? 1 : 0);
-		loggedOnce = true;
-		lastRequested = !!vr_openxr_multiview;
-		lastSupported = xrMultiviewSupported;
-		lastFrameMode = mFrameRenderMode;
-		lastViewCount = xrViewCount;
-		lastShouldUse = shouldUse;
-	}
-
 	return shouldUse;
 }
 

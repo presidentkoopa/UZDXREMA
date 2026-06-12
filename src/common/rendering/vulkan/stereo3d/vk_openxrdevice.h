@@ -244,7 +244,6 @@ protected:
 	mutable int xrMenuPointerLastY = 0;
 	mutable bool xrMenuPointerLastLeftDown = false;
 	mutable bool xrMenuPointerLastRightDown = false;
-	mutable bool xrLoggedDesktopViewportMismatch = false;
 #ifdef XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME
 	mutable bool xrHasDisplayRefreshRate = false;
 	mutable bool xrLoggedDisplayRefreshRates = false;

@@ -66,6 +66,8 @@
 
 #include "gl_openvr.h"
 // #include "openvr_include.h"
+
+EXTERN_CVAR(Int, developer);
 #include <QzDoom/VrCommon.h>
 
 using namespace openvr;
@@ -1794,9 +1796,9 @@ namespace s3d
 	{
 		if (!hmdWasFound || vrSystem == nullptr)
 		{
-			if (!refreshRateLoggedUnavailable)
+			if (developer > 0 && !refreshRateLoggedUnavailable)
 			{
-				Printf("OpenVR: refresh rate control is unavailable because the OpenVR HMD is not fully initialized.\n");
+				Printf("OpenVR: refresh-rate control unavailable; HMD/runtime missing.\n");
 				refreshRateLoggedUnavailable = true;
 			}
 			return;
@@ -1804,15 +1806,13 @@ namespace s3d
 
 		if (vrSettings == nullptr)
 		{
-			if (!refreshRateLoggedUnavailable)
+			if (developer > 0 && !refreshRateLoggedUnavailable)
 			{
-				Printf("OpenVR: SteamVR preferred refresh rate control is unavailable in this runtime.\n");
+				Printf("OpenVR: refresh-rate control unavailable; SteamVR settings interface missing.\n");
 				refreshRateLoggedUnavailable = true;
 			}
 			return;
 		}
-
-		refreshRateLoggedUnavailable = false;
 
 		auto readDisplayFrequency = [this]() -> float
 		{
@@ -1835,26 +1835,14 @@ namespace s3d
 		if (currentRateBefore > 0.0f)
 			lastObservedHmdRefreshRate = currentRateBefore;
 
-		if (!refreshRateLoggedControlPath)
+		if (developer > 0 && !refreshRateLoggedControlPath)
 		{
-			Printf("OpenVR: refresh rate changes use SteamVR preferredRefreshRate and may apply later depending on headset/runtime support.\n");
+			Printf("OpenVR: using SteamVR display refresh-rate control.\n");
 			refreshRateLoggedControlPath = true;
 		}
 
 		if (requestedRate <= 0)
-		{
-			if (currentRateBefore > 0.0f)
-			{
-				Printf("OpenVR: leaving SteamVR preferred refresh rate unchanged (menu=%d, active=%.0f Hz).\n",
-					requestedRate, (double)currentRateBefore);
-			}
-			else
-			{
-				Printf("OpenVR: leaving SteamVR preferred refresh rate unchanged (menu=%d, active rate unknown).\n",
-					requestedRate);
-			}
 			return;
-		}
 
 		EVRSettingsError settingsError = (EVRSettingsError)0;
 		vrSettings->SetFloat(
@@ -1864,8 +1852,8 @@ namespace s3d
 			&settingsError);
 		if (settingsError != (EVRSettingsError)0)
 		{
-			Printf("OpenVR: failed to set SteamVR preferred refresh rate to %d Hz (%s).\n",
-				requestedRate, vrSettings->GetSettingsErrorNameFromEnum(settingsError));
+			if (developer > 0)
+				Printf("OpenVR: failed to request display refresh rate %d Hz.\n", requestedRate);
 			return;
 		}
 
@@ -1877,28 +1865,16 @@ namespace s3d
 
 		if (currentRateAfter <= 0.0f)
 		{
-			Printf("OpenVR: requested SteamVR preferred refresh rate %d Hz, but could not verify the active HMD refresh rate.\n",
-				requestedRate);
+			if (developer > 0)
+				Printf("OpenVR: requested display refresh rate %d Hz.\n", requestedRate);
 			return;
 		}
 
-		if (std::fabs(currentRateAfter - (float)requestedRate) < 0.25f)
+		if (developer > 0)
 		{
-			if (currentRateBefore > 0.0f && std::fabs(currentRateBefore - currentRateAfter) >= 0.25f)
-			{
-				Printf("OpenVR: requested SteamVR preferred refresh rate %d Hz and active HMD rate changed from %.0f to %.0f Hz.\n",
-					requestedRate, (double)currentRateBefore, (double)currentRateAfter);
-			}
-			else
-			{
-				Printf("OpenVR: requested SteamVR preferred refresh rate %d Hz and active HMD rate is %.0f Hz.\n",
-					requestedRate, (double)currentRateAfter);
-			}
-		}
-		else
-		{
-			Printf("OpenVR: requested SteamVR preferred refresh rate %d Hz, but active HMD rate is %.0f Hz. SteamVR or the headset may defer or reject the change.\n",
-				requestedRate, (double)currentRateAfter);
+			Printf("OpenVR: requested display refresh rate %d Hz (current=%.0f Hz).\n",
+				requestedRate,
+				(double)currentRateAfter);
 		}
 	}
 

@@ -1631,8 +1631,12 @@ OptionMenu "MiscOptions" protected
 	StaticText ""
 	Option "$VIDMNU_SHOWFPSONHUD",		        "vid_fps", "OnOff"
 	Option "Lock FrameRate (IF LOW PERF.)",         "cl_capfps", "OnOff"
+
 	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar k_mergekeys k_allowfullscreentoggle queryiwad nocheats allcheats disableautosave saveloadconfirmation autosavecount quicksaverotation quicksaverotationcount dehload enablescriptscreenshot setslotstrict nointerscrollabort gl_cachenodes gl_cachetime clearnodecache m_quickexit showendoom menu_hideextreme sv_alwaystally cl_capfps"
+	Option "$MISCMNU_DEVELOPERMODE",			"developer", "DevMessageLevels"
+
+	StaticText " "
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar k_mergekeys k_allowfullscreentoggle queryiwad nocheats allcheats disableautosave saveloadconfirmation autosavecount quicksaverotation quicksaverotationcount dehload enablescriptscreenshot setslotstrict nointerscrollabort gl_cachenodes gl_cachetime clearnodecache m_quickexit showendoom menu_hideextreme sv_alwaystally cl_capfps developer"
 }
 
 //-------------------------------------------------------------------------------------------
@@ -3126,6 +3130,8 @@ OptionMenu DeveloperOptionsMenu protected
 		Slider "$DEVOPTMNU_MENU_POINTER_TIP_OFFSET", "vr_openvr_menu_pointer_tip_offset", 0.0, 0.15, 0.005, 3
 	}
 	Option "$DEVOPTMNU_HUD_DEBUG_BORDER", "vr_hud_debug_border", "OnOff"
+	StaticText " "
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar gl_no_ssbo vr_openxr_debug_submit_mode vr_openxr_render_scale vr_openxr_fov_adjust_deg vr_openxr_eye_shift_scale vr_openxr_force_recommended_viewport vr_openxr_use_screen_viewport_for_submit vr_openvr_menu_pointer_pitch_bias vr_openvr_menu_pointer_tip_offset vr_hud_debug_border"
 }
 
 
