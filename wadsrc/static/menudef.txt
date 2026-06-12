@@ -3025,7 +3025,7 @@ OptionMenu VROptionsMenu protected
 	StaticText "$VRPREFMNU_MISC", gold
 	ifOption(OpenXR)
 	{
-		Option "VR Render As Desktop View",    "vr_desktop_view_openxr_render", "YesNo"
+		Option "$VRPREFMNU_DESKTOP_RENDER",    "vr_desktop_view_openxr_render", "YesNo"
 	}
 	ifOption(OpenVR, OpenXR)
 	{
@@ -3036,16 +3036,17 @@ OptionMenu VROptionsMenu protected
 	ifOption(OpenVR, OpenXR)
 	{
 		StaticText ""
-		StaticText "Performance", gold
-		Option "VR scene multithread", "vr_scene_multithread", "OnOff"
-		StaticText "Lets VR scene build use the worker thread.", "Brown"
+		StaticText "$VRPREFMNU_PERFORMANCE", gold
+		Option "$VRPREFMNU_SCENE_MULTITHREAD", "vr_scene_multithread", "OnOff"
+		StaticText "$VRPREFMNU_SCENE_MULTITHREAD_HELP", "Brown"
 	}
 	ifOption(OpenXR)
 	{
+		Option "$VRPREFMNU_MULTIVIEW", "vr_openxr_multiview", "OnOff"
+		StaticText "$VRPREFMNU_MULTIVIEW_HELP", "Brown"
+		
 		StaticText ""
 		StaticText "$VRPREFMNU_DISPLAY_ADJUST", gold
-		Option "VR multiview", "vr_openxr_multiview", "OnOff"
-		StaticText "Gates the experimental OpenXR Vulkan multiview path.", "Brown"
 		Slider "$VRPREFMNU_ADJUST_GAMMA",     		"vr_openxr_present_gamma_bias", -2, 2, 0.01, 2
 		Slider "$VRPREFMNU_ADJUST_CONTRAST",     	"vr_openxr_present_contrast_bias", -2, 2, 0.01, 2
 		Slider "$VRPREFMNU_ADJUST_BRIGHTNESS",     "vr_openxr_present_brightness_bias", -2, 2, 0.01, 2
@@ -3680,14 +3681,14 @@ OptionMenu QuickMenu protected
 	ifOption(OpenVR, OpenXR)
 	{
 		StaticText " "
-		Option "VR scene multithread", "vr_scene_multithread", "OnOff"
-		StaticText "Quick toggle for VR scene-build threading.", "Brown"
+		Option "$VRPREFMNU_SCENE_MULTITHREAD", "vr_scene_multithread", "OnOff"
+		StaticText "$VRPREFMNU_SCENE_MULTITHREAD_QUICKHELP", "Brown"
 	}
 	ifOption(OpenXR)
 	{
 		StaticText " "
-		Option "VR multiview", "vr_openxr_multiview", "OnOff"
-		StaticText "Quick toggle for the experimental OpenXR multiview path.", "Brown"
+		Option "$VRPREFMNU_MULTIVIEW", "vr_openxr_multiview", "OnOff"
+		StaticText "$VRPREFMNU_MULTIVIEW_QUICKHELP", "Brown"
 	}
 }
 
@@ -3855,8 +3856,8 @@ OptionMenu "vkoptions"
 	Option "$VKMNU_HDR",				"vk_hdr", "OnOff"
 	ifOption(OpenXR)
 	{
-		Option "VR multiview",			"vr_openxr_multiview", "OnOff"
-		StaticText "Gate the experimental OpenXR Vulkan multiview path.", "Brown"
+		Option "$VRPREFMNU_MULTIVIEW",			"vr_openxr_multiview", "OnOff"
+		StaticText "$VRPREFMNU_MULTIVIEW_HELP", "Brown"
 	}
 }
 
