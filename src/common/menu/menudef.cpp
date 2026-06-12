@@ -1103,6 +1103,16 @@ static void ParseOptionMenuBody(FScanner &sc, DOptionMenuDescriptor *desc, int i
 		{
 			desc->mDontBlur = true;
 		}
+		else if (sc.Compare("AutoScroll"))
+		{
+			desc->mAutoScroll = true;
+			desc->mAutoScrollSpeed = 1;
+			if (sc.CheckNumber())
+			{
+				desc->mAutoScrollSpeed = max(1, sc.Number);
+			}
+			desc->mScrollTop = desc->mItems.Size();
+		}
 		else
 		{
 			bool success = false;
@@ -1276,6 +1286,8 @@ static void ParseOptionMenu(FScanner &sc)
 	desc->mDontBlur = false;
 	desc->mAnimatedTransition = false;
 	desc->mAnimated = false;
+	desc->mAutoScroll = false;
+	desc->mAutoScrollSpeed = 1;
 	desc->mProtected = sc.CheckString("protected");
 
 	ParseOptionMenuBody(sc, desc, -1);

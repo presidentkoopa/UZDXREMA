@@ -58,6 +58,8 @@ class OptionMenuDescriptor : MenuDescriptor native
 	native bool mDontBlur;
 	native bool mAnimatedTransition;
 	native bool mAnimated;
+	native bool mAutoScroll;
+	native int mAutoScrollSpeed;
 	native Font mFont;
 
 	void Reset()
@@ -67,6 +69,8 @@ class OptionMenuDescriptor : MenuDescriptor native
 		mScrollTop = 0;
 		mIndent = 0;
 		mDontDim = 0;
+		mAutoScroll = 0;
+		mAutoScrollSpeed = 1;
 	}
 
 	//=============================================================================
@@ -97,6 +101,9 @@ class OptionMenu : Menu
 	bool CanScrollDown;
 	int VisBottom;
 	OptionMenuItem mFocusControl;
+	bool mAutoScroll;
+	int mAutoScrollDelay;
+	double mAutoScrollOffset;
 
 	//=============================================================================
 	//
@@ -112,6 +119,14 @@ class OptionMenu : Menu
 		DontBlur = desc.mDontBlur;
 		AnimatedTransition = desc.mAnimatedTransition;
 		Animated = desc.mAnimated;
+		mAutoScroll = mDesc.mAutoScroll;
+		if (mDesc.mAutoScrollSpeed < 1) mDesc.mAutoScrollSpeed = 1;
+		mAutoScrollDelay = GameTicRate / 2;
+		mAutoScrollOffset = 0;
+		if (mAutoScroll)
+		{
+			mDesc.mScrollPos = 0;
+		}
 
 		let itemCount = mDesc.mItems.size();
 		if (itemCount > 0)
@@ -137,6 +152,47 @@ class OptionMenu : Menu
 		{
 			mDesc.mItems[i].OnMenuCreated();
 		}
+	}
+
+	//=============================================================================
+	//
+	//  Auto-scroll only the info/credits pages, leaving normal input handling in
+	//  place so the mouse wheel can still override the view.
+	//
+	//=============================================================================
+
+	int GetAutoScrollLimit()
+	{
+		if (!mAutoScroll || mDesc.mItems.Size() == 0)
+		{
+			return 0;
+		}
+
+		double y = mDesc.mPosition;
+		if (y <= 0)
+		{
+			y = DrawCaption(mDesc.mTitle, -y, false);
+		}
+
+		double fontheight = OptionMenuSettings.mLinespacing * CleanYfac_1;
+		double lastrow = screen.GetHeight() - OptionHeight() * CleanYfac_1;
+		int visible = 0;
+		int fixedCount = clamp(mDesc.mScrollTop, 0, mDesc.mItems.Size());
+
+		while (visible < fixedCount && y <= lastrow)
+		{
+			++visible;
+			y += fontheight;
+		}
+
+		int scrollableVisible = 0;
+		while ((fixedCount + scrollableVisible) < mDesc.mItems.Size() && y <= lastrow)
+		{
+			++scrollableVisible;
+			y += fontheight;
+		}
+
+		return MAX(mDesc.mItems.Size() - fixedCount - scrollableVisible, 0);
 	}
 
 
@@ -188,6 +244,7 @@ class OptionMenu : Menu
 		{
 			int scrollamt = MIN(2, mDesc.mScrollPos);
 			mDesc.mScrollPos -= scrollamt;
+			mAutoScrollOffset = 0;
 			return true;
 		}
 		else if (ev.type == UIEvent.Type_WheelDown)
@@ -205,6 +262,7 @@ class OptionMenu : Menu
 					VisBottom++;
 				}
 			}
+			mAutoScrollOffset = 0;
 			return true;
 		}
 		else if (ev.type == UIEvent.Type_Char)
@@ -230,6 +288,7 @@ class OptionMenu : Menu
 				int pagesize = VisBottom - mDesc.mScrollPos - mDesc.mScrollTop;
 				mDesc.mScrollPos = clamp(mDesc.mSelectedItem - mDesc.mScrollTop - 1, 0, mDesc.mItems.size() - pagesize - 1);
 			}
+			mAutoScrollOffset = 0;
 		}
 		return Super.OnUIEvent(ev);
 	}
@@ -437,6 +496,41 @@ class OptionMenu : Menu
 		{
 			mDesc.mItems[i].Ticker();
 		}
+
+		if (!mAutoScroll)
+		{
+			return;
+		}
+
+		int maxScroll = GetAutoScrollLimit();
+		if (maxScroll <= 0)
+		{
+			mDesc.mScrollPos = 0;
+			return;
+		}
+
+		if (mAutoScrollDelay > 0)
+		{
+			--mAutoScrollDelay;
+			return;
+		}
+
+		double fontheight = OptionMenuSettings.mLinespacing * CleanYfac_1;
+		double speed = (fontheight / (GameTicRate * 4.0 / 5.0)) * mDesc.mAutoScrollSpeed / 4.0;
+		mAutoScrollOffset += speed;
+		while (mAutoScrollOffset >= fontheight)
+		{
+			mAutoScrollOffset -= fontheight;
+			if (mDesc.mScrollPos >= maxScroll)
+			{
+				// Loop back to the start after the last line fully scrolls away.
+				mDesc.mScrollPos = 0;
+				mAutoScrollOffset = 0;
+				mAutoScrollDelay = GameTicRate;
+				return;
+			}
+			++mDesc.mScrollPos;
+		}
 	}
 
 	//=============================================================================
@@ -479,19 +573,20 @@ class OptionMenu : Menu
 
 	override void Drawer ()
 	{
-		int y = mDesc.mPosition;
+		double y = mDesc.mPosition;
+		double scrollOffset = mAutoScroll ? mAutoScrollOffset : 0;
 
 		if (y <= 0)
 		{
 			y = DrawCaption(mDesc.mTitle, -y, true);
 		}
 		mDesc.mDrawTop = y / CleanYfac_1; // mouse checks are done in clean space.
-		int fontheight = OptionMenuSettings.mLinespacing * CleanYfac_1;
+		double fontheight = OptionMenuSettings.mLinespacing * CleanYfac_1;
 
 		int indent = GetIndent();
 
-		int ytop = y + mDesc.mScrollTop * 8 * CleanYfac_1;
-		int lastrow = screen.GetHeight() - OptionHeight() * CleanYfac_1;
+		double ytop = y + mDesc.mScrollTop * 8 * CleanYfac_1;
+		double lastrow = screen.GetHeight() - OptionHeight() * CleanYfac_1;
 
 		int i;
 		for (i = 0; i < mDesc.mItems.Size() && y <= lastrow; i++)
@@ -501,6 +596,7 @@ class OptionMenu : Menu
 			{
 				i += mDesc.mScrollPos;
 				if (i >= mDesc.mItems.Size()) break;	// skipped beyond end of menu 
+				y -= scrollOffset;
 			}
 			bool isSelected = mDesc.mSelectedItem == i;
 			int cur_indent = mDesc.mItems[i].Draw(mDesc, y, indent, isSelected);

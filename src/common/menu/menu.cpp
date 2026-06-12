@@ -178,6 +178,8 @@ void DOptionMenuDescriptor::Reset()
 	mScrollTop = 0;
 	mIndent = 0;
 	mDontDim = 0;
+	mAutoScroll = 0;
+	mAutoScrollSpeed = 1;
 	mFont = BigUpper;
 }
 
@@ -1138,6 +1140,8 @@ DEFINE_FIELD(DOptionMenuDescriptor, mDontDim)
 DEFINE_FIELD(DOptionMenuDescriptor, mDontBlur)
 DEFINE_FIELD(DOptionMenuDescriptor, mAnimatedTransition)
 DEFINE_FIELD(DOptionMenuDescriptor, mAnimated)
+DEFINE_FIELD(DOptionMenuDescriptor, mAutoScroll)
+DEFINE_FIELD(DOptionMenuDescriptor, mAutoScrollSpeed)
 DEFINE_FIELD(DOptionMenuDescriptor, mFont)
 
 DEFINE_FIELD(FOptionMenuSettings, mTitleColor)

@@ -3734,15 +3734,15 @@ OptionMenu QuickMenu protected
 
 /*=======================================
  *
- * QZD Info and credits
+ * DOOMXR Info and credits
  *
  *=======================================*/
 
 OptionMenu "InfoAndCreditsMenu"
 { 
 	Title "$INFOCREDMNU_TITLE"
-	StaticPatch 52, -20, "QZDOOM"
-	Position 120
+	StaticPatch 50, -10, "DOOMXR"
+	Position 270
 	Submenu		"$INFOCREDMNU_INSTRUCTIONS", "QuestZDoomInstructions", 0, 1
 	Submenu		"$INFOCREDMNU_CREDITS", "QuestZDoomCredits", 0, 1
 }
@@ -3750,8 +3750,9 @@ OptionMenu "InfoAndCreditsMenu"
 OptionMenu "QuestZDoomInstructions"
 { 
 	Title "$INFOCREDMNU_TITLE"
-	StaticPatch 52, -20, "QZDOOM"
-	Position 120
+	StaticPatch 50, -10, "DOOMXR"
+	Position 270
+	AutoScroll
 	StaticText	"$INFOCREDMNU_INSTRUCTIONS_HEADER"
 	StaticText	""
 	StaticText	"$INFOCREDMNU_LINE_1", "White"
@@ -3782,13 +3783,33 @@ OptionMenu "QuestZDoomInstructions"
 	StaticText	"$INFOCREDMNU_LINE_19"
 	StaticText	"$INFOCREDMNU_LINE_20"
 	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
 }
 
 OptionMenu "QuestZDoomCredits"
 { 
 	Title "$INFOCREDMNU_TITLE"
-	StaticPatch 52, -20, "QZDOOM"
-	Position 120
+	StaticPatch 50, -10, "DOOMXR"
+	Position 270
+	AutoScroll 2
 	StaticText	"$INFOCREDMNU_CREDITS_HEADER"
 	StaticText	""
 	StaticText	"DRBEEF"
@@ -3838,6 +3859,26 @@ OptionMenu "QuestZDoomCredits"
 	StaticText	""
 	StaticText	"$INFOCREDMNU_CREDITS_LINE_15"
 	StaticText	"$INFOCREDMNU_CREDITS_LINE_16"
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
 }
 
 OptionValue "UseModes"
