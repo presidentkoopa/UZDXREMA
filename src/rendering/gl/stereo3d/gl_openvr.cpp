@@ -230,6 +230,7 @@ EXTERN_CVAR(Bool, vr_secondary_button_mappings);
 EXTERN_CVAR(Bool, vr_teleport);
 EXTERN_CVAR(Bool, vr_switch_sticks);
 EXTERN_CVAR(Bool, vr_two_handed_weapons);
+EXTERN_CVAR(Int, vid_refreshrate);
 
 EXTERN_CVAR(Bool, vr_enable_haptics);
 EXTERN_CVAR(Float, vr_kill_momentum);
@@ -1580,8 +1581,11 @@ namespace s3d
 		, hmdWasFound(false)
 		, sceneWidth(0), sceneHeight(0)
 		, vrCompositor(nullptr)
+		, vrOverlay(nullptr)
 		, vrRenderModels(nullptr)
+		, vrSettings(nullptr)
 		, vrToken(0)
+		, haptics(nullptr)
 		, crossHairDrawer(new F2DDrawer)
 	{
 		//eye_ptrs.Push(&leftEyeView); // initially default behavior to Mono non-stereo rendering
@@ -1631,12 +1635,16 @@ namespace s3d
 		const std::string model_key = std::string("FnTable:") + std::string(IVRRenderModels_Version);
 		vrRenderModels = (VR_IVRRenderModels_FnTable*)VR_GetGenericInterface(model_key.c_str(), &eError);
 
+		const std::string settings_key = std::string("FnTable:") + std::string(IVRSettings_Version);
+		vrSettings = (VR_IVRSettings_FnTable*)VR_GetGenericInterface(settings_key.c_str(), &eError);
+
 		//eye_ptrs.Push(&rightEyeView); // NOW we render to two eyes
 		hmdWasFound = true;
 
 		crossHairDrawer->Clear();
 
 		haptics = new OpenVRHaptics(vrSystem);
+		ApplyRefreshRate();
 	}
 
 	/* virtual */
@@ -1779,6 +1787,118 @@ namespace s3d
 				vrOverlay->SetOverlayTransformAbsolute(overlayHandle, (ETrackingUniverseOrigin)openvr::ETrackingUniverseOrigin_TrackingUniverseStanding, &openvrOverlayAbsTransform);
 			}
 			break;
+		}
+	}
+
+	void OpenVRMode::ApplyRefreshRate() const
+	{
+		if (!hmdWasFound || vrSystem == nullptr)
+		{
+			if (!refreshRateLoggedUnavailable)
+			{
+				Printf("OpenVR: refresh rate control is unavailable because the OpenVR HMD is not fully initialized.\n");
+				refreshRateLoggedUnavailable = true;
+			}
+			return;
+		}
+
+		if (vrSettings == nullptr)
+		{
+			if (!refreshRateLoggedUnavailable)
+			{
+				Printf("OpenVR: SteamVR preferred refresh rate control is unavailable in this runtime.\n");
+				refreshRateLoggedUnavailable = true;
+			}
+			return;
+		}
+
+		refreshRateLoggedUnavailable = false;
+
+		auto readDisplayFrequency = [this]() -> float
+		{
+			ETrackedPropertyError propError = (ETrackedPropertyError)0;
+			const float rate = vrSystem->GetFloatTrackedDeviceProperty(
+				k_unTrackedDeviceIndex_Hmd,
+				(ETrackedDeviceProperty)2002,
+				&propError);
+			return propError == (ETrackedPropertyError)0 ? rate : 0.0f;
+		};
+
+		const int requestedRate = std::max(0, (int)vid_refreshrate);
+		if (refreshRateHasLastRequest && lastRefreshRateMenuValue == requestedRate)
+			return;
+
+		refreshRateHasLastRequest = true;
+		lastRefreshRateMenuValue = requestedRate;
+
+		const float currentRateBefore = readDisplayFrequency();
+		if (currentRateBefore > 0.0f)
+			lastObservedHmdRefreshRate = currentRateBefore;
+
+		if (!refreshRateLoggedControlPath)
+		{
+			Printf("OpenVR: refresh rate changes use SteamVR preferredRefreshRate and may apply later depending on headset/runtime support.\n");
+			refreshRateLoggedControlPath = true;
+		}
+
+		if (requestedRate <= 0)
+		{
+			if (currentRateBefore > 0.0f)
+			{
+				Printf("OpenVR: leaving SteamVR preferred refresh rate unchanged (menu=%d, active=%.0f Hz).\n",
+					requestedRate, (double)currentRateBefore);
+			}
+			else
+			{
+				Printf("OpenVR: leaving SteamVR preferred refresh rate unchanged (menu=%d, active rate unknown).\n",
+					requestedRate);
+			}
+			return;
+		}
+
+		EVRSettingsError settingsError = (EVRSettingsError)0;
+		vrSettings->SetFloat(
+			const_cast<char*>(k_pch_SteamVR_Section),
+			const_cast<char*>(k_pch_SteamVR_PreferredRefreshRate),
+			(float)requestedRate,
+			&settingsError);
+		if (settingsError != (EVRSettingsError)0)
+		{
+			Printf("OpenVR: failed to set SteamVR preferred refresh rate to %d Hz (%s).\n",
+				requestedRate, vrSettings->GetSettingsErrorNameFromEnum(settingsError));
+			return;
+		}
+
+		lastAppliedPreferredRefreshRate = (float)requestedRate;
+
+		const float currentRateAfter = readDisplayFrequency();
+		if (currentRateAfter > 0.0f)
+			lastObservedHmdRefreshRate = currentRateAfter;
+
+		if (currentRateAfter <= 0.0f)
+		{
+			Printf("OpenVR: requested SteamVR preferred refresh rate %d Hz, but could not verify the active HMD refresh rate.\n",
+				requestedRate);
+			return;
+		}
+
+		if (std::fabs(currentRateAfter - (float)requestedRate) < 0.25f)
+		{
+			if (currentRateBefore > 0.0f && std::fabs(currentRateBefore - currentRateAfter) >= 0.25f)
+			{
+				Printf("OpenVR: requested SteamVR preferred refresh rate %d Hz and active HMD rate changed from %.0f to %.0f Hz.\n",
+					requestedRate, (double)currentRateBefore, (double)currentRateAfter);
+			}
+			else
+			{
+				Printf("OpenVR: requested SteamVR preferred refresh rate %d Hz and active HMD rate is %.0f Hz.\n",
+					requestedRate, (double)currentRateAfter);
+			}
+		}
+		else
+		{
+			Printf("OpenVR: requested SteamVR preferred refresh rate %d Hz, but active HMD rate is %.0f Hz. SteamVR or the headset may defer or reject the change.\n",
+				requestedRate, (double)currentRateAfter);
 		}
 	}
 
@@ -3551,8 +3671,13 @@ namespace s3d
 			vrCompositor = nullptr;
 			vrOverlay = nullptr;
 			vrRenderModels = nullptr;
+			vrSettings = nullptr;
 			leftEyeView->dispose();
 			rightEyeView->dispose();
+		}
+		if (haptics != nullptr) {
+			delete haptics;
+			haptics = nullptr;
 		}
 		if (crossHairDrawer != nullptr) {
 			delete crossHairDrawer;

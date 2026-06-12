@@ -60,6 +60,7 @@ public:
 	void Swap();
 	bool IsHWGammaActive() const { return HWGammaActive; }
 
+	void NewRefreshRate() override;
 	void SetVSync(bool vsync) override;
 
 	void Draw2D(bool outside2D = false) override;
