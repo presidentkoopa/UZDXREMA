@@ -454,6 +454,7 @@ private:
 };
 
 extern DBaseStatusBar *StatusBar;
+extern bool gPortableHudCanvasRender;
 
 // Status bar factories -----------------------------------------------------
 

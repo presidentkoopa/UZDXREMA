@@ -143,6 +143,7 @@ CUSTOM_CVAR(Float, con_alpha, 0.75f, CVAR_ARCHIVE)
 CUSTOM_CVAR(Int, developer, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	FScriptPosition::Developer = self;
+	M_RequestMenuRebuild();
 }
 
 
@@ -759,6 +760,32 @@ void C_HideConsole ()
 		ConsoleState = c_up;
 		ConBottom = 0;
 		HistPos = NULL;
+		if (sysCallbacks.ConsoleToggled)
+		{
+			sysCallbacks.ConsoleToggled(c_up);
+		}
+	}
+}
+
+void C_ScrollConsole(int amount)
+{
+	if (conbuffer == nullptr || amount == 0)
+	{
+		return;
+	}
+
+	RowAdjust += amount;
+	if (RowAdjust < 0)
+	{
+		RowAdjust = 0;
+	}
+	else
+	{
+		const int maxAdjust = conbuffer->GetFormattedLineCount();
+		if (RowAdjust > maxAdjust)
+		{
+			RowAdjust = maxAdjust;
+		}
 	}
 }
 
@@ -766,6 +793,26 @@ static bool C_HandleKey (event_t *ev, FCommandBuffer &buffer)
 {
 	int data1 = ev->data1;
 	bool keepappending = false;
+	const char *togglebind = Bindings.GetBind(data1);
+
+	if (togglebind && !stricmp(togglebind, "toggleconsole"))
+	{
+		if (gamestate == GS_STARTUP || !AppActive)
+		{
+			return false;
+		}
+		else if (gamestate == GS_FULLCONSOLE)
+		{
+			C_DoCommand("menu_main");
+		}
+		else
+		{
+			buffer.SetString("");
+			HistPos = NULL;
+			C_ToggleConsole();
+		}
+		return true;
+	}
 
 	switch (ev->subtype)
 	{

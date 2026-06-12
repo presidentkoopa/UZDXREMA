@@ -1895,7 +1895,7 @@ void TryRunTics (void)
 	if (vid_dontdowait && ((vid_maxfps > 0) || (vid_vsync == true)))
 		doWait = false;
 
-	if (!AppActive && vid_lowerinbackground)
+	if (!AppActive && vid_lowerinbackground && (vrmode == nullptr || !vrmode->IsVR()))
 		doWait = true;
 
 	// get real tics

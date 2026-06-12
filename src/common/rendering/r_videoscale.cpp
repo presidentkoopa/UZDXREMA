@@ -41,9 +41,11 @@
 #include "i_interface.h"
 #include "printf.h"
 #include "version.h"
+#include "hwrenderer/data/hw_vrmodes.h"
 
 #define NUMSCALEMODES countof(vScaleTable)
 extern bool setsizeneeded;
+EXTERN_CVAR(Int, vr_mode)
 
 CUSTOM_CVAR(Int, vid_scale_customwidth, VID_MIN_WIDTH, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
@@ -72,6 +74,12 @@ namespace
 {
 	uint32_t min_width = VID_MIN_WIDTH;
 	uint32_t min_height = VID_MIN_HEIGHT;
+
+	bool IsOpenXRVidScaleLocked()
+	{
+		const VRMode* vrmode = VRMode::GetVRModeCached(true);
+		return vrmode != nullptr && vrmode->IsVR() && vr_mode == VR_OPENXR_MOBILE;
+	}
 
 	float v_MinimumToFill(uint32_t inwidth, uint32_t inheight)
 	{
@@ -220,7 +228,10 @@ int ViewportScaledWidth(int width, int height)
 		width = ((float)width/height > ActiveRatio(width, height)) ? (int)(height * ActiveRatio(width, height)) : width;
 		height = ((float)width/height < ActiveRatio(width, height)) ? (int)(width / ActiveRatio(width, height)) : height;
 	}
-	return (int)max((int32_t)min_width, (int32_t)(vid_scalefactor * vScaleTable[vid_scalemode].GetScaledWidth(width, height)));
+	const int baseWidth = (int)vScaleTable[vid_scalemode].GetScaledWidth(width, height);
+	if (IsOpenXRVidScaleLocked())
+		return (int)max((int32_t)min_width, (int32_t)baseWidth);
+	return (int)max((int32_t)min_width, (int32_t)(vid_scalefactor * baseWidth));
 }
 
 int ViewportScaledHeight(int width, int height)
@@ -232,7 +243,10 @@ int ViewportScaledHeight(int width, int height)
 		height = ((float)width/height < ActiveRatio(width, height)) ? (int)(width / ActiveRatio(width, height)) : height;
 		width = ((float)width/height > ActiveRatio(width, height)) ? (int)(height * ActiveRatio(width, height)) : width;
 	}
-	return (int)max((int32_t)min_height, (int32_t)(vid_scalefactor * vScaleTable[vid_scalemode].GetScaledHeight(width, height)));
+	const int baseHeight = (int)vScaleTable[vid_scalemode].GetScaledHeight(width, height);
+	if (IsOpenXRVidScaleLocked())
+		return (int)max((int32_t)min_height, (int32_t)baseHeight);
+	return (int)max((int32_t)min_height, (int32_t)(vid_scalefactor * baseHeight));
 }
 
 float ViewportPixelAspect()

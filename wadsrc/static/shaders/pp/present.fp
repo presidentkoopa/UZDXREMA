@@ -19,7 +19,7 @@ vec4 ApplyGamma(vec4 c)
 	vec3 val = valgray * Contrast - (Contrast - 1.0) * 0.5;
 	val += Brightness * 0.5;
 	val = pow(max(val, vec3(0.0)), vec3(InvGamma));
-	return vec4(val, c.a);
+	return vec4(val, 1.0);
 }
 
 vec4 Dither(vec4 c)
@@ -28,7 +28,7 @@ vec4 Dither(vec4 c)
 		return c;
 	vec2 texSize = vec2(textureSize(DitherTexture, 0));
 	float threshold = texture(DitherTexture, gl_FragCoord.xy / texSize).r;
-	return vec4(floor(c.rgb * ColorScale + threshold) / ColorScale, c.a);
+	return vec4(floor(c.rgb * ColorScale + threshold) / ColorScale, 1.0);
 }
 
 vec3 sRGBtoLinear(vec3 c)
@@ -46,7 +46,7 @@ vec4 ApplyHdrMode(vec4 c)
 	if (HdrMode == 0)
 		return c;
 	else
-		return vec4(sRGBtoscRGBLinear(c.rgb), c.a);
+		return vec4(sRGBtoscRGBLinear(c.rgb), 1.0);
 }
 
 void main()

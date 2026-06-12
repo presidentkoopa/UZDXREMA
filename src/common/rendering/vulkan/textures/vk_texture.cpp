@@ -89,7 +89,7 @@ VkTextureImage* VkTextureManager::GetTexture(const PPTextureType& type, PPTextur
 	{
 		int idx = fb->GetPostprocess()->GetCurrentPipelineImage();
 		if (type == PPTextureType::NextPipelineTexture)
-			idx = (idx + 1) % VkRenderBuffers::NumPipelineImages;
+			idx = fb->GetPostprocess()->GetNextPipelineImage();
 
 		return &fb->GetBuffers()->PipelineImage[idx];
 	}
@@ -127,6 +127,24 @@ VkTextureImage* VkTextureManager::GetTexture(const PPTextureType& type, PPTextur
 		I_FatalError("VkPPRenderState::GetTexture not implemented yet for this texture type");
 		return nullptr;
 	}
+}
+
+VulkanImageView* VkTextureManager::GetTextureView(const PPTextureType& type, PPTexture* pptexture, bool depthOnly)
+{
+	VkTextureImage* tex = GetTexture(type, pptexture);
+	if (!tex)
+		return nullptr;
+
+	if (fb->ShouldUseCurrentEyeLayer(type, tex))
+	{
+		const int layerIndex = fb->GetCurrentEyeLayer();
+		return depthOnly ? tex->GetLayerDepthOnlyView(layerIndex) : tex->GetLayerView(layerIndex);
+	}
+
+	if (depthOnly && tex->DepthOnlyView)
+		return tex->DepthOnlyView.get();
+
+	return tex->View.get();
 }
 
 VkFormat VkTextureManager::GetTextureFormat(PPTexture* texture)

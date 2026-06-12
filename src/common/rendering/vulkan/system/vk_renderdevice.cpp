@@ -58,6 +58,11 @@
 #include "vulkan/textures/vk_texture.h"
 #include "vulkan/textures/vk_framebuffer.h"
 #include <zvulkan/vulkanswapchain.h>
+
+EXTERN_CVAR(Bool, vr_openxr_debug_sizes);
+EXTERN_CVAR(Bool, vr_openxr_debug_present);
+
+extern bool cinemamode;
 #include <zvulkan/vulkanbuilders.h>
 #include <zvulkan/vulkansurface.h>
 #include <zvulkan/vulkancompatibledevice.h>
@@ -65,12 +70,14 @@
 #include "vulkan/system/vk_buffer.h"
 #include "engineerrors.h"
 #include "c_dispatch.h"
+#include "common/rendering/stereo3d/openxr/oxr_loader.h"
 
 FString JitCaptureStackTrace(int framesToSkip, bool includeNativeFrames, int maxFrames = -1);
 
 EXTERN_CVAR(Int, gl_tonemap)
 EXTERN_CVAR(Int, screenblocks)
 EXTERN_CVAR(Bool, cl_capfps)
+EXTERN_CVAR(Int, vr_mode)
 
 CVAR(Bool, vk_raytrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
@@ -128,6 +135,21 @@ VulkanRenderDevice::VulkanRenderDevice(void *hMonitor, bool fullscreen, std::sha
 	builder.OptionalRayQuery();
 	builder.Surface(surface);
 	builder.SelectDevice(vk_device);
+	if (vr_mode == VR_OPENXR_MOBILE)
+	{
+		OpenXRVulkanBootstrapInfo xrInfo;
+		if (QueryOpenXRVulkanBootstrapInfo(xrInfo))
+		{
+			for (const auto& ext : xrInfo.requiredDeviceExtensions)
+				builder.RequireExtension(ext);
+		}
+
+		VkPhysicalDevice preferredDevice = VK_NULL_HANDLE;
+		if (surface != nullptr && surface->Instance != nullptr && QueryOpenXRVulkanPreferredPhysicalDevice(surface->Instance->Instance, preferredDevice))
+		{
+			builder.PreferredPhysicalDevice(preferredDevice);
+		}
+	}
 	SupportedDevices = builder.FindDevices(surface->Instance);
 	device = builder.Create(surface->Instance);
 }
@@ -217,10 +239,59 @@ void VulkanRenderDevice::Update()
 
 	Flush3D.Clock();
 
-	GetPostprocess()->SetActiveRenderTarget();
-
-	Draw2D();
-	twod->Clear();
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	auto* postprocess = GetPostprocess();
+	if (postprocess)
+	{
+		if (vrmode != nullptr && vrmode->IsVR())
+		{
+			const int eyeCount = vrmode->mEyeCount > 0 ? vrmode->mEyeCount : 1;
+			const bool suppressSceneEye2D = vrmode->ShouldUseScreenLayerForCurrentFrame() || cinemamode;
+			const bool useGameplayEyeViewport = vrmode->ShouldUseRecommendedRenderSizeThisFrame() && !vrmode->IsRenderingVirtualScreen();
+			const IntRect savedScreenViewport = mScreenViewport;
+			VREyeComposite.Clock();
+			for (int eye_ix = 0; eye_ix < eyeCount; ++eye_ix)
+			{
+				mCurrentEyeIndex = eye_ix;
+				const auto eye = (eye_ix >= 0 && eye_ix < 2) ? vrmode->mEyes[eye_ix] : nullptr;
+				postprocess->SetPipelineImagePair((eye_ix % 2) * 2, 2);
+				postprocess->SetCurrentPipelineImage(mEyeFinalPipelineImage[eye_ix % 2]);
+				if (useGameplayEyeViewport)
+				{
+					mScreenViewport = mSceneViewport;
+				}
+				postprocess->SetActiveRenderTarget();
+				if (eye != nullptr)
+				{
+					eye->AdjustBlend(nullptr);
+				}
+				if (!suppressSceneEye2D && twod != nullptr && twod->HasCommandsForPass(true))
+				{
+					Draw2D(true);
+				}
+				if (!vrmode->ShouldUseScreenLayerForCurrentFrame() && !vrmode->IsRenderingVirtualScreen() && eye != nullptr)
+				{
+					eye->AdjustHud();
+				}
+				if (!suppressSceneEye2D && twod != nullptr && twod->HasCommandsForPass(false))
+				{
+					Draw2D(false);
+				}
+				vrmode->FinalizeEyeImage(this, eye_ix);
+			}
+			VREyeComposite.Unclock();
+			mCurrentEyeIndex = 0;
+			mScreenViewport = savedScreenViewport;
+			vrmode->RenderVirtualScreen();
+			twod->Clear();
+		}
+		else
+		{
+			postprocess->SetActiveRenderTarget();
+			Draw2D();
+			twod->Clear();
+		}
+	}
 
 	mRenderState->EndRenderPass();
 	mRenderState->EndFrame();
@@ -229,6 +300,12 @@ void VulkanRenderDevice::Update()
 
 	mCommands->WaitForCommands(true);
 	mCommands->UpdateGpuStats();
+
+	if (vrmode != nullptr && vrmode->IsVR() && mXRFrameBeganThisFrame)
+	{
+		vrmode->AcquireXRSwapchain();
+	}
+	mXRFrameBeganThisFrame = false;
 
 	Super::Update();
 }
@@ -251,7 +328,7 @@ void VulkanRenderDevice::RenderTextureView(FCanvasTexture* tex, std::function<vo
 		.AddImage(image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, false)
 		.Execute(mCommands->GetDrawCommands());
 
-	mRenderState->SetRenderTarget(image, depthStencil->View.get(), image->Image->width, image->Image->height, VK_FORMAT_R8G8B8A8_UNORM, VK_SAMPLE_COUNT_1_BIT);
+	mRenderState->SetRenderTarget(image, depthStencil->GetFramebufferView(), image->Image->width, image->Image->height, VK_FORMAT_R8G8B8A8_UNORM, VK_SAMPLE_COUNT_1_BIT);
 
 	IntRect bounds;
 	bounds.left = bounds.top = 0;
@@ -266,7 +343,7 @@ void VulkanRenderDevice::RenderTextureView(FCanvasTexture* tex, std::function<vo
 		.AddImage(image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false)
 		.Execute(mCommands->GetDrawCommands());
 
-	mRenderState->SetRenderTarget(&GetBuffers()->SceneColor, GetBuffers()->SceneDepthStencil.View.get(), GetBuffers()->GetWidth(), GetBuffers()->GetHeight(), VK_FORMAT_R16G16B16A16_SFLOAT, GetBuffers()->GetSceneSamples());
+	SetSceneRenderTarget(false);
 
 	tex->SetUpdated(true);
 }
@@ -275,6 +352,7 @@ void VulkanRenderDevice::PostProcessScene(bool swscene, int fixedcm, float flash
 {
 	if (!swscene) mPostprocess->BlitSceneToPostprocess(); // Copy the resulting scene to the current post process texture
 	mPostprocess->PostProcessScene(fixedcm, flash, afterBloomDrawEndScene2D);
+	mEyeFinalPipelineImage[mCurrentEyeIndex % 2] = mPostprocess->GetCurrentPipelineImage();
 }
 
 const char* VulkanRenderDevice::DeviceName() const
@@ -285,6 +363,15 @@ const char* VulkanRenderDevice::DeviceName() const
 void VulkanRenderDevice::SetVSync(bool vsync)
 {
 	mVSync = vsync;
+}
+
+void VulkanRenderDevice::NewRefreshRate()
+{
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	if (vrmode != nullptr && vrmode->IsVR())
+	{
+		vrmode->ApplyRefreshRate();
+	}
 }
 
 void VulkanRenderDevice::PrecacheMaterial(FMaterial *mat, int translation)
@@ -436,7 +523,42 @@ void VulkanRenderDevice::CopyScreenToBuffer(int w, int h, uint8_t *data)
 
 void VulkanRenderDevice::SetActiveRenderTarget()
 {
+	if (mPostprocess)
+	{
+		if (vr_openxr_debug_present || vr_openxr_debug_sizes)
+		{
+			Printf("VulkanRenderDevice: SetActiveRenderTarget switched to pipeline image %d\n",
+				mPostprocess->GetCurrentPipelineImage());
+		}
+	}
 	mPostprocess->SetActiveRenderTarget();
+}
+
+void VulkanRenderDevice::FirstEye()
+{
+	if (mPostprocess)
+	{
+		mCurrentEyeIndex = 0;
+		mPostprocess->SetPipelineImagePair(0, 2);
+		mPostprocess->SetCurrentPipelineImage(0);
+	}
+}
+
+void VulkanRenderDevice::NextEye(int eyecount)
+{
+	if (mPostprocess)
+	{
+		if (eyecount > 1)
+		{
+			mCurrentEyeIndex = (mCurrentEyeIndex + 1) % eyecount;
+		}
+		else
+		{
+			mCurrentEyeIndex = 0;
+		}
+		mPostprocess->SetPipelineImagePair((mCurrentEyeIndex % 2) * 2, 2);
+		mPostprocess->SetCurrentPipelineImage((mCurrentEyeIndex % 2) * 2);
+	}
 }
 
 TArray<uint8_t> VulkanRenderDevice::GetScreenshotBuffer(int &pitch, ESSType &color_type, float &gamma)
@@ -462,14 +584,91 @@ TArray<uint8_t> VulkanRenderDevice::GetScreenshotBuffer(int &pitch, ESSType &col
 
 void VulkanRenderDevice::BeginFrame()
 {
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	mXRFrameBeganThisFrame = false;
+	mCurrentEyeIndex = 0;
+	mEyeFinalPipelineImage[0] = 0;
+	mEyeFinalPipelineImage[1] = 2;
+	if (vrmode != nullptr && vrmode->IsVR())
+	{
+		vrmode->SetUp();
+		mXRFrameBeganThisFrame = vrmode->BeginXRFrame();
+	}
+
 	SetViewportRects(nullptr);
+	int bufferScreenWidth = mScreenViewport.width;
+	int bufferScreenHeight = mScreenViewport.height;
+	int bufferSceneWidth = mSceneViewport.width;
+	int bufferSceneHeight = mSceneViewport.height;
+	if (vrmode != nullptr && vrmode->IsVR() && mXRFrameBeganThisFrame && vrmode->ShouldUseRecommendedRenderSizeThisFrame())
+	{
+		int recommendedWidth = 0;
+		int recommendedHeight = 0;
+		if (vrmode->GetRecommendedRenderSize(recommendedWidth, recommendedHeight))
+		{
+			bufferSceneWidth = recommendedWidth;
+			bufferSceneHeight = recommendedHeight;
+			bufferScreenWidth = recommendedWidth;
+			bufferScreenHeight = recommendedHeight;
+		}
+	}
+	if (bufferSceneWidth == 0 || bufferSceneHeight == 0)
+	{
+		bufferSceneWidth = bufferScreenWidth;
+		bufferSceneHeight = bufferScreenHeight;
+	}
+
 	mViewpoints->Clear();
 	mCommands->BeginFrame();
 	mTextureManager->BeginFrame();
-	mScreenBuffers->BeginFrame(screen->mScreenViewport.width, screen->mScreenViewport.height, screen->mSceneViewport.width, screen->mSceneViewport.height);
-	mSaveBuffers->BeginFrame(SAVEPICWIDTH, SAVEPICHEIGHT, SAVEPICWIDTH, SAVEPICHEIGHT);
+	int eyeLayerCount = 1;
+	const bool useMultiviewScene = vrmode != nullptr && vrmode->IsVR() && mXRFrameBeganThisFrame && vrmode->ShouldUseMultiviewThisFrame();
+	if (vrmode != nullptr && vrmode->IsVR() && mXRFrameBeganThisFrame && vrmode->ShouldUseMultiviewThisFrame())
+	{
+		eyeLayerCount = std::max(1, vrmode->GetMultiviewLayerCount());
+	}
+	static bool lastLoggedMultiviewState = false;
+	static int lastLoggedMultiviewLayers = 1;
+	static uint32_t lastLoggedMultiviewMask = 0;
+	static VkSampleCountFlagBits lastLoggedSceneSamples = VK_SAMPLE_COUNT_FLAG_BITS_MAX_ENUM;
+	const uint32_t multiviewMask = useMultiviewScene ? vrmode->GetMultiviewViewMask() : 0;
+	mScreenBuffers->BeginFrame(
+		bufferScreenWidth, bufferScreenHeight,
+		bufferSceneWidth, bufferSceneHeight,
+		eyeLayerCount, eyeLayerCount);
+
+	const VkSampleCountFlagBits sceneSamples = mScreenBuffers->GetSceneSamples();
+	if (useMultiviewScene != lastLoggedMultiviewState ||
+		eyeLayerCount != lastLoggedMultiviewLayers ||
+		multiviewMask != lastLoggedMultiviewMask ||
+		sceneSamples != lastLoggedSceneSamples)
+	{
+		Printf("OpenXR frame path: multiview=%d layers=%d viewMask=0x%x xrFrame=%d sceneSamples=%d gl_multisample=%d\n",
+			useMultiviewScene ? 1 : 0,
+			eyeLayerCount,
+			(unsigned int)multiviewMask,
+			mXRFrameBeganThisFrame ? 1 : 0,
+			(int)sceneSamples,
+			(int)gl_multisample);
+		lastLoggedMultiviewState = useMultiviewScene;
+		lastLoggedMultiviewLayers = eyeLayerCount;
+		lastLoggedMultiviewMask = multiviewMask;
+		lastLoggedSceneSamples = sceneSamples;
+	}
+	mSaveBuffers->BeginFrame(SAVEPICWIDTH, SAVEPICHEIGHT, SAVEPICWIDTH, SAVEPICHEIGHT, 1, 1);
 	mRenderState->BeginFrame();
 	mDescriptorSetManager->BeginFrame();
+}
+
+void VulkanRenderDevice::SetViewportRects(IntRect *bounds)
+{
+	Super::SetViewportRects(bounds);
+
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	if (vrmode != nullptr && vrmode->IsVR() && vrmode->ShouldUseRecommendedRenderSizeThisFrame())
+	{
+		vrmode->AdjustViewport(this);
+	}
 }
 
 void VulkanRenderDevice::InitLightmap(int LMTextureSize, int LMTextureCount, TArray<uint16_t>& LMTextureData)
@@ -566,10 +765,46 @@ void VulkanRenderDevice::AmbientOccludeScene(float m5)
 
 void VulkanRenderDevice::SetSceneRenderTarget(bool useSSAO)
 {
-	mRenderState->SetRenderTarget(&GetBuffers()->SceneColor, GetBuffers()->SceneDepthStencil.View.get(), GetBuffers()->GetWidth(), GetBuffers()->GetHeight(), VK_FORMAT_R16G16B16A16_SFLOAT, GetBuffers()->GetSceneSamples());
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	if (vrmode != nullptr && vrmode->IsVR() && vrmode->ShouldUseMultiviewThisFrame() && GetBuffers()->GetSceneLayers() > 1)
+	{
+		mRenderState->SetRenderTarget(
+			&GetBuffers()->SceneColor,
+			GetBuffers()->SceneDepthStencil.GetFramebufferView(),
+			GetBuffers()->GetWidth(),
+			GetBuffers()->GetHeight(),
+			VK_FORMAT_R16G16B16A16_SFLOAT,
+			GetBuffers()->GetSceneSamples(),
+			std::max(1, vrmode->GetMultiviewLayerCount()),
+			vrmode->GetMultiviewViewMask(),
+			0);
+		return;
+	}
+
+	const int layerIndex = GetBuffers()->GetSceneLayers() > 1 ? GetCurrentEyeLayer() : 0;
+	mRenderState->SetRenderTarget(&GetBuffers()->SceneColor, GetBuffers()->SceneDepthStencil.GetLayerView(layerIndex), GetBuffers()->GetWidth(), GetBuffers()->GetHeight(), VK_FORMAT_R16G16B16A16_SFLOAT, GetBuffers()->GetSceneSamples(), 1, 0, layerIndex);
 }
 
 bool VulkanRenderDevice::RaytracingEnabled()
 {
 	return vk_raytrace && device->SupportsExtension(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+}
+
+bool VulkanRenderDevice::ShouldUseCurrentEyeLayer(const PPTextureType& type, const VkTextureImage* image) const
+{
+	if (!image || !image->Image || image->Image->layerCount <= 1)
+		return false;
+
+	switch (type)
+	{
+	case PPTextureType::CurrentPipelineTexture:
+	case PPTextureType::NextPipelineTexture:
+	case PPTextureType::SceneColor:
+	case PPTextureType::SceneNormal:
+	case PPTextureType::SceneFog:
+	case PPTextureType::SceneDepth:
+		return true;
+	default:
+		return false;
+	}
 }

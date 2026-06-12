@@ -259,7 +259,7 @@ void FKeyboard::PostKeyEvent(int key, INTBOOL down, bool foreground)
 	// Generate the event, if appropriate.
 	if (down)
 	{
-		if (!foreground || GUICapture)
+		if ((!foreground && !I_AllowBackgroundGameInput()) || GUICapture)
 		{ // Do not generate key down events if we are in the background
 		  // or in "GUI Capture" mode.
 			return;

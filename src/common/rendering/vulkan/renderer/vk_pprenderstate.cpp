@@ -54,7 +54,7 @@ void VkPPRenderState::Draw()
 {
 	fb->GetRenderState()->EndRenderPass();
 
-	VkPPRenderPassKey key;
+	VkPPRenderPassKey key = {};
 	key.BlendMode = BlendMode;
 	key.InputTextures = Textures.Size();
 	key.Uniforms = Uniforms.Data.Size();
@@ -80,6 +80,8 @@ void VkPPRenderState::Draw()
 		key.StencilTest = WhichDepthStencil::None;
 		key.Samples = VK_SAMPLE_COUNT_1_BIT;
 	}
+	key.Layers = 1;
+	key.ViewMask = 0;
 
 	auto passSetup = fb->GetRenderPassManager()->GetPPRenderPass(key);
 
@@ -87,20 +89,66 @@ void VkPPRenderState::Draw()
 	VulkanDescriptorSet *input = fb->GetDescriptorSetManager()->GetInput(passSetup, Textures, ShadowMapBuffers);
 	VulkanFramebuffer *output = fb->GetBuffers()->GetOutput(passSetup, Output, key.StencilTest, framebufferWidth, framebufferHeight);
 
-	RenderScreenQuad(passSetup, input, output, framebufferWidth, framebufferHeight, Viewport.left, Viewport.top, Viewport.width, Viewport.height, Uniforms.Data.Data(), Uniforms.Data.Size(), key.StencilTest == WhichDepthStencil::Scene);
+	RenderScreenQuad(fb->GetCommands()->GetDrawCommands(), passSetup, input, output, framebufferWidth, framebufferHeight, Viewport.left, Viewport.top, Viewport.width, Viewport.height, Uniforms.Data.Data(), Uniforms.Data.Size(), key.StencilTest == WhichDepthStencil::Scene);
 
 	// Advance to next PP texture if our output was sent there
 	if (Output.Type == PPTextureType::NextPipelineTexture)
 	{
 		auto pp = fb->GetPostprocess();
-		pp->mCurrentPipelineImage = (pp->mCurrentPipelineImage + 1) % VkRenderBuffers::NumPipelineImages;
+		pp->AdvancePipelineImage();
 	}
 }
 
-void VkPPRenderState::RenderScreenQuad(VkPPRenderPassSetup *passSetup, VulkanDescriptorSet *descriptorSet, VulkanFramebuffer *framebuffer, int framebufferWidth, int framebufferHeight, int x, int y, int width, int height, const void *pushConstants, uint32_t pushConstantsSize, bool stencilTest)
+void VkPPRenderState::DrawToImage(VkTextureImage *image, VkFormat outputFormat, VulkanCommandBuffer *cmdbuffer)
 {
-	auto cmdbuffer = fb->GetCommands()->GetDrawCommands();
+	fb->GetRenderState()->EndRenderPass();
 
+	VkPPRenderPassKey key = {};
+	key.BlendMode = BlendMode;
+	key.InputTextures = Textures.Size();
+	key.Uniforms = Uniforms.Data.Size();
+	key.Shader = fb->GetShaderManager()->GetVkShader(Shader);
+	key.SwapChain = false;
+	key.ShadowMapBuffers = ShadowMapBuffers;
+	key.OutputFormat = outputFormat;
+	key.StencilTest = WhichDepthStencil::None;
+	key.Samples = VK_SAMPLE_COUNT_1_BIT;
+	key.Layers = 1;
+	key.ViewMask = 0;
+
+	auto passSetup = fb->GetRenderPassManager()->GetPPRenderPass(key);
+
+	int framebufferWidth = image->Image->width;
+	int framebufferHeight = image->Image->height;
+	VulkanDescriptorSet *input = fb->GetDescriptorSetManager()->GetInput(passSetup, Textures, ShadowMapBuffers);
+
+	VkImageTransition()
+		.AddImage(image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, false)
+		.Execute(cmdbuffer);
+
+	const bool useLayerView = image->Image != nullptr && image->Image->layerCount > 1;
+	const int layerIndex = useLayerView ? fb->GetCurrentEyeLayer() : -1;
+	const VulkanImageView* outputView = useLayerView ? image->GetLayerView(layerIndex) : image->GetFramebufferView();
+
+	VkTextureImage::VkPPOutputFramebufferKey framebufferKey = {};
+	framebufferKey.LayerIndex = layerIndex;
+	framebufferKey.DepthStencilMode = 0;
+	auto &framebuffer = image->PPOutputFramebuffers[framebufferKey];
+	if (!framebuffer)
+	{
+		FramebufferBuilder builder;
+		builder.RenderPass(passSetup->RenderPass.get());
+		builder.Size(framebufferWidth, framebufferHeight);
+		builder.AddAttachment(const_cast<VulkanImageView*>(outputView));
+		builder.DebugName("VkPPRenderPassSetup.CustomFramebuffer");
+		framebuffer = builder.Create(fb->device.get());
+	}
+
+	RenderScreenQuad(cmdbuffer, passSetup, input, framebuffer.get(), framebufferWidth, framebufferHeight, Viewport.left, Viewport.top, Viewport.width, Viewport.height, Uniforms.Data.Data(), Uniforms.Data.Size(), false);
+}
+
+void VkPPRenderState::RenderScreenQuad(VulkanCommandBuffer *cmdbuffer, VkPPRenderPassSetup *passSetup, VulkanDescriptorSet *descriptorSet, VulkanFramebuffer *framebuffer, int framebufferWidth, int framebufferHeight, int x, int y, int width, int height, const void *pushConstants, uint32_t pushConstantsSize, bool stencilTest)
+{
 	VkViewport viewport = { };
 	viewport.x = (float)x;
 	viewport.y = (float)y;

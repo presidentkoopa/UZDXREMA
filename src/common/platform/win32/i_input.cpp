@@ -74,6 +74,7 @@
 #include "c_buttons.h"
 #include "cmdlib.h"
 #include "i_mainwindow.h"
+#include "common/rendering/hwrenderer/data/hw_vrmodes.h"
 
 // Compensate for w32api's lack
 #ifndef GET_XBUTTON_WPARAM
@@ -128,6 +129,17 @@ EXTERN_CVAR(Bool, i_pauseinbackground);
 
 
 CVAR (Bool, k_allowfullscreentoggle, true, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+
+bool I_AllowBackgroundGameInput()
+{
+	if (AppActive)
+	{
+		return true;
+	}
+
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	return vrmode != nullptr && vrmode->IsVR();
+}
 
 static void I_CheckGUICapture ()
 {

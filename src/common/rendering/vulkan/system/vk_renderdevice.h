@@ -21,7 +21,9 @@ class VkHardwareDataBuffer;
 class VkHardwareTexture;
 class VkRenderBuffers;
 class VkPostprocess;
+class VkTextureImage;
 class SWSceneDrawer;
+enum class PPTextureType;
 
 class VulkanRenderDevice : public SystemBaseFrameBuffer
 {
@@ -43,6 +45,8 @@ public:
 	VkRenderState *GetRenderState() { return mRenderState.get(); }
 	VkPostprocess *GetPostprocess() { return mPostprocess.get(); }
 	VkRenderBuffers *GetBuffers() { return mActiveRenderBuffers; }
+	int GetCurrentEyeLayer() const { return std::max(0, mCurrentEyeIndex); }
+	bool ShouldUseCurrentEyeLayer(const PPTextureType& type, const VkTextureImage* image) const;
 	FRenderState* RenderState() override;
 
 	unsigned int GetLightBufferBlockSize() const;
@@ -60,6 +64,7 @@ public:
 	const char* DeviceName() const override;
 	int Backend() override { return 1; }
 	void SetTextureFilterMode() override;
+	void NewRefreshRate() override;
 	void StartPrecaching() override;
 	void BeginFrame() override;
 	void InitLightmap(int LMTextureSize, int LMTextureCount, TArray<uint16_t>& LMTextureData) override;
@@ -70,8 +75,11 @@ public:
 	void SetLevelMesh(hwrenderer::LevelMesh* mesh) override;
 	void UpdateShadowMap() override;
 	void SetSaveBuffers(bool yes) override;
+	void SetViewportRects(IntRect *bounds) override;
 	void ImageTransitionScene(bool unknown) override;
 	void SetActiveRenderTarget() override;
+	void FirstEye() override;
+	void NextEye(int eyecount) override;
 
 	IHardwareTexture *CreateHardwareTexture(int numchannels) override;
 	FMaterial* CreateMaterial(FGameTexture* tex, int scaleflags) override;
@@ -115,6 +123,9 @@ private:
 	VkRenderBuffers *mActiveRenderBuffers = nullptr;
 
 	bool mVSync = false;
+	bool mXRFrameBeganThisFrame = false;
+	int mCurrentEyeIndex = 0;
+	int mEyeFinalPipelineImage[2] = { 0, 2 };
 };
 
 class CVulkanError : public CEngineError

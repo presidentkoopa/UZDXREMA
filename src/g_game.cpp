@@ -92,6 +92,7 @@
 #include "i_interface.h"
 #include "fs_findfile.h"
 #include "hw_vrmodes.h"
+#include "hw_vrwheel.h"
 
 #include <QzDoom/VrCommon.h>
 #include <cmath>
@@ -406,6 +407,72 @@ CCMD (pause)
 	sendpause = true;
 }
 
+static int Cmd_VRWeaponWheelDown(CCmdFuncPtr)
+{
+	VRWheel_OpenWeapon();
+	return CCMD_OK;
+}
+
+static int Cmd_VRWeaponWheelUp(CCmdFuncPtr)
+{
+	VRWheel_CloseWeapon();
+	return CCMD_OK;
+}
+
+static int Cmd_VROffhandWeaponWheelDown(CCmdFuncPtr)
+{
+	VRWheel_OpenOffhandWeapon();
+	return CCMD_OK;
+}
+
+static int Cmd_VROffhandWeaponWheelUp(CCmdFuncPtr)
+{
+	VRWheel_CloseOffhandWeapon();
+	return CCMD_OK;
+}
+
+static int Cmd_VRInventoryWheelDown(CCmdFuncPtr)
+{
+	VRWheel_OpenInventory();
+	return CCMD_OK;
+}
+
+static int Cmd_VRInventoryWheelUp(CCmdFuncPtr)
+{
+	VRWheel_CloseInventory();
+	return CCMD_OK;
+}
+
+namespace
+{
+	struct FVRWheelCommandRegistration
+	{
+		FVRWheelCommandRegistration()
+		{
+			C_RegisterFunction("+vrweaponwheel", "Opens the VR main-hand weapon wheel while held.", Cmd_VRWeaponWheelDown);
+			C_RegisterFunction("-vrweaponwheel", "Closes the VR main-hand weapon wheel.", Cmd_VRWeaponWheelUp);
+			C_RegisterFunction("+vroffhandweaponwheel", "Opens the VR offhand weapon wheel while held.", Cmd_VROffhandWeaponWheelDown);
+			C_RegisterFunction("-vroffhandweaponwheel", "Closes the VR offhand weapon wheel.", Cmd_VROffhandWeaponWheelUp);
+			C_RegisterFunction("+vrinvwheel", "Opens the VR inventory wheel while held.", Cmd_VRInventoryWheelDown);
+			C_RegisterFunction("-vrinvwheel", "Closes the VR inventory wheel.", Cmd_VRInventoryWheelUp);
+		}
+	};
+
+	static FVRWheelCommandRegistration VRWheelCommandRegistration;
+}
+
+CCMD(togglecheatmenu)
+{
+	if (CurrentMenu != nullptr && CurrentMenu->IsKindOf("CheatMenu"))
+	{
+		M_ClearMenus();
+		return;
+	}
+
+	M_StartControlPanel(true);
+	M_SetMenu(FName("CheatMenu"), -1);
+}
+
 CCMD (turn180)
 {
 	sendturn180 = true;
@@ -413,6 +480,7 @@ CCMD (turn180)
 
 CCMD (weapnext)
 {
+	if (VRWheel_IsActive()) return;
 	int hand = 0;
 	if (argv.argc() > 1)
 	{
@@ -446,6 +514,7 @@ CCMD (weapnext)
 
 CCMD (weapprev)
 {
+	if (VRWheel_IsActive()) return;
 	int hand = 0;
 	if (argv.argc() > 1)
 	{
@@ -495,6 +564,7 @@ DEFINE_ACTION_FUNCTION_NATIVE(AActor, DisplayNameTag, DisplayNameTag)
 
 CCMD (invnext)
 {
+	if (VRWheel_IsActive()) return;
 	if (players[consoleplayer].mo != nullptr)
 	{
 		IFVM(PlayerPawn, InvNext)
@@ -507,6 +577,7 @@ CCMD (invnext)
 
 CCMD(invprev)
 {
+	if (VRWheel_IsActive()) return;
 	if (players[consoleplayer].mo != nullptr)
 	{
 		IFVM(PlayerPawn, InvPrev)
@@ -519,11 +590,13 @@ CCMD(invprev)
 
 CCMD (invuseall)
 {
+	if (VRWheel_IsActive()) return;
 	SendItemUse = (const AActor *)1;
 }
 
 CCMD (invuse)
 {
+	if (VRWheel_IsActive()) return;
 	if (players[consoleplayer].inventorytics == 0)
 	{
 		if (players[consoleplayer].mo) SendItemUse = players[consoleplayer].mo->PointerVar<AActor>(NAME_InvSel);
@@ -548,6 +621,7 @@ constexpr char True[] = "true";
 
 CCMD (use)
 {
+	if (VRWheel_IsActive()) return;
 	if (argv.argc() > 1 && players[consoleplayer].mo != NULL)
 	{
 		bool subclass = false;
@@ -607,6 +681,7 @@ CCMD (useflechette)
 
 CCMD (select)
 {
+	if (VRWheel_IsActive()) return;
 	if (!players[consoleplayer].mo) return;
 	auto user = players[consoleplayer].mo;
 	if (argv.argc() > 1)
@@ -676,7 +751,7 @@ ticcmd_t* G_BaseTiccmd()
 //
 void G_BuildTiccmd (ticcmd_t *cmd)
 {
-	auto vrmode = VRMode::GetVRMode(true);
+	auto vrmode = VRMode::GetVRModeCached(true);
 
 	int 		strafe;
 	int 		speed;
@@ -795,6 +870,12 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 	if (buttonMap.ButtonDown(Button_MoveUp))		cmd->ucmd.buttons |= BT_MOVEUP;
 	if (buttonMap.ButtonDown(Button_ShowScores))	cmd->ucmd.buttons |= BT_SHOWSCORES;
 	if (speed) cmd->ucmd.buttons |= BT_RUN;
+
+	if (VRWheel_ShouldSuppressGameplayInput())
+	{
+		cmd->ucmd.buttons &= ~(BT_ATTACK | BT_ALTATTACK | BT_USE | BT_RELOAD | BT_MAINHANDRELOAD |
+			BT_OFFHANDRELOAD | BT_OFFHANDATTACK | BT_OFFHANDALTATTACK);
+	}
 
 	// Handle joysticks/game controllers.
 	float joyaxes[NUM_JOYAXIS];
@@ -991,6 +1072,10 @@ void G_AddViewAngle (int yaw, bool mouse)
 	LocalViewAngle -= yaw;
 	if (yaw != 0)
 	{
+		if (!vrApplyingHmdYaw)
+		{
+			resetDoomYaw = true;
+		}
 		LocalKeyboardTurner = !mouse;
 	}
 }
@@ -1111,6 +1196,7 @@ bool G_Responder (event_t *ev)
 			if (!cmd || (
 				strnicmp (cmd, "menu_", 5) &&
 				stricmp (cmd, "toggleconsole") &&
+				stricmp (cmd, "togglecheatmenu") &&
 				stricmp (cmd, "sizeup") &&
 				stricmp (cmd, "sizedown") &&
 				stricmp (cmd, "togglemap") &&
@@ -1138,6 +1224,61 @@ bool G_Responder (event_t *ev)
 
 	if (CT_Responder (ev))
 		return true;			// chat ate the event
+
+	if ((ConsoleState != c_up || gamestate == GS_FULLCONSOLE) && ev->type == EV_KeyDown)
+	{
+		const char *cmd = Bindings.GetBind(ev->data1);
+		if ((cmd && !stricmp(cmd, "toggleconsole")) || ev->data1 == KEY_PAD_B)
+		{
+			if (gamestate == GS_FULLCONSOLE)
+			{
+				C_DoCommand("menu_main");
+			}
+			else
+			{
+				C_HideConsole();
+			}
+			return true;
+		}
+	}
+
+	if (ConsoleState != c_up && menuactive == MENU_Off && ev->type == EV_KeyDown)
+	{
+		switch (ev->data1)
+		{
+		case KEY_PAD_DPAD_UP:
+		case KEY_PAD_LTHUMB_UP:
+		case KEY_PAD_RTHUMB_UP:
+		case KEY_JOYPOV1_UP:
+		case KEY_JOYAXIS2PLUS:
+		case KEY_JOYAXIS4PLUS:
+			C_ScrollConsole(3);
+			return true;
+
+		case KEY_PAD_DPAD_DOWN:
+		case KEY_PAD_LTHUMB_DOWN:
+		case KEY_PAD_RTHUMB_DOWN:
+		case KEY_JOYPOV1_DOWN:
+		case KEY_JOYAXIS2MINUS:
+		case KEY_JOYAXIS4MINUS:
+			C_ScrollConsole(-3);
+			return true;
+		}
+	}
+
+	if (ConsoleState != c_up && menuactive == MENU_Off && ev->type == EV_Mouse)
+	{
+		if (ev->y > 0)
+		{
+			C_ScrollConsole(1);
+			return true;
+		}
+		else if (ev->y < 0)
+		{
+			C_ScrollConsole(-1);
+			return true;
+		}
+	}
 
 	if (gamestate == GS_LEVEL)
 	{
@@ -1338,6 +1479,7 @@ void G_Ticker ()
 			gameaction = ga_nothing;
 			break;
 		case ga_intermission:
+			C_HideConsole();
 			gamestate = GS_CUTSCENE;
 			gameaction = ga_nothing;
 			break;

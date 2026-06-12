@@ -1738,7 +1738,7 @@ void DoDim(F2DDrawer *drawer, PalEntry color, float amount, int x1, int y1, int 
 		amount = 1;
 	}
 	// send outside2D only if VR
-	auto vrmode = VRMode::GetVRMode(true);
+	auto vrmode = VRMode::GetVRModeCached(true);
 	drawer->AddColorOnlyQuad(x1, y1, w, h, (color.d & 0xffffff) | (int(amount * 255) << 24), style, false, vrmode->IsVR());
 }
 

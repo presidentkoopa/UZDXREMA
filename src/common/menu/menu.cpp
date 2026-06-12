@@ -57,6 +57,7 @@
 
 int DMenu::InMenu;
 static ScaleOverrider *CurrentScaleOverrider;
+static bool PendingMenuRebuild = false;
 //
 // Todo: Move these elsewhere
 //
@@ -67,6 +68,7 @@ CVAR (Float, snd_menuvolume, 0.6f, CVAR_ARCHIVE)
 CVAR(Int, m_use_mouse, 1, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 CVAR(Int, m_show_backbutton, 0, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 CVAR(Bool, m_cleanscale, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+bool menu_allow_mouse_override = false;
 // Option Search
 CVAR(Bool, os_isanyof, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
@@ -106,6 +108,7 @@ static MenuTransition transition;
 
 extern PClass *DefaultListMenuClass;
 extern PClass *DefaultOptionMenuClass;
+void InitMenuDelegate();
 
 
 #define KEY_REPEAT_DELAY	(GameTicRate*5/12)
@@ -433,10 +436,19 @@ bool DMenu::TranslateKeyboardEvents()
 
 void M_StartControlPanel (bool makesound, bool scaleoverride)
 {
-	if (sysCallbacks.OnMenuOpen) sysCallbacks.OnMenuOpen(makesound);
 	// intro might call this repeatedly
 	if (CurrentMenu != nullptr)
 		return;
+
+	if (PendingMenuRebuild)
+	{
+		PendingMenuRebuild = false;
+		DeinitMenus();
+		InitMenuDelegate();
+		M_Init();
+	}
+
+	if (sysCallbacks.OnMenuOpen) sysCallbacks.OnMenuOpen(makesound);
 
 	M_ResetButtonStates();
 
@@ -611,6 +623,11 @@ DEFINE_ACTION_FUNCTION(DMenu, SetMenu)
 //
 //=============================================================================
 
+void M_RequestMenuRebuild()
+{
+	PendingMenuRebuild = true;
+}
+
 bool M_Responder (event_t *ev) 
 { 
 	int ch = 0;
@@ -654,7 +671,7 @@ bool M_Responder (event_t *ev)
 				// do we want mouse input?
 				if (ev->subtype >= EV_GUI_FirstMouseEvent && ev->subtype <= EV_GUI_LastMouseEvent)
 				{
-					if (!m_use_mouse)
+					if (!m_use_mouse && !menu_allow_mouse_override)
 					{
 						LastMousePos.HeldButtons.Clear();
 						LastMousePos.LastUpdate = -1;
@@ -726,10 +743,21 @@ bool M_Responder (event_t *ev)
 				}
 			}
 		}
-		else if (menuactive != MENU_WaitKey && (ev->type == EV_KeyDown || ev->type == EV_KeyUp))
+		else if (ev->type == EV_KeyDown || ev->type == EV_KeyUp)
 		{
 			// eat blocked controller events without dispatching them.
 			if (ev->data1 >= KEY_FIRSTJOYBUTTON && m_blockcontrollers) return true;
+
+			// In key-binding capture mode, controller buttons must stay raw so
+			// the binding UI can record the actual Pad_* key instead of menu input.
+			// They still need to reach the current menu's OnInputEvent handler, but
+			// must be swallowed here so the same press cannot leak into gameplay or
+			// normal menu navigation.
+			if (menuactive == MENU_WaitKey && ev->data1 >= KEY_FIRSTJOYBUTTON)
+			{
+				CurrentMenu->CallResponder(ev);
+				return true;
+			}
 
 			keyup = ev->type == EV_KeyUp;
 

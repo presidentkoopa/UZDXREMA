@@ -222,6 +222,10 @@ DEFINE_ACTION_FUNCTION_NATIVE(DShape2D, PushTriangle, Shape2D_PushTriangle)
 int F2DDrawer::AddCommand(RenderCommand *data) 
 {
 	data->mScreenFade = screenFade;
+	if (data->mOutside2D)
+		mHasOutside2DCommands = true;
+	else
+		mHasInside2DCommands = true;
 	if (mData.Size() > 0 && data->isCompatible(mData.Last()))
 	{
 		// Merge with the last command.
@@ -1203,6 +1207,8 @@ void F2DDrawer::Clear()
 		mIndices.Clear();
 		mData.Clear();
 		mIsFirstPass = true;
+		mHasInside2DCommands = false;
+		mHasOutside2DCommands = false;
 	}
 	screenFade = 1.f;
 }
@@ -1239,6 +1245,20 @@ F2DVertexBuffer::F2DVertexBuffer()
 
 TArray<FCanvas*> AllCanvases;
 
+void FCanvas::OnDestroy()
+{
+	if (Tex != nullptr && Tex->Canvas == this)
+	{
+		Tex->Canvas = nullptr;
+	}
+	Tex = nullptr;
+	auto idx = AllCanvases.Find(this);
+	if (idx != -1)
+	{
+		AllCanvases.Delete(idx);
+	}
+}
+
 class InitTextureCanvasGC
 {
 public:
@@ -1250,6 +1270,7 @@ public:
 			});
 	}
 };
+static InitTextureCanvasGC InitCanvasGC;
 
 FCanvas* GetTextureCanvas(const FString& texturename)
 {
@@ -1263,8 +1284,6 @@ FCanvas* GetTextureCanvas(const FString& texturename)
 			FCanvasTexture* canvasTex = static_cast<FCanvasTexture*>(tex->GetTexture());
 			if (!canvasTex->Canvas)
 			{
-				static InitTextureCanvasGC initCanvasGC; // Does the common code have a natural init function this could be moved to?
-
 				canvasTex->Canvas = Create<FCanvas>();
 				canvasTex->Canvas->Tex = canvasTex;
 				canvasTex->Canvas->Drawer.SetSize(tex->GetTexelWidth(), tex->GetTexelHeight());

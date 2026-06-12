@@ -101,7 +101,7 @@ EXTERN_CVAR(Bool,  vr_automap_fixed_pitch);
 EXTERN_CVAR(Bool,  vr_automap_fixed_roll);
 
 
-#include "QzDoom/mathlib.h"
+#include <QzDoom/VrCommon.h>
 
 extern vec3_t hmdPosition;
 extern vec3_t hmdorientation;
@@ -173,6 +173,46 @@ float getViewpointYaw()
     return doomYaw;
 }
 
+static float DEG2RAD(float deg)
+{
+    return deg * float(M_PI / 180.0);
+}
+
+static void AngleVectors(const vec3_t angles, vec3_t forward, vec3_t right, vec3_t up)
+{
+    const float pitch = DEG2RAD(angles[PITCH]);
+    const float yaw = DEG2RAD(angles[YAW]);
+    const float roll = DEG2RAD(angles[ROLL]);
+
+    const float sp = sinf(pitch);
+    const float cp = cosf(pitch);
+    const float sy = sinf(yaw);
+    const float cy = cosf(yaw);
+    const float sr = sinf(roll);
+    const float cr = cosf(roll);
+
+    if (forward != nullptr)
+    {
+        forward[0] = cp * cy;
+        forward[1] = cp * sy;
+        forward[2] = -sp;
+    }
+
+    if (right != nullptr)
+    {
+        right[0] = (-1.0f * sr * sp * cy) + (-1.0f * cr * -sy);
+        right[1] = (-1.0f * sr * sp * sy) + (-1.0f * cr * cy);
+        right[2] = -sr * cp;
+    }
+
+    if (up != nullptr)
+    {
+        up[0] = cr * sp * cy + (-sr * -sy);
+        up[1] = cr * sp * sy + (-sr * cy);
+        up[2] = cr * cp;
+    }
+}
+
 namespace s3d
 {
     static DVector3 oculusquest_origin(0, 0, 0);
@@ -197,14 +237,16 @@ namespace s3d
         outViewShift[0] = outViewShift[1] = outViewShift[2] = 0;
 
         vec3_t angles;
-        VectorSet(angles, vp.HWAngles.Pitch.Degrees(),  getViewpointYaw(), vp.HWAngles.Roll.Degrees());
+        VectorSet(angles, vp.HWAngles.Pitch.Degrees(), getViewpointYaw(), vp.HWAngles.Roll.Degrees());
 
         vec3_t v_forward, v_right, v_up;
         AngleVectors(angles, v_forward, v_right, v_up);
 
         float stereo_separation = (vr_ipd * 0.5) * vr_vunits_per_meter * (eye == 0 ? -1.0 : 1.0);
         vec3_t tmp;
-        VectorScale(v_right, stereo_separation, tmp);
+        tmp[0] = v_right[0] * stereo_separation;
+        tmp[1] = v_right[1] * stereo_separation;
+        tmp[2] = v_right[2] * stereo_separation;
 
         LSVec3 eyeOffset(tmp[0], tmp[1], tmp[2]);
 
@@ -308,7 +350,7 @@ namespace s3d
     void OpenXRDeviceEyePose::AdjustHud() const
     {
         // Draw crosshair on a separate quad, before updating HUD matrix
-        const auto vrmode = VRMode::GetVRMode(true);
+        const auto vrmode = VRMode::GetVRModeCached(true);
         if (vrmode->mEyeCount == 1)
         {
             return;
@@ -696,7 +738,9 @@ namespace s3d
                 havePreviousYaw = true;
             }
             hmdYawDeltaDegrees = yaw - previousHmdYaw;
+            vrApplyingHmdYaw = true;
             G_AddViewAngle(mAngleFromRadians(DEG2RAD(-hmdYawDeltaDegrees)));
+            vrApplyingHmdYaw = false;
             previousHmdYaw = yaw;
         }
 

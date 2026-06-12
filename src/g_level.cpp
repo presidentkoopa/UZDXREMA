@@ -37,6 +37,7 @@
 #include "d_main.h"
 #include "g_level.h"
 #include "g_game.h"
+#include "common/rendering/hwrenderer/data/hw_vrwheel.h"
 #include "s_sound.h"
 #include "d_event.h"
 #include "m_random.h"
@@ -78,6 +79,7 @@
 #include "vm.h"
 #include "events.h"
 #include "i_music.h"
+#include "hw_vrmodes.h"
 #include "a_dynlight.h"
 #include "p_conversation.h"
 #include "p_effect.h"
@@ -515,6 +517,7 @@ void G_NewInit ()
 
 void G_DoNewGame (void)
 {
+	C_HideConsole();
 	G_NewInit ();
 	playeringame[consoleplayer] = 1;
 	if (d_skill != -1)
@@ -565,6 +568,10 @@ void G_InitNew (const char *mapname, bool bTitleLevel)
 	// did we have any level before?
 	if (primaryLevel->info != nullptr)
 		staticEventManager.WorldUnloaded(FString());	// [MK] don't pass the new map, as it's not a level transition
+
+	// Portable HUD surfaces are rebuilt on demand. Destroy the old canvas here
+	// so the next map starts from a clean slate instead of reusing stale 2D state.
+	VR_DestroyHudSurface();
 
 	UnlatchCVars ();
 	if (!savegamerestore)
@@ -1097,6 +1104,7 @@ void RunIntermission(level_info_t* fromMap, level_info_t* toMap, DIntermissionCo
 void G_DoCompleted (void)
 {
 	gameaction = ga_nothing;
+	C_HideConsole();
 	
 	if (   gamestate == GS_DEMOSCREEN
 		|| gamestate == GS_FULLCONSOLE
@@ -1573,6 +1581,7 @@ DEFINE_ACTION_FUNCTION(FLevelLocals, WorldDone)
 void G_DoWorldDone (void) 
 {		 
 	gamestate = GS_LEVEL;
+	C_HideConsole();
 	if (nextlevel.IsEmpty())
 	{
 		// Don't crash if no next map is given. Just repeat the current one.
@@ -2043,6 +2052,8 @@ void G_ReadSnapshots(FResourceFile *resf)
 			}
 		}
 	}
+
+	VRWheel_Reset();
 }
 
 //==========================================================================

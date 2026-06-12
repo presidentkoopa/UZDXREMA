@@ -184,17 +184,12 @@ FRenderViewpoint::FRenderViewpoint()
 
 DAngle FRenderViewpoint::GetFieldOfView() const
 {
-#if defined(USE_OPENVR) || defined(USE_OPENXR)
-	return DAngle::fromDeg(QzDoom_GetFOV());
-#endif
 	return FieldOfView;
 }
 
 void FRenderViewpoint::SetFieldOfView(DAngle newfov)
 {
-#if !defined(USE_OPENVR) && !defined(USE_OPENXR)
 	FieldOfView = newfov;
-#endif
 }
 
 
@@ -264,7 +259,10 @@ void R_SetViewSize (int blocks)
 
 void R_SetWindow (FRenderViewpoint &viewpoint, FViewWindow &viewwindow, int windowSize, int fullWidth, int fullHeight, int stHeight, bool renderingToCanvas)
 {
-	if (windowSize >= 11)
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	const bool forceFullSceneWindow = vrmode != nullptr && vrmode->IsVR() && !vrmode->IsRenderingVirtualScreen() && !renderingToCanvas;
+
+	if (forceFullSceneWindow || windowSize >= 11)
 	{
 		viewwidth = fullWidth;
 		freelookviewheight = viewheight = fullHeight;
@@ -1086,7 +1084,7 @@ void R_SetupFrame(FRenderViewpoint& viewPoint, const FViewWindow& viewWindow, AA
 				double left = QuakePower(vr_quake_haptic_level, jiggers.Intensity.X, jiggers.Offset.X);
 				double right = QuakePower(vr_quake_haptic_level, jiggers.Intensity.Y, jiggers.Offset.Y);
 
-				auto vrmode = VRMode::GetVRMode(true);
+				auto vrmode = VRMode::GetVRModeCached(true);
 				vrmode->Vibrate(10, 0, (float)left); // left
 				vrmode->Vibrate(10, 1, (float)right); // right
 

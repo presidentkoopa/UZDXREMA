@@ -45,6 +45,7 @@
 #include "printf.h"
 #include "c_cvars.h"
 #include "gamestate.h"
+#include "common/rendering/hwrenderer/data/hw_vrmodes.h"
 
 CVARD(Bool, snd_enabled, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "enables/disables sound effects")
 CVAR(Bool, i_soundinbackground, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -1818,12 +1819,20 @@ DEFINE_ACTION_FUNCTION(DObject, S_ResumeSound)
 
 void S_SetSoundPaused(int state)
 {
-	if (!netgame && (i_pauseinbackground))
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	const bool allowBackgroundVR = !state && vrmode != nullptr && vrmode->IsVR();
+	const bool effectivelyActive = state || allowBackgroundVR;
+
+	if (!netgame && i_pauseinbackground && !allowBackgroundVR)
 	{
-		pauseext = !state;
+		pauseext = !effectivelyActive;
+	}
+	else if (allowBackgroundVR)
+	{
+		pauseext = false;
 	}
 
-	if ((state || i_soundinbackground) && !pauseext)
+	if ((effectivelyActive || i_soundinbackground) && !pauseext)
 	{
 		if (!paused)
 			S_ResumeSound(true);

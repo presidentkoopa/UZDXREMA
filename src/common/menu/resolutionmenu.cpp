@@ -34,6 +34,7 @@
 
 #include "c_dispatch.h"
 #include "c_cvars.h"
+#include "hwrenderer\data\hw_vrmodes.h"
 #include "v_video.h"
 #include "menu.h"
 #include "printf.h"
@@ -48,6 +49,9 @@ EXTERN_CVAR(Int, vid_scale_customwidth)
 EXTERN_CVAR(Int, vid_scale_customheight)
 EXTERN_CVAR(Int, vid_scalemode)
 EXTERN_CVAR(Float, vid_scalefactor)
+EXTERN_CVAR(Int, vr_mode)
+EXTERN_CVAR(Int, vid_defwidth)
+EXTERN_CVAR(Int, vid_defheight)
 
 CCMD (menu_resolution_set_custom)
 {
@@ -73,10 +77,24 @@ CCMD (menu_resolution_commit_changes)
 
 	if (do_fullscreen == false)
 	{
+		vid_fullscreen = false;
 		vid_scalemode = 0;
 		vid_scalefactor = 1.;
-		screen->SetWindowSize(menu_resolution_custom_width, menu_resolution_custom_height);
-		V_OutputResized(screen->GetClientWidth(), screen->GetClientHeight());
+		vid_defwidth = *menu_resolution_custom_width;
+		vid_defheight = *menu_resolution_custom_height;
+		if (V_GetBackend() == 1 && vr_mode == VR_OPENXR_MOBILE)
+		{
+			// OpenXR keeps the desktop mirror stable and uses the requested
+			// resolution as the internal render size instead of resizing the
+			// OS window, which OpenXR can clamp against the monitor work area.
+			screen->SetVirtualSize(menu_resolution_custom_width, menu_resolution_custom_height);
+			V_OutputResized(menu_resolution_custom_width, menu_resolution_custom_height);
+		}
+		else
+		{
+			screen->SetWindowSize(menu_resolution_custom_width, menu_resolution_custom_height);
+			V_OutputResized(screen->GetClientWidth(), screen->GetClientHeight());
+		}
 	}
 	else
 	{

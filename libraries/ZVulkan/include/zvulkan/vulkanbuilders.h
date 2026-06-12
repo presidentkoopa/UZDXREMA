@@ -54,6 +54,7 @@ public:
 	VulkanDeviceBuilder& OptionalDescriptorIndexing();
 	VulkanDeviceBuilder& Surface(std::shared_ptr<VulkanSurface> surface);
 	VulkanDeviceBuilder& SelectDevice(int index);
+	VulkanDeviceBuilder& PreferredPhysicalDevice(VkPhysicalDevice device);
 
 	std::vector<VulkanCompatibleDevice> FindDevices(const std::shared_ptr<VulkanInstance>& instance);
 	std::shared_ptr<VulkanDevice> Create(std::shared_ptr<VulkanInstance> instance);
@@ -63,6 +64,7 @@ private:
 	std::set<std::string> optionalDeviceExtensions;
 	std::shared_ptr<VulkanSurface> surface;
 	int deviceIndex = 0;
+	VkPhysicalDevice preferredPhysicalDevice = VK_NULL_HANDLE;
 };
 
 class VulkanSwapChainBuilder
@@ -474,6 +476,7 @@ public:
 	RenderPassBuilder& AddSubpass();
 	RenderPassBuilder& AddSubpassColorAttachmentRef(uint32_t index, VkImageLayout layout);
 	RenderPassBuilder& AddSubpassDepthStencilAttachmentRef(uint32_t index, VkImageLayout layout);
+	RenderPassBuilder& Multiview(uint32_t viewMask, uint32_t correlationMask = 0);
 
 	RenderPassBuilder& DebugName(const char* name) { debugName = name; return *this; }
 
@@ -485,6 +488,10 @@ private:
 	std::vector<VkAttachmentDescription> attachments;
 	std::vector<VkSubpassDependency> dependencies;
 	std::vector<VkSubpassDescription> subpasses;
+	std::vector<uint32_t> subpassViewMasks;
+	std::vector<int32_t> dependencyViewOffsets;
+	std::vector<uint32_t> correlationMasks;
+	VkRenderPassMultiviewCreateInfo multiviewInfo = { VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO };
 
 	struct SubpassData
 	{

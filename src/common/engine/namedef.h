@@ -267,6 +267,7 @@ xx(HelpMenu)
 xx(SoundMenu)
 xx(ConfirmPlayerReset)
 xx(JoystickOptions)
+xx(CheatMenu)
 
 xx(OptionMenuItemSubmenu)
 xx(OptionMenuItemCommand)

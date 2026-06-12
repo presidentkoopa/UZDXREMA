@@ -7,6 +7,9 @@ class DFrameBuffer;
 class FCanvasTexture;
 class FCanvas;
 class FGameTexture;
+class VulkanRenderDevice;
+class VulkanImage;
+class VkTextureImage;
 
 enum
 {
@@ -32,6 +35,7 @@ enum
 };
 
 struct HWDrawInfo;
+struct HWViewpointUniforms;
 
 struct VRHudSurface
 {
@@ -44,6 +48,7 @@ struct VRHudSurface
 	void BeginUpdate();
 	void EndUpdate();
 	void MarkDirty();
+	bool IsCanvasLive() const;
 	bool IsValid() const { return Texture != nullptr; }
 	bool HasGameTexture() const { return GameTexture != nullptr; }
 	int GetWidth() const { return Texture != nullptr ? Texture->GetWidth() : 0; }
@@ -68,7 +73,10 @@ struct VREyeInfo
 	virtual ~VREyeInfo() {}
 
 	virtual VSMatrix GetProjection(float fov, float aspectRatio, float fovRatio, bool iso_ortho) const;
+	virtual DAngle GetRenderFov(DAngle fallback) const;
+	virtual VSMatrix GetHUDProjection() const;
 	virtual DVector3 GetViewShift(FRenderViewpoint& vp) const;
+	virtual void AdjustViewpointUniforms(HWViewpointUniforms& uniforms) const {}
 	virtual void SetUp() const { m_isActive = true; }
 	virtual void TearDown() const { m_isActive = false; }
 	virtual void AdjustHud() const {}
@@ -94,8 +102,10 @@ struct VRMode
 	virtual ~VRMode() {}
 
 	static const VRMode *GetVRMode(bool toscreen = true);
+	static const VRMode *GetVRModeCached(bool toscreen = true);
 	virtual void AdjustViewport(DFrameBuffer *fb) const;
 	VSMatrix GetHUDSpriteProjection() const;
+	virtual VSMatrix GetHUDProjection() const { return GetHUDSpriteProjection(); }
 
 	/* hooks for setup and cleanup operations for each stereo mode */
 	virtual void SetUp() const;
@@ -103,6 +113,13 @@ struct VRMode
 
 	virtual bool IsMono() const { return mEyeCount == 1; }
 	virtual bool IsVR() const { return false; }
+	virtual bool GetRecommendedRenderSize(int& outWidth, int& outHeight) const { outWidth = 0; outHeight = 0; return false; }
+	virtual bool ShouldUseRecommendedRenderSizeThisFrame() const { return false; }
+	virtual bool SupportsMultiview() const { return false; }
+	virtual bool ShouldUseMultiviewThisFrame() const { return false; }
+	virtual int GetMultiviewLayerCount() const { return 1; }
+	virtual uint32_t GetMultiviewViewMask() const { return 0; }
+	virtual bool ShouldUseScreenLayerForCurrentFrame() const { return false; }
 	virtual void AdjustPlayerSprites(FRenderState &state, int hand = 0) const {};
 	virtual void UnAdjustPlayerSprites(FRenderState &state) const {};
 	virtual void AdjustCrossHair() const {}
@@ -112,8 +129,17 @@ struct VRMode
 	virtual void UpdateOverlaySettings() const {}
 	virtual void DrawControllerModels(HWDrawInfo* di, FRenderState& state) const {}
 	virtual void DrawMountedHud(HWDrawInfo* di, FRenderState& state) const {}
+	virtual bool IsRenderingVirtualScreen() const { return false; }
+	virtual bool RenderVirtualScreen() const { return false; }
+	virtual void FinalizeEyeImage(VulkanRenderDevice* fb, int eyeIndex) const {}
+	virtual bool RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage* dstImage) const { return false; }
 	
 	virtual void Present() const;
+	virtual void PollXREvents() const {}
+	virtual bool BeginXRFrame() const { return true; }
+	virtual void ApplyRefreshRate() const {}
+	virtual bool AcquireXRSwapchain() const { return true; }
+	virtual bool SubmitFrame() const { return true; }
 
 	virtual bool GetHandTransform(int hand, VSMatrix* out) const { return false; }
 	virtual bool GetWeaponTransform(VSMatrix* out, int hand = 0) const;
@@ -129,6 +155,10 @@ void QzDoom_GetScreenRes(uint32_t *width, uint32_t *height);
 extern bool weaponStabilised;
 
 VRHudSurface& GetVRHudSurface();
+void VR_DestroyHudSurface();
 void VR_EnsureHudSurface(int width, int height);
+void VR_InitPortableHudBinding();
+bool VR_UsePortableHud();
 bool VR_ShouldDrawMountedHud();
+void VR_SuppressMountedHudForFrames(int frames);
 bool VR_GetMountedHudTransform(VSMatrix& out);

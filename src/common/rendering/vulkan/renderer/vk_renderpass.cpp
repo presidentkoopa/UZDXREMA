@@ -221,6 +221,8 @@ std::unique_ptr<VulkanRenderPass> VkRenderPassSetup::CreateRenderPass(int clearT
 			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
 			VK_ACCESS_COLOR_ATTACHMENT_READ_BIT);
 	}
+	if (PassKey.ViewMask != 0)
+		builder.Multiview(PassKey.ViewMask, PassKey.ViewMask);
 	builder.DebugName("VkRenderPassSetup.RenderPass");
 	return builder.Create(fb->device.get());
 }
@@ -451,6 +453,8 @@ void VkPPRenderPassSetup::CreateRenderPass(const VkPPRenderPassKey& key)
 	}
 
 	builder.DebugName("VkPPRenderPassSetup.RenderPass");
+	if (key.ViewMask != 0)
+		builder.Multiview(key.ViewMask, key.ViewMask);
 	RenderPass = builder.Create(fb->device.get());
 }
 

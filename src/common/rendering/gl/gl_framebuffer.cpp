@@ -294,6 +294,15 @@ void OpenGLFrameBuffer::Swap()
 	mDebug->Update();
 }
 
+void OpenGLFrameBuffer::NewRefreshRate()
+{
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	if (vrmode != nullptr && vrmode->IsVR())
+	{
+		vrmode->ApplyRefreshRate();
+	}
+}
+
 //==========================================================================
 //
 // Enable/disable vertical sync
@@ -399,7 +408,7 @@ void OpenGLFrameBuffer::SetViewportRects(IntRect *bounds)
 	Super::SetViewportRects(bounds);
 	if (!bounds)
 	{
-		auto vrmode = VRMode::GetVRMode(true);
+		auto vrmode = VRMode::GetVRModeCached(true);
 		vrmode->AdjustViewport(this);
 	}
 }

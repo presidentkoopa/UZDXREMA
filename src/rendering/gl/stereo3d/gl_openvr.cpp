@@ -101,6 +101,9 @@ bool VR_UseScreenLayer();
 void VR_GetMove( float *joy_forward, float *joy_side, float *hmd_forward, float *hmd_side, float *up, float *yaw, float *pitch, float *roll );
 void VR_SetHMDOrientation(float pitch, float yaw, float roll );
 void VR_SetHMDPosition(float x, float y, float z );
+extern bool menu_allow_mouse_override;
+class DMenu;
+extern DMenu* CurrentMenu;
 
 #ifdef DYN_OPENVR
 // Dynamically load OpenVR
@@ -216,12 +219,18 @@ EXTERN_CVAR(Float, vr_overlayscreen_size);
 EXTERN_CVAR(Float, vr_overlayscreen_dist);
 EXTERN_CVAR(Float, vr_overlayscreen_vpos);
 EXTERN_CVAR(Int, vr_overlayscreen_bg);
+EXTERN_CVAR(Bool, vr_menu_pointer);
+EXTERN_CVAR(Bool, vr_mouse_in_menu);
+EXTERN_CVAR(Color, vr_menu_pointer_color);
+CVAR(Float, vr_openvr_menu_pointer_pitch_bias, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Float, vr_openvr_menu_pointer_tip_offset, 0.035f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 
 EXTERN_CVAR(Bool, vr_use_alternate_mapping);
 EXTERN_CVAR(Bool, vr_secondary_button_mappings);
 EXTERN_CVAR(Bool, vr_teleport);
 EXTERN_CVAR(Bool, vr_switch_sticks);
 EXTERN_CVAR(Bool, vr_two_handed_weapons);
+EXTERN_CVAR(Int, vid_refreshrate);
 
 EXTERN_CVAR(Bool, vr_enable_haptics);
 EXTERN_CVAR(Float, vr_kill_momentum);
@@ -346,10 +355,65 @@ LSVec3 openvr_dpos(0, 0, 0);
 DAngle openvr_to_doom_angle;
 
 VROverlayHandle_t overlayHandle;
+VROverlayHandle_t overlayBeamHandle;
+VROverlayHandle_t overlayCursorHandle;
 Texture_t* blankTexture;
+Texture_t* beamTexture;
+Texture_t* cursorTexture;
 bool doTrackHmdAngles = true;
 bool forceDisableOverlay = false;
 int prevOverlayBG = -1;
+int prevOverlayBackdropMode = -1;
+bool openvrMenuPointerActive = false;
+bool openvrMenuPointerBeamVisible = false;
+bool openvrMenuPointerLastTriggerDown = false;
+bool openvrMenuSuppressTriggerUntilRelease = false;
+bool openvrMenuSuppressSelectAsKey = false;
+DMenu* openvrLastMenuContext = nullptr;
+float openvrMenuPointerLastX = 0.0f;
+float openvrMenuPointerLastY = 0.0f;
+double openvrMenuWheelCooldownUntil = 0.0;
+bool openvrMenuWheelNeutral = true;
+HmdVector3_t openvrMenuPointerBeamStart = { 0.0f, 0.0f, 0.0f };
+HmdVector3_t openvrMenuPointerBeamEnd = { 0.0f, 0.0f, 0.0f };
+HmdVector3_t openvrMenuPointerHit = { 0.0f, 0.0f, 0.0f };
+HmdMatrix34_t openvrOverlayAbsTransform = {
+	1.0f, 0.0f, 0.0f, 0.0f,
+	0.0f, 1.0f, 0.0f, 1.5f,
+	0.0f, 0.0f, 1.0f, -2.5f
+};
+bool openvrHasLatestHmdPose = false;
+HmdMatrix34_t openvrLatestHmdPose = {
+	1.0f, 0.0f, 0.0f, 0.0f,
+	0.0f, 1.0f, 0.0f, 0.0f,
+	0.0f, 0.0f, 1.0f, 0.0f
+};
+bool openvrOverlayAnchorValid = false;
+int openvrOverlayAnchorMode = -1;
+bool openvrOverlayWasVisible = false;
+HmdMatrix34_t openvrOverlayFollowCurrentTransform = {
+	1.0f, 0.0f, 0.0f, 0.0f,
+	0.0f, 1.0f, 0.0f, 1.5f,
+	0.0f, 0.0f, 1.0f, -2.5f
+};
+HmdMatrix34_t openvrOverlayFollowTargetTransform = {
+	1.0f, 0.0f, 0.0f, 0.0f,
+	0.0f, 1.0f, 0.0f, 1.5f,
+	0.0f, 0.0f, 1.0f, -2.5f
+};
+double openvrOverlayFollowNextTargetTime = 0.0;
+double openvrOverlayFollowLastStepTime = 0.0;
+bool openvrHadPrevHmdPoseForRecenter = false;
+HmdMatrix34_t openvrPrevHmdPoseForRecenter = {
+	1.0f, 0.0f, 0.0f, 0.0f,
+	0.0f, 1.0f, 0.0f, 0.0f,
+	0.0f, 0.0f, 1.0f, 0.0f
+};
+HmdMatrix34_t openvrOverlayAnchorTransform = {
+	1.0f, 0.0f, 0.0f, 0.0f,
+	0.0f, 1.0f, 0.0f, 1.5f,
+	0.0f, 0.0f, 1.0f, -2.5f
+};
 float overlayBG[6][3] = {
 	{0.0f, 0.0f, 0.0f},
 	{0.11f, 0.0f, 0.01f},
@@ -358,6 +422,200 @@ float overlayBG[6][3] = {
 	{0.0f, 0.11f, 0.1f},
 	{0.1f, 0.1f, 0.1f}
 };
+
+static float Dot3(const HmdVector3_t& a, const HmdVector3_t& b)
+{
+	return a.v[0] * b.v[0] + a.v[1] * b.v[1] + a.v[2] * b.v[2];
+}
+
+static HmdVector3_t Sub3(const HmdVector3_t& a, const HmdVector3_t& b)
+{
+	return HmdVector3_t{ a.v[0] - b.v[0], a.v[1] - b.v[1], a.v[2] - b.v[2] };
+}
+
+static HmdVector3_t Add3(const HmdVector3_t& a, const HmdVector3_t& b)
+{
+	return HmdVector3_t{ a.v[0] + b.v[0], a.v[1] + b.v[1], a.v[2] + b.v[2] };
+}
+
+static HmdVector3_t Scale3(const HmdVector3_t& v, const float s)
+{
+	return HmdVector3_t{ v.v[0] * s, v.v[1] * s, v.v[2] * s };
+}
+
+static HmdVector3_t Cross3(const HmdVector3_t& a, const HmdVector3_t& b)
+{
+	return HmdVector3_t{
+		a.v[1] * b.v[2] - a.v[2] * b.v[1],
+		a.v[2] * b.v[0] - a.v[0] * b.v[2],
+		a.v[0] * b.v[1] - a.v[1] * b.v[0]
+	};
+}
+
+static HmdVector3_t Normalize3(const HmdVector3_t& v)
+{
+	const float len = std::sqrt(std::max(0.0f, Dot3(v, v)));
+	if (len <= 1e-6f)
+		return HmdVector3_t{ 0.0f, 0.0f, 1.0f };
+	return Scale3(v, 1.0f / len);
+}
+
+static HmdMatrix34_t Mul34(const HmdMatrix34_t& a, const HmdMatrix34_t& b)
+{
+	HmdMatrix34_t out = {};
+	for (int r = 0; r < 3; ++r)
+	{
+		for (int c = 0; c < 3; ++c)
+		{
+			out.m[r][c] = a.m[r][0] * b.m[0][c] + a.m[r][1] * b.m[1][c] + a.m[r][2] * b.m[2][c];
+		}
+		out.m[r][3] = a.m[r][0] * b.m[0][3] + a.m[r][1] * b.m[1][3] + a.m[r][2] * b.m[2][3] + a.m[r][3];
+	}
+	return out;
+}
+
+static HmdVector3_t RotateAroundAxis(const HmdVector3_t& v, const HmdVector3_t& axisIn, float angleRad)
+{
+	const HmdVector3_t axis = Normalize3(axisIn);
+	const float c = cosf(angleRad);
+	const float s = sinf(angleRad);
+	const HmdVector3_t term1 = Scale3(v, c);
+	const HmdVector3_t term2 = Scale3(Cross3(axis, v), s);
+	const HmdVector3_t term3 = Scale3(axis, Dot3(axis, v) * (1.0f - c));
+	return Add3(Add3(term1, term2), term3);
+}
+
+static HmdMatrix34_t BuildOverlayRelativeTransform()
+{
+	const float overlayDrawDistance = -2.5f - vr_overlayscreen_dist;
+	return HmdMatrix34_t{
+		1.3f, 0.0f, 0.0f, 0.0f,
+		0.0f, 1.0f, 0.0f, vr_overlayscreen_vpos,
+		0.0f, 0.0f, 1.0f, overlayDrawDistance
+	};
+}
+
+static HmdMatrix34_t BuildStationaryOverlayAnchorFromHmd()
+{
+	const float screenDistance = 2.5f + vr_overlayscreen_dist;
+	const HmdVector3_t hmdPos = { openvrLatestHmdPose.m[0][3], openvrLatestHmdPose.m[1][3], openvrLatestHmdPose.m[2][3] };
+	const HmdVector3_t worldUp = Normalize3({ 0.0f, 1.0f, 0.0f });
+	HmdVector3_t forward = Normalize3({ -openvrLatestHmdPose.m[0][2], -openvrLatestHmdPose.m[1][2], -openvrLatestHmdPose.m[2][2] });
+	// Stationary anchor should be upright in world space: preserve yaw only.
+	forward.v[1] = 0.0f;
+	if (Dot3(forward, forward) < 1e-6f)
+	{
+		forward = Normalize3({ -openvrLatestHmdPose.m[0][0], 0.0f, -openvrLatestHmdPose.m[2][0] });
+	}
+	forward = Normalize3(forward);
+	const HmdVector3_t normal = Scale3(forward, -1.0f);
+	HmdVector3_t right = Normalize3(Cross3(worldUp, normal));
+	if (Dot3(right, right) < 1e-6f)
+	{
+		right = Normalize3({ 1.0f, 0.0f, 0.0f });
+	}
+	const HmdVector3_t up = worldUp;
+	right = Scale3(right, 1.3f);
+	const HmdVector3_t center = Add3(Add3(hmdPos, Scale3(forward, screenDistance)), Scale3(worldUp, vr_overlayscreen_vpos));
+	return HmdMatrix34_t{
+		right.v[0], up.v[0], normal.v[0], center.v[0],
+		right.v[1], up.v[1], normal.v[1], center.v[1],
+		right.v[2], up.v[2], normal.v[2], center.v[2]
+	};
+}
+
+static float YawFromPoseDeg(const HmdMatrix34_t& pose)
+{
+	HmdVector3_t forward = Normalize3({ -pose.m[0][2], -pose.m[1][2], -pose.m[2][2] });
+	forward.v[1] = 0.0f;
+	forward = Normalize3(forward);
+	return RAD2DEG(atan2f(forward.v[0], forward.v[2]));
+}
+
+static float ShortestAngleDeltaDeg(float a, float b)
+{
+	float d = fmodf(a - b, 360.0f);
+	if (d > 180.0f) d -= 360.0f;
+	if (d < -180.0f) d += 360.0f;
+	return d;
+}
+
+static float YawFromOverlayTransformDeg(const HmdMatrix34_t& xf)
+{
+	const HmdVector3_t forward = Normalize3({ -xf.m[0][2], -xf.m[1][2], -xf.m[2][2] });
+	return RAD2DEG(atan2f(forward.v[0], forward.v[2]));
+}
+
+static HmdMatrix34_t OrthonormalizeOverlayTransform(const HmdMatrix34_t& in)
+{
+	HmdVector3_t right = { in.m[0][0], in.m[1][0], in.m[2][0] };
+	HmdVector3_t up = { in.m[0][1], in.m[1][1], in.m[2][1] };
+	HmdVector3_t normal = { in.m[0][2], in.m[1][2], in.m[2][2] };
+	const float rightLen = std::sqrt(std::max(0.0f, Dot3(right, right)));
+	normal = Normalize3(normal);
+	right = Normalize3(Cross3(up, normal));
+	if (Dot3(right, right) < 1e-6f)
+	{
+		right = Normalize3({ 1.0f, 0.0f, 0.0f });
+	}
+	up = Normalize3(Cross3(normal, right));
+	right = Scale3(right, std::max(0.1f, rightLen));
+	return HmdMatrix34_t{
+		right.v[0], up.v[0], normal.v[0], in.m[0][3],
+		right.v[1], up.v[1], normal.v[1], in.m[1][3],
+		right.v[2], up.v[2], normal.v[2], in.m[2][3]
+	};
+}
+
+static HmdMatrix34_t BuildControllerFollowOverlayAnchor(const HmdMatrix34_t& controllerPose)
+{
+	const float screenDistance = 2.5f + vr_overlayscreen_dist;
+	const HmdVector3_t controllerPos = { controllerPose.m[0][3], controllerPose.m[1][3], controllerPose.m[2][3] };
+	HmdVector3_t forward = Normalize3({ -controllerPose.m[0][2], -controllerPose.m[1][2], -controllerPose.m[2][2] });
+	const HmdVector3_t controllerRight = Normalize3({ controllerPose.m[0][0], controllerPose.m[1][0], controllerPose.m[2][0] });
+	// Match expected controller-follow feel by pitching the overlay downward.
+	forward = Normalize3(RotateAroundAxis(forward, controllerRight, -45.0f * (float)(M_PI / 180.0)));
+	const HmdVector3_t normal = Scale3(forward, -1.0f);
+	HmdVector3_t upRef = Normalize3({ 0.0f, 1.0f, 0.0f });
+	if (openvrHasLatestHmdPose)
+	{
+		upRef = Normalize3({ openvrLatestHmdPose.m[0][1], openvrLatestHmdPose.m[1][1], openvrLatestHmdPose.m[2][1] });
+	}
+	// Build an orthonormal frame to avoid shear/trapezoid distortion when controller rolls.
+	HmdVector3_t right = Normalize3(Cross3(upRef, normal));
+	if (Dot3(right, right) < 1e-6f)
+	{
+		right = Normalize3({ controllerPose.m[0][0], controllerPose.m[1][0], controllerPose.m[2][0] });
+	}
+	HmdVector3_t up = Normalize3(Cross3(normal, right));
+	right = Scale3(right, 1.3f);
+	const HmdVector3_t center = Add3(Add3(controllerPos, Scale3(forward, screenDistance)), Scale3(up, vr_overlayscreen_vpos));
+	return HmdMatrix34_t{
+		right.v[0], up.v[0], normal.v[0], center.v[0],
+		right.v[1], up.v[1], normal.v[1], center.v[1],
+		right.v[2], up.v[2], normal.v[2], center.v[2]
+	};
+}
+
+static void PostGuiMouseEvent(EGUIEvent type, int x, int y)
+{
+	event_t ev = {};
+	ev.type = EV_GUI_Event;
+	ev.subtype = type;
+	ev.data1 = x;
+	ev.data2 = y;
+	D_PostEvent(&ev);
+}
+
+static void PostGuiWheelEvent(EGUIEvent type, int x, int y)
+{
+	event_t ev = {};
+	ev.type = EV_GUI_Event;
+	ev.subtype = type;
+	ev.data1 = x;
+	ev.data2 = y;
+	D_PostEvent(&ev);
+}
 
 namespace s3d
 {
@@ -856,6 +1114,11 @@ namespace s3d
 		return projectionMatrix;
 	}
 
+	DAngle OpenVREyePose::GetRenderFov(DAngle fallback) const
+	{
+		return renderFovDegrees > 0.0f ? DAngle::fromDeg(renderFovDegrees) : fallback;
+	}
+
 	void OpenVREyePose::initialize(VR_IVRSystem_FnTable* vrsystem)
 	{
 		float zNear = screen->GetZNear(); // 5.0;
@@ -871,7 +1134,10 @@ namespace s3d
 		projectionMatrix.loadIdentity();
 		projectionMatrix.multMatrix(&proj_transpose.m[0][0]);
 
-		fov = 2.0*atan( 1.0/projection.m[1][1] ) * 180.0 / M_PI;
+		const float horizontalFov = 2.0f * RAD2DEG(atanf(1.0f / projection.m[0][0]));
+		const float verticalFov = 2.0f * RAD2DEG(atanf(1.0f / projection.m[1][1]));
+		renderFovDegrees = std::max(horizontalFov, verticalFov);
+		fov = verticalFov;
 
 		HmdMatrix34_t eyeToHead = vrsystem->GetEyeToHeadTransform(EVREye(eye));
 		vSMatrixFromHmdMatrix34(eyeToHeadTransform, eyeToHead);
@@ -931,19 +1197,29 @@ namespace s3d
 
 		static VRTextureBounds_t tBounds = { 0, 0, 1, 1 };
 
-		if(forceDisableOverlay || !VR_UseScreenLayer())
+		const bool showOverlay = (ConsoleState != c_up) || (!forceDisableOverlay && VR_UseScreenLayer());
+		if (!showOverlay)
 		{
 			//clear and hide overlay when not in use
 			vrOverlay->ClearOverlayTexture(overlayHandle);
 			vrOverlay->HideOverlay(overlayHandle);
-
-			// this is where we set the screen texture for HMD
+			if (overlayBeamHandle != 0)
+			{
+				vrOverlay->HideOverlay(overlayBeamHandle);
+			}
+			if (overlayCursorHandle != 0)
+			{
+				vrOverlay->HideOverlay(overlayCursorHandle);
+			}
 			vrCompositor->Submit(EVREye(eye), eyeTexture, &tBounds, EVRSubmitFlags_Submit_Default);
 		}
 		else {
 			// create a solid color backdrop texture
-			if (prevOverlayBG != vr_overlayscreen_bg) {
+			const bool useBlackBackdrop = (gamestate == GS_STARTUP || gamestate == GS_DEMOSCREEN || gamestate == GS_INTRO || gamestate == GS_TITLELEVEL);
+			const int currentBackdropMode = useBlackBackdrop ? 0 : 1;
+			if (prevOverlayBG != vr_overlayscreen_bg || prevOverlayBackdropMode != currentBackdropMode) {
 				prevOverlayBG = vr_overlayscreen_bg;
+				prevOverlayBackdropMode = currentBackdropMode;
 				blankTexture = new Texture_t();
 				blankTexture->handle = nullptr;
 				blankTexture->eType = ETextureType_TextureType_OpenGL;
@@ -964,7 +1240,7 @@ namespace s3d
 				glBindTexture(GL_TEXTURE_2D, emptyTextureID);
 				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-				if (gamestate == GS_STARTUP || gamestate == GS_DEMOSCREEN || gamestate == GS_INTRO || gamestate == GS_TITLELEVEL)
+				if (useBlackBackdrop)
 					glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tWidth, tHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, &emptyDataStart[0]);
 				else
 					glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, tWidth, tHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, emptyData);
@@ -972,18 +1248,149 @@ namespace s3d
 				delete[] emptyData;
 			}
 				
-			// set blank texture for compositor so it draws solid color background behind the overlay
-			// without compositor background the game goes in/out of steamvr and gets glitchy
-			vrCompositor->Submit(EVREye(eye), blankTexture, &tBounds, EVRSubmitFlags_Submit_Default);
-
 			//static VRTextureBounds_t oBounds = { 0, 0.05, 0.8, 0.95 }; // screen texture crop for overlay
 
 			// set screen texture on overly instead of compositor
-			vrOverlay->SetOverlayTexture(overlayHandle, eyeTexture);
-			vrOverlay->SetOverlayTextureBounds(overlayHandle, &tBounds);
-			vrOverlay->SetOverlayWidthInMeters(overlayHandle, 1 + vr_overlayscreen_size);
-			vrOverlay->ShowOverlay(overlayHandle);
-		}
+			vrCompositor->Submit(EVREye(eye), blankTexture, &tBounds, EVRSubmitFlags_Submit_Default);
+				vrOverlay->SetOverlayTexture(overlayHandle, eyeTexture);
+				vrOverlay->SetOverlayTextureBounds(overlayHandle, &tBounds);
+				vrOverlay->SetOverlayWidthInMeters(overlayHandle, (1.0f + vr_overlayscreen_size) * 0.8f);
+				vrOverlay->ShowOverlay(overlayHandle);
+
+				if (eye == 0 && vrOverlay != nullptr && overlayBeamHandle != 0 && openvrMenuPointerBeamVisible)
+				{
+				if (beamTexture == nullptr)
+				{
+					beamTexture = new Texture_t();
+					beamTexture->eType = ETextureType_TextureType_OpenGL;
+					beamTexture->eColorSpace = EColorSpace_ColorSpace_Linear;
+					beamTexture->handle = nullptr;
+				}
+				if (beamTexture->handle == nullptr)
+				{
+					GLuint beamTextureID = 0;
+					glGenTextures(1, &beamTextureID);
+					beamTexture->handle = (void*)(std::ptrdiff_t)beamTextureID;
+					glBindTexture(GL_TEXTURE_2D, beamTextureID);
+					glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+					glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+					const unsigned char white[4] = { 255, 255, 255, 255 };
+					glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, white);
+					glBindTexture(GL_TEXTURE_2D, 0);
+				}
+
+				HmdVector3_t beamVec = Sub3(openvrMenuPointerBeamEnd, openvrMenuPointerBeamStart);
+				const float beamLen = std::sqrt(std::max(0.0f, Dot3(beamVec, beamVec)));
+					if (beamLen > 0.01f)
+					{
+						const HmdVector3_t xAxis = Normalize3(beamVec);
+						HmdVector3_t upHint = HmdVector3_t{ 0.0f, 1.0f, 0.0f };
+						HmdVector3_t yAxis = Normalize3(Cross3(upHint, xAxis));
+						if (Dot3(yAxis, yAxis) < 1e-6f)
+						{
+							upHint = HmdVector3_t{ 1.0f, 0.0f, 0.0f };
+							yAxis = Normalize3(Cross3(upHint, xAxis));
+						}
+						const HmdVector3_t zAxis = Normalize3(Cross3(xAxis, yAxis));
+						const HmdVector3_t beamCenter = Add3(openvrMenuPointerBeamStart, Scale3(xAxis, beamLen * 0.5f));
+
+						HmdMatrix34_t beamTransform = {
+							xAxis.v[0], yAxis.v[0], zAxis.v[0], beamCenter.v[0],
+							xAxis.v[1], yAxis.v[1], zAxis.v[1], beamCenter.v[1],
+							xAxis.v[2], yAxis.v[2], zAxis.v[2], beamCenter.v[2]
+						};
+
+						const int colorRaw = (int)vr_menu_pointer_color;
+						const float colorR = ((colorRaw >> 16) & 0xff) / 255.0f;
+						const float colorG = ((colorRaw >> 8) & 0xff) / 255.0f;
+						const float colorB = (colorRaw & 0xff) / 255.0f;
+						vrOverlay->SetOverlayTexture(overlayBeamHandle, beamTexture);
+						vrOverlay->SetOverlayColor(overlayBeamHandle, colorR, colorG, colorB);
+						vrOverlay->SetOverlayAlpha(overlayBeamHandle, 1.0f);
+						vrOverlay->SetOverlayWidthInMeters(overlayBeamHandle, std::max(0.02f, beamLen));
+						vrOverlay->SetOverlayTexelAspect(overlayBeamHandle, std::max(1.0f, std::max(0.02f, beamLen) / 0.005f));
+						vrOverlay->SetOverlayTransformAbsolute(overlayBeamHandle, (ETrackingUniverseOrigin)openvr::ETrackingUniverseOrigin_TrackingUniverseRawAndUncalibrated, &beamTransform);
+						vrOverlay->ShowOverlay(overlayBeamHandle);
+					}
+					else
+					{
+						vrOverlay->HideOverlay(overlayBeamHandle);
+					}
+			}
+				else if (eye == 0 && overlayBeamHandle != 0)
+				{
+					vrOverlay->HideOverlay(overlayBeamHandle);
+				}
+
+				if (eye == 0 && vrOverlay != nullptr && overlayCursorHandle != 0 && openvrMenuPointerActive)
+				{
+					if (cursorTexture == nullptr)
+					{
+						cursorTexture = new Texture_t();
+						cursorTexture->eType = ETextureType_TextureType_OpenGL;
+						cursorTexture->eColorSpace = EColorSpace_ColorSpace_Linear;
+						cursorTexture->handle = nullptr;
+					}
+					if (cursorTexture->handle == nullptr)
+					{
+						GLuint cursorTextureID = 0;
+						glGenTextures(1, &cursorTextureID);
+						cursorTexture->handle = (void*)(std::ptrdiff_t)cursorTextureID;
+						glBindTexture(GL_TEXTURE_2D, cursorTextureID);
+						glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+						glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+						glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+						glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+						constexpr int cursorTexSize = 32;
+						std::vector<unsigned char> cursorPixels(cursorTexSize * cursorTexSize * 4, 0);
+						for (int y = 0; y < cursorTexSize; y++)
+						{
+							for (int x = 0; x < cursorTexSize; x++)
+							{
+								const float fx = ((float)x + 0.5f) / (float)cursorTexSize * 2.0f - 1.0f;
+								const float fy = ((float)y + 0.5f) / (float)cursorTexSize * 2.0f - 1.0f;
+								const float dist = std::sqrt(fx * fx + fy * fy);
+								const bool ring = (dist > 0.72f && dist < 0.96f);
+								const bool centerDot = (dist < 0.10f);
+								const bool on = ring || centerDot;
+								const size_t idx = (size_t)(y * cursorTexSize + x) * 4;
+								cursorPixels[idx + 0] = 255;
+								cursorPixels[idx + 1] = 255;
+								cursorPixels[idx + 2] = 255;
+								cursorPixels[idx + 3] = on ? 255 : 0;
+							}
+						}
+						glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, cursorTexSize, cursorTexSize, 0, GL_RGBA, GL_UNSIGNED_BYTE, cursorPixels.data());
+						glBindTexture(GL_TEXTURE_2D, 0);
+					}
+
+					const HmdVector3_t xAxis = Normalize3(HmdVector3_t{ openvrOverlayAbsTransform.m[0][0], openvrOverlayAbsTransform.m[1][0], openvrOverlayAbsTransform.m[2][0] });
+					const HmdVector3_t yAxis = Normalize3(HmdVector3_t{ openvrOverlayAbsTransform.m[0][1], openvrOverlayAbsTransform.m[1][1], openvrOverlayAbsTransform.m[2][1] });
+					const HmdVector3_t zAxis = Normalize3(HmdVector3_t{ openvrOverlayAbsTransform.m[0][2], openvrOverlayAbsTransform.m[1][2], openvrOverlayAbsTransform.m[2][2] });
+					const HmdVector3_t cursorCenter = Add3(openvrMenuPointerHit, Scale3(zAxis, 0.002f));
+					HmdMatrix34_t cursorTransform = {
+						xAxis.v[0], yAxis.v[0], zAxis.v[0], cursorCenter.v[0],
+						xAxis.v[1], yAxis.v[1], zAxis.v[1], cursorCenter.v[1],
+						xAxis.v[2], yAxis.v[2], zAxis.v[2], cursorCenter.v[2]
+					};
+
+					const int colorRaw = (int)vr_menu_pointer_color;
+					const float colorR = ((colorRaw >> 16) & 0xff) / 255.0f;
+					const float colorG = ((colorRaw >> 8) & 0xff) / 255.0f;
+					const float colorB = (colorRaw & 0xff) / 255.0f;
+					vrOverlay->SetOverlayTexture(overlayCursorHandle, cursorTexture);
+					vrOverlay->SetOverlayColor(overlayCursorHandle, colorR, colorG, colorB);
+					vrOverlay->SetOverlayAlpha(overlayCursorHandle, 1.0f);
+					vrOverlay->SetOverlayTexelAspect(overlayCursorHandle, 1.0f);
+					vrOverlay->SetOverlayWidthInMeters(overlayCursorHandle, 0.02f);
+					vrOverlay->SetOverlayTransformAbsolute(overlayCursorHandle, (ETrackingUniverseOrigin)openvr::ETrackingUniverseOrigin_TrackingUniverseRawAndUncalibrated, &cursorTransform);
+					vrOverlay->ShowOverlay(overlayCursorHandle);
+				}
+				else if (eye == 0 && overlayCursorHandle != 0)
+				{
+					vrOverlay->HideOverlay(overlayCursorHandle);
+				}
+			}
 		return true;
 	}
 
@@ -1000,7 +1407,7 @@ namespace s3d
 		return (automapactive && !vr_automap_use_hud) ? automap : hud;
 	}
 
-	VSMatrix OpenVREyePose::getHUDProjection() const
+	VSMatrix OpenVREyePose::GetHUDProjection() const
 	{
 		VSMatrix new_projection;
 		new_projection.loadIdentity();
@@ -1062,10 +1469,22 @@ namespace s3d
 		return new_projection;
 	}
 
+	VSMatrix OpenVRMode::GetHUDProjection() const
+	{
+		for (int i = 0; i < mEyeCount; ++i)
+		{
+			if (mEyes[i] != nullptr && mEyes[i]->isActive())
+			{
+				return mEyes[i]->GetHUDProjection();
+			}
+		}
+		return GetHUDSpriteProjection();
+	}
+
 	void OpenVREyePose::AdjustHud() const
 	{
 		// Keep the regular camera-mounted HUD path working for non-mounted mode.
-		const auto vrmode = VRMode::GetVRMode(true);
+		const auto vrmode = VRMode::GetVRModeCached(true);
 		if (vrmode->mEyeCount == 1)
 		{
 			return;
@@ -1076,7 +1495,7 @@ namespace s3d
 		}
 		auto* di = HWDrawInfo::StartDrawInfo(r_viewpoint.ViewLevel, nullptr, r_viewpoint, nullptr);
 
-		di->VPUniforms.mProjectionMatrix = getHUDProjection();
+		di->VPUniforms.mProjectionMatrix = GetHUDProjection();
 		ApplyVPUniforms(di);
 		di->EndDrawInfo();
 	}
@@ -1162,8 +1581,11 @@ namespace s3d
 		, hmdWasFound(false)
 		, sceneWidth(0), sceneHeight(0)
 		, vrCompositor(nullptr)
+		, vrOverlay(nullptr)
 		, vrRenderModels(nullptr)
+		, vrSettings(nullptr)
 		, vrToken(0)
+		, haptics(nullptr)
 		, crossHairDrawer(new F2DDrawer)
 	{
 		//eye_ptrs.Push(&leftEyeView); // initially default behavior to Mono non-stereo rendering
@@ -1213,12 +1635,16 @@ namespace s3d
 		const std::string model_key = std::string("FnTable:") + std::string(IVRRenderModels_Version);
 		vrRenderModels = (VR_IVRRenderModels_FnTable*)VR_GetGenericInterface(model_key.c_str(), &eError);
 
+		const std::string settings_key = std::string("FnTable:") + std::string(IVRSettings_Version);
+		vrSettings = (VR_IVRSettings_FnTable*)VR_GetGenericInterface(settings_key.c_str(), &eError);
+
 		//eye_ptrs.Push(&rightEyeView); // NOW we render to two eyes
 		hmdWasFound = true;
 
 		crossHairDrawer->Clear();
 
 		haptics = new OpenVRHaptics(vrSystem);
+		ApplyRefreshRate();
 	}
 
 	/* virtual */
@@ -1232,56 +1658,247 @@ namespace s3d
 			return;
 
 		vrOverlay->CreateOverlay((char*)"doomVROverlay", (char*)"doomVROverlay", &overlayHandle);
+		vrOverlay->CreateOverlay((char*)"doomVRBeamOverlay", (char*)"doomVRBeamOverlay", &overlayBeamHandle);
+		vrOverlay->CreateOverlay((char*)"doomVRCursorOverlay", (char*)"doomVRCursorOverlay", &overlayCursorHandle);
+		if (overlayBeamHandle != 0)
+		{
+			vrOverlay->SetOverlaySortOrder(overlayBeamHandle, 2);
+			vrOverlay->SetOverlayAlpha(overlayBeamHandle, 1.0f);
+			vrOverlay->SetOverlayWidthInMeters(overlayBeamHandle, 0.1f);
+		}
+		if (overlayCursorHandle != 0)
+		{
+			vrOverlay->SetOverlaySortOrder(overlayCursorHandle, 3);
+			vrOverlay->SetOverlayAlpha(overlayCursorHandle, 1.0f);
+			vrOverlay->SetOverlayWidthInMeters(overlayCursorHandle, 0.02f);
+		}
 	}
 
 	void OpenVRMode::UpdateOverlaySettings() const
 	{
 		if (vrOverlay == nullptr || overlayHandle == 0)
 			return;
-
-		float overlayDrawDistance = - 2.5f - vr_overlayscreen_dist;
-		float overlayVerticalPosition = 1.5f + vr_overlayscreen_vpos;
-
-		HmdMatrix34_t vrOverlayTransform = {
-					1.3f, 0.0f, 0.0f, 0.0f,
-					0.0f, 1.0f, 0.0f, vr_overlayscreen_vpos,
-					0.0f, 0.0f, 1.0f, overlayDrawDistance
-		};
+		HmdMatrix34_t overlayRelTransform = BuildOverlayRelativeTransform();
 
 		bool rightHanded = vr_control_scheme < 10;
 		TrackedDeviceIndex_t mainhandOverlayIndex = controllers[rightHanded ? 1 : 0].active ? controllers[rightHanded ? 1 : 0].index : openvr::k_unTrackedDeviceIndex_Hmd;
 		TrackedDeviceIndex_t offhandOverlayIndex = controllers[rightHanded ? 0 : 1].active ? controllers[rightHanded ? 0 : 1].index : openvr::k_unTrackedDeviceIndex_Hmd;
 
-		//int overlayscreen_pos = vr_overlayscreen;
-		// when overlay follow-mode is set to the controllers it makes more sense to lock it in stationary position
-		// if the user decides to play the game in the overlay screen (to prevent nausea/gamepad user?)
-		//if (vr_overlayscreen_always && vr_overlayscreen > 2) overlayscreen_pos = 1;
-
 		switch (vr_overlayscreen) {
-		case 1: // overlay stationary position
+		case 1: // stationary
 		{
-			HmdMatrix34_t oAbsTransform = {
-							1.3f, 0.0f, 0.0f, 0.0f,
-							0.0f, 1.0f, 0.0f, overlayVerticalPosition,
-							0.0f, 0.0f, 1.0f, overlayDrawDistance
-			};
-
-			auto oTracking = (ETrackingUniverseOrigin)openvr::ETrackingUniverseOrigin_TrackingUniverseRawAndUncalibrated;
-			vrOverlay->SetOverlayTransformAbsolute(overlayHandle, oTracking, &oAbsTransform);
+			if (!openvrOverlayAnchorValid || openvrOverlayAnchorMode != vr_overlayscreen)
+			{
+				if (openvrHasLatestHmdPose)
+				{
+					openvrOverlayAnchorTransform = BuildStationaryOverlayAnchorFromHmd();
+					openvrOverlayAnchorValid = true;
+				}
+				openvrOverlayAnchorMode = vr_overlayscreen;
+			}
+			openvrOverlayAbsTransform = openvrOverlayAnchorTransform;
+			auto tracking = (ETrackingUniverseOrigin)openvr::ETrackingUniverseOrigin_TrackingUniverseStanding;
+			vrOverlay->SetOverlayTransformAbsolute(overlayHandle, tracking, &openvrOverlayAbsTransform);
 			break;
 		}
 
-		case 2: // overlay follows head movement
-			vrOverlay->SetOverlayTransformTrackedDeviceRelative(overlayHandle, openvr::k_unTrackedDeviceIndex_Hmd, &vrOverlayTransform);
+		case 2: // stationary (follow)
+		{
+			const double now = I_msTimeF();
+			if (!openvrOverlayAnchorValid || openvrOverlayAnchorMode != vr_overlayscreen)
+			{
+				if (openvrHasLatestHmdPose)
+				{
+					openvrOverlayFollowCurrentTransform = BuildStationaryOverlayAnchorFromHmd();
+					openvrOverlayFollowTargetTransform = openvrOverlayFollowCurrentTransform;
+					openvrOverlayFollowNextTargetTime = now + 1000.0;
+					openvrOverlayFollowLastStepTime = now;
+					openvrOverlayAnchorValid = true;
+				}
+				openvrOverlayAnchorMode = vr_overlayscreen;
+			}
+			if (openvrHasLatestHmdPose && now >= openvrOverlayFollowNextTargetTime)
+			{
+				const HmdMatrix34_t candidateTarget = BuildStationaryOverlayAnchorFromHmd();
+				const float currentTargetYaw = YawFromOverlayTransformDeg(openvrOverlayFollowTargetTransform);
+				const float candidateYaw = YawFromOverlayTransformDeg(candidateTarget);
+				const float yawDelta = fabsf(ShortestAngleDeltaDeg(candidateYaw, currentTargetYaw));
+				// Ignore tiny head yaw drift to prevent stationary-follow jitter.
+				if (yawDelta >= 15.0f)
+				{
+					openvrOverlayFollowTargetTransform = candidateTarget;
+				}
+				openvrOverlayFollowNextTargetTime = now + 1000.0;
+			}
+			const float dt = (float)clamp((now - openvrOverlayFollowLastStepTime) / 1000.0, 0.0, 0.1);
+			openvrOverlayFollowLastStepTime = now;
+			const float step = clamp(dt * 1.1f, 0.0f, 1.0f);
+			const float eased = 1.0f - powf(1.0f - step, 3.0f);
+			for (int r = 0; r < 3; ++r)
+			{
+				for (int c = 0; c < 4; ++c)
+				{
+					openvrOverlayFollowCurrentTransform.m[r][c] =
+						openvrOverlayFollowCurrentTransform.m[r][c] +
+						(openvrOverlayFollowTargetTransform.m[r][c] - openvrOverlayFollowCurrentTransform.m[r][c]) * eased;
+				}
+			}
+			openvrOverlayFollowCurrentTransform = OrthonormalizeOverlayTransform(openvrOverlayFollowCurrentTransform);
+			openvrOverlayAbsTransform = openvrOverlayFollowCurrentTransform;
+			auto tracking = (ETrackingUniverseOrigin)openvr::ETrackingUniverseOrigin_TrackingUniverseStanding;
+			vrOverlay->SetOverlayTransformAbsolute(overlayHandle, tracking, &openvrOverlayAbsTransform);
+			break;
+		}
+
+		case 3: // follow head movement
+			if (openvrHasLatestHmdPose)
+				openvrOverlayAbsTransform = Mul34(openvrLatestHmdPose, overlayRelTransform);
+			vrOverlay->SetOverlayTransformTrackedDeviceRelative(overlayHandle, openvr::k_unTrackedDeviceIndex_Hmd, &overlayRelTransform);
 			break;
 
-		case 3: // overlay follows main hand movement
-			vrOverlay->SetOverlayTransformTrackedDeviceRelative(overlayHandle, mainhandOverlayIndex, &vrOverlayTransform);
+		case 4: // follow main hand
+			if (mainhandOverlayIndex == openvr::k_unTrackedDeviceIndex_Hmd)
+			{
+				if (openvrHasLatestHmdPose)
+					openvrOverlayAbsTransform = Mul34(openvrLatestHmdPose, overlayRelTransform);
+				vrOverlay->SetOverlayTransformTrackedDeviceRelative(overlayHandle, mainhandOverlayIndex, &overlayRelTransform);
+			}
+			else
+			{
+				const int role = rightHanded ? 1 : 0;
+				if (controllers[role].active && controllers[role].pose.bPoseIsValid)
+					openvrOverlayAbsTransform = BuildControllerFollowOverlayAnchor(controllers[role].pose.mDeviceToAbsoluteTracking);
+				vrOverlay->SetOverlayTransformAbsolute(overlayHandle, (ETrackingUniverseOrigin)openvr::ETrackingUniverseOrigin_TrackingUniverseStanding, &openvrOverlayAbsTransform);
+			}
 			break;
 
-		case 4: // overlay follows off hand movement
-			vrOverlay->SetOverlayTransformTrackedDeviceRelative(overlayHandle, offhandOverlayIndex, &vrOverlayTransform);
+		case 5: // follow off hand
+			if (offhandOverlayIndex == openvr::k_unTrackedDeviceIndex_Hmd)
+			{
+				if (openvrHasLatestHmdPose)
+					openvrOverlayAbsTransform = Mul34(openvrLatestHmdPose, overlayRelTransform);
+				vrOverlay->SetOverlayTransformTrackedDeviceRelative(overlayHandle, offhandOverlayIndex, &overlayRelTransform);
+			}
+			else
+			{
+				const int role = rightHanded ? 0 : 1;
+				if (controllers[role].active && controllers[role].pose.bPoseIsValid)
+					openvrOverlayAbsTransform = BuildControllerFollowOverlayAnchor(controllers[role].pose.mDeviceToAbsoluteTracking);
+				vrOverlay->SetOverlayTransformAbsolute(overlayHandle, (ETrackingUniverseOrigin)openvr::ETrackingUniverseOrigin_TrackingUniverseStanding, &openvrOverlayAbsTransform);
+			}
 			break;
+		}
+	}
+
+	void OpenVRMode::ApplyRefreshRate() const
+	{
+		if (!hmdWasFound || vrSystem == nullptr)
+		{
+			if (!refreshRateLoggedUnavailable)
+			{
+				Printf("OpenVR: refresh rate control is unavailable because the OpenVR HMD is not fully initialized.\n");
+				refreshRateLoggedUnavailable = true;
+			}
+			return;
+		}
+
+		if (vrSettings == nullptr)
+		{
+			if (!refreshRateLoggedUnavailable)
+			{
+				Printf("OpenVR: SteamVR preferred refresh rate control is unavailable in this runtime.\n");
+				refreshRateLoggedUnavailable = true;
+			}
+			return;
+		}
+
+		refreshRateLoggedUnavailable = false;
+
+		auto readDisplayFrequency = [this]() -> float
+		{
+			ETrackedPropertyError propError = (ETrackedPropertyError)0;
+			const float rate = vrSystem->GetFloatTrackedDeviceProperty(
+				k_unTrackedDeviceIndex_Hmd,
+				(ETrackedDeviceProperty)2002,
+				&propError);
+			return propError == (ETrackedPropertyError)0 ? rate : 0.0f;
+		};
+
+		const int requestedRate = std::max(0, (int)vid_refreshrate);
+		if (refreshRateHasLastRequest && lastRefreshRateMenuValue == requestedRate)
+			return;
+
+		refreshRateHasLastRequest = true;
+		lastRefreshRateMenuValue = requestedRate;
+
+		const float currentRateBefore = readDisplayFrequency();
+		if (currentRateBefore > 0.0f)
+			lastObservedHmdRefreshRate = currentRateBefore;
+
+		if (!refreshRateLoggedControlPath)
+		{
+			Printf("OpenVR: refresh rate changes use SteamVR preferredRefreshRate and may apply later depending on headset/runtime support.\n");
+			refreshRateLoggedControlPath = true;
+		}
+
+		if (requestedRate <= 0)
+		{
+			if (currentRateBefore > 0.0f)
+			{
+				Printf("OpenVR: leaving SteamVR preferred refresh rate unchanged (menu=%d, active=%.0f Hz).\n",
+					requestedRate, (double)currentRateBefore);
+			}
+			else
+			{
+				Printf("OpenVR: leaving SteamVR preferred refresh rate unchanged (menu=%d, active rate unknown).\n",
+					requestedRate);
+			}
+			return;
+		}
+
+		EVRSettingsError settingsError = (EVRSettingsError)0;
+		vrSettings->SetFloat(
+			const_cast<char*>(k_pch_SteamVR_Section),
+			const_cast<char*>(k_pch_SteamVR_PreferredRefreshRate),
+			(float)requestedRate,
+			&settingsError);
+		if (settingsError != (EVRSettingsError)0)
+		{
+			Printf("OpenVR: failed to set SteamVR preferred refresh rate to %d Hz (%s).\n",
+				requestedRate, vrSettings->GetSettingsErrorNameFromEnum(settingsError));
+			return;
+		}
+
+		lastAppliedPreferredRefreshRate = (float)requestedRate;
+
+		const float currentRateAfter = readDisplayFrequency();
+		if (currentRateAfter > 0.0f)
+			lastObservedHmdRefreshRate = currentRateAfter;
+
+		if (currentRateAfter <= 0.0f)
+		{
+			Printf("OpenVR: requested SteamVR preferred refresh rate %d Hz, but could not verify the active HMD refresh rate.\n",
+				requestedRate);
+			return;
+		}
+
+		if (std::fabs(currentRateAfter - (float)requestedRate) < 0.25f)
+		{
+			if (currentRateBefore > 0.0f && std::fabs(currentRateBefore - currentRateAfter) >= 0.25f)
+			{
+				Printf("OpenVR: requested SteamVR preferred refresh rate %d Hz and active HMD rate changed from %.0f to %.0f Hz.\n",
+					requestedRate, (double)currentRateBefore, (double)currentRateAfter);
+			}
+			else
+			{
+				Printf("OpenVR: requested SteamVR preferred refresh rate %d Hz and active HMD rate is %.0f Hz.\n",
+					requestedRate, (double)currentRateAfter);
+			}
+		}
+		else
+		{
+			Printf("OpenVR: requested SteamVR preferred refresh rate %d Hz, but active HMD rate is %.0f Hz. SteamVR or the headset may defer or reject the change.\n",
+				requestedRate, (double)currentRateAfter);
 		}
 	}
 
@@ -1485,7 +2102,9 @@ namespace s3d
 				havePreviousYaw = true;
 			}
 			hmdYawDeltaDegrees = hmdYaw - previousHmdYaw;
+			vrApplyingHmdYaw = true;
 			G_AddViewAngle(mAngleFromRadians(DEG2RAD(-hmdYawDeltaDegrees)));
+			vrApplyingHmdYaw = false;
 			previousHmdYaw = hmdYaw;
 		}
 
@@ -1623,6 +2242,7 @@ namespace s3d
 			HandleUIVRButton(lastState, newState, openvr::vr::k_EButton_ApplicationMenu, GK_BACKSPACE);
 		}
 		else {
+			const bool dominantHand = (vr_control_scheme < 10) ? (role == 1) : (role == 0);
 
 			if (axisTrackpad != -1)
 			{
@@ -1636,7 +2256,19 @@ namespace s3d
 			}
 
 			// k_EButton_Grip === k_EButton_IndexController_A
-			HandleVRButton(lastState, newState, openvr::vr::k_EButton_Grip, KEY_PAD_LSHOULDER, role * (KEY_PAD_RSHOULDER - KEY_PAD_LSHOULDER));
+			if (vr_secondary_button_mappings && dominantHand)
+			{
+				const int gripKey = KEY_PAD_LSHOULDER + role * (KEY_PAD_RSHOULDER - KEY_PAD_LSHOULDER);
+				Joy_GenerateButtonEvents(
+					(lastState.ulButtonPressed & (1LL << openvr::vr::k_EButton_Grip)) ? 1 : 0,
+					0,
+					1,
+					&gripKey);
+			}
+			else
+			{
+				HandleVRButton(lastState, newState, openvr::vr::k_EButton_Grip, KEY_PAD_LSHOULDER, role * (KEY_PAD_RSHOULDER - KEY_PAD_LSHOULDER));
+			}
 
 			// k_EButton_ApplicationMenu / k_EButton_IndexController_B
 			HandleVRButton(lastState, newState, openvr::vr::k_EButton_ApplicationMenu, KEY_PAD_BACK, role * (KEY_PAD_START - KEY_PAD_BACK));
@@ -1686,6 +2318,8 @@ namespace s3d
 				(pDominantTrackedRemoteOld->ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Grip)) : false;
 		bool dominantGripPushedNew = vr_secondary_button_mappings ?
 				(pDominantTrackedRemoteNew->ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Grip)) : false;
+		static float analogTurnRateDegPerSec = 0.0f;
+		static uint64_t lastAnalogTurnTime = 0;
 
 		VRControllerState_t *pPrimaryTrackedRemoteNew, *pPrimaryTrackedRemoteOld,  *pSecondaryTrackedRemoteNew, *pSecondaryTrackedRemoteOld;
 		if (vr_switch_sticks)
@@ -1703,7 +2337,7 @@ namespace s3d
 			pSecondaryTrackedRemoteOld = pOffTrackedRemoteOld;
 		}
 
-		const auto vrmode = VRMode::GetVRMode(true);
+		const auto vrmode = VRMode::GetVRModeCached(true);
 
 		//All this to allow stick and button switching!
 		uint64_t primaryButtonsNew;
@@ -1840,35 +2474,45 @@ namespace s3d
 
 			//Off-hand specific stuff
 			{
-				//Teleport - only does anything if vr_teleport cvar is true
-				if (vr_teleport) {
-					if ((pSecondaryTrackedRemoteOld->rAxis[axisJoystick].y > 0.7f) && !ready_teleport) {
-						ready_teleport = true;
-					} else if ((pSecondaryTrackedRemoteOld->rAxis[axisJoystick].y < 0.7f) && ready_teleport) {
-						ready_teleport = false;
-						trigger_teleport = true;
-					}
+				const bool suppressOffhandLocomotion = dominantGripPushedNew;
+				if (suppressOffhandLocomotion)
+				{
+					ready_teleport = false;
+					remote_movementSideways = 0.0f;
+					remote_movementForward = 0.0f;
 				}
+				else
+				{
+					//Teleport - only does anything if vr_teleport cvar is true
+					if (vr_teleport) {
+						if ((pSecondaryTrackedRemoteOld->rAxis[axisJoystick].y > 0.7f) && !ready_teleport) {
+							ready_teleport = true;
+						} else if ((pSecondaryTrackedRemoteOld->rAxis[axisJoystick].y < 0.7f) && ready_teleport) {
+							ready_teleport = false;
+							trigger_teleport = true;
+						}
+					}
 
-				//Apply a filter and quadratic scaler so small movements are easier to make
-				//and we don't get movement jitter when the joystick doesn't quite center properly
-				float dist = length(pSecondaryTrackedRemoteNew->rAxis[axisJoystick].x, pSecondaryTrackedRemoteNew->rAxis[axisJoystick].y);
-				float nlf = nonLinearFilter(dist);
-				dist = (dist > 1.0f) ? dist : 1.0f;
-				float x = nlf * (pSecondaryTrackedRemoteNew->rAxis[axisJoystick].x / dist);
-				float y = nlf * (pSecondaryTrackedRemoteNew->rAxis[axisJoystick].y / dist);
+					//Apply a filter and quadratic scaler so small movements are easier to make
+					//and we don't get movement jitter when the joystick doesn't quite center properly
+					float dist = length(pSecondaryTrackedRemoteNew->rAxis[axisJoystick].x, pSecondaryTrackedRemoteNew->rAxis[axisJoystick].y);
+					float nlf = nonLinearFilter(dist);
+					dist = (dist > 1.0f) ? dist : 1.0f;
+					float x = nlf * (pSecondaryTrackedRemoteNew->rAxis[axisJoystick].x / dist);
+					float y = nlf * (pSecondaryTrackedRemoteNew->rAxis[axisJoystick].y / dist);
 
-				//Apply a simple deadzone
-				bool player_moving = (fabs(x) + fabs(y)) > 0.05f;
-				x = player_moving ? x : 0;
-				y = player_moving ? y : 0;
+					//Apply a simple deadzone
+					bool player_moving = (fabs(x) + fabs(y)) > 0.05f;
+					x = player_moving ? x : 0;
+					y = player_moving ? y : 0;
 
-				//Adjust to be off-hand controller oriented
-				//vec2_t v;
-				//rotateAboutOrigin(x, y, controllerYawHeading, v);
+					//Adjust to be off-hand controller oriented
+					//vec2_t v;
+					//rotateAboutOrigin(x, y, controllerYawHeading, v);
 
-				remote_movementSideways = x;
-				remote_movementForward = y;
+					remote_movementSideways = x;
+					remote_movementForward = y;
+				}
 			}
 
 			if (!VR_UseScreenLayer() && !dominantGripPushedNew)
@@ -1876,12 +2520,31 @@ namespace s3d
 				static int increaseSnap = true;
 				static int decreaseSnap = true;
 
-				float joy = -I_OpenVRGetYaw();
-				if (vr_snapTurn <= 10.0f && abs(joy) > 0.05f)
+				const uint64_t currentTime = I_msTime();
+				if (lastAnalogTurnTime == 0)
 				{
-					increaseSnap = false;
-					decreaseSnap = false;
-					snapTurn -= vr_snapTurn * nonLinearFilter(joy);
+					lastAnalogTurnTime = currentTime;
+				}
+				float deltaSeconds = float(currentTime - lastAnalogTurnTime) * 0.001f;
+				if (deltaSeconds > 0.1f)
+				{
+					deltaSeconds = 0.1f;
+				}
+				lastAnalogTurnTime = currentTime;
+
+				float joy = -I_OpenVRGetYaw();
+				if (vr_snapTurn <= 10.0f)
+				{
+					snapTurn += VR_ApplyAnalogSmoothTurn(joy, 210.0f, deltaSeconds, VR_GetAnalogTurnResponseScale(vr_snapTurn), analogTurnRateDegPerSec);
+					if (fabsf(joy) > 0.05f)
+					{
+						increaseSnap = false;
+						decreaseSnap = false;
+					}
+					else
+					{
+						analogTurnRateDegPerSec = 0.0f;
+					}
 				}
 
 				// Turning logic
@@ -1912,6 +2575,11 @@ namespace s3d
 					snapTurn -= 360.f;
 				}
 			}
+			else
+			{
+				analogTurnRateDegPerSec = 0.0f;
+				lastAnalogTurnTime = 0;
+			}
 
 			//Menu button - invoke menu
 			// Joy_GenerateButtonEvents(
@@ -1921,12 +2589,14 @@ namespace s3d
 				
 		}  // in game section
 
-		static int joy_mode = vr_joy_mode;
-		if (joy_mode == 1) 
-		{
-			//if in cinema mode, then the dominant joystick is used differently
-			if (!VR_UseScreenLayer() && axisJoystick != -1) 
+			static int joy_mode = vr_joy_mode;
+			if (joy_mode == 1) 
 			{
+				const bool suppressSelectAsKey = openvrMenuSuppressSelectAsKey;
+
+				//if in cinema mode, then the dominant joystick is used differently
+				if (!VR_UseScreenLayer() && axisJoystick != -1) 
+				{
 				//Default this is Weapon Chooser - This _could_ be remapped
 				Joy_GenerateButtonEvents(
 					(pPrimaryTrackedRemoteOld->rAxis[axisJoystick].y < -0.7f && !dominantGripPushedOld ? 1 : 0), 
@@ -1971,11 +2641,11 @@ namespace s3d
 					((pDominantTrackedRemoteNew->ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Axis0)) != 0) && !dominantGripPushedNew ? 1 : 0,
 					1, KEY_ENTER);
 
-				//Fire
-				Joy_GenerateButtonEvents(
-					((pDominantTrackedRemoteOld->ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Axis1)) != 0) && !dominantGripPushedOld ? 1 : 0,
-					((pDominantTrackedRemoteNew->ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Axis1)) != 0) && !dominantGripPushedNew ? 1 : 0,
-					1, KEY_PAD_RTRIGGER);
+					//Fire
+					Joy_GenerateButtonEvents(
+						((pDominantTrackedRemoteOld->ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Axis1)) != 0) && !dominantGripPushedOld && !suppressSelectAsKey ? 1 : 0,
+						((pDominantTrackedRemoteNew->ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Axis1)) != 0) && !dominantGripPushedNew && !suppressSelectAsKey ? 1 : 0,
+						1, KEY_PAD_RTRIGGER);
 
 				// Joy_GenerateButtonEvents(
 				// 	((pDominantTrackedRemoteOld->ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Axis2)) != 0) && !dominantGripPushedOld ? 1 : 0,
@@ -2021,11 +2691,11 @@ namespace s3d
 					((pDominantTrackedRemoteNew->ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Axis0)) != 0) && dominantGripPushedNew ? 1 : 0,
 					1, KEY_TAB);
 
-				//Alt-Fire
-				Joy_GenerateButtonEvents(
-					((pDominantTrackedRemoteOld->ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Axis1)) != 0) && dominantGripPushedOld ? 1 : 0,
-					((pDominantTrackedRemoteNew->ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Axis1)) != 0) && dominantGripPushedNew ? 1 : 0,
-					1, KEY_PAD_LTRIGGER);
+					//Alt-Fire
+					Joy_GenerateButtonEvents(
+						((pDominantTrackedRemoteOld->ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Axis1)) != 0) && dominantGripPushedOld && !suppressSelectAsKey ? 1 : 0,
+						((pDominantTrackedRemoteNew->ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Axis1)) != 0) && dominantGripPushedNew && !suppressSelectAsKey ? 1 : 0,
+						1, KEY_PAD_LTRIGGER);
 
 				//No Default Binding
 				// Joy_GenerateButtonEvents(
@@ -2394,46 +3064,59 @@ namespace s3d
 
 		haptics->ProcessHaptics();
 
-		if (gamestate == GS_LEVEL && menuactive == MENU_Off && !paused) {
+		if (gamestate == GS_LEVEL && menuactive == MENU_Off && !paused && ConsoleState == c_up) {
 			cachedScreenBlocks = screenblocks;
 			screenblocks = 12; // always be full-screen during 3D scene render
 			QzDoom_setUseScreenLayer(false);
 		}
 		else {
-			//Ensure we are drawing on virtual screen
+			// Ensure we are drawing on virtual screen
 			QzDoom_setUseScreenLayer(true);
 		}
 		
 		static TrackedDevicePose_t poses[k_unMaxTrackedDeviceCount];
 		
-		if (gamestate != GS_TITLELEVEL) {
-			// TODO: Draw a more interesting background behind the 2D screen
-			const int eyeCount = mEyeCount;
-			GLRenderer->mBuffers->CurrentEye() = 0;  // always begin at zero, in case eye count changed
-			for (int eye_ix = 0; eye_ix < eyeCount; ++eye_ix)
-			{
-				const auto& eye = mEyes[GLRenderer->mBuffers->CurrentEye()];
+		// Keep the HMD fed on title/menu screens as well as in-game.
+		// The menu lives in GS_TITLELEVEL, so skipping this block makes VR appear to freeze.
+		const int eyeCount = mEyeCount;
+		GLRenderer->mBuffers->CurrentEye() = 0;  // always begin at zero, in case eye count changed
+		for (int eye_ix = 0; eye_ix < eyeCount; ++eye_ix)
+		{
+			GLRenderer->mBuffers->BindCurrentFB();
+			glClearColor(0.f, 0.f, 0.f, 1.0f);
+			glClear(GL_COLOR_BUFFER_BIT);
+			GLRenderer->mBuffers->NextEye(eyeCount);
+		}
 
-				GLRenderer->mBuffers->BindCurrentFB();
-				glClearColor(0.f, 0.f, 0.f, 1.0f);
-				glClear(GL_COLOR_BUFFER_BIT);
-				//if (eyeCount - eye_ix > 1)
-					GLRenderer->mBuffers->NextEye(eyeCount);
-			}
-			//GLRenderer->mBuffers->BlitToEyeTexture(GLRenderer->mBuffers->CurrentEye(), false);
-			
-			if (vrCompositor != nullptr) {
-				vrCompositor->WaitGetPoses(
-					poses, k_unMaxTrackedDeviceCount, // current pose
-					nullptr, 0 // future pose?
-				);
-			}
+		if (vrCompositor != nullptr) {
+			vrCompositor->WaitGetPoses(
+				poses, k_unMaxTrackedDeviceCount, // current pose
+				nullptr, 0 // future pose?
+			);
 		}
 
 		TrackedDevicePose_t& hmdPose0 = poses[k_unTrackedDeviceIndex_Hmd];
 		
 		if (hmdPose0.bPoseIsValid) {
 			const HmdMatrix34_t& hmdPose = hmdPose0.mDeviceToAbsoluteTracking;
+			if (openvrHadPrevHmdPoseForRecenter)
+			{
+				const float prevYaw = YawFromPoseDeg(openvrPrevHmdPoseForRecenter);
+				const float currYaw = YawFromPoseDeg(hmdPose);
+				const float yawDelta = fabsf(ShortestAngleDeltaDeg(currYaw, prevYaw));
+				const float prevY = openvrPrevHmdPoseForRecenter.m[1][3];
+				const float currY = hmdPose.m[1][3];
+				const float heightDelta = fabsf(currY - prevY);
+				if ((vr_overlayscreen == 1 || vr_overlayscreen == 2) && (yawDelta > 25.0f || heightDelta > 0.20f))
+				{
+					// Respect runtime recenter / tracking-origin reset for stationary modes.
+					openvrOverlayAnchorValid = false;
+				}
+			}
+			openvrPrevHmdPoseForRecenter = hmdPose;
+			openvrHadPrevHmdPoseForRecenter = true;
+			openvrLatestHmdPose = hmdPose;
+			openvrHasLatestHmdPose = true;
 			HmdVector3d_t eulerAngles = eulerAnglesFromMatrix(hmdPose);
 
 			// TODO we should prepare the hmd pos and orientation here
@@ -2694,7 +3377,220 @@ namespace s3d
 			else
 				forceDisableOverlay = false;
 #endif
-		}  // hmdPose0.bPoseIsValid
+			if (VR_UseScreenLayer() || ConsoleState != c_up)
+			{
+				forceDisableOverlay = false;
+			}
+				const bool overlayVisibleNow = (VR_UseScreenLayer() || gamestate == GS_TITLELEVEL || menuactive != MENU_Off || ConsoleState != c_up);
+				if ((vr_overlayscreen == 1 || vr_overlayscreen == 2) && overlayVisibleNow && !openvrOverlayWasVisible)
+				{
+					// Re-anchor stationary overlay whenever virtual screen is (re)entered.
+					openvrOverlayAnchorValid = false;
+				}
+				openvrOverlayWasVisible = overlayVisibleNow;
+				if (overlayVisibleNow)
+				{
+					UpdateOverlaySettings();
+				}
+
+				// Prevent click bleed-through across menu transitions (e.g. quit confirm -> main menu).
+				if (CurrentMenu != openvrLastMenuContext)
+				{
+					if (openvrMenuPointerLastTriggerDown)
+					{
+						PostGuiMouseEvent(EV_GUI_LButtonUp, (int)openvrMenuPointerLastX, (int)openvrMenuPointerLastY);
+						openvrMenuPointerLastTriggerDown = false;
+					}
+					openvrMenuSuppressTriggerUntilRelease = true;
+					openvrLastMenuContext = CurrentMenu;
+				}
+
+				// OpenVR virtual menu mouse (right controller): keep behavior aligned
+				// with OpenXR (master enable + optional hold-grip activation).
+				openvrMenuPointerActive = false;
+				openvrMenuPointerBeamVisible = false;
+				openvrMenuSuppressSelectAsKey = false;
+				menu_allow_mouse_override = false;
+				const bool keybindCaptureMode = menuactive == MENU_WaitKey;
+				// Enable virtual mouse only while explicit GUI is open.
+				// This avoids pointer/beam during boot logo or idle title screen.
+				const bool guiMouseContext = (menuactive != MENU_Off) || (ConsoleState != c_up);
+				const bool menuMode = guiMouseContext && (vr_overlayscreen || vr_overlayscreen_always);
+				const bool rightControllerValid = controllers[1].active && controllers[1].pose.bPoseIsValid;
+				const bool rightGripDown = (rightTrackedRemoteState_new.ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Grip)) != 0;
+				const bool vrMouseEnabled = !keybindCaptureMode && (*vr_menu_pointer) && ((*vr_mouse_in_menu) || rightGripDown);
+				openvrMenuSuppressSelectAsKey = !keybindCaptureMode && menuMode && *vr_menu_pointer && (vrMouseEnabled || openvrMenuSuppressTriggerUntilRelease || openvrMenuPointerLastTriggerDown);
+				if (menuMode && rightControllerValid && vrMouseEnabled)
+				{
+					const HmdMatrix34_t& overlayAbs = openvrOverlayAbsTransform;
+
+					const HmdVector3_t rayOrigin = {
+						controllers[1].pose.mDeviceToAbsoluteTracking.m[0][3],
+						controllers[1].pose.mDeviceToAbsoluteTracking.m[1][3],
+						controllers[1].pose.mDeviceToAbsoluteTracking.m[2][3]
+					};
+						const HmdVector3_t planeOrigin = { overlayAbs.m[0][3], overlayAbs.m[1][3], overlayAbs.m[2][3] };
+						const HmdVector3_t planeNormal = Normalize3({ overlayAbs.m[0][2], overlayAbs.m[1][2], overlayAbs.m[2][2] });
+						const HmdVector3_t planeRight = Normalize3({ overlayAbs.m[0][0], overlayAbs.m[1][0], overlayAbs.m[2][0] });
+						const HmdVector3_t planeUp = Normalize3({ overlayAbs.m[0][1], overlayAbs.m[1][1], overlayAbs.m[2][1] });
+						const HmdVector3_t controllerRight = Normalize3({
+							controllers[1].pose.mDeviceToAbsoluteTracking.m[0][0],
+							controllers[1].pose.mDeviceToAbsoluteTracking.m[1][0],
+							controllers[1].pose.mDeviceToAbsoluteTracking.m[2][0]
+						});
+						const float baseOverlayWidthMeters = std::max(0.1f, (1.0f + vr_overlayscreen_size) * 0.8f);
+						const HmdVector3_t overlayRightAxisRaw = { overlayAbs.m[0][0], overlayAbs.m[1][0], overlayAbs.m[2][0] };
+						const float overlayRightScale = std::sqrt(std::max(0.0f, Dot3(overlayRightAxisRaw, overlayRightAxisRaw)));
+						const float screenWidthMeters = baseOverlayWidthMeters * std::max(1.0f, overlayRightScale);
+						const int renderW = std::max(1, screen->GetWidth());
+						const int renderH = std::max(1, screen->GetHeight());
+						const float screenHeightMeters = screenWidthMeters * ((float)renderH / (float)renderW * 1.15); // extra x1.5 fixes mouse vertical position
+						const float halfW = screenWidthMeters * 0.56f; // x0.5 actually drifts mouse position horizontally
+						const float halfH = screenHeightMeters * 0.5f;
+
+					struct RayHit
+					{
+						bool valid = false;
+						float t = 0.0f;
+						float localX = 0.0f;
+						float localY = 0.0f;
+						float unclampedU = 0.0f;
+						float unclampedV = 0.0f;
+						float overflow = 0.0f;
+						HmdVector3_t origin = { 0.0f, 0.0f, 0.0f };
+						HmdVector3_t hit = { 0.0f, 0.0f, 0.0f };
+						HmdVector3_t rayDir = { 0.0f, 0.0f, 0.0f };
+					};
+
+					auto testAxis = [&](const HmdVector3_t& rayDirIn) -> RayHit
+					{
+						RayHit out;
+						HmdVector3_t rayDir = Normalize3(rayDirIn);
+						const float biasDeg = (float)vr_openvr_menu_pointer_pitch_bias;
+						if (fabsf(biasDeg) > 0.001f)
+						{
+							rayDir = Normalize3(RotateAroundAxis(rayDir, controllerRight, biasDeg * (float)(M_PI / 180.0)));
+						}
+						const float tipOffset = std::max(0.0f, (float)vr_openvr_menu_pointer_tip_offset);
+						const HmdVector3_t rayStart = Add3(rayOrigin, Scale3(rayDir, tipOffset));
+						const float denom = Dot3(rayDir, planeNormal);
+						if (fabsf(denom) <= 1e-4f) return out;
+						const float t = Dot3(Sub3(planeOrigin, rayStart), planeNormal) / denom;
+						if (t <= 0.05f) return out;
+						const HmdVector3_t hit = Add3(rayStart, Scale3(rayDir, t));
+						const HmdVector3_t local = Sub3(hit, planeOrigin);
+						const float lx = Dot3(local, planeRight);
+						const float ly = Dot3(local, planeUp);
+						const float u = (lx + halfW) / std::max(screenWidthMeters, 0.0001f);
+						const float v = (halfH - ly) / std::max(screenHeightMeters, 0.0001f);
+						const float overflow =
+							(u < 0.0f ? -u : 0.0f) +
+							(u > 1.0f ? u - 1.0f : 0.0f) +
+							(v < 0.0f ? -v : 0.0f) +
+							(v > 1.0f ? v - 1.0f : 0.0f);
+						out.valid = true;
+						out.t = t;
+						out.localX = lx;
+						out.localY = ly;
+						out.unclampedU = u;
+						out.unclampedV = v;
+						out.overflow = overflow;
+						out.origin = rayStart;
+						out.hit = hit;
+						out.rayDir = rayDir;
+						return out;
+					};
+
+					const HmdVector3_t rayAxis = {
+						-controllers[1].pose.mDeviceToAbsoluteTracking.m[0][2],
+						-controllers[1].pose.mDeviceToAbsoluteTracking.m[1][2],
+						-controllers[1].pose.mDeviceToAbsoluteTracking.m[2][2]
+					};
+					const RayHit bestHit = testAxis(rayAxis);
+					if (bestHit.valid)
+					{
+						const bool inside = bestHit.overflow <= 0.0001f;
+						// OpenVR overlay horizontal orientation: use raw U so drag direction
+						// matches controller motion (mirrored U inverts slider dragging).
+						float u = bestHit.unclampedU;
+						// OpenVR overlay space already aligns with screen Y orientation here;
+						// inverting V again makes pitch feel reversed.
+						float v = bestHit.unclampedV;
+						u = clamp(u, 0.0f, 1.0f);
+						v = clamp(v, 0.0f, 1.0f);
+						const int mouseX = clamp((int)std::lround(u * (renderW - 1)), 0, renderW - 1);
+						const int mouseY = clamp((int)std::lround(v * (renderH - 1)), 0, renderH - 1);
+						openvrMenuPointerBeamVisible = true;
+						openvrMenuPointerBeamStart = bestHit.origin;
+						openvrMenuPointerBeamEnd = bestHit.hit;
+						openvrMenuPointerHit = bestHit.hit;
+						const bool dragHoldActive = openvrMenuPointerLastTriggerDown;
+						const bool allowClampedInteraction = inside || dragHoldActive;
+						if (allowClampedInteraction)
+						{
+							menu_allow_mouse_override = true;
+							openvrMenuPointerActive = true;
+							if (mouseX != (int)openvrMenuPointerLastX || mouseY != (int)openvrMenuPointerLastY)
+							{
+								PostGuiMouseEvent(EV_GUI_MouseMove, mouseX, mouseY);
+								openvrMenuPointerLastX = (float)mouseX;
+								openvrMenuPointerLastY = (float)mouseY;
+							}
+
+							const bool triggerDown = axisTrigger >= 0
+								? rightTrackedRemoteState_new.rAxis[axisTrigger].x > 0.75f
+								: ((rightTrackedRemoteState_new.ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_SteamVR_Trigger)) != 0);
+							if (openvrMenuSuppressTriggerUntilRelease)
+							{
+								if (!triggerDown)
+								{
+									openvrMenuSuppressTriggerUntilRelease = false;
+								}
+							}
+							else if (triggerDown != openvrMenuPointerLastTriggerDown)
+							{
+								PostGuiMouseEvent(triggerDown ? EV_GUI_LButtonDown : EV_GUI_LButtonUp, mouseX, mouseY);
+								openvrMenuPointerLastTriggerDown = triggerDown;
+							}
+
+							if (axisJoystick >= 0)
+							{
+								const float y = rightTrackedRemoteState_new.rAxis[axisJoystick].y;
+								constexpr float wheelTrigger = 0.85f;
+								constexpr float wheelReset = 0.35f;
+								const double now = I_msTimeF();
+								if (fabsf(y) < wheelReset)
+									openvrMenuWheelNeutral = true;
+								if (openvrMenuWheelNeutral && now >= openvrMenuWheelCooldownUntil)
+								{
+									if (y > wheelTrigger)
+									{
+										PostGuiWheelEvent(EV_GUI_WheelUp, mouseX, mouseY);
+										openvrMenuWheelNeutral = false;
+										openvrMenuWheelCooldownUntil = now + 160.0;
+									}
+									else if (y < -wheelTrigger)
+									{
+										PostGuiWheelEvent(EV_GUI_WheelDown, mouseX, mouseY);
+										openvrMenuWheelNeutral = false;
+										openvrMenuWheelCooldownUntil = now + 160.0;
+									}
+								}
+							}
+						}
+					}
+				}
+
+				if (!openvrMenuPointerActive && openvrMenuPointerLastTriggerDown)
+				{
+					PostGuiMouseEvent(EV_GUI_LButtonUp, (int)openvrMenuPointerLastX, (int)openvrMenuPointerLastY);
+					openvrMenuPointerLastTriggerDown = false;
+				}
+				if (!openvrMenuPointerActive)
+				{
+					openvrMenuWheelNeutral = true;
+				}
+			}  // hmdPose0.bPoseIsValid
 
 		I_StartupOpenVR();
 
@@ -2728,14 +3624,60 @@ namespace s3d
 	/* virtual */
 	OpenVRMode::~OpenVRMode()
 	{
+		if (vrOverlay != nullptr)
+		{
+			if (overlayBeamHandle != 0)
+			{
+				vrOverlay->HideOverlay(overlayBeamHandle);
+				vrOverlay->DestroyOverlay(overlayBeamHandle);
+				overlayBeamHandle = 0;
+			}
+			if (overlayHandle != 0)
+			{
+				vrOverlay->HideOverlay(overlayHandle);
+				vrOverlay->DestroyOverlay(overlayHandle);
+				overlayHandle = 0;
+			}
+			if (overlayCursorHandle != 0)
+			{
+				vrOverlay->HideOverlay(overlayCursorHandle);
+				vrOverlay->DestroyOverlay(overlayCursorHandle);
+				overlayCursorHandle = 0;
+			}
+		}
+		if (beamTexture != nullptr)
+		{
+			if (beamTexture->handle != nullptr)
+			{
+				GLuint beamTextureID = (GLuint)(std::ptrdiff_t)beamTexture->handle;
+				glDeleteTextures(1, &beamTextureID);
+			}
+			delete beamTexture;
+			beamTexture = nullptr;
+		}
+		if (cursorTexture != nullptr)
+		{
+			if (cursorTexture->handle != nullptr)
+			{
+				GLuint cursorTextureID = (GLuint)(std::ptrdiff_t)cursorTexture->handle;
+				glDeleteTextures(1, &cursorTextureID);
+			}
+			delete cursorTexture;
+			cursorTexture = nullptr;
+		}
 		if (vrSystem != nullptr) {
 			vr::VR_Shutdown();
 			vrSystem = nullptr;
 			vrCompositor = nullptr;
 			vrOverlay = nullptr;
 			vrRenderModels = nullptr;
+			vrSettings = nullptr;
 			leftEyeView->dispose();
 			rightEyeView->dispose();
+		}
+		if (haptics != nullptr) {
+			delete haptics;
+			haptics = nullptr;
 		}
 		if (crossHairDrawer != nullptr) {
 			delete crossHairDrawer;

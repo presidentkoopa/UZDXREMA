@@ -63,13 +63,33 @@ void Draw2D(F2DDrawer* drawer, FRenderState& state, int x, int y, int width, int
 {
 	twoD.Clock();
 
-	auto vrmode = VRMode::GetVRMode(true);
+	auto vrmode = VRMode::GetVRModeCached(true);
 	// In vr mode viewport setting and color swaping is already done in FGLRenderer::Flush()
 	// However, for the texture-mounted HUD, we MUST set the viewport and 2D matrix for the eye-specific resolution of the hud surface.
-	if (!vrmode->IsVR() || (GetVRHudSurface().IsValid() && drawer == &GetVRHudSurface().GetCanvas()->Drawer))
+	auto* vrHudCanvas = GetVRHudSurface().GetCanvas();
+	const bool isVRHudCanvas = vrmode->IsVR() &&
+		GetVRHudSurface().IsValid() &&
+		(vrHudCanvas != nullptr) &&
+		(drawer == &vrHudCanvas->Drawer);
+	const bool isVirtualScreenPass = vrmode->IsVR() && vrmode->IsRenderingVirtualScreen();
+	if (isVRHudCanvas)
 	{
+		// Mounted HUD/automap canvas must always define its own viewport + 2D
+		// projection, otherwise it inherits the active eye viewport and only a
+		// sub-rect gets rendered into the texture.
 		state.SetViewport(x, y, width, height);
 		screen->mViewpoints->Set2D(state, drawer->GetWidth(), drawer->GetHeight());
+	}
+	else
+	{
+		state.SetViewport(x, y, width, height);
+		// Match the OpenGL VR path: regular HUD/menu rendering keeps the
+		// eye-aware projection prepared by AdjustHud(), while mounted HUD
+		// canvases still get their own explicit 2D setup.
+		if (!vrmode->IsVR() || isVirtualScreenPass)
+		{
+			screen->mViewpoints->Set2D(state, drawer->GetWidth(), drawer->GetHeight());
+		}
 	}
 
 	state.EnableStencil(false);

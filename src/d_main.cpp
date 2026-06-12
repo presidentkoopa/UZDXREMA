@@ -372,6 +372,7 @@ static int pagetic;
 //==========================================================================
 
 CVAR(Int, saved_screenblocks, 10, CVAR_ARCHIVE)
+CVAR(Bool, vr_hud_debug_border, false, CVAR_ARCHIVE)
 CVAR(Bool, saved_drawplayersprite, true, CVAR_ARCHIVE)
 CVAR(Bool, saved_showmessages, true, CVAR_ARCHIVE)
 CVAR(Bool, hud_toggled, false, CVAR_ARCHIVE)
@@ -928,7 +929,11 @@ static void DrawVersionString ()
 static void DrawOverlays()
 {
 	NetUpdate ();
-	C_DrawConsole ();
+	const bool drawConsoleOnPortableHud = (gamestate == GS_LEVEL && ConsoleState == c_up && VR_UsePortableHud());
+	if (!drawConsoleOnPortableHud)
+	{
+		C_DrawConsole ();
+	}
 	M_Drawer ();
 	DrawRateStuff();
 	DrawVersionString();
@@ -936,15 +941,66 @@ static void DrawOverlays()
 		FStat::PrintStat (twod);
 }
 
-static void DrawHudToSurface(const FRenderViewpoint& vp)
+static void DrawVRHudDebugBorder(int width, int height)
 {
-	if ((!vr_hud_mount && !vr_automap_mount) || hud_toggled || StatusBar == nullptr)
+	if (!vr_hud_debug_border || twod == nullptr || width <= 0 || height <= 0)
 	{
 		return;
 	}
 
+	const int thickness = width >= 1920 ? 3 : (width >= 960 ? 2 : 1);
+	const uint32_t color = 0xFF00FF00;
+
+	twod->AddColorOnlyQuad(0, 0, width, thickness, color);
+	twod->AddColorOnlyQuad(0, height - thickness, width, thickness, color);
+	twod->AddColorOnlyQuad(0, 0, thickness, height, color);
+	twod->AddColorOnlyQuad(width - thickness, 0, thickness, height, color);
+}
+
+static void DrawHudToSurface(const FRenderViewpoint& vp)
+{
+	// Transition/intermission -> map handoff can leave status bar texture refs
+	// briefly unstable. Keep portable HUD draw disabled for a short cooldown
+	// window after any unstable state is detected.
+	static int portableHudCooldownTics = 0;
+	static bool lastPortableSurfaceAutomap = false;
+	static bool lastPortableSurfaceModeValid = false;
+
+	// Never route portable HUD drawing through the status bar while the virtual
+	// screen layer owns composition.
+	if (VR_UseScreenLayer())
+	{
+		portableHudCooldownTics = 0;
+		return;
+	}
+
+	const bool unstableAction = (gameaction != ga_nothing && gameaction != ga_fullconsole);
+	const bool unstableState = unstableAction || setsizeneeded || gamestate == GS_INTERMISSION;
+	if (unstableState)
+	{
+		portableHudCooldownTics = 35;
+		return;
+	}
+
+	if (primaryLevel != nullptr && primaryLevel->maptime < 8)
+	{
+		portableHudCooldownTics = 35;
+		return;
+	}
+
+	if (portableHudCooldownTics > 0)
+	{
+		--portableHudCooldownTics;
+		return;
+	}
+
+	const bool portableHud = VR_UsePortableHud();
+	if ((!portableHud && !vr_hud_mount && !vr_automap_mount) || hud_toggled || StatusBar == nullptr)
+	{
+		return;
+	}
 	// If the automap is not mounted, keep the regular automap/HUD screen path untouched.
-	if (automapactive && !vr_automap_mount)
+	if (automapactive && !portableHud && !vr_automap_mount)
 	{
 		return;
 	}
@@ -957,20 +1013,58 @@ static void DrawHudToSurface(const FRenderViewpoint& vp)
 
 	auto& surface = GetVRHudSurface();
 	auto& mutableSurface = const_cast<VRHudSurface&>(surface);
-	auto* hudTexture = surface.GetTexture();
-	auto* hudCanvas = surface.GetCanvas();
-	if (!surface.IsValid() || hudCanvas == nullptr || hudTexture == nullptr)
+	if (!surface.IsValid())
 	{
 		return;
 	}
-	const int hudWidth = surface.GetWidth();
-	const int hudHeight = surface.GetHeight();
+	int hudWidth = surface.GetWidth();
+	int hudHeight = surface.GetHeight();
 	if (hudWidth <= 0 || hudHeight <= 0)
 	{
 		return;
 	}
+	if (!surface.IsCanvasLive())
+	{
+		mutableSurface.EnsureSize(hudWidth, hudHeight);
+		hudWidth = surface.GetWidth();
+		hudHeight = surface.GetHeight();
+	}
+	auto* hudTexture = surface.GetTexture();
+	auto* hudCanvas = surface.GetCanvas();
+	if (!surface.IsCanvasLive() || hudCanvas == nullptr || hudTexture == nullptr)
+	{
+		lastPortableSurfaceModeValid = false;
+		return;
+	}
+	const bool renderAutomapToPortableSurface = automapactive && (portableHud || vr_automap_mount);
+	if (lastPortableSurfaceModeValid && renderAutomapToPortableSurface != lastPortableSurfaceAutomap)
+	{
+		// Automap<->HUD handoff can briefly present the previous texture for one
+		// frame. Force a clear-only update first and suppress mounted HUD once
+		// so the stale texture is never presented.
+		VR_SuppressMountedHudForFrames(1);
+		mutableSurface.BeginUpdate();
+		auto* savedtwod = twod;
+		twod = &hudCanvas->Drawer;
+		twod->Begin(hudWidth, hudHeight);
+		twod->End();
+		twod = savedtwod;
+		mutableSurface.EndUpdate();
+		lastPortableSurfaceAutomap = renderAutomapToPortableSurface;
+		lastPortableSurfaceModeValid = true;
+		return;
+	}
+	lastPortableSurfaceAutomap = renderAutomapToPortableSurface;
+	lastPortableSurfaceModeValid = true;
 
 	mutableSurface.BeginUpdate();
+	struct PortableHudCanvasGuard
+	{
+		bool& flag;
+		explicit PortableHudCanvasGuard(bool& inFlag) : flag(inFlag) { flag = true; }
+		~PortableHudCanvasGuard() { flag = false; }
+	};
+	PortableHudCanvasGuard portableHudGuard(gPortableHudCanvasRender);
 	auto* savedtwod = twod;
 	twod = &hudCanvas->Drawer;
 	twod->Begin(hudWidth, hudHeight);
@@ -1010,7 +1104,7 @@ static void DrawHudToSurface(const FRenderViewpoint& vp)
 	// Force the status bar to update its internal scaling for the current twod
 	StatusBar->CallScreenSizeChanged();
 
-	if (automapactive && vr_automap_mount)
+	if (renderAutomapToPortableSurface)
 	{
 		// Draw the full automap stack to the surface.
 		twod->ClearClipRect();
@@ -1029,7 +1123,10 @@ static void DrawHudToSurface(const FRenderViewpoint& vp)
 	}
 	else if (saved_vh == saved_sh && (viewactive || automapactive) && saved_sb > 10)
 	{
-		EHudState state = (DrawFSHUD || automapactive) ? HUD_Fullscreen : HUD_None;
+		const bool renderMountedHudSurface = portableHud || vr_hud_mount;
+		EHudState state = renderMountedHudSurface
+			? ((DrawFSHUD || automapactive) ? HUD_Fullscreen : HUD_StatusBar)
+			: ((DrawFSHUD || automapactive) ? HUD_Fullscreen : HUD_None);
 		if (state == HUD_None) StatusBar->RefreshBackground();
 		StatusBar->DrawBottomStuff(state);
 		StatusBar->CallDraw(state, vp.TicFrac);
@@ -1037,15 +1134,26 @@ static void DrawHudToSurface(const FRenderViewpoint& vp)
 	}
 	else
 	{
-		StatusBar->RefreshBackground();
-		if (!automapactive || viewactive)
+		if (portableHud)
 		{
-			StatusBar->RefreshViewBorder();
+			StatusBar->DrawBottomStuff(HUD_StatusBar);
+			StatusBar->CallDraw(HUD_StatusBar, vp.TicFrac);
+			StatusBar->DrawTopStuff(HUD_StatusBar);
 		}
-		StatusBar->DrawBottomStuff(HUD_StatusBar);
-		StatusBar->CallDraw(HUD_StatusBar, vp.TicFrac);
-		StatusBar->DrawTopStuff(HUD_StatusBar);
+		else
+		{
+			StatusBar->RefreshBackground();
+			if (!automapactive || viewactive)
+			{
+				StatusBar->RefreshViewBorder();
+			}
+			StatusBar->DrawBottomStuff(HUD_StatusBar);
+			StatusBar->CallDraw(HUD_StatusBar, vp.TicFrac);
+			StatusBar->DrawTopStuff(HUD_StatusBar);
+		}
 	}
+	C_DrawConsole();
+	DrawVRHudDebugBorder(hudWidth, hudHeight);
 
 	viewwidth = saved_vw;
 	viewheight = saved_vh;
@@ -1090,8 +1198,10 @@ void D_Display ()
 
 	if (nodrawers || screen == NULL)
 		return; 				// for comparative timing / profiling
-	
-	if (!AppActive && (screen->IsFullscreen() || !vid_activeinbackground))
+
+	auto vrmode = VRMode::GetVRModeCached(true);
+	if (!AppActive && (screen->IsFullscreen() || !vid_activeinbackground) &&
+		(vrmode == nullptr || !vrmode->IsVR()))
 	{
 		return;
 	}
@@ -1108,7 +1218,6 @@ void D_Display ()
 	{
 		players[consoleplayer].camera = players[consoleplayer].mo;
 	}
-	auto vrmode = VRMode::GetVRMode(true);
     auto &vp = r_viewpoint;
 	if (viewactive)
 	{
@@ -1218,9 +1327,10 @@ void D_Display ()
 			}
 
 			// Keep HUD and automap toggles independent.
-			const bool drawMountedHud = vr_hud_mount && !menuactive && ConsoleState == c_up && !automapactive;
-			const bool drawMountedMap = vr_automap_mount && automapactive && !menuactive && ConsoleState == c_up;
-			const bool drawFaceMap = automapactive && !drawMountedMap;
+			const bool portableHud = VR_UsePortableHud();
+			const bool drawMountedHud = !menuactive && ConsoleState == c_up && !automapactive && (portableHud || vr_hud_mount);
+			const bool drawMountedMap = !menuactive && ConsoleState == c_up && automapactive && (portableHud || vr_automap_mount);
+			const bool drawFaceMap = automapactive && !drawMountedMap && !portableHud;
 			const bool drawFaceHud = (!drawMountedHud && !drawMountedMap) || drawFaceMap;
 
 			if (drawMountedMap)
@@ -1232,7 +1342,7 @@ void D_Display ()
 				primaryLevel->automap->Drawer(viewheight);
 			}
 			
-			if (drawFaceHud && (automapactive || viewactive))
+			if (drawFaceHud && (!automapactive || viewactive))
 			{
 				StatusBar->RefreshViewBorder ();
 			}
@@ -1261,6 +1371,10 @@ void D_Display ()
 				StatusBar->DrawBottomStuff (HUD_StatusBar);
 				StatusBar->CallDraw (HUD_StatusBar, vp.TicFrac);
 				StatusBar->DrawTopStuff (HUD_StatusBar);
+			}
+			if (drawFaceHud && vrmode->IsVR())
+			{
+				DrawVRHudDebugBorder(screen->GetWidth(), screen->GetHeight());
 			}
 		}
 	}
@@ -1292,7 +1406,7 @@ void D_Display ()
 	}
 	if (!hud_toggled)
 	{
-		if (!vr_hud_mount || automapactive || menuactive || ConsoleState != c_up)
+		if ((!VR_UsePortableHud() && !vr_hud_mount) || automapactive || menuactive || ConsoleState != c_up)
 		{
 			CT_Drawer ();
 		}
@@ -3046,7 +3160,9 @@ IntRect System_GetSceneRect()
 	IntRect mSceneViewport;
 	// Special handling so the view with a visible status bar displays properly
 	int height, width;
-	if (screenblocks >= 10)
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	const bool forceFullSceneRect = vrmode != nullptr && vrmode->IsVR() && !vrmode->IsRenderingVirtualScreen();
+	if (forceFullSceneRect || screenblocks >= 10)
 	{
 		height = screen->GetHeight();
 		width = screen->GetWidth();
@@ -3080,6 +3196,35 @@ FString System_GetPlayerName(int node)
 
 void System_ConsoleToggled(int state)
 {
+	static bool consoleTextEnterMenuOpen = false;
+	static bool consoleAutoPaused = false;
+
+	if ((state == c_falling || state == c_down) && menuactive == MENU_Off)
+	{
+		if (CurrentMenu == nullptr)
+		{
+			M_SetMenu(FName("ConsoleTextEnterMenu"), -1);
+			consoleTextEnterMenuOpen = (CurrentMenu != nullptr);
+		}
+		if (consoleTextEnterMenuOpen && !consoleAutoPaused && gamestate == GS_LEVEL && !netgame && paused == 0 && !pauseext)
+		{
+			consoleAutoPaused = true;
+			paused = 1;
+			S_PauseSound(false, false);
+		}
+	}
+	else if (consoleTextEnterMenuOpen && (state == c_rising || state == c_up))
+	{
+		M_ClearMenus();
+		if (consoleAutoPaused)
+		{
+			consoleAutoPaused = false;
+			paused = 0;
+			S_ResumeSound(false);
+		}
+		consoleTextEnterMenuOpen = false;
+	}
+
 	if (state == c_falling && hud_toggled)
 		D_ToggleHud();
 }
@@ -3536,7 +3681,8 @@ static int D_InitGame(const FIWADInfo* iwad_info, std::vector<std::string>& allw
 
 	// Base systems have been inited; enable cvar callbacks
 	FBaseCVar::EnableCallbacks ();
-	
+	VR_InitPortableHudBinding();
+
 	// +compatmode cannot be used on the command line, so use this as a substitute
 	auto compatmodeval = Args->CheckValue("-compatmode");
 	if (compatmodeval)

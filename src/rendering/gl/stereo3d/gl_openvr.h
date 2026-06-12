@@ -38,6 +38,7 @@ namespace openvr {
 	struct VR_IVRCompositor_FnTable;
 	struct VR_IVROverlay_FnTable;
 	struct VR_IVRRenderModels_FnTable;
+	struct VR_IVRSettings_FnTable;
 }
 
 /* stereoscopic 3D API */
@@ -51,6 +52,8 @@ public:
 	OpenVREyePose(int eye, float shiftFactor, float scaleFactor);
 	virtual ~OpenVREyePose() override;
 	virtual VSMatrix GetProjection(FLOATTYPE fov, FLOATTYPE aspectRatio, FLOATTYPE fovRatio, bool iso_ortho) const override;
+	virtual DAngle GetRenderFov(DAngle fallback) const override;
+	virtual VSMatrix GetHUDProjection() const override;
 	DVector3 GetViewShift(FRenderViewpoint& vp) const override;
 	virtual void AdjustHud() const override;
 	virtual void AdjustBlend(HWDrawInfo* di) const override;
@@ -67,9 +70,9 @@ protected:
 	openvr::Texture_t* eyeTexture;
 	mutable uint32_t framebuffer;
 	int eye;
+	float renderFovDegrees = 90.0f;
 
 	mutable const openvr::TrackedDevicePose_t * currentPose;
-	VSMatrix getHUDProjection() const;
 };
 
 class OpenVRHaptics
@@ -103,7 +106,9 @@ public:
 	virtual void SetUp() const override; // called immediately before rendering a scene frame
 	virtual void TearDown() const override; // called immediately after rendering a scene frame
 	virtual bool IsVR() const override { return true; }
+	virtual VSMatrix GetHUDProjection() const override;
 	virtual void Present() const override;
+	virtual void ApplyRefreshRate() const override;
 	virtual void AdjustViewport(DFrameBuffer* screen) const override;
 	virtual void AdjustPlayerSprites(FRenderState &state, int hand = 0) const override;
 	virtual void UnAdjustPlayerSprites(FRenderState &state) const override;
@@ -122,7 +127,8 @@ public:
 
 	virtual void Vibrate(float duration, int channel, float intensity) const
 	{ 
-		haptics->Vibrate(duration, channel, intensity);
+		if (haptics != nullptr)
+			haptics->Vibrate(duration, channel, intensity);
 	}
 
 protected:
@@ -138,12 +144,19 @@ protected:
 	openvr::VR_IVRCompositor_FnTable * vrCompositor;
 	openvr::VR_IVROverlay_FnTable * vrOverlay;
 	openvr::VR_IVRRenderModels_FnTable * vrRenderModels;
+	openvr::VR_IVRSettings_FnTable * vrSettings;
 	uint32_t vrToken;
 
 	mutable int cachedScreenBlocks;
 	mutable double hmdYaw; // cached latest value in radians
 	mutable int cachedViewwidth, cachedViewheight, cachedViewwindowx, cachedViewwindowy;
 	mutable F2DDrawer * crossHairDrawer;
+	mutable int lastRefreshRateMenuValue = -1;
+	mutable float lastAppliedPreferredRefreshRate = 0.0f;
+	mutable float lastObservedHmdRefreshRate = 0.0f;
+	mutable bool refreshRateHasLastRequest = false;
+	mutable bool refreshRateLoggedUnavailable = false;
+	mutable bool refreshRateLoggedControlPath = false;
 
 private:
 	typedef VRMode super;

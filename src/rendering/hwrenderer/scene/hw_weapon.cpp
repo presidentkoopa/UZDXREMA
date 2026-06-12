@@ -41,6 +41,7 @@
 #include "hw_material.h"
 #include "hw_lighting.h"
 #include "hw_cvars.h"
+#include "hw_vrwheel.h"
 #include "hw_vrmodes.h"
 #include "hwrenderer/scene/hw_drawinfo.h"
 #include "hwrenderer/scene/hw_drawstructs.h"
@@ -67,6 +68,8 @@ enum PlayerSprites3DMode
 	ITEM_ONLY,
 	FAT_ITEM,
 };
+
+static bool WeaponSpriteMatches(AActor* equippedWeapon, AActor* spriteCaller);
 
 
 //==========================================================================
@@ -110,7 +113,7 @@ void HWDrawInfo::DrawPSprite(HUDSprite *huds, FRenderState &state)
 	}
 	else
 	{
-		auto vrmode = VRMode::GetVRMode(true);
+		auto vrmode = VRMode::GetVRModeCached(true);
 		float thresh = (huds->texture->GetTranslucency() || huds->OverrideShader != -1) && !vrmode->IsVR() ? 0.f : gl_mask_sprite_threshold;
 		state.AlphaFunc(Alpha_GEqual, thresh);
 		FTranslationID trans = huds->weapon->GetTranslation();
@@ -317,14 +320,34 @@ void HWDrawInfo::DrawVRHudBorder(FRenderState& state, float width, float height,
 
 void HWDrawInfo::DrawPlayerSprites(bool hudModelStep, FRenderState &state)
 {
-	auto vrmode = VRMode::GetVRMode(true);
+	auto vrmode = VRMode::GetVRModeCached(true);
 	
 	auto oldlightmode = lightmode;
 	for (auto &hudsprite : hudsprites)
 	{
 		if (!vrmode->IsVR() && (!!hudsprite.mframe) != hudModelStep) continue;
 		if (!hudsprite.mframe && isSoftwareLighting(oldlightmode)) SetFallbackLightMode();	// Software lighting cannot handle 2D content.
-		if (!hudsprite.mframe) vrmode->AdjustPlayerSprites(state, hudsprite.weapon->GetCaller() == hudsprite.owner->player->OffhandWeapon);
+		if (hudsprite.weapon != nullptr && hudsprite.owner != nullptr && hudsprite.owner->player != nullptr)
+		{
+			AActor* caller = hudsprite.weapon->GetCaller();
+			player_t* spritePlayer = hudsprite.owner->player;
+			if (WeaponSpriteMatches(spritePlayer->ReadyWeapon, caller) && VRWheel_ShouldSuppressWeaponHand(VR_MAINHAND))
+			{
+				continue;
+			}
+			if (WeaponSpriteMatches(spritePlayer->OffhandWeapon, caller) && VRWheel_ShouldSuppressWeaponHand(VR_OFFHAND))
+			{
+				continue;
+			}
+		}
+		if (!hudsprite.mframe)
+		{
+			const bool isOffhandSprite = hudsprite.weapon != nullptr &&
+				hudsprite.owner != nullptr &&
+				hudsprite.owner->player != nullptr &&
+				WeaponSpriteMatches(hudsprite.owner->player->OffhandWeapon, hudsprite.weapon->GetCaller());
+			vrmode->AdjustPlayerSprites(state, isOffhandSprite);
+		}
 		DrawPSprite(&hudsprite, state);
 		if (!hudsprite.mframe) vrmode->UnAdjustPlayerSprites(state);
 		lightmode = oldlightmode;
@@ -354,6 +377,29 @@ static bool isBright(DPSprite *psp)
 	return false;
 }
 
+static bool WeaponSpriteMatches(AActor* equippedWeapon, AActor* spriteCaller)
+{
+	if (equippedWeapon == nullptr || spriteCaller == nullptr)
+	{
+		return false;
+	}
+
+	if (equippedWeapon == spriteCaller || equippedWeapon->GetClass() == spriteCaller->GetClass())
+	{
+		return true;
+	}
+
+	auto equippedSister = equippedWeapon->PointerVar<AActor>(NAME_SisterWeapon);
+	auto callerSister = spriteCaller->PointerVar<AActor>(NAME_SisterWeapon);
+	if (equippedSister == spriteCaller || callerSister == equippedWeapon)
+	{
+		return true;
+	}
+
+	return (equippedSister != nullptr && equippedSister->GetClass() == spriteCaller->GetClass()) ||
+		(callerSister != nullptr && callerSister->GetClass() == equippedWeapon->GetClass());
+}
+
 //==========================================================================
 //
 // Weapon position
@@ -369,7 +415,7 @@ static WeaponPosition2D GetWeaponPosition2D(player_t *player, double ticFrac, DP
 	DPSprite *offhandWeaponPsp = player->FindPSprite(PSP_OFFHANDWEAPON);
 
 	// Interpolate the main weapon layer once so as to be able to add it to other layers.
-	w.weapon = psp->GetCaller() == player->ReadyWeapon ? readyWeaponPsp : offhandWeaponPsp;
+	w.weapon = WeaponSpriteMatches(player->ReadyWeapon, psp->GetCaller()) ? readyWeaponPsp : offhandWeaponPsp;
 	if (w.weapon != nullptr)
 	{
 		if (w.weapon->firstTic)
@@ -400,7 +446,7 @@ static WeaponPosition3D GetWeaponPosition3D(player_t *player, double ticFrac, DP
 	DPSprite *offhandWeaponPsp = player->FindPSprite(PSP_OFFHANDWEAPON);
 
 	// Interpolate the main weapon layer once so as to be able to add it to other layers.
-	w.weapon = psp->GetCaller() == player->ReadyWeapon ? readyWeaponPsp : offhandWeaponPsp;
+	w.weapon = WeaponSpriteMatches(player->ReadyWeapon, psp->GetCaller()) ? readyWeaponPsp : offhandWeaponPsp;
 	if (w.weapon != nullptr)
 	{
 		if (w.weapon->firstTic)

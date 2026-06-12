@@ -134,7 +134,21 @@ void VkRenderState::EnableClipDistance(int num, bool state)
 
 void VkRenderState::Clear(int targets)
 {
-	mClearTargets = targets;
+	if (targets & CT_Color)
+	{
+		// Snapshot the color clear value now. Vulkan performs attachment clears
+		// when the next render pass begins, so callers may legitimately restore
+		// screen->mSceneClearColor immediately after requesting a clear.
+		mQueuedClearColor[0] = screen->mSceneClearColor[0];
+		mQueuedClearColor[1] = screen->mSceneClearColor[1];
+		mQueuedClearColor[2] = screen->mSceneClearColor[2];
+		mQueuedClearColor[3] = screen->mSceneClearColor[3];
+	}
+
+	// Multiple clear requests can be queued before the next render pass begins
+	// (e.g. translucent HUD canvas requests CT_Color, then Draw2D requests
+	// CT_Stencil). Keep all requested bits so earlier clears are not lost.
+	mClearTargets |= targets;
 	EndRenderPass();
 }
 
@@ -373,7 +387,12 @@ void VkRenderState::ApplyPushConstants()
 
 	int tempTM = TM_NORMAL;
 	if (mMaterial.mMaterial && mMaterial.mMaterial->Source()->isHardwareCanvas())
-		tempTM = TM_OPAQUE;
+	{
+		// Match GL behavior: only force opaque for fully-opaque canvas textures.
+		// Translucent UI canvases (VR HUD surface) must preserve alpha.
+		auto* canvasTex = static_cast<FCanvasTexture*>(mMaterial.mMaterial->Source()->GetTexture());
+		tempTM = (canvasTex && canvasTex->bTranslucentCanvas) ? TM_NORMAL : TM_OPAQUE;
+	}
 
 	mPushConstants.uFogEnabled = fogset;
 	mPushConstants.uTextureMode = GetTextureModeAndFlags(tempTM);
@@ -518,7 +537,7 @@ void VkRenderState::EnableDrawBuffers(int count, bool apply)
 	}
 }
 
-void VkRenderState::SetRenderTarget(VkTextureImage *image, VulkanImageView *depthStencilView, int width, int height, VkFormat format, VkSampleCountFlagBits samples)
+void VkRenderState::SetRenderTarget(VkTextureImage *image, VulkanImageView *depthStencilView, int width, int height, VkFormat format, VkSampleCountFlagBits samples, int layers, uint32_t viewMask, int layerIndex)
 {
 	EndRenderPass();
 
@@ -528,6 +547,9 @@ void VkRenderState::SetRenderTarget(VkTextureImage *image, VulkanImageView *dept
 	mRenderTarget.Height = height;
 	mRenderTarget.Format = format;
 	mRenderTarget.Samples = samples;
+	mRenderTarget.Layers = layers;
+	mRenderTarget.ViewMask = viewMask;
+	mRenderTarget.LayerIndex = layerIndex;
 }
 
 void VkRenderState::BeginRenderPass(VulkanCommandBuffer *cmdbuffer)
@@ -537,21 +559,28 @@ void VkRenderState::BeginRenderPass(VulkanCommandBuffer *cmdbuffer)
 	key.Samples = mRenderTarget.Samples;
 	key.DrawBuffers = mRenderTarget.DrawBuffers;
 	key.DepthStencil = !!mRenderTarget.DepthStencil;
+	key.Layers = mRenderTarget.Layers;
+	key.ViewMask = mRenderTarget.ViewMask;
 
 	mPassSetup = fb->GetRenderPassManager()->GetRenderPass(key);
 
-	auto &framebuffer = mRenderTarget.Image->RSFramebuffers[key];
+	const bool useLayerView = mRenderTarget.Layers == 1 && mRenderTarget.ViewMask == 0;
+	VkTextureImage::VkRenderTargetFramebufferKey framebufferKey = {};
+	framebufferKey.PassKey = key;
+	framebufferKey.LayerIndex = useLayerView ? mRenderTarget.LayerIndex : -1;
+
+	auto &framebuffer = mRenderTarget.Image->RSFramebuffers[framebufferKey];
 	if (!framebuffer)
 	{
 		auto buffers = fb->GetBuffers();
 		FramebufferBuilder builder;
 		builder.RenderPass(mPassSetup->GetRenderPass(0));
-		builder.Size(mRenderTarget.Width, mRenderTarget.Height);
-		builder.AddAttachment(mRenderTarget.Image->View.get());
+		builder.Size(mRenderTarget.Width, mRenderTarget.Height, mRenderTarget.Layers);
+		builder.AddAttachment(useLayerView ? mRenderTarget.Image->GetLayerView(mRenderTarget.LayerIndex) : mRenderTarget.Image->GetFramebufferView());
 		if (key.DrawBuffers > 1)
-			builder.AddAttachment(buffers->SceneFog.View.get());
+			builder.AddAttachment(useLayerView ? buffers->SceneFog.GetLayerView(mRenderTarget.LayerIndex) : buffers->SceneFog.GetFramebufferView());
 		if (key.DrawBuffers > 2)
-			builder.AddAttachment(buffers->SceneNormal.View.get());
+			builder.AddAttachment(useLayerView ? buffers->SceneNormal.GetLayerView(mRenderTarget.LayerIndex) : buffers->SceneNormal.GetFramebufferView());
 		if (key.DepthStencil)
 			builder.AddAttachment(mRenderTarget.DepthStencil);
 		builder.DebugName("VkRenderPassSetup.Framebuffer");
@@ -566,7 +595,7 @@ void VkRenderState::BeginRenderPass(VulkanCommandBuffer *cmdbuffer)
 	beginInfo.RenderPass(mPassSetup->GetRenderPass(mClearTargets));
 	beginInfo.RenderArea(0, 0, mRenderTarget.Width, mRenderTarget.Height);
 	beginInfo.Framebuffer(framebuffer.get());
-	beginInfo.AddClearColor(screen->mSceneClearColor[0], screen->mSceneClearColor[1], screen->mSceneClearColor[2], screen->mSceneClearColor[3]);
+	beginInfo.AddClearColor(mQueuedClearColor[0], mQueuedClearColor[1], mQueuedClearColor[2], mQueuedClearColor[3]);
 	if (key.DrawBuffers > 1)
 		beginInfo.AddClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 	if (key.DrawBuffers > 2)

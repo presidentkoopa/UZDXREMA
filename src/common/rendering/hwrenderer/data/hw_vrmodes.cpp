@@ -66,15 +66,25 @@
 #include "d_player.h"
 #include "actorinlines.h"
 #include "LSMatrix.h"
+#include "hw_vrwheel.h"
 #include "gl/stereo3d/gl_openvr.h"
 #include "gl/stereo3d/gl_openxrdevice.h"
+#include "vulkan/stereo3d/vk_openxrdevice.h"
+#include <QzDoom/VrCommon.h>
+
 #include "textures.h"
 #include "gametexture.h"
 #include "common/2d/v_2ddrawer.h"
 #include <algorithm>
+#include <functional>
+#include <thread>
+#include "c_dispatch.h"
 #include "c_console.h"
+#include "common/scripting/jit/jit.h"
 
 using namespace OpenGLRenderer;
+
+extern thread_local bool isWorkerThread;
 
 EXTERN_CVAR(Bool, vr_hud_mount);
 EXTERN_CVAR(Int, vr_hud_mount_pos);
@@ -94,9 +104,14 @@ EXTERN_CVAR(Float, vr_automap_mount_zoffset);
 EXTERN_CVAR(Float, vr_automap_mount_pitch);
 EXTERN_CVAR(Float, vr_automap_mount_yaw);
 EXTERN_CVAR(Bool, vr_automap_mount_roll);
+EXTERN_CVAR(Bool, portablehud);
+EXTERN_CVAR(Int, vr_mode);
 
 extern float weaponangles[3];
 extern float offhandangles[3];
+
+static int gSuppressMountedHudFrames = 0;
+static uint64_t gSuppressMountedHudLastFrameTime = 0;
 
 VRHudSurface::VRHudSurface() = default;
 
@@ -109,6 +124,10 @@ void VRHudSurface::Clear()
 {
 	if (Canvas != nullptr)
 	{
+		if (Texture != nullptr && Texture->Canvas == Canvas)
+		{
+			Texture->Canvas = nullptr;
+		}
 		Canvas->Tex = nullptr;
 		auto idx = AllCanvases.Find(Canvas);
 		if (idx != -1)
@@ -121,13 +140,26 @@ void VRHudSurface::Clear()
 	Texture = nullptr;
 }
 
+bool VRHudSurface::IsCanvasLive() const
+{
+	if (Texture == nullptr || Canvas == nullptr)
+	{
+		return false;
+	}
+	if (Texture->Canvas != Canvas || Canvas->Tex != Texture)
+	{
+		return false;
+	}
+	return AllCanvases.Find(Canvas) != -1;
+}
+
 void VRHudSurface::EnsureSize(int width, int height)
 {
 	if (width <= 0 || height <= 0)
 	{
 		return;
 	}
-	if (Texture && Texture->GetWidth() == width && Texture->GetHeight() == height)
+	if (Texture && Texture->GetWidth() == width && Texture->GetHeight() == height && IsCanvasLive())
 	{
 		return;
 	}
@@ -173,14 +205,38 @@ VRHudSurface& GetVRHudSurface()
 	return surface;
 }
 
+void VR_DestroyHudSurface()
+{
+	GetVRHudSurface().Clear();
+}
+
 void VR_EnsureHudSurface(int width, int height)
 {
 	GetVRHudSurface().EnsureSize(width, height);
 }
 
+void VR_SuppressMountedHudForFrames(int frames)
+{
+	if (frames > gSuppressMountedHudFrames)
+	{
+		gSuppressMountedHudFrames = frames;
+	}
+}
+
 bool VR_ShouldDrawMountedHud()
 {
-	if (!vr_hud_mount && !vr_automap_mount)
+	if (gSuppressMountedHudFrames > 0 && screen != nullptr)
+	{
+		if (gSuppressMountedHudLastFrameTime != screen->FrameTime)
+		{
+			gSuppressMountedHudLastFrameTime = screen->FrameTime;
+			gSuppressMountedHudFrames--;
+		}
+		return false;
+	}
+
+	const bool portableHud = VR_UsePortableHud();
+	if (!portableHud && !vr_hud_mount && !vr_automap_mount)
 	{
 		return false;
 	}
@@ -192,8 +248,8 @@ bool VR_ShouldDrawMountedHud()
 	}
 
 	// [MR] Only draw if the respective feature is active
-	if (automapactive && !vr_automap_mount) return false;
-	if (!automapactive && !vr_hud_mount) return false;
+	if (automapactive && !portableHud && !vr_automap_mount) return false;
+	if (!automapactive && !portableHud && !vr_hud_mount) return false;
 
 	auto& surface = GetVRHudSurface();
 	return surface.HasGameTexture() && surface.GetWidth() > 0 && surface.GetHeight() > 0;
@@ -201,17 +257,18 @@ bool VR_ShouldDrawMountedHud()
 
 bool VR_GetMountedHudTransform(VSMatrix& out)
 {
-	if (!vr_hud_mount && !vr_automap_mount)
+	const bool portableHud = VR_UsePortableHud();
+	if (!portableHud && !vr_hud_mount && !vr_automap_mount)
 	{
 		return false;
 	}
 
 	VSMatrix mountTransform;
 	int mountedHand;
-	if (automapactive && vr_automap_mount)
+	if (automapactive && (portableHud || vr_automap_mount))
 	{
 		mountedHand = vr_automap_mount_pos == 0 ? VR_MAINHAND : VR_OFFHAND;
-		if (!VRMode::GetVRMode(true)->GetWeaponTransform(&mountTransform, mountedHand)) return false;
+		if (!VRMode::GetVRModeCached(true)->GetWeaponTransform(&mountTransform, mountedHand)) return false;
 
 		const float handSign = mountedHand == VR_MAINHAND ? -1.f : 1.f;
 		mountTransform.translate(-vr_automap_mount_xoffset * handSign, -vr_automap_mount_zoffset, -vr_automap_mount_yoffset);
@@ -226,7 +283,7 @@ bool VR_GetMountedHudTransform(VSMatrix& out)
 	else
 	{
 		mountedHand = vr_hud_mount_pos == 0 ? VR_MAINHAND : VR_OFFHAND;
-		if (!VRMode::GetVRMode(true)->GetWeaponTransform(&mountTransform, mountedHand)) return false;
+		if (!VRMode::GetVRModeCached(true)->GetWeaponTransform(&mountTransform, mountedHand)) return false;
 
 		const float handSign = mountedHand == VR_MAINHAND ? -1.f : 1.f;
 		mountTransform.translate(-vr_hud_mount_xoffset * handSign, -vr_hud_mount_zoffset, -vr_hud_mount_yoffset);
@@ -241,17 +298,64 @@ bool VR_GetMountedHudTransform(VSMatrix& out)
 	out = mountTransform;
 	return true;
 }
+
+bool VR_UsePortableHud()
+{
+	// Portable HUD is world-space only. While virtual screen/screen-layer mode
+	// is active, use the normal screen composition path and skip the portable pass.
+	return portablehud && !VR_UseScreenLayer();
+}
+
+const VRMode *VRMode::GetVRModeCached(bool toscreen)
+{
+	if (isWorkerThread)
+	{
+		static VREyeInfo safeMonoEyes[2] = { VREyeInfo(0.f, 1.f), VREyeInfo(0.f, 0.f) };
+		static VRMode safeMono(1, 1.f, 1.f, 1.f, safeMonoEyes);
+		return &safeMono;
+	}
+
+	struct CacheEntry
+	{
+		bool valid = false;
+		uint64_t frameTime = 0;
+		int vrMode = 0;
+		int backend = 0;
+		bool disableTextureFilter = false;
+		const VRMode* mode = nullptr;
+	};
+
+	thread_local CacheEntry cache[2];
+	auto& entry = cache[toscreen ? 1 : 0];
+	const uint64_t frameTime = screen != nullptr ? screen->FrameTime : 0;
+	const int currentVrMode = (int)vr_mode;
+	const int currentBackend = V_GetBackend();
+	const bool currentDisableTextureFilter = sysCallbacks.DisableTextureFilter && sysCallbacks.DisableTextureFilter();
+
+	if (entry.valid &&
+		entry.frameTime == frameTime &&
+		entry.vrMode == currentVrMode &&
+		entry.backend == currentBackend &&
+		entry.disableTextureFilter == currentDisableTextureFilter)
+	{
+		return entry.mode;
+	}
+
+	entry.valid = true;
+	entry.frameTime = frameTime;
+	entry.vrMode = currentVrMode;
+	entry.backend = currentBackend;
+	entry.disableTextureFilter = currentDisableTextureFilter;
+	entry.mode = GetVRMode(toscreen);
+	return entry.mode;
+}
 // Set up 3D-specific console variables:
 CUSTOM_CVAR(Int, vr_mode, 0, CVAR_GLOBALCONFIG|CVAR_ARCHIVE)
 {
-#ifdef USE_OPENXR
-	if (self != 15)
-		self = 15;
-#endif
-#if 0 //def USE_OPENVR
-	if (self != 10)
-		self = 10;
-#endif
+	// Keep the selected VR mode stable across renderers.
+	// OpenGL can use OpenVR (10), Vulkan can use OpenXR (15).
+	if (self < 0)
+		self = 0;
 }
 
 #define PITCH 0
@@ -270,18 +374,40 @@ CVAR(Float, vr_ipd, 0.064f, CVAR_ARCHIVE|CVAR_GLOBALCONFIG) // METERS
 CVAR(Float, vr_screendist, 0.80f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // METERS
 
 CVAR(Int, vr_desktop_view, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Int, vr_overlayscreen, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, vr_overlayscreen, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_overlayscreen_always, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_overlayscreen_size, 1., CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_overlayscreen_dist, 0., CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_overlayscreen_vpos, 0., CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, vr_overlayscreen_bg, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-
 CVAR(Float, vr_kill_momentum, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 // default conversion between (vertical) DOOM units and meters
 CVAR(Float, vr_vunits_per_meter, 34.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // METERS
 CVAR(Float, vr_height_adjust, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // METERS
+CVAR(Float, vr_openxr_fov_adjust_deg, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // DEGREES PER SIDE
+CVAR(Float, vr_openxr_eye_shift_scale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, vr_debug_projection_compare, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, vr_openxr_debug_sizes, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, vr_openxr_debug_present, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, vr_openxr_debug_weapon, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, vr_openxr_debug_submit_mode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// Gate the layered OpenXR/Vulkan multiview path separately from the current per-eye render path
+CVARD(Bool, vr_openxr_multiview, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "Enable the experimental OpenXR Vulkan multiview path when available")
+// Experimental: render the OpenXR scene at runtime-recommended eye size
+// instead of desktop framebuffer size to reduce upscale aliasing.
+CVAR(Bool, vr_openxr_force_recommended_viewport, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// OpenXR-only internal render scale relative to recommended eye dimensions.
+// 1.0 means recommended size, below 1.0 trades quality for performance.
+CVAR(Float, vr_openxr_render_scale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// Use the full screen viewport as XR present source by default to reduce
+// aspect-stretch upscaling artifacts compared to mSceneViewport.
+CVAR(Bool, vr_openxr_use_screen_viewport_for_submit, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVARD(Bool, vr_desktop_view_openxr_render, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "Reuse the XR-submitted present texture for the desktop mirror to skip the separate unbiased mirror pass")
+CVAR(Float, vr_openxr_present_gamma_bias, 1.95f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_openxr_present_contrast_bias, 0.85f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_openxr_present_brightness_bias, -0.15f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_openxr_present_saturation_bias, 1.15f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CUSTOM_CVAR(Int, vr_control_scheme, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL)
 {
 	M_ResetButtonStates();
@@ -332,6 +458,9 @@ CVAR(Float, vr_hud_mount_scale, 0.15f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_hud_mount_pitch, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_hud_mount_yaw, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_hud_mount_roll, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// Runtime override that forces the mounted HUD/automap path on without
+// changing the individual menu toggles.
+CVAR(Bool, portablehud, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 //AutoMap control
 CVAR(Bool, vr_automap_use_hud, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -352,6 +481,19 @@ CVAR(Float, vr_automap_mount_yaw, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_automap_mount_roll, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, vr_automap_border, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Color, vr_automap_border_color, 0x636363, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+CCMD(toggleportablehud)
+{
+	portablehud = !portablehud;
+	Printf("portablehud %s\n", portablehud ? "enabled" : "disabled");
+}
+
+void VR_InitPortableHudBinding()
+{
+	// Allow the menu/keybind entry named "portablehud" to invoke the toggle
+	// path instead of only querying the boolean cvar.
+	C_SetAlias("portablehud", "toggleportablehud");
+}
 
 
 CVARD(Bool, vr_override_weap_pos, false, 0, "Only used for testing VR environment on PC");
@@ -459,14 +601,24 @@ const VRMode *VRMode::GetVRMode(bool toscreen)
 		return &vrmi_checker;
 #ifdef USE_OPENVR
 	case VR_OPENVR:
+	{
 		// When calling a function of this class, ensure that you are using a pointer or reference to the derived class
-		const VRMode &vrmode =  s3d::OpenVRMode::getInstance();
+		Printf("VRMode select: choosing OpenVR mode 10.\n");
+		const VRMode &vrmode = s3d::OpenVRMode::getInstance();
 		return vrmode.IsInitialized() ? &vrmode : &vrmi_mono;
 		//return vrmi_openvr.IsInitialized() ? &vrmi_openvr : &vrmi_mono;
+	}
 #endif
 #ifdef USE_OPENXR
 	case VR_OPENXR_MOBILE:
-		return &s3d::OpenXRDeviceMode::getInstance();
+		if (V_GetBackend() == 1)
+		{
+			Printf("VRMode select: choosing Vulkan/OpenXR mode 15.\n");
+			const VRMode& vrmode = s3d::VKOpenXRDeviceMode::getInstance();
+			return vrmode.IsInitialized() ? &vrmode : &vrmi_mono;
+		}
+		Printf("VRMode select: Vulkan/OpenXR requested but backend is not Vulkan.\n");
+		return &vrmi_mono;
 #endif
 	}
 }
@@ -503,6 +655,7 @@ VREyeInfo::VREyeInfo(float shiftFactor, float scaleFactor)
 {
 	mShiftFactor = shiftFactor;
 	mScaleFactor = scaleFactor;
+	m_isActive = false;
 }
 
 float VREyeInfo::getShift() const
@@ -560,6 +713,20 @@ VSMatrix VREyeInfo::GetProjection(float fov, float aspectRatio, float fovRatio, 
 	}
 }
 
+DAngle VREyeInfo::GetRenderFov(DAngle fallback) const
+{
+	return fallback;
+}
+
+VSMatrix VREyeInfo::GetHUDProjection() const
+{
+	VSMatrix mat;
+	int w = screen->GetWidth();
+	int h = screen->GetHeight();
+	mat.ortho(0.f, (float)w, (float)h, 0.f, -1.0f, 1.0f);
+	return mat;
+}
+
 
 
 /* virtual */
@@ -583,7 +750,7 @@ DVector3 VREyeInfo::GetViewShift(FRenderViewpoint& vp) const
 static DVector3 MapWeaponDir(AActor* actor, DAngle yaw, DAngle pitch, int hand = 0)
 {
 	LSMatrix44 mat;
-	auto vrmode = VRMode::GetVRMode(true);
+	auto vrmode = VRMode::GetVRModeCached(true);
 	if (!vrmode->GetWeaponTransform(&mat, hand))
 	{
 		double pc = pitch.Cos();
@@ -624,7 +791,7 @@ bool VRMode::RenderPlayerSpritesInScene() const
 
 void VRMode::SetUp() const
 {
-	player_t* player = r_viewpoint.camera ? r_viewpoint.camera->player : nullptr;
+	player_t* player = &players[consoleplayer];
 	if (player && player->mo)
 	{
 		player->PlayInVR = IsVR();
@@ -646,7 +813,7 @@ void VRMode::SetUp() const
 //---------------------------------------------------------------------------
 bool VRMode::GetWeaponTransform(VSMatrix* out, int hand_weapon) const
 {
-	player_t * player = r_viewpoint.camera ? r_viewpoint.camera->player : nullptr;
+	player_t* player = &players[consoleplayer];
 	bool autoReverse = true;
 	if (player)
 	{
@@ -693,6 +860,52 @@ float nonLinearFilter(float in)
     return val;
 }
 
+float VR_GetAnalogTurnResponseScale(float smoothTurnSetting)
+{
+    const float clamped = clamp(smoothTurnSetting, 0.0f, 10.0f);
+
+    if (clamped <= 0.0f)
+    {
+        return 15.0f;
+    }
+
+    return 1.0f + (10.0f - clamped);
+}
+
+float VR_ApplyAnalogSmoothTurn(float turnAxis, float maxTurnRateDegPerSec, float deltaSeconds, float responseScale, float& currentTurnRateDegPerSec)
+{
+    constexpr float analogTurnDeadzone = 0.10f;
+    constexpr float analogTurnResponse = 8.0f;
+
+    if (deltaSeconds < 0.0f)
+    {
+        deltaSeconds = 0.0f;
+    }
+
+    float targetTurnRate = 0.0f;
+    const float absTurnAxis = fabsf(turnAxis);
+    if (absTurnAxis > analogTurnDeadzone)
+    {
+        float t = (absTurnAxis - analogTurnDeadzone) / (1.0f - analogTurnDeadzone);
+        if (t < 0.0f)
+        {
+            t = 0.0f;
+        }
+        else if (t > 1.0f)
+        {
+            t = 1.0f;
+        }
+
+        // Ease in and out so the turn starts gently, then ramps toward the cap.
+        const float eased = t * t * (3.0f - 2.0f * t);
+        targetTurnRate = (turnAxis > 0.0f ? -1.0f : 1.0f) * maxTurnRateDegPerSec * eased;
+    }
+
+    const float response = 1.0f - expf(-analogTurnResponse * responseScale * deltaSeconds);
+    currentTurnRateDegPerSec += (targetTurnRate - currentTurnRateDegPerSec) * response;
+    return currentTurnRateDegPerSec * deltaSeconds;
+}
+
 bool between(float min, float val, float max)
 {
     return (min < val) && (val < max);
@@ -722,7 +935,7 @@ ADD_STAT(vrstats)
 {
 	FString out;
 
-	player_t* player = r_viewpoint.camera ? r_viewpoint.camera->player : nullptr;
+	player_t* player = &players[consoleplayer];
 	if (player && player->mo)
 	{
 		out.AppendFormat("AttackPos: X=%2.f, Y=%2.f, Z=%2.f\n"

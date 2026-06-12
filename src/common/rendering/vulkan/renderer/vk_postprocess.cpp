@@ -39,10 +39,18 @@
 #include "hwrenderer/postprocessing/hw_postprocess.h"
 #include "hwrenderer/postprocessing/hw_postprocess_cvars.h"
 #include "hw_vrmodes.h"
+#include "common/rendering/stereo3d/openxr/oxr_loader.h"
 #include "flatvertices.h"
 #include "r_videoscale.h"
 
 EXTERN_CVAR(Int, gl_dither_bpc)
+EXTERN_CVAR(Bool, vr_debug_projection_compare)
+EXTERN_CVAR(Bool, vr_openxr_debug_sizes)
+EXTERN_CVAR(Bool, vr_openxr_debug_present)
+EXTERN_CVAR(Float, vr_openxr_present_gamma_bias)
+EXTERN_CVAR(Float, vr_openxr_present_contrast_bias)
+EXTERN_CVAR(Float, vr_openxr_present_brightness_bias)
+EXTERN_CVAR(Float, vr_openxr_present_saturation_bias)
 
 VkPostprocess::VkPostprocess(VulkanRenderDevice* fb) : fb(fb)
 {
@@ -52,16 +60,32 @@ VkPostprocess::~VkPostprocess()
 {
 }
 
+int VkPostprocess::GetNextPipelineImage() const
+{
+	if (mPipelinePairSize <= 1)
+	{
+		return mCurrentPipelineImage;
+	}
+
+	const int localIndex = std::max(0, mCurrentPipelineImage - mPipelinePairStart);
+	return mPipelinePairStart + ((localIndex + 1) % mPipelinePairSize);
+}
+
 void VkPostprocess::SetActiveRenderTarget()
 {
+	if (vr_openxr_debug_present || vr_openxr_debug_sizes)
+	{
+		Printf("OpenXR: SetActiveRenderTarget mCurrentPipelineImage=%d\n", mCurrentPipelineImage);
+	}
 	auto buffers = fb->GetBuffers();
+	const int layerIndex = buffers->GetPipelineLayers() > 1 ? fb->GetCurrentEyeLayer() : 0;
 
 	VkImageTransition()
 		.AddImage(&buffers->PipelineImage[mCurrentPipelineImage], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, false)
 		.AddImage(&buffers->PipelineDepthStencil, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, false)
 		.Execute(fb->GetCommands()->GetDrawCommands());
 
-	fb->GetRenderState()->SetRenderTarget(&buffers->PipelineImage[mCurrentPipelineImage], buffers->PipelineDepthStencil.View.get(), buffers->GetWidth(), buffers->GetHeight(), VK_FORMAT_R16G16B16A16_SFLOAT, VK_SAMPLE_COUNT_1_BIT);
+	fb->GetRenderState()->SetRenderTarget(&buffers->PipelineImage[mCurrentPipelineImage], buffers->PipelineDepthStencil.GetLayerView(layerIndex), buffers->GetWidth(), buffers->GetHeight(), VK_FORMAT_R16G16B16A16_SFLOAT, VK_SAMPLE_COUNT_1_BIT, 1, 0, layerIndex);
 }
 
 void VkPostprocess::PostProcessScene(int fixedcm, float flash, const std::function<void()> &afterBloomDrawEndScene2D)
@@ -84,8 +108,6 @@ void VkPostprocess::BlitSceneToPostprocess()
 	auto buffers = fb->GetBuffers();
 	auto cmdbuffer = fb->GetCommands()->GetDrawCommands();
 
-	mCurrentPipelineImage = 0;
-
 	VkImageTransition()
 		.AddImage(&buffers->SceneColor, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
 		.AddImage(&buffers->PipelineImage[mCurrentPipelineImage], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, true)
@@ -94,16 +116,18 @@ void VkPostprocess::BlitSceneToPostprocess()
 	if (buffers->GetSceneSamples() != VK_SAMPLE_COUNT_1_BIT)
 	{
 		auto sceneColor = buffers->SceneColor.Image.get();
+		const uint32_t sceneLayer = buffers->GetSceneLayers() > 1 ? (uint32_t)fb->GetCurrentEyeLayer() : 0u;
+		const uint32_t pipelineLayer = buffers->GetPipelineLayers() > 1 ? (uint32_t)fb->GetCurrentEyeLayer() : 0u;
 		VkImageResolve resolve = {};
 		resolve.srcOffset = { 0, 0, 0 };
 		resolve.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		resolve.srcSubresource.mipLevel = 0;
-		resolve.srcSubresource.baseArrayLayer = 0;
+		resolve.srcSubresource.baseArrayLayer = sceneLayer;
 		resolve.srcSubresource.layerCount = 1;
 		resolve.dstOffset = { 0, 0, 0 };
 		resolve.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		resolve.dstSubresource.mipLevel = 0;
-		resolve.dstSubresource.baseArrayLayer = 0;
+		resolve.dstSubresource.baseArrayLayer = pipelineLayer;
 		resolve.dstSubresource.layerCount = 1;
 		resolve.extent = { (uint32_t)sceneColor->width, (uint32_t)sceneColor->height, 1 };
 		cmdbuffer->resolveImage(
@@ -114,18 +138,20 @@ void VkPostprocess::BlitSceneToPostprocess()
 	else
 	{
 		auto sceneColor = buffers->SceneColor.Image.get();
+		const uint32_t sceneLayer = buffers->GetSceneLayers() > 1 ? (uint32_t)fb->GetCurrentEyeLayer() : 0u;
+		const uint32_t pipelineLayer = buffers->GetPipelineLayers() > 1 ? (uint32_t)fb->GetCurrentEyeLayer() : 0u;
 		VkImageBlit blit = {};
 		blit.srcOffsets[0] = { 0, 0, 0 };
 		blit.srcOffsets[1] = { sceneColor->width, sceneColor->height, 1 };
 		blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		blit.srcSubresource.mipLevel = 0;
-		blit.srcSubresource.baseArrayLayer = 0;
+		blit.srcSubresource.baseArrayLayer = sceneLayer;
 		blit.srcSubresource.layerCount = 1;
 		blit.dstOffsets[0] = { 0, 0, 0 };
 		blit.dstOffsets[1] = { sceneColor->width, sceneColor->height, 1 };
 		blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		blit.dstSubresource.mipLevel = 0;
-		blit.dstSubresource.baseArrayLayer = 0;
+		blit.dstSubresource.baseArrayLayer = pipelineLayer;
 		blit.dstSubresource.layerCount = 1;
 		cmdbuffer->blitImage(
 			sceneColor->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -152,6 +178,8 @@ void VkPostprocess::BlitCurrentToImage(VkTextureImage *dstimage, VkImageLayout f
 
 	auto srcimage = &fb->GetBuffers()->PipelineImage[mCurrentPipelineImage];
 	auto cmdbuffer = fb->GetCommands()->GetDrawCommands();
+	const uint32_t srcLayer = srcimage->Image && srcimage->Image->layerCount > 1 ? (uint32_t)fb->GetCurrentEyeLayer() : 0u;
+	const uint32_t dstLayer = dstimage->Image && dstimage->Image->layerCount > 1 ? (uint32_t)fb->GetCurrentEyeLayer() : 0u;
 
 	VkImageTransition()
 		.AddImage(srcimage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
@@ -163,13 +191,13 @@ void VkPostprocess::BlitCurrentToImage(VkTextureImage *dstimage, VkImageLayout f
 	blit.srcOffsets[1] = { srcimage->Image->width, srcimage->Image->height, 1 };
 	blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	blit.srcSubresource.mipLevel = 0;
-	blit.srcSubresource.baseArrayLayer = 0;
+	blit.srcSubresource.baseArrayLayer = srcLayer;
 	blit.srcSubresource.layerCount = 1;
 	blit.dstOffsets[0] = { 0, 0, 0 };
 	blit.dstOffsets[1] = { dstimage->Image->width, dstimage->Image->height, 1 };
 	blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	blit.dstSubresource.mipLevel = 0;
-	blit.dstSubresource.baseArrayLayer = 0;
+	blit.dstSubresource.baseArrayLayer = dstLayer;
 	blit.dstSubresource.layerCount = 1;
 
 	cmdbuffer->blitImage(
@@ -241,6 +269,98 @@ void VkPostprocess::DrawPresentTexture(const IntRect &box, bool applyGamma, bool
 	renderstate.Draw();
 }
 
+void VkPostprocess::DrawPresentTextureToImage(VkTextureImage *image, VkFormat outputFormat, const IntRect &box, bool applyGamma, bool screenshot, float sourceScaleX, float sourceScaleY, float sourceOffsetX, float sourceOffsetY, VulkanCommandBuffer *cmdbuffer, bool applyOpenXrBias)
+{
+	VkPPRenderState renderstate(fb);
+	const bool outputIsSrgb = outputFormat == VK_FORMAT_B8G8R8A8_SRGB || outputFormat == VK_FORMAT_R8G8B8A8_SRGB;
+	const auto* buffers = fb->GetBuffers();
+	const int sourceWidth = buffers ? buffers->GetWidth() : 0;
+	const int sourceHeight = buffers ? buffers->GetHeight() : 0;
+	const int destWidth = image && image->Image ? image->Image->width : box.width;
+	const int destHeight = image && image->Image ? image->Image->height : box.height;
+	const PPFilterMode presentFilter = ViewportLinearScale() ? PPFilterMode::Linear : PPFilterMode::Nearest;
+
+	if (!screenshot)
+		hw_postprocess.customShaders.Run(&renderstate, "screen");
+
+	PresentUniforms uniforms;
+	if (!applyGamma)
+	{
+		uniforms.InvGamma = 1.0f;
+		uniforms.Contrast = 1.0f;
+		uniforms.Brightness = 0.0f;
+		uniforms.Saturation = 1.0f;
+	}
+	else
+	{
+		// sRGB XR swapchains already get the final framebuffer transfer on write,
+		// so applying the full software gamma exponent here tends to over-brighten
+		// the submitted eye image. Keep the present-pass shaping, but use a softer
+		// compensation curve to recover some of the darker midtone contrast seen
+		// in the OpenVR/OpenGL path.
+		const float gammaValue = clamp<float>(vid_gamma, 0.1f, 4.f);
+		uniforms.InvGamma = outputIsSrgb ? (1.0f / sqrtf(gammaValue)) : (1.0f / gammaValue);
+		uniforms.Contrast = clamp<float>(vid_contrast, 0.1f, 3.f);
+		uniforms.Brightness = clamp<float>(vid_brightness, -0.8f, 0.8f);
+		uniforms.Saturation = clamp<float>(vid_saturation, -15.0f, 15.f);
+		uniforms.GrayFormula = static_cast<int>(gl_satformula);
+
+		// OpenXR headset compositor path can look noticeably brighter/flatter than
+		// the local mirror/OpenVR reference even with matching source images. Allow
+		// XR-only final present tuning to recover headset parity without affecting
+		// the non-XR present path.
+		if (applyOpenXrBias && IsOpenXRPresent())
+		{
+			const float gammaBias = clamp<float>(vr_openxr_present_gamma_bias, 0.25f, 4.0f);
+			const float contrastBias = clamp<float>(vr_openxr_present_contrast_bias, 0.25f, 4.0f);
+			const float brightnessBias = clamp<float>(vr_openxr_present_brightness_bias, -0.8f, 0.8f);
+			const float saturationBias = clamp<float>(vr_openxr_present_saturation_bias, 0.0f, 4.0f);
+
+			uniforms.InvGamma = clamp<float>(uniforms.InvGamma * gammaBias, 0.1f, 4.0f);
+			uniforms.Contrast = clamp<float>(uniforms.Contrast * contrastBias, 0.1f, 3.0f);
+			uniforms.Brightness = clamp<float>(uniforms.Brightness + brightnessBias, -0.8f, 0.8f);
+			uniforms.Saturation = clamp<float>(uniforms.Saturation * saturationBias, -15.0f, 15.0f);
+		}
+	}
+	uniforms.ColorScale = (gl_dither_bpc == -1) ? 255.0f : (float)((1 << gl_dither_bpc) - 1);
+
+	if (vr_debug_projection_compare || vr_openxr_debug_present)
+	{
+		Printf("XR_PRESENT_MAP toImage box=%dx%d srcVP=%dx%d sceneVP=%dx%d src=%dx%d dst=%dx%d scale=(%.4f,%.4f) offset=(%.4f,%.4f) applyGamma=%d screenshot=%d outputFormat=%d outputIsSrgb=%d\n",
+			box.width, box.height,
+			screen ? screen->mScreenViewport.width : -1,
+			screen ? screen->mScreenViewport.height : -1,
+			screen ? screen->mSceneViewport.width : -1,
+			screen ? screen->mSceneViewport.height : -1,
+			sourceWidth,
+			sourceHeight,
+			destWidth,
+			destHeight,
+			(double)sourceScaleX,
+			(double)sourceScaleY,
+			(double)sourceOffsetX,
+			(double)sourceOffsetY,
+			applyGamma ? 1 : 0,
+			screenshot ? 1 : 0,
+			(int)outputFormat,
+			outputIsSrgb ? 1 : 0);
+	}
+
+	uniforms.Scale = { sourceScaleX, sourceScaleY };
+	uniforms.Offset = { sourceOffsetX, sourceOffsetY };
+
+	uniforms.HdrMode = 0;
+
+	renderstate.Clear();
+	renderstate.Shader = &hw_postprocess.present.Present;
+	renderstate.Uniforms.Set(uniforms);
+	renderstate.Viewport = box;
+	renderstate.SetInputCurrent(0, presentFilter);
+	renderstate.SetInputTexture(1, &hw_postprocess.present.Dither, PPFilterMode::Nearest, PPWrapMode::Repeat);
+	renderstate.SetNoBlend();
+	renderstate.DrawToImage(image, outputFormat, cmdbuffer);
+}
+
 void VkPostprocess::AmbientOccludeScene(float m5)
 {
 	int sceneWidth = fb->GetBuffers()->GetSceneWidth();
@@ -259,7 +379,7 @@ void VkPostprocess::BlurScene(float gameinfobluramount)
 
 	VkPPRenderState renderstate(fb);
 
-	auto vrmode = VRMode::GetVRMode(true);
+	auto vrmode = VRMode::GetVRModeCached(true);
 	int eyeCount = vrmode->mEyeCount;
 	for (int i = 0; i < eyeCount; ++i)
 	{
@@ -290,4 +410,49 @@ void VkPostprocess::UpdateShadowMap()
 
 void VkPostprocess::NextEye(int eyeCount)
 {
+	int oldImage = mCurrentPipelineImage;
+	if (eyeCount > 1)
+		mCurrentPipelineImage = (mCurrentPipelineImage + 1) % VkRenderBuffers::NumPipelineImages;
+	Printf("OpenXR: NextEye eyeCount=%d oldImage=%d newImage=%d\n",
+		eyeCount, oldImage, mCurrentPipelineImage);
+}
+
+void VkPostprocess::SetCurrentPipelineImage(int index)
+{
+	int count = VkRenderBuffers::NumPipelineImages;
+	if (count <= 0)
+	{
+		mCurrentPipelineImage = 0;
+		return;
+	}
+
+	mCurrentPipelineImage = ((index % count) + count) % count;
+}
+
+void VkPostprocess::SetPipelineImagePair(int start, int size)
+{
+	const int count = VkRenderBuffers::NumPipelineImages;
+	if (count <= 0)
+	{
+		mPipelinePairStart = 0;
+		mPipelinePairSize = 1;
+		mCurrentPipelineImage = 0;
+		return;
+	}
+
+	mPipelinePairStart = ((start % count) + count) % count;
+	mPipelinePairSize = std::clamp(size, 1, count);
+
+	// Clamp the current image into the active pair so the caller can swap
+	// pair ownership without accidentally sampling another eye's history.
+	const int pairEnd = mPipelinePairStart + mPipelinePairSize;
+	if (mCurrentPipelineImage < mPipelinePairStart || mCurrentPipelineImage >= pairEnd)
+	{
+		mCurrentPipelineImage = mPipelinePairStart;
+	}
+}
+
+void VkPostprocess::AdvancePipelineImage()
+{
+	mCurrentPipelineImage = GetNextPipelineImage();
 }

@@ -9,10 +9,12 @@ extern glcycle_t RenderFlat,SetupFlat;
 extern glcycle_t RenderSprite,SetupSprite;
 extern glcycle_t All, Finish, PortalAll, Bsp;
 extern glcycle_t ProcessAll, PostProcess;
+extern glcycle_t VRSceneEyes, VRSceneBuild, VRSubsectors, VRSubsectorCull, VRSubsectorVisible, VRLineBuild, VRLineClip, VRLineDecide, VRThingBuild, VRFlatBuild, VRScenePostBSP, VRPlayerSprites, VRSceneDraw, VREyeComposite, VRFinalizeEye, VRSubmit;
 extern glcycle_t RenderAll;
 extern glcycle_t Dirty;
 extern glcycle_t drawcalls, twoD, Flush3D;
 extern glcycle_t MTWait, WTTotal;
+extern glcycle_t WTWallJobs, WTFlatJobs, WTThingJobs;
 
 extern int iter_dlightf, iter_dlight, draw_dlight, draw_dlightf;
 extern int rendered_lines,rendered_flats,rendered_sprites,rendered_decals,render_vertexsplit,render_texsplit;

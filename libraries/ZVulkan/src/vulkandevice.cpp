@@ -92,8 +92,11 @@ void VulkanDevice::CreateDevice()
 	VkPhysicalDeviceFeatures2 deviceFeatures2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
 	deviceFeatures2.features = EnabledFeatures.Features;
 
+	const bool canUseFeatures2 =
+		Instance->ApiVersion >= VK_API_VERSION_1_1 ||
+		SupportsExtension(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
 	void** next = const_cast<void**>(&deviceCreateInfo.pNext);
-	if (SupportsExtension(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME))
+	if (canUseFeatures2)
 	{
 		*next = &deviceFeatures2;
 		next = &deviceFeatures2.pNext;
@@ -103,6 +106,11 @@ void VulkanDevice::CreateDevice()
 		deviceCreateInfo.pEnabledFeatures = &deviceFeatures2.features;
 	}
 
+	if (Instance->ApiVersion >= VK_API_VERSION_1_1 || SupportsExtension(VK_KHR_MULTIVIEW_EXTENSION_NAME))
+	{
+		*next = &EnabledFeatures.Multiview;
+		next = &EnabledFeatures.Multiview.pNext;
+	}
 	if (SupportsExtension(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME))
 	{
 		*next = &EnabledFeatures.BufferDeviceAddress;

@@ -50,6 +50,10 @@
 #include "texturemanager.h"
 #include "printf.h"
 #include "i_interface.h"
+#include "hwrenderer/data/hw_vrmodes.h"
+
+EXTERN_CVAR(Int, developer);
+EXTERN_CVAR(Int, vr_mode);
 
 
 
@@ -221,7 +225,27 @@ static bool CheckSkipOptionBlock(FScanner &sc, bool yes = true)
 	do
 	{
 		sc.MustGetString();
-		if (sysCallbacks.CheckMenudefOption && sysCallbacks.CheckMenudefOption(sc.String)) filter = true;
+		if (!stricmp(sc.String, "OpenXR"))
+		{
+			filter |= vr_mode == VR_OPENXR_MOBILE;
+		}
+		else if (!stricmp(sc.String, "OpenVR"))
+		{
+			filter |= vr_mode == VR_OPENVR;
+		}
+		else if (!stricmp(sc.String, "NonVR"))
+		{
+			filter |= vr_mode != VR_OPENXR_MOBILE && vr_mode != VR_OPENVR;
+		}
+		else if (!stricmp(sc.String, "Developer1"))
+		{
+			filter |= developer >= 1;
+		}
+		else if (!stricmp(sc.String, "Developer2"))
+		{
+			filter |= developer >= 2;
+		}
+		else if (sysCallbacks.CheckMenudefOption && sysCallbacks.CheckMenudefOption(sc.String)) filter = true;
 		else if (sc.Compare("Windows"))
 		{
 			#ifdef _WIN32

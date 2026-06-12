@@ -221,6 +221,33 @@ bool M_SetSpecialMenu(FName& menu, int param)
 		M_StartupEpisodeMenu(&NewGameStartupInfo);	// needs player class name from class menu (later)
 		break;
 
+	case NAME_Playerclassmenu:
+	{
+		// Preserve legacy behavior: if there is no selectable class (or only one),
+		// skip class selection entirely and continue the new-game flow.
+		int selectableClasses = 0;
+		for (unsigned i = 0; i < PlayerClasses.Size(); i++)
+		{
+			if (!(PlayerClasses[i].Flags & PCF_NOMENU))
+			{
+				const char* pname = GetPrintableDisplayName(PlayerClasses[i].Type).GetChars();
+				if (pname != nullptr)
+				{
+					selectableClasses++;
+				}
+			}
+		}
+
+		if (selectableClasses <= 1)
+		{
+			// Route through the normal special-menu chain so downstream behavior
+			// remains identical to stock flow.
+			M_SetMenu(NAME_Episodemenu, -1000);
+			return false;
+		}
+		break;
+	}
+
 	case NAME_Skillmenu:
 		// sent from the episode menu
 

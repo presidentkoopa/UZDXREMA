@@ -139,20 +139,55 @@ sector_t* RenderViewpoint(FRenderViewpoint& mainvp, AActor* camera, IntRect* bou
 
 	// Render (potentially) multiple views for stereo 3d
 	// Fixme. The view offsetting should be done with a static table and not require setup of the entire render state for the mode.
-	auto vrmode = VRMode::GetVRMode(mainview && toscreen);
+	auto vrmode = VRMode::GetVRModeCached(mainview && toscreen);
 	vrmode->SetUp();
 	const int eyeCount = vrmode->mEyeCount;
+	const bool useMultiviewScene = mainview && toscreen && vrmode->ShouldUseMultiviewThisFrame() && eyeCount >= 2;
+	int sharedPostprocessColormap = CM_DEFAULT;
+	float sharedPostprocessFlash = 1.0f;
+	bool hasSharedPostprocessState = false;
 	screen->FirstEye();
 	for (int eye_ix = 0; eye_ix < eyeCount; ++eye_ix)
 	{
 		flatVerticesPerEye = wallVerticesPerEye = portalsPerEye = lightsFlatPerEye = lightsWallPerEye = 0;
-		const auto& eye = vrmode->mEyes[eye_ix];
-		eye->SetUp();
-		screen->SetViewportRects(bounds);
-
-		if (mainview) // Bind the scene frame buffer and turn on draw buffers used by ssao
+		const auto eye = vrmode->mEyes[eye_ix];
+		if (eye == nullptr)
 		{
-			bool useSSAO = (gl_ssao != 0);
+			continue;
+		}
+		eye->SetUp();
+		const bool isVRScene = vrmode->IsVR();
+		if (isVRScene) VRSceneEyes.Clock();
+		screen->SetViewportRects(bounds);
+		const bool renderSceneThisEye = !useMultiviewScene || eye_ix == 0;
+		const bool usePostprocessOnlyEye = useMultiviewScene &&
+			!renderSceneThisEye &&
+			mainview &&
+			toscreen &&
+			vrmode->RenderPlayerSpritesInScene() &&
+			hasSharedPostprocessState;
+		const bool useSSAO = (gl_ssao != 0);
+
+		if (usePostprocessOnlyEye)
+		{
+			RenderState.SetSpecialColormap(sharedPostprocessColormap, sharedPostprocessFlash);
+			eye->AdjustHud();
+
+			PostProcess.Clock();
+			screen->PostProcessScene(false, sharedPostprocessColormap, sharedPostprocessFlash, []() {});
+			eye->AdjustBlend(nullptr);
+			V_DrawBlend(mainvp.sector);
+			PostProcess.Unclock();
+
+			RenderState.SetSpecialColormap(CM_DEFAULT, 1);
+			eye->TearDown();
+			screen->NextEye(eyeCount);
+			if (isVRScene) VRSceneEyes.Unclock();
+			continue;
+		}
+
+		if (mainview && renderSceneThisEye) // Bind the scene frame buffer and turn on draw buffers used by ssao
+		{
 			screen->SetSceneRenderTarget(useSSAO);
 			RenderState.SetPassType(useSSAO ? GBUFFER_PASS : NORMAL_PASS);
 			RenderState.EnableDrawBuffers(RenderState.GetPassDrawBufferCount(), true);
@@ -161,15 +196,22 @@ sector_t* RenderViewpoint(FRenderViewpoint& mainvp, AActor* camera, IntRect* bou
 		auto di = HWDrawInfo::StartDrawInfo(mainvp.ViewLevel, nullptr, mainvp, nullptr);
 		auto& vp = di->Viewpoint;
 
-		di->Set3DViewport(RenderState);
+		if (renderSceneThisEye)
+			di->Set3DViewport(RenderState);
 		di->SetViewArea();
 		auto cm = di->SetFullbrightFlags(mainview ? vp.camera->player : nullptr);
 		float flash = 1.f;
+		if (renderSceneThisEye)
+		{
+			sharedPostprocessColormap = cm;
+			sharedPostprocessFlash = flash;
+			hasSharedPostprocessState = true;
+		}
 
 		// Only used by the GLES2 renderer
 		RenderState.SetSpecialColormap(cm, flash);
 
-		di->Viewpoint.SetFieldOfView(DAngle::fromDeg(fov));	// Set the real FOV for the current scene (it's not necessarily the same as the global setting in r_viewpoint)
+		di->Viewpoint.SetFieldOfView(eye->GetRenderFov(DAngle::fromDeg(fov)));	// Match the clipper FOV to the active eye projection in VR.
 
 		// Stereo mode specific perspective projection
 		float inv_iso_dist = 1.0f;
@@ -178,24 +220,57 @@ sector_t* RenderViewpoint(FRenderViewpoint& mainvp, AActor* camera, IntRect* bou
 		di->VPUniforms.mProjectionMatrix = eye->GetProjection(fov, ratio, fovratio * inv_iso_dist, iso_ortho);
 		di->ProjectionMatrix2 = eye->GetProjection(fov, ratio, fovratio, false); // Regular ol' perspective projection matrix
 
-		// Stereo mode specific viewpoint adjustment
-		vp.Pos += eye->GetViewShift(vp);
-		di->SetupView(RenderState, vp.Pos.X, vp.Pos.Y, vp.Pos.Z, false, false);
+		const DVector3 baseViewPos = vp.Pos;
+		FRenderViewpoint centerView = vp;
+		centerView.Pos = baseViewPos;
+		const DVector3 eyeShift = eye->GetViewShift(centerView);
+		vp.Pos = baseViewPos + eyeShift;
+		if (useMultiviewScene && eye_ix == 0 && vrmode->mEyes[1] != nullptr)
+		{
+			di->SetupView(RenderState, vp.Pos.X, vp.Pos.Y, vp.Pos.Z, false, false, false);
+			eye->AdjustViewpointUniforms(di->VPUniforms);
+			HWViewpointUniforms viewpoints[2];
+			viewpoints[0] = di->VPUniforms;
 
-		di->ProcessScene(toscreen);
+			const auto secondEye = vrmode->mEyes[1];
+			secondEye->SetUp();
+			di->VPUniforms.mProjectionMatrix = secondEye->GetProjection(fov, ratio, fovratio * inv_iso_dist, iso_ortho);
+			di->MultiviewProjectionMatrix2[0] = di->ProjectionMatrix2;
+			di->MultiviewProjectionMatrix2[1] = secondEye->GetProjection(fov, ratio, fovratio, false);
+			di->HasMultiviewProjectionMatrix2 = true;
+			const DVector3 eyeShift2 = secondEye->GetViewShift(centerView);
+			const DVector3 secondEyePos = baseViewPos + eyeShift2;
+			di->SetupView(RenderState, secondEyePos.X, secondEyePos.Y, secondEyePos.Z, false, false, false);
+			secondEye->AdjustViewpointUniforms(di->VPUniforms);
+			viewpoints[1] = di->VPUniforms;
+
+			di->ApplyMultiviewViewpoints(RenderState, viewpoints, 2);
+		}
+		else
+		{
+			di->SetupView(RenderState, vp.Pos.X, vp.Pos.Y, vp.Pos.Z, false, false, false);
+			eye->AdjustViewpointUniforms(di->VPUniforms);
+			di->ApplyViewpoint(RenderState);
+		}
+
+		if (renderSceneThisEye)
+			di->ProcessScene(toscreen);
+		eye->AdjustHud();
 
 		if (mainview)
 		{
 			PostProcess.Clock();
-			if (toscreen) di->EndDrawScene(mainvp.sector, RenderState); // do not call this for camera textures.
+			if (toscreen && renderSceneThisEye) di->EndDrawScene(mainvp.sector, RenderState); // do not call this for camera textures.
 
-			if (RenderState.GetPassType() == GBUFFER_PASS) // Turn off ssao draw buffers
+			if (renderSceneThisEye && RenderState.GetPassType() == GBUFFER_PASS) // Turn off ssao draw buffers
 			{
 				RenderState.SetPassType(NORMAL_PASS);
 				RenderState.EnableDrawBuffers(1);
 			}
 
-			screen->PostProcessScene(false, cm, flash, [&]() { di->DrawEndScene2D(mainvp.sector, RenderState); });
+			screen->PostProcessScene(false, cm, flash, [&]() {
+				di->DrawEndScene2D(mainvp.sector, RenderState);
+			});
 
 			eye->AdjustBlend(di);
 			V_DrawBlend(mainvp.sector);
@@ -207,6 +282,7 @@ sector_t* RenderViewpoint(FRenderViewpoint& mainvp, AActor* camera, IntRect* bou
 		di->EndDrawInfo();
 		eye->TearDown();
 		screen->NextEye(eyeCount);
+		if (isVRScene) VRSceneEyes.Unclock();
 	}
 	vrmode->TearDown();
 	
@@ -431,7 +507,7 @@ sector_t* RenderView(player_t* player)
 			fovratio = ratio;
 		}
 
-		auto vrmode = VRMode::GetVRMode(true);
+		auto vrmode = VRMode::GetVRModeCached(true);
 		VR_EnsureHudSurface(screen->GetWidth() * vrmode->mHorizontalViewportScale, screen->GetHeight() * vrmode->mVerticalViewportScale);
 
 		screen->ImageTransitionScene(true); // Only relevant for Vulkan.
@@ -441,4 +517,3 @@ sector_t* RenderView(player_t* player)
 	All.Unclock();
 	return retsec;
 }
-

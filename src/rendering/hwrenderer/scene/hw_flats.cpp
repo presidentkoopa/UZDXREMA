@@ -381,11 +381,11 @@ void HWFlat::DrawFlat(HWDrawInfo *di, FRenderState &state, bool translucent)
 			else state.AlphaFunc(Alpha_GEqual, 0.f);
 			state.SetMaterial(texture, UF_Texture, 0, CLAMP_NONE, NO_TRANSLATION, -1);
 			SetPlaneTextureRotation(state, &plane, texture);
-			di->VPUniforms.mViewMatrix.translate(0.0, zshift, 0.0);
-			screen->mViewpoints->SetViewpoint(state, &di->VPUniforms);
+			di->TranslateViewpointMatrices(0.0, zshift, 0.0);
+			di->ApplyViewpoint(state);
 			DrawSubsectors(di, state);
-			di->VPUniforms.mViewMatrix.translate(0.0, -zshift, 0.0);
-			screen->mViewpoints->SetViewpoint(state, &di->VPUniforms);
+			di->TranslateViewpointMatrices(0.0, -zshift, 0.0);
+			di->ApplyViewpoint(state);
 			state.EnableTextureMatrix(false);
 		}
 		state.SetRenderStyle(DefaultRenderStyle());

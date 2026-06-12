@@ -185,11 +185,23 @@ std::vector<VulkanPhysicalDevice> VulkanInstance::GetPhysicalDevices(VkInstance 
 
 		vkGetPhysicalDeviceMemoryProperties(dev.Device, &dev.Properties.Memory);
 
-		if (apiVersion != VK_API_VERSION_1_0)
+		const bool canQueryProperties2 =
+			(apiVersion != VK_API_VERSION_1_0 && vkGetPhysicalDeviceProperties2 != nullptr) ||
+			vkGetPhysicalDeviceProperties2KHR != nullptr;
+		const bool canQueryFeatures2 =
+			(apiVersion != VK_API_VERSION_1_0 && vkGetPhysicalDeviceFeatures2 != nullptr) ||
+			vkGetPhysicalDeviceFeatures2KHR != nullptr;
+
+		if (canQueryProperties2 && canQueryFeatures2)
 		{
 			VkPhysicalDeviceProperties2 deviceProperties2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
 
 			void** next = const_cast<void**>(&deviceProperties2.pNext);
+			if (apiVersion >= VK_API_VERSION_1_1 || checkForExtension(VK_KHR_MULTIVIEW_EXTENSION_NAME))
+			{
+				*next = &dev.Properties.Multiview;
+				next = &dev.Properties.Multiview.pNext;
+			}
 			if (checkForExtension(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME))
 			{
 				*next = &dev.Properties.AccelerationStructure;
@@ -206,8 +218,12 @@ std::vector<VulkanPhysicalDevice> VulkanInstance::GetPhysicalDevices(VkInstance 
 				next = &dev.Properties.LayeredDriver.pNext;
 			}
 
-			vkGetPhysicalDeviceProperties2(dev.Device, &deviceProperties2);
+			if (apiVersion != VK_API_VERSION_1_0 && vkGetPhysicalDeviceProperties2 != nullptr)
+				vkGetPhysicalDeviceProperties2(dev.Device, &deviceProperties2);
+			else
+				vkGetPhysicalDeviceProperties2KHR(dev.Device, &deviceProperties2);
 			dev.Properties.Properties = deviceProperties2.properties;
+			dev.Properties.Multiview.pNext = nullptr;
 			dev.Properties.AccelerationStructure.pNext = nullptr;
 			dev.Properties.DescriptorIndexing.pNext = nullptr;
 			dev.Properties.LayeredDriver.pNext = nullptr;
@@ -215,6 +231,11 @@ std::vector<VulkanPhysicalDevice> VulkanInstance::GetPhysicalDevices(VkInstance 
 			VkPhysicalDeviceFeatures2 deviceFeatures2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
 
 			next = const_cast<void**>(&deviceFeatures2.pNext);
+			if (apiVersion >= VK_API_VERSION_1_1 || checkForExtension(VK_KHR_MULTIVIEW_EXTENSION_NAME))
+			{
+				*next = &dev.Features.Multiview;
+				next = &dev.Features.Multiview.pNext;
+			}
 			if (checkForExtension(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME))
 			{
 				*next = &dev.Features.BufferDeviceAddress;
@@ -236,8 +257,12 @@ std::vector<VulkanPhysicalDevice> VulkanInstance::GetPhysicalDevices(VkInstance 
 				next = &dev.Features.DescriptorIndexing.pNext;
 			}
 
-			vkGetPhysicalDeviceFeatures2(dev.Device, &deviceFeatures2);
+			if (apiVersion != VK_API_VERSION_1_0 && vkGetPhysicalDeviceFeatures2 != nullptr)
+				vkGetPhysicalDeviceFeatures2(dev.Device, &deviceFeatures2);
+			else
+				vkGetPhysicalDeviceFeatures2KHR(dev.Device, &deviceFeatures2);
 			dev.Features.Features = deviceFeatures2.features;
+			dev.Features.Multiview.pNext = nullptr;
 			dev.Features.BufferDeviceAddress.pNext = nullptr;
 			dev.Features.AccelerationStructure.pNext = nullptr;
 			dev.Features.RayQuery.pNext = nullptr;

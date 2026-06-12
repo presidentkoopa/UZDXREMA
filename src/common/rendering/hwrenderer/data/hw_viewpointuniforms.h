@@ -29,12 +29,15 @@ struct HWViewpointUniforms
 	int mShadowmapFilter = 1;
 
 	int mLightBlendMode = 0;
+	int mPadding0 = 0;
 
 	void CalcDependencies()
 	{
 		mNormalViewMatrix.computeNormalMatrix(mViewMatrix);
 	}
 };
+
+static_assert((sizeof(HWViewpointUniforms) % 16) == 0, "HWViewpointUniforms must remain 16-byte aligned for std140 array stride.");
 
 
 

@@ -73,6 +73,7 @@ void C_DrawConsole ();
 void C_ToggleConsole (void);
 void C_FullConsole (void);
 void C_HideConsole (void);
+void C_ScrollConsole (int amount);
 void C_AdjustBottom (void);
 void C_FlushDisplay (void);
 class FNotifyBufferBase;

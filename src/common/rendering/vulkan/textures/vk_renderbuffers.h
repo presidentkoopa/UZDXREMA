@@ -20,12 +20,14 @@ public:
 	VkRenderBuffers(VulkanRenderDevice* fb);
 	~VkRenderBuffers();
 
-	void BeginFrame(int width, int height, int sceneWidth, int sceneHeight);
+	void BeginFrame(int width, int height, int sceneWidth, int sceneHeight, int sceneLayers = 1, int pipelineLayers = 1);
 
 	int GetWidth() const { return mWidth; }
 	int GetHeight() const { return mHeight; }
 	int GetSceneWidth() const { return mSceneWidth; }
 	int GetSceneHeight() const { return mSceneHeight; }
+	int GetSceneLayers() const { return mSceneLayers; }
+	int GetPipelineLayers() const { return mPipelineLayers; }
 	VkSampleCountFlagBits GetSceneSamples() const { return mSamples; }
 
 	VkTextureImage SceneColor;
@@ -37,20 +39,20 @@ public:
 	VkFormat SceneDepthStencilFormat = VK_FORMAT_D24_UNORM_S8_UINT;
 	VkFormat SceneNormalFormat = VK_FORMAT_A2R10G10B10_UNORM_PACK32;
 
-	static const int NumPipelineImages = 2;
+	static const int NumPipelineImages = 4;
 	VkTextureImage PipelineDepthStencil;
 	VkTextureImage PipelineImage[NumPipelineImages];
 
 	VulkanFramebuffer* GetOutput(VkPPRenderPassSetup* passSetup, const PPOutput& output, WhichDepthStencil stencilTest, int& framebufferWidth, int& framebufferHeight);
 
 private:
-	void CreatePipelineDepthStencil(int width, int height);
-	void CreatePipeline(int width, int height);
-	void CreateScene(int width, int height, VkSampleCountFlagBits samples);
-	void CreateSceneColor(int width, int height, VkSampleCountFlagBits samples);
-	void CreateSceneDepthStencil(int width, int height, VkSampleCountFlagBits samples);
-	void CreateSceneFog(int width, int height, VkSampleCountFlagBits samples);
-	void CreateSceneNormal(int width, int height, VkSampleCountFlagBits samples);
+	void CreatePipelineDepthStencil(int width, int height, int layers);
+	void CreatePipeline(int width, int height, int layers);
+	void CreateScene(int width, int height, VkSampleCountFlagBits samples, int layers);
+	void CreateSceneColor(int width, int height, VkSampleCountFlagBits samples, int layers);
+	void CreateSceneDepthStencil(int width, int height, VkSampleCountFlagBits samples, int layers);
+	void CreateSceneFog(int width, int height, VkSampleCountFlagBits samples, int layers);
+	void CreateSceneNormal(int width, int height, VkSampleCountFlagBits samples, int layers);
 	VkSampleCountFlagBits GetBestSampleCount();
 
 	VulkanRenderDevice* fb = nullptr;
@@ -59,5 +61,7 @@ private:
 	int mHeight = 0;
 	int mSceneWidth = 0;
 	int mSceneHeight = 0;
+	int mSceneLayers = 1;
+	int mPipelineLayers = 1;
 	VkSampleCountFlagBits mSamples = VK_SAMPLE_COUNT_1_BIT;
 };

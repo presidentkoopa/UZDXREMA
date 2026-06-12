@@ -1187,6 +1187,33 @@ DEFINE_ACTION_FUNCTION(DOptionMenuItemCommandInput, DoCommand)
 	return 0;
 }
 
+DEFINE_ACTION_FUNCTION(DConsoleTextEnterMenu, DoCommand)
+{
+	PARAM_PROLOGUE;
+	PARAM_STRING(cmd);
+	PARAM_BOOL(unsafe);
+	UnsafeExecutionScope scope(unsafe);
+	C_DoCommand(cmd.GetChars());
+	return 0;
+}
+
+DEFINE_ACTION_FUNCTION(DCheatMenu, DoCommand)
+{
+	PARAM_PROLOGUE;
+	PARAM_STRING(cmd);
+	PARAM_BOOL(unsafe);
+
+	// Only menus are allowed to execute CCMDs.
+	if (DMenu::InMenu == 0)
+	{
+		I_FatalError("Attempt to execute CCMD '%s' outside of menu code", cmd.GetChars());
+	}
+
+	UnsafeExecutionScope scope(unsafe);
+	AddCommandString(cmd.GetChars());
+	return 0;
+}
+
 DEFINE_ACTION_FUNCTION(_Console, HideConsole)
 {
 	C_HideConsole();

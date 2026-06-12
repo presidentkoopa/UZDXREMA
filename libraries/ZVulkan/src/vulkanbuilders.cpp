@@ -1424,6 +1424,35 @@ RenderPassBuilder& RenderPassBuilder::AddSubpassDepthStencilAttachmentRef(uint32
 	return *this;
 }
 
+RenderPassBuilder& RenderPassBuilder::Multiview(uint32_t viewMask, uint32_t correlationMask)
+{
+	if (subpasses.empty())
+		return *this;
+
+	subpassViewMasks.resize(subpasses.size(), viewMask);
+	dependencyViewOffsets.resize(dependencies.size(), 0);
+	multiviewInfo.subpassCount = (uint32_t)subpassViewMasks.size();
+	multiviewInfo.pViewMasks = subpassViewMasks.data();
+	multiviewInfo.dependencyCount = (uint32_t)dependencyViewOffsets.size();
+	multiviewInfo.pViewOffsets = dependencyViewOffsets.empty() ? nullptr : dependencyViewOffsets.data();
+
+	if (correlationMask != 0)
+	{
+		correlationMasks = { correlationMask };
+		multiviewInfo.correlationMaskCount = (uint32_t)correlationMasks.size();
+		multiviewInfo.pCorrelationMasks = correlationMasks.data();
+	}
+	else
+	{
+		correlationMasks.clear();
+		multiviewInfo.correlationMaskCount = 0;
+		multiviewInfo.pCorrelationMasks = nullptr;
+	}
+
+	renderPassInfo.pNext = &multiviewInfo;
+	return *this;
+}
+
 std::unique_ptr<VulkanRenderPass> RenderPassBuilder::Create(VulkanDevice* device)
 {
 	VkRenderPass renderPass = 0;
@@ -1814,6 +1843,12 @@ VulkanDeviceBuilder& VulkanDeviceBuilder::SelectDevice(int index)
 	return *this;
 }
 
+VulkanDeviceBuilder& VulkanDeviceBuilder::PreferredPhysicalDevice(VkPhysicalDevice device)
+{
+	preferredPhysicalDevice = device;
+	return *this;
+}
+
 std::vector<VulkanCompatibleDevice> VulkanDeviceBuilder::FindDevices(const std::shared_ptr<VulkanInstance>& instance)
 {
 	std::vector<VulkanCompatibleDevice> supportedDevices;
@@ -1858,6 +1893,9 @@ std::vector<VulkanCompatibleDevice> VulkanDeviceBuilder::FindDevices(const std::
 		enabledFeatures.Features.shaderClipDistance = deviceFeatures.Features.shaderClipDistance;
 		enabledFeatures.Features.multiDrawIndirect = deviceFeatures.Features.multiDrawIndirect;
 		enabledFeatures.Features.independentBlend = deviceFeatures.Features.independentBlend;
+		enabledFeatures.Multiview.multiview = deviceFeatures.Multiview.multiview;
+		enabledFeatures.Multiview.multiviewGeometryShader = deviceFeatures.Multiview.multiviewGeometryShader;
+		enabledFeatures.Multiview.multiviewTessellationShader = deviceFeatures.Multiview.multiviewTessellationShader;
 		enabledFeatures.BufferDeviceAddress.bufferDeviceAddress = deviceFeatures.BufferDeviceAddress.bufferDeviceAddress;
 		enabledFeatures.AccelerationStructure.accelerationStructure = deviceFeatures.AccelerationStructure.accelerationStructure;
 		enabledFeatures.RayQuery.rayQuery = deviceFeatures.RayQuery.rayQuery;
@@ -1940,6 +1978,17 @@ std::shared_ptr<VulkanDevice> VulkanDeviceBuilder::Create(std::shared_ptr<Vulkan
 		VulkanError("No Vulkan device found supports the minimum requirements of this application");
 
 	size_t selected = deviceIndex;
+	if (preferredPhysicalDevice != VK_NULL_HANDLE)
+	{
+		for (size_t i = 0; i < supportedDevices.size(); ++i)
+		{
+			if (supportedDevices[i].Device != nullptr && supportedDevices[i].Device->Device == preferredPhysicalDevice)
+			{
+				selected = i;
+				break;
+			}
+		}
+	}
 	if (selected >= supportedDevices.size())
 		selected = 0;
 	return std::make_shared<VulkanDevice>(instance, surface, supportedDevices[selected]);

@@ -62,10 +62,12 @@
 #include "texturemanager.h"
 #include "i_interface.h"
 #include "v_draw.h"
+#include "hwrenderer\data\hw_vrmodes.h"
 
 
 EXTERN_CVAR(Int, menu_resolution_custom_width)
 EXTERN_CVAR(Int, menu_resolution_custom_height)
+EXTERN_CVAR(Int, vr_mode)
 
 CVAR(Int, win_x, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, win_y, -1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -402,8 +404,16 @@ void V_Init2()
 	Printf ("Resolution: %d x %d\n", SCREENWIDTH, SCREENHEIGHT);
 
 	// init these for the scaling menu
-	menu_resolution_custom_width = SCREENWIDTH;
-	menu_resolution_custom_height = SCREENHEIGHT;
+	if (V_GetBackend() == 1 && vr_mode == VR_OPENXR_MOBILE)
+	{
+		menu_resolution_custom_width = *vid_defwidth;
+		menu_resolution_custom_height = *vid_defheight;
+	}
+	else
+	{
+		menu_resolution_custom_width = SCREENWIDTH;
+		menu_resolution_custom_height = SCREENHEIGHT;
+	}
 
 	screen->SetVSync(vid_vsync);
 	FBaseCVar::ResetColors ();

@@ -31,6 +31,107 @@
 #include "vulkan/system/vk_commandbuffer.h"
 #include "hw_cvars.h"
 
+namespace
+{
+void CreateColorTargetViews(VulkanRenderDevice* fb, VkTextureImage& texture, VkFormat format, const char* viewName, const char* framebufferViewName)
+{
+	const int layers = texture.Image ? texture.Image->layerCount : 1;
+	if (layers > 1)
+	{
+		texture.View = ImageViewBuilder()
+			.Type(VK_IMAGE_VIEW_TYPE_2D)
+			.Image(texture.Image.get(), format, VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 0, 1)
+			.DebugName(viewName)
+			.Create(fb->device.get());
+
+		texture.ArrayView = ImageViewBuilder()
+			.Type(VK_IMAGE_VIEW_TYPE_2D_ARRAY)
+			.Image(texture.Image.get(), format, VK_IMAGE_ASPECT_COLOR_BIT)
+			.DebugName(framebufferViewName)
+			.Create(fb->device.get());
+
+		texture.FramebufferView = ImageViewBuilder()
+			.Type(VK_IMAGE_VIEW_TYPE_2D_ARRAY)
+			.Image(texture.Image.get(), format, VK_IMAGE_ASPECT_COLOR_BIT)
+			.DebugName(framebufferViewName)
+			.Create(fb->device.get());
+
+		texture.LayerViews.resize(layers);
+		for (int layer = 0; layer < layers; ++layer)
+		{
+			texture.LayerViews[layer] = ImageViewBuilder()
+				.Type(VK_IMAGE_VIEW_TYPE_2D)
+				.Image(texture.Image.get(), format, VK_IMAGE_ASPECT_COLOR_BIT, 0, layer, 0, 1)
+				.DebugName(viewName)
+				.Create(fb->device.get());
+		}
+	}
+	else
+	{
+		texture.View = ImageViewBuilder()
+			.Image(texture.Image.get(), format)
+			.DebugName(viewName)
+			.Create(fb->device.get());
+	}
+}
+
+void CreateDepthTargetViews(VulkanRenderDevice* fb, VkTextureImage& texture, VkFormat format, const char* viewName, const char* depthViewName, const char* framebufferViewName)
+{
+	const int layers = texture.Image ? texture.Image->layerCount : 1;
+	texture.AspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+
+	if (layers > 1)
+	{
+		texture.View = ImageViewBuilder()
+			.Type(VK_IMAGE_VIEW_TYPE_2D)
+			.Image(texture.Image.get(), format, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 0, 0, 1)
+			.DebugName(viewName)
+			.Create(fb->device.get());
+
+		texture.FramebufferView = ImageViewBuilder()
+			.Type(VK_IMAGE_VIEW_TYPE_2D_ARRAY)
+			.Image(texture.Image.get(), format, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)
+			.DebugName(framebufferViewName)
+			.Create(fb->device.get());
+
+		texture.DepthOnlyView = ImageViewBuilder()
+			.Type(VK_IMAGE_VIEW_TYPE_2D)
+			.Image(texture.Image.get(), format, VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 0, 1)
+			.DebugName(depthViewName)
+			.Create(fb->device.get());
+
+		texture.LayerViews.resize(layers);
+		texture.LayerDepthOnlyViews.resize(layers);
+		for (int layer = 0; layer < layers; ++layer)
+		{
+			texture.LayerViews[layer] = ImageViewBuilder()
+				.Type(VK_IMAGE_VIEW_TYPE_2D)
+				.Image(texture.Image.get(), format, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, layer, 0, 1)
+				.DebugName(viewName)
+				.Create(fb->device.get());
+
+			texture.LayerDepthOnlyViews[layer] = ImageViewBuilder()
+				.Type(VK_IMAGE_VIEW_TYPE_2D)
+				.Image(texture.Image.get(), format, VK_IMAGE_ASPECT_DEPTH_BIT, 0, layer, 0, 1)
+				.DebugName(depthViewName)
+				.Create(fb->device.get());
+		}
+	}
+	else
+	{
+		texture.View = ImageViewBuilder()
+			.Image(texture.Image.get(), format, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)
+			.DebugName(viewName)
+			.Create(fb->device.get());
+
+		texture.DepthOnlyView = ImageViewBuilder()
+			.Image(texture.Image.get(), format, VK_IMAGE_ASPECT_DEPTH_BIT)
+			.DebugName(depthViewName)
+			.Create(fb->device.get());
+	}
+}
+}
+
 VkRenderBuffers::VkRenderBuffers(VulkanRenderDevice* fb) : fb(fb)
 {
 }
@@ -42,7 +143,15 @@ VkRenderBuffers::~VkRenderBuffers()
 VkSampleCountFlagBits VkRenderBuffers::GetBestSampleCount()
 {
 	const auto &limits = fb->device->PhysicalDevice.Properties.Properties.limits;
-	VkSampleCountFlags deviceSampleCounts = limits.sampledImageColorSampleCounts & limits.sampledImageDepthSampleCounts & limits.sampledImageStencilSampleCounts;
+	// The scene color/depth targets are rendered multisampled and later resolved.
+	// Stencil sampling is not required here, and some runtimes report no sampled
+	// multisample stencil support even though color/depth MSAA is available.
+	VkSampleCountFlags deviceSampleCounts =
+		limits.framebufferColorSampleCounts &
+		limits.framebufferDepthSampleCounts &
+		limits.framebufferStencilSampleCounts &
+		limits.sampledImageColorSampleCounts &
+		limits.sampledImageDepthSampleCounts;
 
 	int requestedSamples = clamp((int)gl_multisample, 0, 64);
 
@@ -61,33 +170,37 @@ VkSampleCountFlagBits VkRenderBuffers::GetBestSampleCount()
 	return (VkSampleCountFlagBits)best;
 }
 
-void VkRenderBuffers::BeginFrame(int width, int height, int sceneWidth, int sceneHeight)
+void VkRenderBuffers::BeginFrame(int width, int height, int sceneWidth, int sceneHeight, int sceneLayers, int pipelineLayers)
 {
 	VkSampleCountFlagBits samples = GetBestSampleCount();
+	const int pipelineWidth = std::max(width, sceneWidth);
+	const int pipelineHeight = std::max(height, sceneHeight);
 
-	if (width != mWidth || height != mHeight || mSamples != samples)
+	if (pipelineWidth != mWidth || pipelineHeight != mHeight || mSamples != samples || mPipelineLayers != pipelineLayers || mSceneLayers != sceneLayers)
 	{
 		fb->GetCommands()->WaitForCommands(false);
 		fb->GetRenderPassManager()->RenderBuffersReset();
 	}
 
-	if (width != mWidth || height != mHeight)
-		CreatePipeline(width, height);
+	if (pipelineWidth != mWidth || pipelineHeight != mHeight || mPipelineLayers != pipelineLayers)
+		CreatePipeline(pipelineWidth, pipelineHeight, pipelineLayers);
 
-	if (width != mWidth || height != mHeight || mSamples != samples)
-		CreateScene(width, height, samples);
+	if (sceneWidth != mSceneWidth || sceneHeight != mSceneHeight || mSamples != samples || mSceneLayers != sceneLayers)
+		CreateScene(sceneWidth, sceneHeight, samples, sceneLayers);
 
-	mWidth = width;
-	mHeight = height;
+	mWidth = pipelineWidth;
+	mHeight = pipelineHeight;
 	mSamples = samples;
 	mSceneWidth = sceneWidth;
 	mSceneHeight = sceneHeight;
+	mSceneLayers = sceneLayers;
+	mPipelineLayers = pipelineLayers;
 }
 
-void VkRenderBuffers::CreatePipelineDepthStencil(int width, int height)
+void VkRenderBuffers::CreatePipelineDepthStencil(int width, int height, int layers)
 {
 	ImageBuilder builder;
-	builder.Size(width, height);
+	builder.Size(width, height, 1, layers);
 	builder.Format(PipelineDepthStencilFormat);
 	builder.Usage(VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 	if (!builder.IsFormatSupported(fb->device.get()))
@@ -102,20 +215,13 @@ void VkRenderBuffers::CreatePipelineDepthStencil(int width, int height)
 	builder.DebugName("VkRenderBuffers.PipelineDepthStencil");
 
 	PipelineDepthStencil.Image = builder.Create(fb->device.get());
-	PipelineDepthStencil.AspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-
-	PipelineDepthStencil.View = ImageViewBuilder()
-		.Image(PipelineDepthStencil.Image.get(), PipelineDepthStencilFormat, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)
-		.DebugName("VkRenderBuffers.PipelineDepthStencilView")
-		.Create(fb->device.get());
-
-	PipelineDepthStencil.DepthOnlyView = ImageViewBuilder()
-		.Image(PipelineDepthStencil.Image.get(), PipelineDepthStencilFormat, VK_IMAGE_ASPECT_DEPTH_BIT)
-		.DebugName("VkRenderBuffers.PipelineDepthView")
-		.Create(fb->device.get());
+	CreateDepthTargetViews(fb, PipelineDepthStencil, PipelineDepthStencilFormat,
+		"VkRenderBuffers.PipelineDepthStencilView",
+		"VkRenderBuffers.PipelineDepthView",
+		"VkRenderBuffers.PipelineDepthStencilFramebufferView");
 }
 
-void VkRenderBuffers::CreatePipeline(int width, int height)
+void VkRenderBuffers::CreatePipeline(int width, int height, int layers)
 {
 	for (int i = 0; i < NumPipelineImages; i++)
 	{
@@ -123,40 +229,39 @@ void VkRenderBuffers::CreatePipeline(int width, int height)
 	}
 	PipelineDepthStencil.Reset(fb);
 
-	CreatePipelineDepthStencil(width, height);
+	CreatePipelineDepthStencil(width, height, layers);
 
 	VkImageTransition barrier;
 	barrier.AddImage(&PipelineDepthStencil, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, true);
 	for (int i = 0; i < NumPipelineImages; i++)
 	{
 		PipelineImage[i].Image = ImageBuilder()
-			.Size(width, height)
+			.Size(width, height, 1, layers)
 			.Format(VK_FORMAT_R16G16B16A16_SFLOAT)
 			.Usage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)
 			.DebugName("VkRenderBuffers.PipelineImage")
 			.Create(fb->device.get());
 
-		PipelineImage[i].View = ImageViewBuilder()
-			.Image(PipelineImage[i].Image.get(), VK_FORMAT_R16G16B16A16_SFLOAT)
-			.DebugName("VkRenderBuffers.PipelineView")
-			.Create(fb->device.get());
+		CreateColorTargetViews(fb, PipelineImage[i], VK_FORMAT_R16G16B16A16_SFLOAT,
+			"VkRenderBuffers.PipelineView",
+			"VkRenderBuffers.PipelineFramebufferView");
 
 		barrier.AddImage(&PipelineImage[i], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, true);
 	}
 	barrier.Execute(fb->GetCommands()->GetDrawCommands());
 }
 
-void VkRenderBuffers::CreateScene(int width, int height, VkSampleCountFlagBits samples)
+void VkRenderBuffers::CreateScene(int width, int height, VkSampleCountFlagBits samples, int layers)
 {
 	SceneColor.Reset(fb);
 	SceneDepthStencil.Reset(fb);
 	SceneNormal.Reset(fb);
 	SceneFog.Reset(fb);
 
-	CreateSceneColor(width, height, samples);
-	CreateSceneDepthStencil(width, height, samples);
-	CreateSceneNormal(width, height, samples);
-	CreateSceneFog(width, height, samples);
+	CreateSceneColor(width, height, samples, layers);
+	CreateSceneDepthStencil(width, height, samples, layers);
+	CreateSceneNormal(width, height, samples, layers);
+	CreateSceneFog(width, height, samples, layers);
 
 	VkImageTransition()
 		.AddImage(&SceneColor, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, true)
@@ -166,26 +271,25 @@ void VkRenderBuffers::CreateScene(int width, int height, VkSampleCountFlagBits s
 		.Execute(fb->GetCommands()->GetDrawCommands());
 }
 
-void VkRenderBuffers::CreateSceneColor(int width, int height, VkSampleCountFlagBits samples)
+void VkRenderBuffers::CreateSceneColor(int width, int height, VkSampleCountFlagBits samples, int layers)
 {
 	SceneColor.Image = ImageBuilder()
-		.Size(width, height)
+		.Size(width, height, 1, layers)
 		.Samples(samples)
 		.Format(VK_FORMAT_R16G16B16A16_SFLOAT)
 		.Usage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
 		.DebugName("VkRenderBuffers.SceneColor")
 		.Create(fb->device.get());
 
-	SceneColor.View = ImageViewBuilder()
-		.Image(SceneColor.Image.get(), VK_FORMAT_R16G16B16A16_SFLOAT)
-		.DebugName("VkRenderBuffers.SceneColorView")
-		.Create(fb->device.get());
+	CreateColorTargetViews(fb, SceneColor, VK_FORMAT_R16G16B16A16_SFLOAT,
+		"VkRenderBuffers.SceneColorView",
+		"VkRenderBuffers.SceneColorFramebufferView");
 }
 
-void VkRenderBuffers::CreateSceneDepthStencil(int width, int height, VkSampleCountFlagBits samples)
+void VkRenderBuffers::CreateSceneDepthStencil(int width, int height, VkSampleCountFlagBits samples, int layers)
 {
 	ImageBuilder builder;
-	builder.Size(width, height);
+	builder.Size(width, height, 1, layers);
 	builder.Samples(samples);
 	builder.Format(SceneDepthStencilFormat);
 	builder.Usage(VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
@@ -201,39 +305,31 @@ void VkRenderBuffers::CreateSceneDepthStencil(int width, int height, VkSampleCou
 	builder.DebugName("VkRenderBuffers.SceneDepthStencil");
 
 	SceneDepthStencil.Image = builder.Create(fb->device.get());
-	SceneDepthStencil.AspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-
-	SceneDepthStencil.View = ImageViewBuilder()
-		.Image(SceneDepthStencil.Image.get(), SceneDepthStencilFormat, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)
-		.DebugName("VkRenderBuffers.SceneDepthStencilView")
-		.Create(fb->device.get());
-
-	SceneDepthStencil.DepthOnlyView = ImageViewBuilder()
-		.Image(SceneDepthStencil.Image.get(), SceneDepthStencilFormat, VK_IMAGE_ASPECT_DEPTH_BIT)
-		.DebugName("VkRenderBuffers.SceneDepthView")
-		.Create(fb->device.get());
+	CreateDepthTargetViews(fb, SceneDepthStencil, SceneDepthStencilFormat,
+		"VkRenderBuffers.SceneDepthStencilView",
+		"VkRenderBuffers.SceneDepthView",
+		"VkRenderBuffers.SceneDepthStencilFramebufferView");
 }
 
-void VkRenderBuffers::CreateSceneFog(int width, int height, VkSampleCountFlagBits samples)
+void VkRenderBuffers::CreateSceneFog(int width, int height, VkSampleCountFlagBits samples, int layers)
 {
 	SceneFog.Image = ImageBuilder()
-		.Size(width, height)
+		.Size(width, height, 1, layers)
 		.Samples(samples)
 		.Format(VK_FORMAT_R8G8B8A8_UNORM)
 		.Usage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)
 		.DebugName("VkRenderBuffers.SceneFog")
 		.Create(fb->device.get());
 
-	SceneFog.View = ImageViewBuilder()
-		.Image(SceneFog.Image.get(), VK_FORMAT_R8G8B8A8_UNORM)
-		.DebugName("VkRenderBuffers.SceneFogView")
-		.Create(fb->device.get());
+	CreateColorTargetViews(fb, SceneFog, VK_FORMAT_R8G8B8A8_UNORM,
+		"VkRenderBuffers.SceneFogView",
+		"VkRenderBuffers.SceneFogFramebufferView");
 }
 
-void VkRenderBuffers::CreateSceneNormal(int width, int height, VkSampleCountFlagBits samples)
+void VkRenderBuffers::CreateSceneNormal(int width, int height, VkSampleCountFlagBits samples, int layers)
 {
 	ImageBuilder builder;
-	builder.Size(width, height);
+	builder.Size(width, height, 1, layers);
 	builder.Samples(samples);
 	builder.Format(SceneNormalFormat);
 	builder.Usage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
@@ -246,10 +342,9 @@ void VkRenderBuffers::CreateSceneNormal(int width, int height, VkSampleCountFlag
 
 	SceneNormal.Image = builder.Create(fb->device.get());
 
-	SceneNormal.View = ImageViewBuilder()
-		.Image(SceneNormal.Image.get(), SceneNormalFormat)
-		.DebugName("VkRenderBuffers.SceneNormalView")
-		.Create(fb->device.get());
+	CreateColorTargetViews(fb, SceneNormal, SceneNormalFormat,
+		"VkRenderBuffers.SceneNormalView",
+		"VkRenderBuffers.SceneNormalFramebufferView");
 }
 
 VulkanFramebuffer* VkRenderBuffers::GetOutput(VkPPRenderPassSetup* passSetup, const PPOutput& output, WhichDepthStencil stencilTest, int& framebufferWidth, int& framebufferHeight)
@@ -261,6 +356,8 @@ VulkanFramebuffer* VkRenderBuffers::GetOutput(VkPPRenderPassSetup* passSetup, co
 	int w, h;
 	if (tex)
 	{
+		const bool useLayerView = fb->ShouldUseCurrentEyeLayer(output.Type, tex);
+		const int layerIndex = useLayerView ? fb->GetCurrentEyeLayer() : -1;
 		VkImageTransition imageTransition;
 		imageTransition.AddImage(tex, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, output.Type == PPTextureType::NextPipelineTexture);
 		if (stencilTest == WhichDepthStencil::Scene)
@@ -271,10 +368,13 @@ VulkanFramebuffer* VkRenderBuffers::GetOutput(VkPPRenderPassSetup* passSetup, co
 
 		imageTransition.Execute(fb->GetCommands()->GetDrawCommands());
 
-		view = tex->View->view;
+		view = useLayerView ? tex->GetLayerView(layerIndex)->view : tex->GetFramebufferView()->view;
 		w = tex->Image->width;
 		h = tex->Image->height;
-		framebufferptr = &tex->PPFramebuffer;
+		VkTextureImage::VkPPOutputFramebufferKey framebufferKey = {};
+		framebufferKey.LayerIndex = layerIndex;
+		framebufferKey.DepthStencilMode = (int)stencilTest;
+		framebufferptr = &tex->PPOutputFramebuffers[framebufferKey];
 	}
 	else
 	{
@@ -292,9 +392,9 @@ VulkanFramebuffer* VkRenderBuffers::GetOutput(VkPPRenderPassSetup* passSetup, co
 		builder.Size(w, h);
 		builder.AddAttachment(view);
 		if (stencilTest == WhichDepthStencil::Scene)
-			builder.AddAttachment(fb->GetBuffers()->SceneDepthStencil.View.get());
+			builder.AddAttachment(fb->GetBuffers()->GetSceneLayers() > 1 ? fb->GetBuffers()->SceneDepthStencil.GetLayerView(fb->GetCurrentEyeLayer()) : fb->GetBuffers()->SceneDepthStencil.GetFramebufferView());
 		if (stencilTest == WhichDepthStencil::Pipeline)
-			builder.AddAttachment(fb->GetBuffers()->PipelineDepthStencil.View.get());
+			builder.AddAttachment(fb->GetBuffers()->GetPipelineLayers() > 1 ? fb->GetBuffers()->PipelineDepthStencil.GetLayerView(fb->GetCurrentEyeLayer()) : fb->GetBuffers()->PipelineDepthStencil.GetFramebufferView());
 		builder.DebugName("PPOutputFB");
 		framebuffer = builder.Create(fb->device.get());
 	}

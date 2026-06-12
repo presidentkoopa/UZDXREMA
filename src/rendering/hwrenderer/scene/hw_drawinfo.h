@@ -150,7 +150,11 @@ struct HWDrawInfo
 	Clipper *rClipper; // Radar clipper
 	FRenderViewpoint Viewpoint;
 	HWViewpointUniforms VPUniforms;	// per-viewpoint uniform state
+	HWViewpointUniforms MultiviewVPUniforms[2];
+	bool HasMultiviewViewpoints = false;
 	VSMatrix ProjectionMatrix2;
+	VSMatrix MultiviewProjectionMatrix2[2];
+	bool HasMultiviewProjectionMatrix2 = false;
 	TArray<HWPortal *> Portals;
 	TArray<HWDecal *> Decals[2];	// the second slot is for mirrors which get rendered in a separate pass.
 	TArray<HUDSprite> hudsprites;	// These may just be stored by value.
@@ -184,6 +188,7 @@ struct HWDrawInfo
 	area_t	in_area;
 	fixed_t viewx, viewy;	// since the nodes are still fixed point, keeping the view position  also fixed point for node traversal is faster.
 	bool multithread;
+	bool IsVRScene = false;
 
 private:
     // For ProcessLowerMiniseg
@@ -204,6 +209,7 @@ private:
 	void AddPolyobjs(subsector_t *sub);
 	void AddLines(subsector_t * sub, sector_t * sector);
 	void AddSpecialPortalLines(subsector_t * sub, sector_t * sector, linebase_t *line);
+	void ProcessVisibleSubsector(subsector_t* sub, sector_t* sector, sector_t* fakesector);
 	public:
 	void RenderThings(subsector_t * sub, sector_t * sector);
 	void RenderParticles(subsector_t *sub, sector_t *front);
@@ -252,6 +258,10 @@ public:
 	void DrawScene(int drawmode);
 	void CreateScene(bool drawpsprites);
 	void RenderScene(FRenderState &state);
+	void ApplyViewpoint(FRenderState &state);
+	void ApplyMultiviewViewpoints(FRenderState &state, const HWViewpointUniforms *viewpoints, int count = 2);
+	void TranslateViewpointMatrices(double x, double y, double z);
+	void InheritMultiviewState(const HWDrawInfo& other);
 	void RenderTranslucent(FRenderState &state);
 	void RenderPortal(HWPortal *p, FRenderState &state, bool usestencil);
 	void EndDrawScene(sector_t * viewsector, FRenderState &state);
@@ -300,7 +310,7 @@ public:
 
 	void UpdateCurrentMapSection();
 	void SetViewMatrix(const FRotator &angles, float vx, float vy, float vz, bool mirror, bool planemirror);
-	void SetupView(FRenderState &state, float vx, float vy, float vz, bool mirror, bool planemirror);
+	void SetupView(FRenderState &state, float vx, float vy, float vz, bool mirror, bool planemirror, bool upload = true);
 	angle_t FrustumAngle();
 
 	void DrawDecals(FRenderState &state, TArray<HWDecal *> &decals);

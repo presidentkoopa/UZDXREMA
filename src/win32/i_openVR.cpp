@@ -1,10 +1,13 @@
 #include <Windows.h>
+#include "c_cvars.h"
 #include "d_event.h"
 #include "i_input.h"
 #include "openvr_include.h"
 #include "menu.h"
 
 using namespace openvr;
+
+EXTERN_CVAR(Bool, vr_secondary_button_mappings);
 
 namespace s3d
 {
@@ -90,6 +93,14 @@ public:
 		//joysticks should be disabled while menu is shown, otherwise player moves while scrolling menu
 		if (CurrentMenu == nullptr)
 		{
+			constexpr uint64_t kOpenVRGripButtonMask = (1ULL << 2);
+			const bool dominantGripModifier = vr_secondary_button_mappings &&
+				((onState.ulButtonPressed & kOpenVRGripButtonMask) != 0);
+			if (dominantGripModifier && Hands[i] == OFF && Sources[i] == STICK)
+			{
+				return 0.0f;
+			}
+
 			VRControllerState_t& state = Hands[i] == ON ? onState : offState;
 			int axis = Sources[i] == PAD ? s3d::OpenVR_GetTouchPadAxis() : s3d::OpenVR_GetJoystickAxis();
 			if (axis != -1)
@@ -106,18 +117,10 @@ public:
 
 	void AddAxes(float axes[NUM_JOYAXIS])
 	{
-		VRControllerState_t& onState = s3d::OpenVR_GetState(1);
-		VRControllerState_t& offState = s3d::OpenVR_GetState(0);
-
-		for (int i = 0; i < NUM_AXES; i++)
-		{
-			//JOYAXIS_Yaw needs special handling - must accumulate per render frame, not logical frame
-			if (Axes[i].GameAxis == JOYAXIS_None || Axes[i].GameAxis == JOYAXIS_Yaw)
-			{
-				continue;
-			}
-			axes[Axes[i].GameAxis] += GetAxisValue(i, offState, onState);
-		}
+		// OpenVR gameplay should be driven by the VR backend's explicit movement, turn, and
+		// stick-to-button paths rather than the engine's generic joystick gameplay axes. Leaving
+		// this enabled causes backend-specific hidden actions to leak through and bypass binds
+		(void)axes;
 	}
 	
 	float GetYaw()

@@ -161,8 +161,21 @@ static const char *shaderBindings = R"(
 	layout(set = 0, binding = 2) uniform accelerationStructureEXT TopLevelAS;
 	#endif
 
+	#ifdef SUPPORTS_MULTIVIEW
+	#ifdef VERTEX_SHADER
+	layout(location = 15) flat out int hwViewIndex;
+	#define HW_VIEWPOINT_INDEX gl_ViewIndex
+	#else
+	layout(location = 15) flat in int hwViewIndex;
+	#define HW_VIEWPOINT_INDEX hwViewIndex
+	#endif
+	#else
+	#define HW_VIEWPOINT_INDEX 0
+	#endif
+
 	// This must match the HWViewpointUniforms struct
-	layout(set = 1, binding = 0, std140) uniform ViewpointUBO {
+	struct ViewpointData
+	{
 		mat4 ProjectionMatrix;
 		mat4 ViewMatrix;
 		mat4 NormalViewMatrix;
@@ -179,6 +192,23 @@ static const char *shaderBindings = R"(
 		
 		int uLightBlendMode;
 	};
+
+	layout(set = 1, binding = 0, std140) uniform ViewpointUBO {
+		ViewpointData viewpoints[2];
+	};
+
+	#define ProjectionMatrix viewpoints[HW_VIEWPOINT_INDEX].ProjectionMatrix
+	#define ViewMatrix viewpoints[HW_VIEWPOINT_INDEX].ViewMatrix
+	#define NormalViewMatrix viewpoints[HW_VIEWPOINT_INDEX].NormalViewMatrix
+	#define uCameraPos viewpoints[HW_VIEWPOINT_INDEX].uCameraPos
+	#define uClipLine viewpoints[HW_VIEWPOINT_INDEX].uClipLine
+	#define uGlobVis viewpoints[HW_VIEWPOINT_INDEX].uGlobVis
+	#define uPalLightLevels viewpoints[HW_VIEWPOINT_INDEX].uPalLightLevels
+	#define uViewHeight viewpoints[HW_VIEWPOINT_INDEX].uViewHeight
+	#define uClipHeight viewpoints[HW_VIEWPOINT_INDEX].uClipHeight
+	#define uClipHeightDirection viewpoints[HW_VIEWPOINT_INDEX].uClipHeightDirection
+	#define uShadowmapFilter viewpoints[HW_VIEWPOINT_INDEX].uShadowmapFilter
+	#define uLightBlendMode viewpoints[HW_VIEWPOINT_INDEX].uLightBlendMode
 
 	layout(set = 1, binding = 1, std140) uniform MatricesUBO {
 		mat4 ModelMatrix;
@@ -359,6 +389,7 @@ static const char *shaderBindings = R"(
 std::unique_ptr<VulkanShader> VkShaderManager::LoadVertShader(FString shadername, const char *vert_lump, const char *defines)
 {
 	FString code = GetTargetGlslVersion();
+	code << "#define VERTEX_SHADER\n";
 	code << defines;
 	code << "\n#define MAX_STREAM_DATA " << std::to_string(MAX_STREAM_DATA).c_str() << "\n";
 #ifdef NPOT_EMULATION
@@ -381,6 +412,7 @@ std::unique_ptr<VulkanShader> VkShaderManager::LoadFragShader(FString shadername
 	FString code = GetTargetGlslVersion();
 	if (fb->RaytracingEnabled())
 		code << "\n#define SUPPORTS_RAYTRACING\n";
+	code << "#define FRAGMENT_SHADER\n";
 	code << defines;
 	code << "\n$placeholder$";	// here the code can later add more needed #defines.
 	code << "\n#define MAX_STREAM_DATA " << std::to_string(MAX_STREAM_DATA).c_str() << "\n";
@@ -471,14 +503,22 @@ std::unique_ptr<VulkanShader> VkShaderManager::LoadFragShader(FString shadername
 
 FString VkShaderManager::GetTargetGlslVersion()
 {
+	FString version;
 	if (fb->device->Instance->ApiVersion == VK_API_VERSION_1_2)
 	{
-		return "#version 460\n#extension GL_EXT_ray_query : enable\n";
+		version = "#version 460\n#extension GL_EXT_ray_query : enable\n";
 	}
 	else
 	{
-		return "#version 450 core\n";
+		version = "#version 450 core\n";
 	}
+
+	if (fb->device->EnabledFeatures.Multiview.multiview)
+	{
+		version << "#extension GL_EXT_multiview : require\n#define SUPPORTS_MULTIVIEW\n";
+	}
+
+	return version;
 }
 
 FString VkShaderManager::LoadPublicShaderLump(const char *lumpname)

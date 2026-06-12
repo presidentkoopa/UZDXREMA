@@ -751,7 +751,7 @@ void FXInputManager::ProcessInput()
 {
 	for (int i = 0; i < XUSER_MAX_COUNT; ++i)
 	{
-		if(AppActive || Devices[i]->GetEnabledInBackground())
+		if(I_AllowBackgroundGameInput() || Devices[i]->GetEnabledInBackground())
 		{
 			Devices[i]->ProcessInput();
 		}

@@ -997,7 +997,7 @@ bool DIntermissionController::Responder (FInputEvent *ev)
 
 			if (cmd != nullptr)
 			{
-				if (!stricmp(cmd, "toggleconsole") || !stricmp(cmd, "screenshot"))
+				if (!stricmp(cmd, "toggleconsole") || !stricmp(cmd, "togglecheatmenu") || !stricmp(cmd, "screenshot"))
 				{
 					return false;
 				}

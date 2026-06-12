@@ -158,3 +158,4 @@ CUSTOM_CVAR (Int, gl_storage_buffer_type, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | 
 CVARD(Bool, gl_no_persistent_buffer, false, 0, "Disable persistent buffer storage support")
 CVARD(Bool, gl_no_clip_planes, false, 0, "Disable clip planes support")
 CVARD(Bool, gl_no_ssbo, false, 0, "Disable SSBO support")
+CVARD(Bool, vr_scene_multithread, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "Allow VR BSP scene-build jobs on a worker thread")

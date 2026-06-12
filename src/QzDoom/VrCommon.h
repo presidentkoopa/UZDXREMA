@@ -29,6 +29,7 @@ extern float cinemamodeYaw;
 extern float cinemamodePitch;
 
 extern float playerYaw;
+extern bool vrApplyingHmdYaw;
 extern bool resetDoomYaw;
 extern float doomYaw;
 extern bool resetPreviousPitch;
@@ -45,8 +46,13 @@ extern bool player_moving;
 extern bool ready_teleport;
 extern bool trigger_teleport;
 
+// Shared smooth-turn helper used by OpenVR/OpenXR.
+float VR_GetAnalogTurnResponseScale(float smoothTurnSetting);
+float VR_ApplyAnalogSmoothTurn(float turnAxis, float maxTurnRateDegPerSec, float deltaSeconds, float responseScale, float& currentTurnRateDegPerSec);
+
 //Called from engine code
 void QzDoom_setUseScreenLayer(bool use);
+bool VR_UseScreenLayer();
 void QzDoom_Restart();
 
 
