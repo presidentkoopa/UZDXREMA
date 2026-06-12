@@ -129,6 +129,24 @@ VkTextureImage* VkTextureManager::GetTexture(const PPTextureType& type, PPTextur
 	}
 }
 
+VulkanImageView* VkTextureManager::GetTextureView(const PPTextureType& type, PPTexture* pptexture, bool depthOnly)
+{
+	VkTextureImage* tex = GetTexture(type, pptexture);
+	if (!tex)
+		return nullptr;
+
+	if (fb->ShouldUseCurrentEyeLayer(type, tex))
+	{
+		const int layerIndex = fb->GetCurrentEyeLayer();
+		return depthOnly ? tex->GetLayerDepthOnlyView(layerIndex) : tex->GetLayerView(layerIndex);
+	}
+
+	if (depthOnly && tex->DepthOnlyView)
+		return tex->DepthOnlyView.get();
+
+	return tex->View.get();
+}
+
 VkFormat VkTextureManager::GetTextureFormat(PPTexture* texture)
 {
 	return GetVkTexture(texture)->Format;

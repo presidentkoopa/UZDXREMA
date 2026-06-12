@@ -3023,14 +3023,28 @@ OptionMenu VROptionsMenu protected
 	Submenu "$VRWHEELMNU_TITLE",  "VRWeaponWheelOptions"
 	StaticText ""
 	StaticText "$VRPREFMNU_MISC", gold
+	ifOption(OpenXR)
+	{
+		Option "$VRPREFMNU_DESKTOP_RENDER",    "vr_desktop_view_openxr_render", "YesNo"
+	}
 	ifOption(OpenVR, OpenXR)
 	{
 		Option "$VRPREFMNU_DESKTOP",    "vr_desktop_view", "DesktopViewModes"
 	}
 	Slider "$VRPREFMNU_WORLDSCALE",     "vr_vunits_per_meter", 1, 60, 1, 0
 	Slider "$VRPREFMNU_HEIGHT_ADJUST",		        "vr_height_adjust", -0.5, 1.0, 0.01, 2
+	ifOption(OpenVR, OpenXR)
+	{
+		StaticText ""
+		StaticText "$VRPREFMNU_PERFORMANCE", gold
+		Option "$VRPREFMNU_SCENE_MULTITHREAD", "vr_scene_multithread", "OnOff"
+		StaticText "$VRPREFMNU_SCENE_MULTITHREAD_HELP", "Brown"
+	}
 	ifOption(OpenXR)
 	{
+		Option "$VRPREFMNU_MULTIVIEW", "vr_openxr_multiview", "OnOff"
+		StaticText "$VRPREFMNU_MULTIVIEW_HELP", "Brown"
+		
 		StaticText ""
 		StaticText "$VRPREFMNU_DISPLAY_ADJUST", gold
 		Slider "$VRPREFMNU_ADJUST_GAMMA",     		"vr_openxr_present_gamma_bias", -2, 2, 0.01, 2
@@ -3039,7 +3053,7 @@ OptionMenu VROptionsMenu protected
 		Slider "$VRPREFMNU_ADJUST_SATURATION",     "vr_openxr_present_saturation_bias", -2, 2, 0.01, 2
 	}
 	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_desktop_view vr_vunits_per_meter vr_height_adjust vr_openxr_present_gamma_bias vr_openxr_present_contrast_bias vr_openxr_present_brightness_bias vr_openxr_present_saturation_bias"
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_desktop_view vr_vunits_per_meter vr_height_adjust vr_scene_multithread vr_openxr_multiview vr_openxr_present_gamma_bias vr_openxr_present_contrast_bias vr_openxr_present_brightness_bias vr_openxr_present_saturation_bias"
 	StaticText ""
 	StaticText "$VRPREFMNU_VR_CONTROLS", gold
 	ifOption(OpenVR, OpenXR)
@@ -3663,6 +3677,19 @@ OptionMenu QuickMenu protected
 	Option "$GLPREFMNU_CUSTOMPOST", gl_custompost, "OnOff"
 	StaticText "This option on can prevent some mods from running.", "Brown"
 	StaticText "Recommended to keep it on.", "Brown"
+
+	ifOption(OpenVR, OpenXR)
+	{
+		StaticText " "
+		Option "$VRPREFMNU_SCENE_MULTITHREAD", "vr_scene_multithread", "OnOff"
+		StaticText "$VRPREFMNU_SCENE_MULTITHREAD_QUICKHELP", "Brown"
+	}
+	ifOption(OpenXR)
+	{
+		StaticText " "
+		Option "$VRPREFMNU_MULTIVIEW", "vr_openxr_multiview", "OnOff"
+		StaticText "$VRPREFMNU_MULTIVIEW_QUICKHELP", "Brown"
+	}
 }
 
 /*=======================================
@@ -3827,6 +3854,11 @@ OptionMenu "vkoptions"
 	StaticText ""
 	TextField "$VKMNU_DEVICE",			vk_device
 	Option "$VKMNU_HDR",				"vk_hdr", "OnOff"
+	ifOption(OpenXR)
+	{
+		Option "$VRPREFMNU_MULTIVIEW",			"vr_openxr_multiview", "OnOff"
+		StaticText "$VRPREFMNU_MULTIVIEW_HELP", "Brown"
+	}
 }
 
 OptionValue "SpriteShadowModes"

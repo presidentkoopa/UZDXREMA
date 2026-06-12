@@ -152,6 +152,8 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 	rClipper->amRadar = true;
 
 	Viewpoint = parentvp;
+	auto vrmode = VRMode::GetVRModeCached(true);
+	IsVRScene = vrmode != nullptr && vrmode->IsVR();
 	if (Level != nullptr)
 		lightmode = getRealLightmode(Level, true);
 	if (uniforms)
@@ -192,6 +194,8 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 	hudsprites.Clear();
 //	Coronas.Clear();
 	vpIndex = 0;
+	HasMultiviewViewpoints = false;
+	HasMultiviewProjectionMatrix2 = false;
 
 	// Fullbright information needs to be propagated from the main view.
 	if (outer != nullptr) FullbrightFlags = outer->FullbrightFlags;
@@ -437,14 +441,109 @@ void HWDrawInfo::SetViewMatrix(const FRotator &angles, float vx, float vy, float
 // Setup the view rotation matrix for the given viewpoint
 //
 //-----------------------------------------------------------------------------
-void HWDrawInfo::SetupView(FRenderState &state, float vx, float vy, float vz, bool mirror, bool planemirror)
+void HWDrawInfo::SetupView(FRenderState &state, float vx, float vy, float vz, bool mirror, bool planemirror, bool upload)
 {
 	auto &vp = Viewpoint;
 	vp.SetViewAngle(r_viewwindow);
+	HWViewpointUniforms previousLeft = VPUniforms;
+	const HWViewpointUniforms previousRight = MultiviewVPUniforms[1];
 	SetViewMatrix(vp.HWAngles, vx, vy, vz, mirror, planemirror);
-	SetCameraPos(vp.Pos);
+	SetCameraPos({ vx, vy, vz });
 	VPUniforms.CalcDependencies();
-	vpIndex = screen->mViewpoints->SetViewpoint(state, &VPUniforms);
+	if (HasMultiviewViewpoints)
+	{
+		HWViewpointUniforms nextRight = VPUniforms;
+		nextRight.mProjectionMatrix = previousRight.mProjectionMatrix;
+
+		VSMatrix inverseLeft;
+		if (previousLeft.mViewMatrix.inverseMatrix(inverseLeft))
+		{
+			VSMatrix viewDelta = inverseLeft;
+			viewDelta.multMatrix(VPUniforms.mViewMatrix);
+			nextRight.mViewMatrix = previousRight.mViewMatrix;
+			nextRight.mViewMatrix.multMatrix(viewDelta);
+		}
+		else
+		{
+			nextRight.mViewMatrix = previousRight.mViewMatrix;
+		}
+
+		const FVector4 cameraDelta = VPUniforms.mCameraPos - previousLeft.mCameraPos;
+		nextRight.mCameraPos = previousRight.mCameraPos + cameraDelta;
+		nextRight.CalcDependencies();
+
+		MultiviewVPUniforms[0] = VPUniforms;
+		MultiviewVPUniforms[1] = nextRight;
+	}
+	if (upload)
+		ApplyViewpoint(state);
+}
+
+void HWDrawInfo::ApplyViewpoint(FRenderState &state)
+{
+	if (HasMultiviewViewpoints)
+	{
+		MultiviewVPUniforms[0] = VPUniforms;
+		MultiviewVPUniforms[0].CalcDependencies();
+		MultiviewVPUniforms[1].CalcDependencies();
+		vpIndex = screen->mViewpoints->SetViewpoints(state, MultiviewVPUniforms, 2);
+	}
+	else
+	{
+		VPUniforms.CalcDependencies();
+		vpIndex = screen->mViewpoints->SetViewpoint(state, &VPUniforms);
+	}
+}
+
+void HWDrawInfo::ApplyMultiviewViewpoints(FRenderState &state, const HWViewpointUniforms *viewpoints, int count)
+{
+	if (viewpoints == nullptr || count <= 0)
+		return;
+
+	VPUniforms = viewpoints[0];
+	HasMultiviewViewpoints = count >= 2;
+	if (HasMultiviewViewpoints)
+	{
+		MultiviewVPUniforms[0] = viewpoints[0];
+		MultiviewVPUniforms[1] = viewpoints[1];
+		MultiviewVPUniforms[0].CalcDependencies();
+		MultiviewVPUniforms[1].CalcDependencies();
+		vpIndex = screen->mViewpoints->SetViewpoints(state, MultiviewVPUniforms, 2);
+	}
+	else
+	{
+		VPUniforms.CalcDependencies();
+		vpIndex = screen->mViewpoints->SetViewpoint(state, &VPUniforms);
+	}
+}
+
+void HWDrawInfo::TranslateViewpointMatrices(double x, double y, double z)
+{
+	VPUniforms.mViewMatrix.translate(x, y, z);
+	if (HasMultiviewViewpoints)
+	{
+		MultiviewVPUniforms[0].mViewMatrix.translate(x, y, z);
+		MultiviewVPUniforms[1].mViewMatrix.translate(x, y, z);
+		VPUniforms = MultiviewVPUniforms[0];
+	}
+}
+
+void HWDrawInfo::InheritMultiviewState(const HWDrawInfo& other)
+{
+	HasMultiviewViewpoints = other.HasMultiviewViewpoints;
+	if (HasMultiviewViewpoints)
+	{
+		MultiviewVPUniforms[0] = other.MultiviewVPUniforms[0];
+		MultiviewVPUniforms[1] = other.MultiviewVPUniforms[1];
+		VPUniforms = MultiviewVPUniforms[0];
+	}
+
+	HasMultiviewProjectionMatrix2 = other.HasMultiviewProjectionMatrix2;
+	if (HasMultiviewProjectionMatrix2)
+	{
+		MultiviewProjectionMatrix2[0] = other.MultiviewProjectionMatrix2[0];
+		MultiviewProjectionMatrix2[1] = other.MultiviewProjectionMatrix2[1];
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -500,6 +599,7 @@ void HWDrawInfo::CreateScene(bool drawpsprites)
 	// reset the portal manager
 	portalState.StartFrame();
 
+	if (IsVRScene) VRSceneBuild.Clock();
 	ProcessAll.Clock();
 
 	// clip the scene and fill the drawlists
@@ -512,14 +612,17 @@ void HWDrawInfo::CreateScene(bool drawpsprites)
 	// These cannot be multithreaded when the time comes because all these depend
 	// on the global 'validcount' variable.
 
+	if (IsVRScene) VRScenePostBSP.Clock();
 	HandleMissingTextures(in_area);	// Missing upper/lower textures
 	HandleHackedSubsectors();	// open sector hacks for deep water
 	PrepareUnhandledMissingTextures();
 	DispatchRenderHacks();
+	if (IsVRScene) VRScenePostBSP.Unclock();
 	screen->mLights->Unmap();
 	screen->mVertexData->Unmap();
 
 	ProcessAll.Unclock();
+	if (IsVRScene) VRSceneBuild.Unclock();
 
 }
 
@@ -534,6 +637,7 @@ void HWDrawInfo::CreateScene(bool drawpsprites)
 void HWDrawInfo::RenderScene(FRenderState &state)
 {
 	const auto &vp = Viewpoint;
+	if (IsVRScene) VRSceneDraw.Clock();
 	RenderAll.Clock();
 
 	state.SetDepthMask(true);
@@ -583,6 +687,7 @@ void HWDrawInfo::RenderScene(FRenderState &state)
 	DrawDecals(state, Decals[0]);
 
 	RenderAll.Unclock();
+	if (IsVRScene) VRSceneDraw.Unclock();
 }
 
 //-----------------------------------------------------------------------------
@@ -593,6 +698,7 @@ void HWDrawInfo::RenderScene(FRenderState &state)
 
 void HWDrawInfo::RenderTranslucent(FRenderState &state)
 {
+	if (IsVRScene) VRSceneDraw.Clock();
 	RenderAll.Clock();
 
 	// final pass: translucent stuff
@@ -611,6 +717,7 @@ void HWDrawInfo::RenderTranslucent(FRenderState &state)
 	state.SetDepthMask(true);
 
 	RenderAll.Unclock();
+	if (IsVRScene) VRSceneDraw.Unclock();
 }
 
 
@@ -626,6 +733,8 @@ void HWDrawInfo::RenderPortal(HWPortal *p, FRenderState &state, bool usestencil)
 	auto gp = static_cast<HWPortal *>(p);
 	gp->SetupStencil(this, state, usestencil);
 	auto new_di = StartDrawInfo(this->Level, this, Viewpoint, &VPUniforms);
+	new_di->InheritMultiviewState(*this);
+	new_di->ProjectionMatrix2 = ProjectionMatrix2;
 	new_di->mCurrentPortal = gp;
 	state.SetLightIndex(-1);
 	gp->DrawContents(new_di, state);

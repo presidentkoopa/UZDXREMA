@@ -54,7 +54,7 @@ void VkPPRenderState::Draw()
 {
 	fb->GetRenderState()->EndRenderPass();
 
-	VkPPRenderPassKey key;
+	VkPPRenderPassKey key = {};
 	key.BlendMode = BlendMode;
 	key.InputTextures = Textures.Size();
 	key.Uniforms = Uniforms.Data.Size();
@@ -80,6 +80,8 @@ void VkPPRenderState::Draw()
 		key.StencilTest = WhichDepthStencil::None;
 		key.Samples = VK_SAMPLE_COUNT_1_BIT;
 	}
+	key.Layers = 1;
+	key.ViewMask = 0;
 
 	auto passSetup = fb->GetRenderPassManager()->GetPPRenderPass(key);
 
@@ -101,7 +103,7 @@ void VkPPRenderState::DrawToImage(VkTextureImage *image, VkFormat outputFormat, 
 {
 	fb->GetRenderState()->EndRenderPass();
 
-	VkPPRenderPassKey key;
+	VkPPRenderPassKey key = {};
 	key.BlendMode = BlendMode;
 	key.InputTextures = Textures.Size();
 	key.Uniforms = Uniforms.Data.Size();
@@ -111,6 +113,8 @@ void VkPPRenderState::DrawToImage(VkTextureImage *image, VkFormat outputFormat, 
 	key.OutputFormat = outputFormat;
 	key.StencilTest = WhichDepthStencil::None;
 	key.Samples = VK_SAMPLE_COUNT_1_BIT;
+	key.Layers = 1;
+	key.ViewMask = 0;
 
 	auto passSetup = fb->GetRenderPassManager()->GetPPRenderPass(key);
 
@@ -122,13 +126,20 @@ void VkPPRenderState::DrawToImage(VkTextureImage *image, VkFormat outputFormat, 
 		.AddImage(image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, false)
 		.Execute(cmdbuffer);
 
-	auto &framebuffer = image->PPFramebuffer;
+	const bool useLayerView = image->Image != nullptr && image->Image->layerCount > 1;
+	const int layerIndex = useLayerView ? fb->GetCurrentEyeLayer() : -1;
+	const VulkanImageView* outputView = useLayerView ? image->GetLayerView(layerIndex) : image->GetFramebufferView();
+
+	VkTextureImage::VkPPOutputFramebufferKey framebufferKey = {};
+	framebufferKey.LayerIndex = layerIndex;
+	framebufferKey.DepthStencilMode = 0;
+	auto &framebuffer = image->PPOutputFramebuffers[framebufferKey];
 	if (!framebuffer)
 	{
 		FramebufferBuilder builder;
 		builder.RenderPass(passSetup->RenderPass.get());
 		builder.Size(framebufferWidth, framebufferHeight);
-		builder.AddAttachment(image->View.get());
+		builder.AddAttachment(const_cast<VulkanImageView*>(outputView));
 		builder.DebugName("VkPPRenderPassSetup.CustomFramebuffer");
 		framebuffer = builder.Create(fb->device.get());
 	}

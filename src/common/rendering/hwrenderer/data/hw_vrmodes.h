@@ -35,6 +35,7 @@ enum
 };
 
 struct HWDrawInfo;
+struct HWViewpointUniforms;
 
 struct VRHudSurface
 {
@@ -75,6 +76,7 @@ struct VREyeInfo
 	virtual DAngle GetRenderFov(DAngle fallback) const;
 	virtual VSMatrix GetHUDProjection() const;
 	virtual DVector3 GetViewShift(FRenderViewpoint& vp) const;
+	virtual void AdjustViewpointUniforms(HWViewpointUniforms& uniforms) const {}
 	virtual void SetUp() const { m_isActive = true; }
 	virtual void TearDown() const { m_isActive = false; }
 	virtual void AdjustHud() const {}
@@ -113,6 +115,10 @@ struct VRMode
 	virtual bool IsVR() const { return false; }
 	virtual bool GetRecommendedRenderSize(int& outWidth, int& outHeight) const { outWidth = 0; outHeight = 0; return false; }
 	virtual bool ShouldUseRecommendedRenderSizeThisFrame() const { return false; }
+	virtual bool SupportsMultiview() const { return false; }
+	virtual bool ShouldUseMultiviewThisFrame() const { return false; }
+	virtual int GetMultiviewLayerCount() const { return 1; }
+	virtual uint32_t GetMultiviewViewMask() const { return 0; }
 	virtual bool ShouldUseScreenLayerForCurrentFrame() const { return false; }
 	virtual void AdjustPlayerSprites(FRenderState &state, int hand = 0) const {};
 	virtual void UnAdjustPlayerSprites(FRenderState &state) const {};
@@ -131,6 +137,7 @@ struct VRMode
 	virtual void Present() const;
 	virtual void PollXREvents() const {}
 	virtual bool BeginXRFrame() const { return true; }
+	virtual void ApplyRefreshRate() const {}
 	virtual bool AcquireXRSwapchain() const { return true; }
 	virtual bool SubmitFrame() const { return true; }
 

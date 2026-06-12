@@ -30,6 +30,7 @@
 #include "hw_renderstate.h"
 #include "hw_viewpointbuffer.h"
 #include "hw_cvars.h"
+#include "hw_vrmodes.h"
 
 static const int INITIAL_BUFFER_SIZE = 100;	// 100 viewpoints per frame should nearly always be enough
 
@@ -37,7 +38,8 @@ HWViewpointBuffer::HWViewpointBuffer(int pipelineNbr):
 	mPipelineNbr(pipelineNbr)
 {
 	mBufferSize = INITIAL_BUFFER_SIZE;
-	mBlockAlign = ((sizeof(HWViewpointUniforms) / screen->uniformblockalignment) + 1) * screen->uniformblockalignment;
+	mBlockAlign = ((sizeof(HWViewpointUniforms) + screen->uniformblockalignment - 1) / screen->uniformblockalignment) * screen->uniformblockalignment;
+	mBlockSize = mBlockAlign;
 	mByteSize = mBufferSize * mBlockAlign;
 
 	for (int n = 0; n < mPipelineNbr; n++)
@@ -108,13 +110,36 @@ void HWViewpointBuffer::Set2D(FRenderState &di, int width, int height, int pll)
 
 int HWViewpointBuffer::SetViewpoint(FRenderState &di, HWViewpointUniforms *vp)
 {
-	CheckSize();
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	if (vp != nullptr && vrmode != nullptr && vrmode->ShouldUseMultiviewThisFrame() && vrmode->GetMultiviewLayerCount() >= 2)
+	{
+		HWViewpointUniforms viewpoints[2] = { *vp, *vp };
+		return SetViewpoints(di, viewpoints, 2);
+	}
+	return SetViewpoints(di, vp, 1);
+}
+
+int HWViewpointBuffer::SetViewpoints(FRenderState &di, const HWViewpointUniforms *vp, int count)
+{
+	if (vp == nullptr || count <= 0)
+		return Bind(di, mUploadIndex);
+
+	while (mUploadIndex + count > mBufferSize)
+	{
+		CheckSize();
+	}
+
+	const unsigned int firstIndex = mUploadIndex;
 	mBuffer->Map();
-	memcpy(((char*)mBuffer->Memory()) + mUploadIndex * mBlockAlign, vp, sizeof(*vp));
+	for (int i = 0; i < count; ++i)
+	{
+		memcpy(((char*)mBuffer->Memory()) + (mUploadIndex + i) * mBlockAlign, &vp[i], sizeof(vp[i]));
+		mClipPlaneInfo.Push(vp[i].mClipHeightDirection != 0.f || vp[i].mClipLine.X > -10000000.0f);
+	}
 	mBuffer->Unmap();
 
-	mClipPlaneInfo.Push(vp->mClipHeightDirection != 0.f || vp->mClipLine.X > -10000000.0f);
-	return Bind(di, mUploadIndex++);
+	mUploadIndex += count;
+	return Bind(di, firstIndex);
 }
 
 void HWViewpointBuffer::Clear()

@@ -31,6 +31,7 @@ public:
 	int Bind(FRenderState &di, unsigned int index);
 	void Set2D(FRenderState &di, int width, int height, int pll = 0);
 	int SetViewpoint(FRenderState &di, HWViewpointUniforms *vp);
+	int SetViewpoints(FRenderState &di, const HWViewpointUniforms *vp, int count);
 	unsigned int GetBlockSize() const { return mBlockSize; }
 };
 

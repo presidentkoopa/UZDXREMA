@@ -21,7 +21,9 @@ class VkHardwareDataBuffer;
 class VkHardwareTexture;
 class VkRenderBuffers;
 class VkPostprocess;
+class VkTextureImage;
 class SWSceneDrawer;
+enum class PPTextureType;
 
 class VulkanRenderDevice : public SystemBaseFrameBuffer
 {
@@ -43,6 +45,8 @@ public:
 	VkRenderState *GetRenderState() { return mRenderState.get(); }
 	VkPostprocess *GetPostprocess() { return mPostprocess.get(); }
 	VkRenderBuffers *GetBuffers() { return mActiveRenderBuffers; }
+	int GetCurrentEyeLayer() const { return std::max(0, mCurrentEyeIndex); }
+	bool ShouldUseCurrentEyeLayer(const PPTextureType& type, const VkTextureImage* image) const;
 	FRenderState* RenderState() override;
 
 	unsigned int GetLightBufferBlockSize() const;
@@ -60,6 +64,7 @@ public:
 	const char* DeviceName() const override;
 	int Backend() override { return 1; }
 	void SetTextureFilterMode() override;
+	void NewRefreshRate() override;
 	void StartPrecaching() override;
 	void BeginFrame() override;
 	void InitLightmap(int LMTextureSize, int LMTextureCount, TArray<uint16_t>& LMTextureData) override;

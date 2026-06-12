@@ -163,14 +163,29 @@ bool FPortalSceneState::RenderFirstSkyPortal(int recursion, HWDrawInfo *outer_di
 	if (best)
 	{
 		portals.Delete(bestindex);
+		VSMatrix tempmatrixRight;
+		const bool useMultiviewSkyProjection = outer_di->HasMultiviewViewpoints && outer_di->HasMultiviewProjectionMatrix2;
 		if (usestencil && ((strcmp(best->GetName(), "Sky") == 0) || (strcmp(best->GetName(), "Skybox") == 0)))
 		{
 			tempmatrix = outer_di->VPUniforms.mProjectionMatrix; // ensure perspective projection matrix for skies
 			outer_di->VPUniforms.mProjectionMatrix = outer_di->ProjectionMatrix2;
+			if (useMultiviewSkyProjection)
+			{
+				tempmatrixRight = outer_di->MultiviewVPUniforms[1].mProjectionMatrix;
+				outer_di->MultiviewVPUniforms[0].mProjectionMatrix = outer_di->MultiviewProjectionMatrix2[0];
+				outer_di->MultiviewVPUniforms[1].mProjectionMatrix = outer_di->MultiviewProjectionMatrix2[1];
+			}
 		}
 		RenderPortal(best, state, usestencil, outer_di);
 		if (usestencil && ((strcmp(best->GetName(), "Sky") == 0) || (strcmp(best->GetName(), "Skybox") == 0)))
+		{
 			outer_di->VPUniforms.mProjectionMatrix = tempmatrix;
+			if (useMultiviewSkyProjection)
+			{
+				outer_di->MultiviewVPUniforms[0].mProjectionMatrix = tempmatrix;
+				outer_di->MultiviewVPUniforms[1].mProjectionMatrix = tempmatrixRight;
+			}
+		}
 		delete best;
 		return true;
 	}

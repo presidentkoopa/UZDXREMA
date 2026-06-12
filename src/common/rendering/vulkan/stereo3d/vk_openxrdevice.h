@@ -23,6 +23,7 @@ public:
 	virtual DAngle GetRenderFov(DAngle fallback) const override;
 	virtual VSMatrix GetHUDProjection() const override;
 	DVector3 GetViewShift(FRenderViewpoint& vp) const override;
+	virtual void AdjustViewpointUniforms(HWViewpointUniforms& uniforms) const override;
 	virtual void SetUp() const override;
 	virtual void TearDown() const override;
 	virtual void AdjustHud() const override;
@@ -57,8 +58,13 @@ public:
 	virtual void Present() const override;
 	virtual void PollXREvents() const override;
 	virtual bool BeginXRFrame() const override;
+	virtual void ApplyRefreshRate() const override;
 	virtual bool AcquireXRSwapchain() const override;
 	virtual bool SubmitFrame() const override;
+	virtual bool SupportsMultiview() const override { return xrMultiviewSupported; }
+	virtual bool ShouldUseMultiviewThisFrame() const override;
+	virtual int GetMultiviewLayerCount() const override;
+	virtual uint32_t GetMultiviewViewMask() const override;
 	virtual void AdjustViewport(DFrameBuffer* screen) const override;
 	virtual void AdjustPlayerSprites(FRenderState& state, int hand = 0) const override;
 	virtual void UnAdjustPlayerSprites(FRenderState& state) const override;
@@ -240,10 +246,21 @@ protected:
 	mutable bool xrMenuPointerLastLeftDown = false;
 	mutable bool xrMenuPointerLastRightDown = false;
 	mutable bool xrLoggedDesktopViewportMismatch = false;
+#ifdef XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME
+	mutable bool xrHasDisplayRefreshRate = false;
+	mutable bool xrLoggedDisplayRefreshRates = false;
+	mutable float xrRequestedDisplayRefreshRate = 0.0f;
+	mutable float xrCurrentDisplayRefreshRate = 0.0f;
+#endif
 	mutable bool mSetUpInProgress = false;
 	mutable uint64_t xrFrameCounter = 0;
 	mutable bool xrHasFBColorSpace = false;
 	mutable bool xrHasEquirectBackdrop = false;
+	mutable bool xrMultiviewProbed = false;
+	mutable bool xrMultiviewSupported = false;
+	mutable bool xrMultiviewUsesCoreVulkan = false;
+	mutable uint32_t xrMultiviewMaxViewCount = 0;
+	mutable uint32_t xrMultiviewMaxInstanceIndex = 0;
     
 private:
 	typedef VRMode super;

@@ -37,6 +37,9 @@ BonesResult ApplyBones();
 
 void main()
 {
+#ifdef SUPPORTS_MULTIVIEW
+	hwViewIndex = gl_ViewIndex;
+#endif
 	float ClipDistance0, ClipDistance1, ClipDistance2, ClipDistance3, ClipDistance4;
 
 	vec2 parmTexCoord;
