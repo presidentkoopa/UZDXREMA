@@ -44,9 +44,6 @@
 #include "r_videoscale.h"
 
 EXTERN_CVAR(Int, gl_dither_bpc)
-EXTERN_CVAR(Bool, vr_debug_projection_compare)
-EXTERN_CVAR(Bool, vr_openxr_debug_sizes)
-EXTERN_CVAR(Bool, vr_openxr_debug_present)
 EXTERN_CVAR(Float, vr_openxr_present_gamma_bias)
 EXTERN_CVAR(Float, vr_openxr_present_contrast_bias)
 EXTERN_CVAR(Float, vr_openxr_present_brightness_bias)
@@ -73,10 +70,6 @@ int VkPostprocess::GetNextPipelineImage() const
 
 void VkPostprocess::SetActiveRenderTarget()
 {
-	if (vr_openxr_debug_present || vr_openxr_debug_sizes)
-	{
-		Printf("OpenXR: SetActiveRenderTarget mCurrentPipelineImage=%d\n", mCurrentPipelineImage);
-	}
 	auto buffers = fb->GetBuffers();
 	const int layerIndex = buffers->GetPipelineLayers() > 1 ? fb->GetCurrentEyeLayer() : 0;
 
@@ -273,11 +266,6 @@ void VkPostprocess::DrawPresentTextureToImage(VkTextureImage *image, VkFormat ou
 {
 	VkPPRenderState renderstate(fb);
 	const bool outputIsSrgb = outputFormat == VK_FORMAT_B8G8R8A8_SRGB || outputFormat == VK_FORMAT_R8G8B8A8_SRGB;
-	const auto* buffers = fb->GetBuffers();
-	const int sourceWidth = buffers ? buffers->GetWidth() : 0;
-	const int sourceHeight = buffers ? buffers->GetHeight() : 0;
-	const int destWidth = image && image->Image ? image->Image->width : box.width;
-	const int destHeight = image && image->Image ? image->Image->height : box.height;
 	const PPFilterMode presentFilter = ViewportLinearScale() ? PPFilterMode::Linear : PPFilterMode::Nearest;
 
 	if (!screenshot)
@@ -323,28 +311,6 @@ void VkPostprocess::DrawPresentTextureToImage(VkTextureImage *image, VkFormat ou
 		}
 	}
 	uniforms.ColorScale = (gl_dither_bpc == -1) ? 255.0f : (float)((1 << gl_dither_bpc) - 1);
-
-	if (vr_debug_projection_compare || vr_openxr_debug_present)
-	{
-		Printf("XR_PRESENT_MAP toImage box=%dx%d srcVP=%dx%d sceneVP=%dx%d src=%dx%d dst=%dx%d scale=(%.4f,%.4f) offset=(%.4f,%.4f) applyGamma=%d screenshot=%d outputFormat=%d outputIsSrgb=%d\n",
-			box.width, box.height,
-			screen ? screen->mScreenViewport.width : -1,
-			screen ? screen->mScreenViewport.height : -1,
-			screen ? screen->mSceneViewport.width : -1,
-			screen ? screen->mSceneViewport.height : -1,
-			sourceWidth,
-			sourceHeight,
-			destWidth,
-			destHeight,
-			(double)sourceScaleX,
-			(double)sourceScaleY,
-			(double)sourceOffsetX,
-			(double)sourceOffsetY,
-			applyGamma ? 1 : 0,
-			screenshot ? 1 : 0,
-			(int)outputFormat,
-			outputIsSrgb ? 1 : 0);
-	}
 
 	uniforms.Scale = { sourceScaleX, sourceScaleY };
 	uniforms.Offset = { sourceOffsetX, sourceOffsetY };

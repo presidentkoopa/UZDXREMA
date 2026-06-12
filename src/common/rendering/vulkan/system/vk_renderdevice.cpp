@@ -25,8 +25,6 @@
 #include <inttypes.h>
 
 #include "v_video.h"
-#include "m_png.h"
-
 #include "r_videoscale.h"
 #include "i_time.h"
 #include "v_text.h"
@@ -58,9 +56,6 @@
 #include "vulkan/textures/vk_texture.h"
 #include "vulkan/textures/vk_framebuffer.h"
 #include <zvulkan/vulkanswapchain.h>
-
-EXTERN_CVAR(Bool, vr_openxr_debug_sizes);
-EXTERN_CVAR(Bool, vr_openxr_debug_present);
 
 extern bool cinemamode;
 #include <zvulkan/vulkanbuilders.h>
@@ -523,14 +518,6 @@ void VulkanRenderDevice::CopyScreenToBuffer(int w, int h, uint8_t *data)
 
 void VulkanRenderDevice::SetActiveRenderTarget()
 {
-	if (mPostprocess)
-	{
-		if (vr_openxr_debug_present || vr_openxr_debug_sizes)
-		{
-			Printf("VulkanRenderDevice: SetActiveRenderTarget switched to pipeline image %d\n",
-				mPostprocess->GetCurrentPipelineImage());
-		}
-	}
 	mPostprocess->SetActiveRenderTarget();
 }
 

@@ -76,10 +76,6 @@ EXTERN_CVAR(Float, vr_height_adjust);
 EXTERN_CVAR(Float, vr_openxr_fov_adjust_deg);
 EXTERN_CVAR(Float, vr_openxr_eye_shift_scale);
 EXTERN_CVAR(Float, vr_openxr_render_scale);
-EXTERN_CVAR(Bool, vr_debug_projection_compare);
-EXTERN_CVAR(Bool, vr_openxr_debug_sizes);
-EXTERN_CVAR(Bool, vr_openxr_debug_present);
-EXTERN_CVAR(Bool, vr_openxr_debug_weapon);
 EXTERN_CVAR(Int, vr_openxr_debug_submit_mode);
 EXTERN_CVAR(Bool, vr_openxr_multiview);
 EXTERN_CVAR(Bool, vr_desktop_view_openxr_render);
@@ -1359,20 +1355,6 @@ DVector3 VKOpenXRDeviceEyePose::GetViewShift(FRenderViewpoint& vp) const
 		shift.Y += sin(yaw) * stereoShift;
 	}
 
-	if (vr_debug_projection_compare)
-	{
-		static bool loggedShift[2] = { false, false };
-		if (eye >= 0 && eye < 2 && !loggedShift[eye])
-		{
-			Printf("VR_PROJ OpenXR eye=%d shift=(%.3f, %.3f, %.3f) eyePos=(%.4f, %.4f, %.4f) hmdPos=(%.4f, %.4f, %.4f) hmdHeight=%.3f playerHeight=%.3f stage=%d\n",
-				eye, (double)shift.X, (double)shift.Y, (double)shift.Z,
-				(double)currentEyePose.position.x, (double)currentEyePose.position.y, (double)currentEyePose.position.z,
-				(double)hmdPosition[0], (double)hmdPosition[1], (double)hmdPosition[2],
-				hmdHeight, playerHeight, mode.xrUsingStageSpace ? 1 : 0);
-			loggedShift[eye] = true;
-		}
-	}
-
 	return shift;
 }
 
@@ -1401,20 +1383,6 @@ void VKOpenXRDeviceEyePose::AdjustViewpointUniforms(HWViewpointUniforms& uniform
 	uniforms.mViewMatrix = rotation;
 	uniforms.CalcDependencies();
 
-	if (vr_debug_projection_compare)
-	{
-		static bool loggedEyeOrientationDelta[2] = { false, false };
-		if (eye < 2 && !loggedEyeOrientationDelta[eye])
-		{
-			float pitch = 0.0f;
-			float yaw = 0.0f;
-			float roll = 0.0f;
-			QuaternionToEuler(relativeOrientation, pitch, yaw, roll);
-			Printf("VR_PROJ OpenXR eye=%d relativeOrientation pitch=%.4f yaw=%.4f roll=%.4f\n",
-				eye, pitch, yaw, roll);
-			loggedEyeOrientationDelta[eye] = true;
-		}
-	}
 }
 
 void VKOpenXRDeviceEyePose::SetUp() const
@@ -1443,32 +1411,6 @@ void VKOpenXRDeviceEyePose::SetUp() const
 		currentFov = mode.xrViews[(size_t)eye].fov;
 		projection = BuildOpenXREyeProjection(currentFov, (float)screen->GetZNear(), (float)screen->GetZFar(), eye);
 
-		static bool loggedEye[2] = { false, false };
-		if (vr_debug_projection_compare && eye >= 0 && eye < 2 && !loggedEye[eye])
-		{
-			const float tanLeft = std::tan(currentFov.angleLeft);
-			const float tanRight = std::tan(currentFov.angleRight);
-			const float tanUp = std::tan(currentFov.angleUp);
-			const float tanDown = std::tan(currentFov.angleDown);
-			const float horizontalFovDeg = (float)((currentFov.angleRight - currentFov.angleLeft) * (180.0 / M_PI));
-			const float verticalFovDeg = (float)((currentFov.angleUp - currentFov.angleDown) * (180.0 / M_PI));
-			Printf("VR_PROJ OpenXR eye=%d fovL=%.3f fovR=%.3f fovU=%.3f fovD=%.3f hFov=%.3f vFov=%.3f\n",
-				eye,
-				currentFov.angleLeft * (180.0f / (float)M_PI),
-				currentFov.angleRight * (180.0f / (float)M_PI),
-				currentFov.angleUp * (180.0f / (float)M_PI),
-				currentFov.angleDown * (180.0f / (float)M_PI),
-				horizontalFovDeg,
-				verticalFovDeg);
-			Printf("VR_PROJ OpenXR eye=%d tan=[%.6f %.6f %.6f %.6f] proj=[%.6f %.6f %.6f %.6f | %.6f %.6f %.6f %.6f | %.6f %.6f %.6f %.6f]\n",
-				eye,
-				tanLeft, tanRight, tanUp, tanDown,
-				projection.get()[0], projection.get()[1], projection.get()[2], projection.get()[3],
-				projection.get()[4], projection.get()[5], projection.get()[6], projection.get()[7],
-				projection.get()[8], projection.get()[9], projection.get()[10], projection.get()[11],
-				projection.get()[12], projection.get()[13], projection.get()[14], projection.get()[15]);
-			loggedEye[eye] = true;
-		}
 	}
 
 	VREyeInfo::SetUp();
@@ -1499,22 +1441,8 @@ void VKOpenXRDeviceEyePose::AdjustHud() const
 	if (r_viewpoint.ViewLevel == nullptr)
 		return;
 	if (VR_ShouldDrawMountedHud())
-	{
-		static bool loggedMountedHudBypass = false;
-		if (!loggedMountedHudBypass && (vr_openxr_debug_present || vr_debug_projection_compare))
-		{
-			Printf("OpenXR HUD: skipping camera HUD projection because mounted HUD path is active.\n");
-			loggedMountedHudBypass = true;
-		}
 		return;
-	}
 	VSMatrix hudProj = GetHUDProjection();
-	static bool loggedCameraHudPath = false;
-	if (!loggedCameraHudPath && (vr_openxr_debug_present || vr_debug_projection_compare))
-	{
-		Printf("OpenXR HUD: using camera-mounted HUD projection path (mounted HUD inactive).\n");
-		loggedCameraHudPath = true;
-	}
 
 	auto* di = HWDrawInfo::StartDrawInfo(r_viewpoint.ViewLevel, nullptr, r_viewpoint, nullptr);
 	if (di)
@@ -1713,23 +1641,6 @@ VSMatrix VKOpenXRDeviceEyePose::GetHUDProjection() const
 	// transform so the HUD is camera-anchored in front of the user.
 	VSMatrix finalProjection(projection);
 	finalProjection.multMatrix(hudProjection);
-
-	if (vr_openxr_debug_present || vr_debug_projection_compare)
-	{
-		static bool loggedHudProjection[2] = { false, false };
-		if (eye >= 0 && eye < 2 && !loggedHudProjection[eye])
-		{
-			const FLOATTYPE* m = finalProjection.get();
-			Printf("OpenXR HUD eye=%d stereo=%.3f dist=%.3f scale=%.3f projRow0=[%.5f %.5f %.5f %.5f] projRow1=[%.5f %.5f %.5f %.5f]\n",
-				eye,
-				(double)hudStereo,
-				(double)getHUDValue<FFloatCVarRef>(vr_automap_distance, vr_hud_distance),
-				(double)getHUDValue<FFloatCVarRef>(vr_automap_scale, vr_hud_scale),
-				(double)m[0], (double)m[4], (double)m[8], (double)m[12],
-				(double)m[1], (double)m[5], (double)m[9], (double)m[13]);
-			loggedHudProjection[eye] = true;
-		}
-	}
 
 	return finalProjection;
 }
@@ -2767,7 +2678,6 @@ void VKOpenXRDeviceMode::DestroyOpenXR() const
 	xrLastMenuReturnState = false;
 	xrLastMenuBackState = false;
 	xrLastMenuBackspaceState = false;
-	xrLoggedWeaponState = false;
 	StopHaptics();
 	xrHapticAction = XR_NULL_HANDLE;
 	xrHapticDuration[0] = xrHapticDuration[1] = 0.0;
@@ -2996,20 +2906,6 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 
 	if (gamestate != GS_LEVEL || menuactive != MENU_Off || r_viewpoint.camera == nullptr || r_viewpoint.ViewLevel == nullptr)
 		return;
-
-	if (vr_debug_projection_compare)
-	{
-		const float pixelstretch = r_viewpoint.ViewLevel ? (float)r_viewpoint.ViewLevel->pixelstretch : 1.2f;
-		const player_t* player = &players[consoleplayer];
-		const double playerHeight = player ? GetDoomPlayerHeightWithoutCrouch(player) : 0.0;
-		const double rawHeight = GetRawHmdHeightInMapUnit();
-		const double adjustedHeight = GetHmdAdjustedHeightInMapUnit(xrUsingStageSpace ? false : xrHasLocalHeightAnchor, xrLocalHeightAnchor);
-		Printf("VR_PROJ OpenXR pose: hmdY=%.3f rawHmd=%.3f adjHmd=%.3f anchor=%.3f playerHeight=%.3f vupm=%.3f eyeShiftScale=%.3f pixelstretch=%.3f vpPos=(%.3f, %.3f, %.3f) yaw=%.3f pitch=%.3f roll=%.3f stage=%d\n",
-			hmdPosition[1], rawHeight, adjustedHeight, (double)xrLocalHeightAnchor, playerHeight, (double)vr_vunits_per_meter, (double)vr_openxr_eye_shift_scale, pixelstretch,
-			vp.Pos.X, vp.Pos.Y, vp.Pos.Z,
-			vp.Angles.Yaw.Degrees(), vp.HWAngles.Pitch.Degrees(), vp.HWAngles.Roll.Degrees(),
-			xrUsingStageSpace ? 1 : 0);
-	}
 
 	static float previousHmdYaw = 0;
 	static bool havePreviousYaw = false;
@@ -3291,29 +3187,6 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 	else
 	{
 		weaponStabilised = false;
-	}
-
-	if (vr_openxr_debug_weapon)
-	{
-		static bool lastLoggedWeaponStabilised = false;
-		static bool haveLastLoggedWeaponStabilised = false;
-		const float dx = xrHandPoses[mainHand].position.x - xrHandPoses[offHand].position.x;
-		const float dy = xrHandPoses[mainHand].position.y - xrHandPoses[offHand].position.y;
-		const float dz = xrHandPoses[mainHand].position.z - xrHandPoses[offHand].position.z;
-		const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
-		if (!haveLastLoggedWeaponStabilised || lastLoggedWeaponStabilised != weaponStabilised)
-		{
-			Printf("VR_WEAPON OpenXR stab=%d dist=%.3f main=%d off=%d grip=%d valid=%d/%d\n",
-				weaponStabilised ? 1 : 0,
-				distance,
-				mainHand,
-				offHand,
-				handInput[offHand].grip ? 1 : 0,
-				mainHandValid ? 1 : 0,
-				offHandValid ? 1 : 0);
-			lastLoggedWeaponStabilised = weaponStabilised;
-			haveLastLoggedWeaponStabilised = true;
-		}
 	}
 
 	if (menuModeChanged)
@@ -3604,28 +3477,6 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			float v = clamp<float>(mappedV, 0.0f, 1.0f);
 			const int mouseX = clamp<int>((int)std::lround(u * (float)(xrVirtualScreenWidth - 1)), 0, (int)xrVirtualScreenWidth - 1);
 			const int mouseY = clamp<int>((int)std::lround(v * (float)(xrVirtualScreenHeight - 1)), 0, (int)xrVirtualScreenHeight - 1);
-			if (vr_openxr_debug_sizes)
-			{
-				static int pointerDebugTicker = 0;
-				if ((pointerDebugTicker++ % 35) == 0)
-				{
-					const int guiW = screen ? screen->GetWidth() : 0;
-					const int guiH = screen ? screen->GetHeight() : 0;
-					Printf("XR_MENU_PTR axis=%d t=%.3f local=(%.3f,%.3f) half=(%.3f,%.3f) uvRaw=(%.3f,%.3f) uvMap=(%.3f,%.3f) ovf=%.3f virt=%ux%u vis=(%d,%d) gui=%dx%d guiPos=(%d,%d)\n",
-						0,
-						bestHit.t,
-						bestHit.localX, bestHit.localY,
-						screenWidth * 0.5f, screenHeight * 0.5f,
-						bestHit.unclampedU, bestHit.unclampedV,
-						u, v,
-						bestHit.overflow,
-						xrVirtualScreenWidth, xrVirtualScreenHeight,
-						mouseX, mouseY,
-						guiW, guiH,
-						mouseX, mouseY);
-				}
-			}
-
 			// Build a world-space quad layer representing a laser beam from
 			// controller pose to the virtual-screen hit point.
 			const XrVector3f beamStart = rayOrigin;
@@ -3863,20 +3714,6 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			}
 			player->mo->Vel = vel;
 
-			if (vr_openxr_debug_weapon && !xrLoggedWeaponState)
-			{
-				Printf("VR_WEAPON OpenXR handedness=%s main=%d off=%d weapon=(%.3f,%.3f,%.3f|%.1f,%.1f,%.1f) offhand=(%.3f,%.3f,%.3f|%.1f,%.1f,%.1f) stab=%d teleport=%d target=%d\n",
-					IsRightHandedVrControls() ? "right" : "left",
-					GetMainHandIndex(), GetOffHandIndex(),
-					weaponoffset[0], weaponoffset[1], weaponoffset[2],
-					weaponangles[0], weaponangles[1], weaponangles[2],
-					offhandoffset[0], offhandoffset[1], offhandoffset[2],
-					offhandangles[0], offhandangles[1], offhandangles[2],
-					weaponStabilised ? 1 : 0,
-					ready_teleport ? 1 : 0,
-					m_TeleportTarget);
-				xrLoggedWeaponState = true;
-			}
 		}
 	}
 	static bool loggedBoundSources = false;
@@ -4222,18 +4059,6 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		return XR_SUCCEEDED(endResult);
 	}
 
-	if (vr_openxr_debug_sizes)
-	{
-		Printf("XR_SIZES frame=%llu desktopVP=%dx%d screenVP=%dx%d sceneVP=%dx%d fb=%dx%d present=%ux%u recommended=%ux%u\n",
-			(unsigned long long)xrFrameCounter,
-			vkfb->mOutputLetterbox.width, vkfb->mOutputLetterbox.height,
-			vkfb->mScreenViewport.width, vkfb->mScreenViewport.height,
-			vkfb->mSceneViewport.width, vkfb->mSceneViewport.height,
-			buffers->GetWidth(), buffers->GetHeight(),
-			dstW, dstH,
-			recommendedW, recommendedH);
-	}
-
 	if (!xrLoggedDesktopViewportMismatch)
 	{
 		const bool desktopDiffers = (vkfb->mOutputLetterbox.width != (int)dstW) || (vkfb->mOutputLetterbox.height != (int)dstH);
@@ -4249,12 +4074,6 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 			xrLoggedDesktopViewportMismatch = true;
 		}
 	}
-	if (vr_openxr_debug_present || vr_openxr_debug_sizes)
-	{
-		Printf("OpenXR frame %llu: about to draw XR layers to swapchain image %u.\n",
-			(unsigned long long)xrFrameCounter, imageIndex);
-	}
-
 	ScopedCycleTimer cycle(VRSubmit);
 	vkResetCommandPool(xrVkDevice->device, xrVkCommandPool->pool, 0);
 	xrVkCommandBuffer->begin();
@@ -4295,12 +4114,6 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 			Printf("OpenXR frame %llu: Skipping eye %u - invalid prepared eye image %u extent=%dx%d\n",
 				(unsigned long long)xrFrameCounter, layer, sourceEye, srcW, srcH);
 			continue;
-		}
-
-		if (vr_openxr_debug_present)
-		{
-			Printf("XR_PRESENT_MAP eye=%u sourceEye=%u srcExtent=%dx%d dstExtent=%ux%u\n",
-				layer, sourceEye, srcW, srcH, dstW, dstH);
 		}
 
 		VkImageTransition()
@@ -4363,10 +4176,6 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 	}
 	XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
 	xrResult = xrReleaseSwapchainImage(xrSwapchain, &releaseInfo);
-	if (vr_openxr_debug_present || vr_openxr_debug_sizes)
-	{
-		Printf("OpenXR frame %llu: xrReleaseSwapchainImage=%d.\n", (unsigned long long)xrFrameCounter, (int)xrResult);
-	}
 	if (XR_FAILED(xrResult))
 	{
 		XrFrameEndInfo endInfo{ XR_TYPE_FRAME_END_INFO };
@@ -4397,12 +4206,6 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		xrProjectionViews[i].subImage.imageArrayIndex = arrayIndex;
 		xrProjectionViews[i].subImage.imageRect.offset = { 0, 0 };
 		xrProjectionViews[i].subImage.imageRect.extent = { (int32_t)dstW, (int32_t)dstH };
-	}
-
-	if (vr_openxr_debug_present && vr_openxr_debug_submit_mode != 0)
-	{
-		Printf("XR_PRESENT_MAP debug submit mode=%d (1=left image to both, 2=left pose/fov to both, 3=both)\n",
-			(int)vr_openxr_debug_submit_mode);
 	}
 
 	XrCompositionLayerQuad backdropLayer{ XR_TYPE_COMPOSITION_LAYER_QUAD };
@@ -4841,15 +4644,6 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 	xrVirtualScreenImageIndex = (int)imageIndex;
 	auto& target = xrVirtualScreenTextures[imageIndex];
 	const bool useSceneBackdrop = gamestate == GS_LEVEL;
-	if (vr_openxr_debug_sizes)
-	{
-		Printf("XR_VSCREEN visible=%d swapchain=%ux%u draw=%ux%u backdrop=%d\n",
-			1,
-			xrVirtualScreenWidth, xrVirtualScreenHeight,
-			screenWidth, screenHeight,
-			useSceneBackdrop ? 1 : 0);
-	}
-
 	if (useSceneBackdrop)
 	{
 		vkfb->GetPostprocess()->BlitCurrentToImage(&target, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -5182,69 +4976,6 @@ void VKOpenXRDeviceMode::FinalizeEyeImage(VulkanRenderDevice* vkfb, int eyeIndex
 			IsSRGBSwapchainFormat((VkFormat)xrSwapchainFormat) ? 1 : 0,
 			(int)xrSwapchainFormat);
 		xrLoggedPresentFormat = true;
-	}
-
-	if (vr_debug_projection_compare || vr_openxr_debug_present || vr_openxr_debug_sizes)
-	{
-		auto* buffers = vkfb->GetBuffers();
-		const auto* sourceTexture = (buffers && pipelineImageIndex >= 0 && pipelineImageIndex < VkRenderBuffers::NumPipelineImages)
-			? buffers->PipelineImage[pipelineImageIndex].Image.get()
-			: nullptr;
-		const auto* targetTexture = (eyeIndex >= 0 && eyeIndex < (int)xrPresentTextures.size())
-			? xrPresentTextures[eyeIndex].Image.get()
-			: nullptr;
-		const int sourceWidth = sourceTexture ? sourceTexture->width : -1;
-		const int sourceHeight = sourceTexture ? sourceTexture->height : -1;
-		const int targetWidth = targetTexture ? targetTexture->width : (int)xrPresentWidth;
-		const int targetHeight = targetTexture ? targetTexture->height : (int)xrPresentHeight;
-		Printf("XR_PRESENT_MAP finalize eye=%d sourceImage=%d srcExtent=%dx%d dstExtent=%ux%u fb=%dx%d present=%ux%u\n",
-			eyeIndex,
-			postprocess->GetCurrentPipelineImage(),
-			sourceWidth,
-			sourceHeight,
-			targetWidth,
-			targetHeight,
-			buffers ? buffers->GetWidth() : -1,
-			buffers ? buffers->GetHeight() : -1,
-			xrPresentWidth,
-			xrPresentHeight);
-
-		Printf("XR_PRESENT_MAP finalize eye=%d srcBuffer=%dx%d srcRect=%d,%d %dx%d scale=(%.4f,%.4f) offset=(%.4f,%.4f) dstEye=%dx%d fallback=%d clamped=%d\n",
-			eyeIndex,
-			buffers ? buffers->GetWidth() : -1,
-			buffers ? buffers->GetHeight() : -1,
-			sourceRect.rect.left,
-			sourceRect.rect.top,
-			sourceRect.rect.width,
-			sourceRect.rect.height,
-			(double)sourceRect.scaleX,
-			(double)sourceRect.scaleY,
-			(double)sourceRect.offsetX,
-			(double)sourceRect.offsetY,
-			targetWidth,
-			targetHeight,
-			sourceRect.usedFallback ? 1 : 0,
-			sourceRect.wasClamped ? 1 : 0);
-	}
-
-	static bool xrLoggedSourceRectAdjustment = false;
-	if (!xrLoggedSourceRectAdjustment && (sourceRect.usedFallback || sourceRect.wasClamped) && (vr_openxr_debug_present || vr_openxr_debug_sizes))
-	{
-		auto* buffers = vkfb->GetBuffers();
-		Printf("OpenXR: adjusted XR finalize source rect srcBuffer=%dx%d requested=%d,%d %dx%d chosen=%d,%d %dx%d fallback=%d clamped=%d\n",
-			buffers ? buffers->GetWidth() : -1,
-			buffers ? buffers->GetHeight() : -1,
-			vkfb->mSceneViewport.left,
-			vkfb->mSceneViewport.top,
-			vkfb->mSceneViewport.width,
-			vkfb->mSceneViewport.height,
-			sourceRect.rect.left,
-			sourceRect.rect.top,
-			sourceRect.rect.width,
-			sourceRect.rect.height,
-			sourceRect.usedFallback ? 1 : 0,
-			sourceRect.wasClamped ? 1 : 0);
-		xrLoggedSourceRectAdjustment = true;
 	}
 
 	postprocess->SetCurrentPipelineImage(pipelineImageIndex);

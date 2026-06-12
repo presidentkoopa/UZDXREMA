@@ -172,7 +172,6 @@ protected:
 	mutable bool xrLastMenuReturnState = false;
 	mutable bool xrLastMenuBackState = false;
 	mutable bool xrLastMenuBackspaceState = false;
-	mutable bool xrLoggedWeaponState = false;
 	mutable XrAction xrHapticAction = XR_NULL_HANDLE;
 	mutable double xrHapticDuration[2] = { 0.0, 0.0 };
 	mutable float xrHapticIntensity[2] = { 0.0f, 0.0f };
