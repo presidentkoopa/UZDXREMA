@@ -98,7 +98,7 @@ class StateProvider : Inventory
 		int alflags = 0;
 
 		Vector2 ofs = (0, Spawnofs_xy);
-		if (!weapon || multiplayer || !player.mo.OverrideAttackPosDir)
+		if (!weapon || !player.mo.OverrideAttackPosDir)
 		{
 			double ang = Angle - 90;
 			ofs = AngleToVector(ang, Spawnofs_xy);
@@ -127,10 +127,10 @@ class StateProvider : Inventory
 
 		double _bangle = bangle;
 		double _bslope = bslope;
-		if (weapon && !multiplayer && player.mo.OverrideAttackPosDir)
+		if (weapon && player.mo.OverrideAttackPosDir)
 		{
 			Vector3 dir;
-			if (weapon.bOffhandWeapon)
+			if (weapon.bOffhandWeapon && !multiplayer)
 			{
 				dir = player.mo.OffhandDir(self, bangle, bslope);
 			}
@@ -259,7 +259,7 @@ class StateProvider : Inventory
 		if (missiletype) 
 		{
 			Vector2 ofs = (0, Spawnofs_xy);
-			if (!weapon || multiplayer || !player.mo.OverrideAttackPosDir)
+			if (!weapon || !player.mo.OverrideAttackPosDir)
 			{
 				double ang = self.Angle - 90;
 				ofs = AngleToVector(ang, Spawnofs_xy);
@@ -283,10 +283,10 @@ class StateProvider : Inventory
 				{
 					// This original implementation is to aim straight ahead and then offset
 					// the angle from the resulting direction. 
-					if (weapon && !multiplayer && player.mo.OverrideAttackPosDir)
+					if (weapon && player.mo.OverrideAttackPosDir)
 					{
 						Vector3 dir;
-						if (weapon.bOffhandWeapon)
+						if (weapon.bOffhandWeapon && !multiplayer)
 						{
 							dir = player.mo.OffhandDir(misl, misl.Angle + angle, misl.Pitch);
 						}

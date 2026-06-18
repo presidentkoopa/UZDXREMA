@@ -3608,14 +3608,17 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			LSMatrix44 mat;
 			if (GetWeaponTransform(&mat, VR_MAINHAND))
 			{
-				player->mo->AttackPos.X = mat[3][0];
-				player->mo->AttackPos.Y = mat[3][2];
-				player->mo->AttackPos.Z = mat[3][1];
-				player->mo->AttackPitch = DAngle::fromDeg(ShouldUseScreenLayerForCurrentFrame()
-					? -weaponangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees()
-					: -weaponangles[PITCH]);
-				player->mo->AttackAngle = DAngle::fromDeg(-90 + GetViewpointYaw() + (weaponangles[YAW] - playerYaw));
-				player->mo->AttackRoll = DAngle::fromDeg(weaponangles[ROLL]);
+				if (!multiplayer)
+				{
+					player->mo->AttackPos.X = mat[3][0];
+					player->mo->AttackPos.Y = mat[3][2];
+					player->mo->AttackPos.Z = mat[3][1];
+					player->mo->AttackPitch = DAngle::fromDeg(ShouldUseScreenLayerForCurrentFrame()
+						? -weaponangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees()
+						: -weaponangles[PITCH]);
+					player->mo->AttackAngle = DAngle::fromDeg(-90 + GetViewpointYaw() + (weaponangles[YAW] - playerYaw));
+					player->mo->AttackRoll = DAngle::fromDeg(weaponangles[ROLL]);
+				}
 			}
 
 			LSMatrix44 matOffhand;

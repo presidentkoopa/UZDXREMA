@@ -464,12 +464,12 @@ extend class Actor
 		{
 			directionAngle = self.Angle + angle;
 			Weapon weapon = invoker == player.OffhandWeapon ? player.OffhandWeapon : player.ReadyWeapon;
-			if (weapon && weapon == invoker && !multiplayer && player.mo.OverrideAttackPosDir)
+			if (weapon && weapon == invoker && player.mo.OverrideAttackPosDir)
 			{
 				Vector3 dir;
 				Vector3 yoffsetDir;
 				Vector3 zoffsetDir;
-				if (weapon.bOffhandWeapon)
+				if (weapon.bOffhandWeapon && !multiplayer)
 				{
 					spawnpos = player.mo.OffhandPos;
 					directionRoll = -player.mo.OffhandRoll;
@@ -588,9 +588,9 @@ extend class Actor
 				return true, null;
 			}
 
-			if (weapon && weapon == invoker && !multiplayer && player.mo.OverrideAttackPosDir)
+			if (weapon && weapon == invoker && player.mo.OverrideAttackPosDir)
 			{
-				if (weapon.bOffhandWeapon)
+				if (weapon.bOffhandWeapon && !multiplayer)
 				{
 					spawnpos = player.mo.OffhandPos;
 					dir = player.mo.OffhandDir(self, directionAngle, self.Pitch);
@@ -642,7 +642,7 @@ extend class Actor
 			bo.Vel.Y = xy_vely + z_vely + Vel.Y / 2;
 			bo.Vel.Z = xy_velz + z_velz;
 
-			if (weapon && weapon == invoker && !multiplayer && player.mo.OverrideAttackPosDir)
+			if (weapon && weapon == invoker && player.mo.OverrideAttackPosDir)
 			{
 				let newvel = (Vel.XY * .5, 0);
 				newvel += (

@@ -4594,9 +4594,9 @@ DAngle P_AimLineAttack(AActor *t1, DAngle angle, double distance, FTranslatedLin
 	DVector3 startPos = t1->Pos();
 	DAngle aimPitch = t1->Angles.Pitch;
 	DAngle aimAngle = angle;
-	if (t1->player != NULL && !multiplayer && t1->player->mo->OverrideAttackPosDir && !(flags & ALF_CHECKCONVERSATION))
+	if (t1->player != NULL && t1->player->mo->OverrideAttackPosDir && !(flags & ALF_CHECKCONVERSATION))
 	{
-		if (flags & ALF_ISOFFHAND)
+		if ((flags & ALF_ISOFFHAND) && !multiplayer)
 		{
 			startPos = t1->player->mo->OffhandPos;
 			DVector3 direction = t1->player->mo->OffhandDir(t1, angle, t1->Angles.Pitch);
@@ -4606,9 +4606,17 @@ DAngle P_AimLineAttack(AActor *t1, DAngle angle, double distance, FTranslatedLin
 		else 
 		{
 			startPos = t1->player->mo->AttackPos;
-			DVector3 direction = t1->player->mo->AttackDir(t1, angle, t1->Angles.Pitch);
-			aimPitch = direction.Pitch();
-			aimAngle = direction.Angle();
+			if (multiplayer)
+			{
+				aimPitch = -t1->player->mo->AttackPitch;
+				aimAngle = t1->player->mo->AttackAngle + DAngle::fromDeg(90.);
+			}
+			else
+			{
+				DVector3 direction = t1->player->mo->AttackDir(t1, angle, t1->Angles.Pitch);
+				aimPitch = direction.Pitch();
+				aimAngle = direction.Angle();
+			}
 		}
 	}
 
@@ -4702,6 +4710,12 @@ static ETraceStatus CheckForActor(FTraceResults &res, void *userdata)
 	return TRACE_Stop;
 }
 
+static DVector3 CanonicalAimDir(DAngle yaw, DAngle pitch)
+{
+	double pc = pitch.Cos();
+	return { pc * yaw.Cos(), pc * yaw.Sin(), -pitch.Sin() };
+}
+
 //==========================================================================
 //
 // P_LineAttack
@@ -4782,9 +4796,9 @@ AActor *P_LineAttack(AActor *t1, DAngle angle, double distance,
 		shootz = t1->Z();
 	shootz += sz;
 
-	if (t1->player != NULL && !multiplayer && t1->player->mo->OverrideAttackPosDir)
+	if (t1->player != NULL && t1->player->mo->OverrideAttackPosDir)
 	{
-		if (flags & LAF_ISOFFHAND)
+		if ((flags & LAF_ISOFFHAND) && !multiplayer)
 		{
 			fromPos = t1->player->mo->OffhandPos;
 			direction = t1->player->mo->OffhandDir(t1, angle, pitch);
@@ -4794,9 +4808,20 @@ AActor *P_LineAttack(AActor *t1, DAngle angle, double distance,
 		else 
 		{
 			fromPos = t1->player->mo->AttackPos;
-			direction = t1->player->mo->AttackDir(t1, angle, pitch);
-			yoffsetDir = t1->player->mo->AttackDir(t1, angle - DAngle::fromDeg(90.), pitch);
-			zoffsetDir = t1->player->mo->AttackDir(t1, angle, pitch + DAngle::fromDeg(90.));
+			if (multiplayer)
+			{
+				DAngle attackYaw = t1->player->mo->AttackAngle + DAngle::fromDeg(90.);
+				DAngle attackPitch = -t1->player->mo->AttackPitch;
+				direction = CanonicalAimDir(attackYaw, attackPitch);
+				yoffsetDir = CanonicalAimDir(attackYaw - DAngle::fromDeg(90.), attackPitch);
+				zoffsetDir = CanonicalAimDir(attackYaw, attackPitch + DAngle::fromDeg(90.));
+			}
+			else
+			{
+				direction = t1->player->mo->AttackDir(t1, angle, pitch);
+				yoffsetDir = t1->player->mo->AttackDir(t1, angle - DAngle::fromDeg(90.), pitch);
+				zoffsetDir = t1->player->mo->AttackDir(t1, angle, pitch + DAngle::fromDeg(90.));
+			}
 		}
 	}
 	else
@@ -4886,7 +4911,7 @@ AActor *P_LineAttack(AActor *t1, DAngle angle, double distance,
 		// Default case so exact comparison is enough
 		tempos = fromPos;
 	}
-	else if (t1->player != NULL && !multiplayer && t1->player->mo->OverrideAttackPosDir)
+	else if (t1->player != NULL && t1->player->mo->OverrideAttackPosDir)
 	{
 		tempos += DVector3(
 			offsetforward * direction.Angle().Cos() * direction.Pitch().Cos(),
@@ -5647,11 +5672,11 @@ void P_RailAttack(FRailParams *p)
 		puffflags |= PF_NORANDOMZ;
 	}
 
-	if (source->player != NULL && !multiplayer && source->player->mo->OverrideAttackPosDir)
+	if (source->player != NULL && source->player->mo->OverrideAttackPosDir)
 	{
 		DVector3 offsetxyDir;
 		DVector3 offsetzDir;
-		if (p->flags & RAF_ISOFFHAND)
+		if ((p->flags & RAF_ISOFFHAND) && !multiplayer)
 		{
 			start = source->player->mo->OffhandPos;
 			direction = source->player->mo->OffhandDir(source, angle, pitch);
@@ -5661,9 +5686,20 @@ void P_RailAttack(FRailParams *p)
 		else 
 		{
 			start = source->player->mo->AttackPos;
-			direction = source->player->mo->AttackDir(source, angle, pitch);
-			offsetxyDir = source->player->mo->AttackDir(source, source->Angles.Yaw - DAngle::fromDeg(90.), source->Angles.Pitch);
-			offsetzDir = source->player->mo->AttackDir(source, source->Angles.Yaw, source->Angles.Pitch + DAngle::fromDeg(90.));
+			if (multiplayer)
+			{
+				DAngle attackYaw = source->player->mo->AttackAngle + DAngle::fromDeg(90.);
+				DAngle attackPitch = -source->player->mo->AttackPitch;
+				direction = CanonicalAimDir(attackYaw, attackPitch);
+				offsetxyDir = CanonicalAimDir(attackYaw - DAngle::fromDeg(90.), attackPitch);
+				offsetzDir = CanonicalAimDir(attackYaw, attackPitch + DAngle::fromDeg(90.));
+			}
+			else
+			{
+				direction = source->player->mo->AttackDir(source, angle, pitch);
+				offsetxyDir = source->player->mo->AttackDir(source, source->Angles.Yaw - DAngle::fromDeg(90.), source->Angles.Pitch);
+				offsetzDir = source->player->mo->AttackDir(source, source->Angles.Yaw, source->Angles.Pitch + DAngle::fromDeg(90.));
+			}
 		}
 
 		if (!multiplayer && !use_action_spawn_yzoffset)

@@ -127,6 +127,12 @@ EXTERN_CVAR (Int, vr_mode)
 // TODO gzdoom vr stuff
 EXTERN_CVAR(Float, vr_missile_haptic_level)
 
+static DVector3 CanonicalAimDir(DAngle yaw, DAngle pitch)
+{
+	double pc = pitch.Cos();
+	return { pc * yaw.Cos(), pc * yaw.Sin(), -pitch.Sin() };
+}
+
 
 // PRIVATE DATA DEFINITIONS ------------------------------------------------
 
@@ -7330,9 +7336,9 @@ AActor *P_SpawnSubMissile(AActor *source, PClassActor *type, AActor *target, DAn
 	DAngle an = angle;
 	DAngle pitch = source->Angles.Pitch;
 	DVector3 pos = source->Pos();
-	if (source->player != NULL && !multiplayer && source->player->mo->OverrideAttackPosDir)
+	if (source->player != NULL && source->player->mo->OverrideAttackPosDir)
 	{
-		if (aimflags & ALF_ISOFFHAND)
+		if ((aimflags & ALF_ISOFFHAND) && !multiplayer)
 		{
 			pos = source->player->mo->OffhandPos;
 			DVector3 dir = source->player->mo->OffhandDir(source, an, pitch);
@@ -7342,9 +7348,17 @@ AActor *P_SpawnSubMissile(AActor *source, PClassActor *type, AActor *target, DAn
 		else
 		{
 			pos = source->player->mo->AttackPos;
-			DVector3 dir = source->player->mo->AttackDir(source, an, pitch);
-			an = dir.Angle();
-			pitch = dir.Pitch();
+			if (multiplayer)
+			{
+				an = source->player->mo->AttackAngle + DAngle::fromDeg(90.);
+				pitch = -source->player->mo->AttackPitch;
+			}
+			else
+			{
+				DVector3 dir = source->player->mo->AttackDir(source, an, pitch);
+				an = dir.Angle();
+				pitch = dir.Pitch();
+			}
 		}
 	}
 
@@ -7475,13 +7489,13 @@ AActor *P_SpawnPlayerMissile (AActor *source, double x, double y, double z,
 			pos.Z = source->floorz;
 		}
 	}
-	if (source->player != NULL && !multiplayer && source->player->mo->OverrideAttackPosDir)
+	if (source->player != NULL && source->player->mo->OverrideAttackPosDir)
 	{
 		DVector3 dir;
 		DVector3 xoffsetDir;
 		DVector3 yoffsetDir;
 		DVector3 zoffsetDir;
-		if (aimflags & ALF_ISOFFHAND)
+		if ((aimflags & ALF_ISOFFHAND) && !multiplayer)
 		{
 			pos = source->player->mo->OffhandPos;
 			dir = source->player->mo->OffhandDir(source, angle, pitch);
@@ -7494,12 +7508,24 @@ AActor *P_SpawnPlayerMissile (AActor *source, double x, double y, double z,
 		else
 		{
 			pos = source->player->mo->AttackPos;
-			dir = source->player->mo->AttackDir(source, angle, pitch);
-			xoffsetDir = source->player->mo->AttackDir(source, source->Angles.Yaw, source->Angles.Pitch);
-			yoffsetDir = source->player->mo->AttackDir(source, source->Angles.Yaw - DAngle::fromDeg(90.), source->Angles.Pitch);
-			zoffsetDir = source->player->mo->AttackDir(source, source->Angles.Yaw, source->Angles.Pitch + DAngle::fromDeg(90.));
-			an = dir.Angle();
-			pitch = dir.Pitch();
+			if (multiplayer)
+			{
+				an = source->player->mo->AttackAngle + DAngle::fromDeg(90.);
+				pitch = -source->player->mo->AttackPitch;
+				dir = CanonicalAimDir(an, pitch);
+				xoffsetDir = dir;
+				yoffsetDir = CanonicalAimDir(an - DAngle::fromDeg(90.), pitch);
+				zoffsetDir = CanonicalAimDir(an, pitch + DAngle::fromDeg(90.));
+			}
+			else
+			{
+				dir = source->player->mo->AttackDir(source, angle, pitch);
+				xoffsetDir = source->player->mo->AttackDir(source, source->Angles.Yaw, source->Angles.Pitch);
+				yoffsetDir = source->player->mo->AttackDir(source, source->Angles.Yaw - DAngle::fromDeg(90.), source->Angles.Pitch);
+				zoffsetDir = source->player->mo->AttackDir(source, source->Angles.Yaw, source->Angles.Pitch + DAngle::fromDeg(90.));
+				an = dir.Angle();
+				pitch = dir.Pitch();
+			}
 		}
 
 		if (!multiplayer && !use_action_spawn_yzoffset)

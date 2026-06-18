@@ -88,12 +88,12 @@ class StrifeGrenadeLauncher : StrifeWeapon
 			offset += AngleToVector(an, 15);
 			grenade.SetOrigin(grenade.Vec3Offset(offset.X, offset.Y, 0.), false);
 
-			if (weapon && weapon == invoker && !multiplayer && player.mo.OverrideAttackPosDir)
+			if (weapon && weapon == invoker && player.mo.OverrideAttackPosDir)
 			{
 				Vector3 dir;
 				Vector3 offsetDir;
 				Vector3 zoffsetDir;
-				if (weapon.bOffhandWeapon)
+				if (weapon.bOffhandWeapon && !multiplayer)
 				{
 					dir = player.mo.OffhandDir(self, Angle, pitch);
 					offsetDir = player.mo.OffhandDir(self, Angle + angleofs, pitch);

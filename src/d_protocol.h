@@ -67,6 +67,8 @@ struct usercmd_t
 	short	pitch;			// up/down
 	short	yaw;			// left/right
 	short	roll;			// "tilt"
+	short	weaponpitch;	// main-hand aim pitch
+	short	weaponyaw;		// main-hand aim yaw
 	short	forwardmove;
 	short	sidemove;
 	short	upmove;
@@ -83,6 +85,8 @@ enum
 	UCMDF_SIDEMOVE		= 0x10,
 	UCMDF_UPMOVE		= 0x20,
 	UCMDF_ROLL			= 0x40,
+	UCMDF_WEAPONPITCH	= 0x80,
+	UCMDF_WEAPONYAW		= 0x100,
 };
 
 // When changing the following enum, be sure to update Net_SkipCommand()

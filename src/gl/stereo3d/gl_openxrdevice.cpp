@@ -610,16 +610,19 @@ namespace s3d
 
                 //Weapon firing tracking - Thanks Fishbiter for the inspiration of how/where to use this!
                 {
-                    player->mo->AttackPitch = DAngle::fromDeg(cinemamode ? -weaponangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees()
-                            : -weaponangles[PITCH]);
+                    if (!multiplayer)
+                    {
+                        player->mo->AttackPitch = DAngle::fromDeg(cinemamode ? -weaponangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees()
+                                : -weaponangles[PITCH]);
 
-                    player->mo->AttackAngle = DAngle::fromDeg(-90 + getViewpointYaw() + (weaponangles[YAW]- playerYaw));
-                    player->mo->AttackRoll = DAngle::fromDeg(weaponangles[ROLL]);
+                        player->mo->AttackAngle = DAngle::fromDeg(-90 + getViewpointYaw() + (weaponangles[YAW]- playerYaw));
+                        player->mo->AttackRoll = DAngle::fromDeg(weaponangles[ROLL]);
 
-                    player->mo->AttackPos.X = player->mo->X() - (weaponoffset[0] * vr_vunits_per_meter);
-                    player->mo->AttackPos.Y = player->mo->Y() - (weaponoffset[2] * vr_vunits_per_meter);
-                    player->mo->AttackPos.Z = r_viewpoint.CenterEyePos.Z + (((hmdPosition[1] + weaponoffset[1] + vr_height_adjust) * vr_vunits_per_meter) / pixelstretch) -
-                            getDoomPlayerHeightWithoutCrouch(player); // Fixes wrong shot height when in water
+                        player->mo->AttackPos.X = player->mo->X() - (weaponoffset[0] * vr_vunits_per_meter);
+                        player->mo->AttackPos.Y = player->mo->Y() - (weaponoffset[2] * vr_vunits_per_meter);
+                        player->mo->AttackPos.Z = r_viewpoint.CenterEyePos.Z + (((hmdPosition[1] + weaponoffset[1] + vr_height_adjust) * vr_vunits_per_meter) / pixelstretch) -
+                                getDoomPlayerHeightWithoutCrouch(player); // Fixes wrong shot height when in water
+                    }
                 }
 
                 {

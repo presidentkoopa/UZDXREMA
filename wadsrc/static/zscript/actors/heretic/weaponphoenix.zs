@@ -174,11 +174,11 @@ class PhoenixRodPowered : PhoenixRod
 		let directionAngle = angle;
 		let directionPitch = pitch;
 		let directionRoll = roll;
-		if (weapon && weapon == invoker && !multiplayer && player.mo.OverrideAttackPosDir)
+		if (weapon && weapon == invoker && player.mo.OverrideAttackPosDir)
 		{
 			Vector3 dir;
 			Vector3 yoffsetDir;
-			if (weapon.bOffhandWeapon)
+			if (weapon.bOffhandWeapon && !multiplayer)
 			{
 				spawnpos = player.mo.OffhandPos;
 				directionRoll = -player.mo.OffhandRoll;

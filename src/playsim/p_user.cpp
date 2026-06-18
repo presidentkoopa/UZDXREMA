@@ -99,6 +99,34 @@
 
 static FRandom pr_skullpop ("SkullPop");
 
+static inline DAngle CmdAngleToDAngle(short value)
+{
+	return DAngle::fromDeg(double(value) * (360.0 / 65536.0));
+}
+
+static void UpdateCanonicalMainHandPose(player_t *player)
+{
+	if (player == nullptr || player->mo == nullptr)
+	{
+		return;
+	}
+
+	if (multiplayer)
+	{
+		player->mo->OverrideAttackPosDir = true;
+	}
+	else if (!player->mo->OverrideAttackPosDir)
+	{
+		return;
+	}
+
+	const double shootz = player->mo->Center() - player->mo->Floorclip + player->mo->AttackOffset();
+	player->mo->AttackPos = player->mo->PosAtZ(shootz);
+	player->mo->AttackPitch = CmdAngleToDAngle(player->cmd.ucmd.weaponpitch);
+	player->mo->AttackAngle = CmdAngleToDAngle(player->cmd.ucmd.weaponyaw);
+	player->mo->AttackRoll = nullAngle;
+}
+
 // [SP] Allows respawn in single player
 CVAR(Bool, sv_singleplayerrespawn, false, CVAR_SERVERINFO | CVAR_CHEAT)
 CVAR(Float, snd_footstepvolume, 1.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -1344,6 +1372,7 @@ void P_PlayerThink (player_t *player)
 	// Make unmodified copies for ACS's GetPlayerInput.
 	player->original_oldbuttons = player->original_cmd.buttons;
 	player->original_cmd = cmd->ucmd;
+	UpdateCanonicalMainHandPose(player);
 	// Don't interpolate the view for more than one tic
 	player->cheats &= ~CF_INTERPVIEW;
 	player->cheats &= ~CF_INTERPVIEWANGLES;

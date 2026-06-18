@@ -955,6 +955,18 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 	cmd->ucmd.sidemove += clamp(side, -127, 127);
 	cmd->ucmd.yaw = LocalViewAngle >> 16;
 	cmd->ucmd.upmove = fly;
+	cmd->ucmd.weaponpitch = cmd->ucmd.pitch;
+	cmd->ucmd.weaponyaw = cmd->ucmd.yaw;
+	if (vrmode->IsVR())
+	{
+		const float cmdAngleScale = 65536.0f / 360.0f;
+		const float bodyYaw = doomYaw;
+		const float weaponYaw = -90.0f + bodyYaw + (weaponangles[YAW] - playerYaw);
+		const float weaponPitch = -weaponangles[PITCH];
+
+		cmd->ucmd.weaponpitch = (short)std::lround(weaponPitch * cmdAngleScale);
+		cmd->ucmd.weaponyaw = (short)std::lround(weaponYaw * cmdAngleScale);
+	}
 	LocalViewAngle = 0;
 	LocalViewPitch = 0;
 

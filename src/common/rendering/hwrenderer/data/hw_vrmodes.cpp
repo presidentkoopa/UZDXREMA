@@ -788,6 +788,12 @@ static DVector3 MapWeaponDir(AActor* actor, DAngle yaw, DAngle pitch, int hand =
 {
 	LSMatrix44 mat;
 	auto vrmode = VRMode::GetVRModeCached(true);
+	if (multiplayer)
+	{
+		double pc = pitch.Cos();
+		DVector3 direction = { pc * yaw.Cos(), pc * yaw.Sin(), -pitch.Sin() };
+		return direction;
+	}
 	if (!vrmode->GetWeaponTransform(&mat, hand))
 	{
 		double pc = pitch.Cos();
@@ -834,10 +840,17 @@ void VRMode::SetUp() const
 		player->mo->OverrideAttackPosDir = !puristmode && (IsVR() || vr_override_weap_pos);
 		player->mo->AttackDir = MapAttackDir;
 		player->mo->OffhandDir = MapOffhandDir;
+		if (!multiplayer)
+		{
+			double shootz = player->mo->Center() - player->mo->Floorclip + player->mo->AttackOffset();
+			player->mo->AttackPos = player->mo->PosAtZ(shootz);
+			player->mo->AttackAngle = r_viewpoint.Angles.Yaw - DAngle::fromDeg(90.);
+			player->mo->AttackPitch = -r_viewpoint.Angles.Pitch;
+		}
 		double shootz = player->mo->Center() - player->mo->Floorclip + player->mo->AttackOffset();
-		player->mo->AttackPos = player->mo->OffhandPos = player->mo->PosAtZ(shootz);
-		player->mo->AttackAngle = player->mo->OffhandAngle = r_viewpoint.Angles.Yaw - DAngle::fromDeg(90.);
-		player->mo->AttackPitch = player->mo->OffhandPitch = - r_viewpoint.Angles.Pitch;
+		player->mo->OffhandPos = player->mo->PosAtZ(shootz);
+		player->mo->OffhandAngle = r_viewpoint.Angles.Yaw - DAngle::fromDeg(90.);
+		player->mo->OffhandPitch = -r_viewpoint.Angles.Pitch;
 	}
 }
 
