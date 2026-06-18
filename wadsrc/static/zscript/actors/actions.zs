@@ -74,10 +74,10 @@ extend class Actor
 
 		if (player != NULL && player.mo == ref)
 		{
-			if (!vr_recoil) return;
+			if (multiplayer || !vr_recoil) return;
 			player.keepmomentum = true;
 			let weapon = invoker == player.OffhandWeapon ? player.OffhandWeapon : player.ReadyWeapon;
-			if (weapon && weapon == invoker && flags & CVF_RELATIVETOWEAPON && player.mo.OverrideAttackPosDir)
+			if (weapon && weapon == invoker && flags & CVF_RELATIVETOWEAPON && !multiplayer && player.mo.OverrideAttackPosDir)
 			{
 				Vector3 dir;
 				Vector3 yoffsetDir;

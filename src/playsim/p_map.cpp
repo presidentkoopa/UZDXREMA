@@ -4594,7 +4594,7 @@ DAngle P_AimLineAttack(AActor *t1, DAngle angle, double distance, FTranslatedLin
 	DVector3 startPos = t1->Pos();
 	DAngle aimPitch = t1->Angles.Pitch;
 	DAngle aimAngle = angle;
-	if (t1->player != NULL && t1->player->mo->OverrideAttackPosDir && !(flags & ALF_CHECKCONVERSATION))
+	if (t1->player != NULL && !multiplayer && t1->player->mo->OverrideAttackPosDir && !(flags & ALF_CHECKCONVERSATION))
 	{
 		if (flags & ALF_ISOFFHAND)
 		{
@@ -4644,7 +4644,7 @@ DAngle P_AimLineAttack(AActor *t1, DAngle angle, double distance, FTranslatedLin
 		result->pitch = newPitch;
 
 	aimPitch = t1->Angles.Pitch;
-	if (result->linetarget && (t1->player == NULL || !t1->player->mo->OverrideAttackPosDir))
+	if (result->linetarget && (t1->player == NULL || multiplayer || !t1->player->mo->OverrideAttackPosDir))
 	{
 		aimPitch = result->pitch;
 	}
@@ -4782,7 +4782,7 @@ AActor *P_LineAttack(AActor *t1, DAngle angle, double distance,
 		shootz = t1->Z();
 	shootz += sz;
 
-	if (t1->player != NULL && t1->player->mo->OverrideAttackPosDir)
+	if (t1->player != NULL && !multiplayer && t1->player->mo->OverrideAttackPosDir)
 	{
 		if (flags & LAF_ISOFFHAND)
 		{
@@ -4886,7 +4886,7 @@ AActor *P_LineAttack(AActor *t1, DAngle angle, double distance,
 		// Default case so exact comparison is enough
 		tempos = fromPos;
 	}
-	else if (t1->player != NULL && t1->player->mo->OverrideAttackPosDir)
+	else if (t1->player != NULL && !multiplayer && t1->player->mo->OverrideAttackPosDir)
 	{
 		tempos += DVector3(
 			offsetforward * direction.Angle().Cos() * direction.Pitch().Cos(),
@@ -5183,7 +5183,7 @@ int P_LineTrace(AActor *t1, DAngle angle, double distance,
 	double startz = t1->Z() - t1->Floorclip;
 	startz += sz;
 
-	if (flags & TRF_USEWEAPON && t1->player != NULL && t1->player->mo->OverrideAttackPosDir)
+	if (flags & TRF_USEWEAPON && t1->player != NULL && !multiplayer && t1->player->mo->OverrideAttackPosDir)
 	{
 		if (flags & TRF_ISOFFHAND)
 		{
@@ -5217,7 +5217,7 @@ int P_LineTrace(AActor *t1, DAngle angle, double distance,
 	{
 		startpos = fromPos;
 	}
-	else if (flags & TRF_USEWEAPON && t1->player != NULL && t1->player->mo->OverrideAttackPosDir)
+	else if (flags & TRF_USEWEAPON && t1->player != NULL && !multiplayer && t1->player->mo->OverrideAttackPosDir)
 	{
 		startpos += DVector3(
 			offsetforward * direction.Angle().Cos() * direction.Pitch().Cos(),
@@ -5647,7 +5647,7 @@ void P_RailAttack(FRailParams *p)
 		puffflags |= PF_NORANDOMZ;
 	}
 
-	if (source->player != NULL && source->player->mo->OverrideAttackPosDir)
+	if (source->player != NULL && !multiplayer && source->player->mo->OverrideAttackPosDir)
 	{
 		DVector3 offsetxyDir;
 		DVector3 offsetzDir;
@@ -5666,7 +5666,7 @@ void P_RailAttack(FRailParams *p)
 			offsetzDir = source->player->mo->AttackDir(source, source->Angles.Yaw, source->Angles.Pitch + DAngle::fromDeg(90.));
 		}
 
-		if (!use_action_spawn_yzoffset)
+		if (!multiplayer && !use_action_spawn_yzoffset)
 			p->offset_xy = p->offset_z = 0;
 
 		start += DVector3(
@@ -6162,12 +6162,12 @@ void P_UseLines(player_t *player)
 	// [NS] Now queries the Player's UseRange.
 	DVector2 end = start + player->mo->Angles.Yaw.ToVector(player->mo->FloatVar(NAME_UseRange));
 
-	if (use_mode == 0 || use_mode == 2)
+	if (multiplayer || use_mode == 0 || use_mode == 2)
 	{
 		used |= P_UseTraverse(player->mo, start, end, foundline);
 	}
 
-	if (player->mo->OverrideAttackPosDir && use_mode > 0)
+	if (!multiplayer && player->mo->OverrideAttackPosDir && use_mode > 0)
 	{
 		DAngle aimAngle;
 		float useRange;
@@ -6283,12 +6283,12 @@ int P_UsePuzzleItem(AActor *PuzzleItemUser, int PuzzleItemType)
 	start = PuzzleItemUser->GetPortalTransition(PuzzleItemUser->Height / 2).XY();
 	end = PuzzleItemUser->Angles.Yaw.ToVector(usedist);
 
-	if (use_mode == 0 || use_mode == 2)
+	if (multiplayer || use_mode == 0 || use_mode == 2)
 	{
 		used |= P_UsePuzzleItem(PuzzleItemUser, PuzzleItemType, start.X, start.Y, end.X, end.Y);
 	}
 
-	if (player != nullptr && player->mo->OverrideAttackPosDir && use_mode > 0)
+	if (player != nullptr && !multiplayer && player->mo->OverrideAttackPosDir && use_mode > 0)
 	{
 		DAngle aimAngle;
 		float useRange;

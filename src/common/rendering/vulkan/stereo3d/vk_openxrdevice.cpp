@@ -3677,16 +3677,6 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 				trigger_teleport = false;
 			}
 
-			if (*vr_move_use_offhand && xrHandPoseValid[offHand])
-			{
-				const DAngle offhandYaw = DAngle::fromDeg(GetViewpointYaw() - hmdorientation[YAW] + offhandangles[YAW]);
-				player->mo->ThrustAngleOffset = offhandYaw - player->mo->Angles.Yaw;
-			}
-			else
-			{
-				player->mo->ThrustAngleOffset = nullAngle;
-			}
-
 			auto vel = player->mo->Vel;
 			player->mo->Vel = DVector3((DVector2(positional_movementSideways, positional_movementForward) * vr_vunits_per_meter), 0);
 			bool wasOnGround = player->mo->Z() <= player->mo->floorz;

@@ -3302,17 +3302,6 @@ namespace s3d
 						trigger_teleport = false;
 					}
 
-					bool rightHanded = vr_control_scheme < 10;
-					// if right handed we use the left controller otherwise right controller
-					if (GetHandTransform(rightHanded ? 0 : 1, &mat) && vr_move_use_offhand)
-					{
-						player->mo->ThrustAngleOffset = DAngle::fromDeg(RAD2DEG(atan2f(-mat[2][2], -mat[2][0]))) - player->mo->Angles.Yaw;
-					}
-					else
-					{
-						player->mo->ThrustAngleOffset = nullAngle;
-					}
-
 					//Positional Movement
 					float hmd_forward=0;
 					float hmd_side=0;

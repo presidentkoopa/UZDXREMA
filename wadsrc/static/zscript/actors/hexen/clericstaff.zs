@@ -87,7 +87,7 @@ class CWeapStaff : ClericWeapon
 					LineAttack(ang, 1.5 * DEFMELEERANGE, slope, damage, 'Melee', "CStaffPuff", laflags, t);
 					if (t.linetarget != null)
 					{
-						if (!player.PlayInVR || vanilla_melee_attack)
+						if (!player.PlayInVR || (!multiplayer && vanilla_melee_attack))
 						{
 							angle = t.angleFromSource;
 							player.resetDoomYaw = true;

@@ -676,18 +676,6 @@ namespace s3d
 
                     trigger_teleport = false;
                 }
-#if 0  // this replace the move with offhand implementation in VrInputDefault.cpp
-                LSMatrix44 mat;
-                bool rightHanded = vr_control_scheme < 10;
-                if (GetHandTransform(rightHanded ? 0 : 1, &mat) && vr_move_use_offhand)
-                {
-                    player->mo->ThrustAngleOffset = DAngle::fromDeg(RAD2DEG(atan2f(-mat[2][2], -mat[2][0]))) - player->mo->Angles.Yaw;
-                }
-                else
-                {
-                    player->mo->ThrustAngleOffset = nullAngle;
-                }
-#endif
                 //Positional Movement
                 float hmd_forward=0;
                 float hmd_side=0;

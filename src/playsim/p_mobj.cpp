@@ -123,6 +123,7 @@ static void PlayerLandedOnThing (AActor *mo, AActor *onmobj);
 
 EXTERN_CVAR (Int,  cl_rockettrails)
 EXTERN_CVAR (Bool, use_action_spawn_yzoffset)
+EXTERN_CVAR (Int, vr_mode)
 // TODO gzdoom vr stuff
 EXTERN_CVAR(Float, vr_missile_haptic_level)
 
@@ -5731,6 +5732,7 @@ AActor *FLevelLocals::SpawnPlayer (FPlayerStart *mthing, int playernum, int flag
 
 	p->DesiredFOV = p->FOV = QzDoom_GetFOV();
 	p->camera = p->mo;
+	p->PlayInVR = vr_mode != VR_MONO;
 	p->playerstate = PST_LIVE;
 	p->refire = 0;
 	p->damagecount = 0;
@@ -7328,7 +7330,7 @@ AActor *P_SpawnSubMissile(AActor *source, PClassActor *type, AActor *target, DAn
 	DAngle an = angle;
 	DAngle pitch = source->Angles.Pitch;
 	DVector3 pos = source->Pos();
-	if (source->player != NULL && source->player->mo->OverrideAttackPosDir)
+	if (source->player != NULL && !multiplayer && source->player->mo->OverrideAttackPosDir)
 	{
 		if (aimflags & ALF_ISOFFHAND)
 		{
@@ -7371,7 +7373,7 @@ AActor *P_SpawnSubMissile(AActor *source, PClassActor *type, AActor *target, DAn
 
 	if (P_CheckMissileSpawn(other, source->radius))
 	{
-		if (source->player == NULL || !source->player->mo->OverrideAttackPosDir)
+		if (source->player == NULL || multiplayer || !source->player->mo->OverrideAttackPosDir)
 		{
 			pitch = P_AimLineAttack(source, angle, 1024., NULL, nullAngle, aimflags);
 		}
@@ -7473,7 +7475,7 @@ AActor *P_SpawnPlayerMissile (AActor *source, double x, double y, double z,
 			pos.Z = source->floorz;
 		}
 	}
-	if (source->player != NULL && source->player->mo->OverrideAttackPosDir)
+	if (source->player != NULL && !multiplayer && source->player->mo->OverrideAttackPosDir)
 	{
 		DVector3 dir;
 		DVector3 xoffsetDir;
@@ -7500,7 +7502,7 @@ AActor *P_SpawnPlayerMissile (AActor *source, double x, double y, double z,
 			pitch = dir.Pitch();
 		}
 
-		if (!use_action_spawn_yzoffset)
+		if (!multiplayer && !use_action_spawn_yzoffset)
 			y = z = 0;
 
 		pos += DVector3(

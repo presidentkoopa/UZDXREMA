@@ -831,7 +831,6 @@ void VRMode::SetUp() const
 	player_t* player = &players[consoleplayer];
 	if (player && player->mo)
 	{
-		player->PlayInVR = IsVR();
 		player->mo->OverrideAttackPosDir = !puristmode && (IsVR() || vr_override_weap_pos);
 		player->mo->AttackDir = MapAttackDir;
 		player->mo->OffhandDir = MapOffhandDir;

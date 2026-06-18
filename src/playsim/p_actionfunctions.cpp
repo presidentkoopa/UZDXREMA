@@ -1291,7 +1291,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_Recoil)
 	if (player != nullptr && player->mo == self)
 	{
 		//We don't want to adjust the player's camera - that could make them sick
-		if (!vr_recoil) return 0;
+		if (multiplayer || !vr_recoil) return 0;
 		player->keepmomentum = true;
 	}
 

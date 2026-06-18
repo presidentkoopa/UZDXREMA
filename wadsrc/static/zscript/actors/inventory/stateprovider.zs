@@ -98,7 +98,7 @@ class StateProvider : Inventory
 		int alflags = 0;
 
 		Vector2 ofs = (0, Spawnofs_xy);
-		if (!weapon || !player.mo.OverrideAttackPosDir)
+		if (!weapon || multiplayer || !player.mo.OverrideAttackPosDir)
 		{
 			double ang = Angle - 90;
 			ofs = AngleToVector(ang, Spawnofs_xy);
@@ -127,7 +127,7 @@ class StateProvider : Inventory
 
 		double _bangle = bangle;
 		double _bslope = bslope;
-		if (weapon && player.mo.OverrideAttackPosDir)
+		if (weapon && !multiplayer && player.mo.OverrideAttackPosDir)
 		{
 			Vector3 dir;
 			if (weapon.bOffhandWeapon)
@@ -259,7 +259,7 @@ class StateProvider : Inventory
 		if (missiletype) 
 		{
 			Vector2 ofs = (0, Spawnofs_xy);
-			if (!weapon || !player.mo.OverrideAttackPosDir)
+			if (!weapon || multiplayer || !player.mo.OverrideAttackPosDir)
 			{
 				double ang = self.Angle - 90;
 				ofs = AngleToVector(ang, Spawnofs_xy);
@@ -283,7 +283,7 @@ class StateProvider : Inventory
 				{
 					// This original implementation is to aim straight ahead and then offset
 					// the angle from the resulting direction. 
-					if (weapon && player.mo.OverrideAttackPosDir)
+					if (weapon && !multiplayer && player.mo.OverrideAttackPosDir)
 					{
 						Vector3 dir;
 						if (weapon.bOffhandWeapon)
@@ -399,7 +399,7 @@ class StateProvider : Inventory
 				else			A_StartSound(weapon.AttackSound, CHAN_WEAPON);
 			}
 
-			if ((!player.PlayInVR || vanilla_melee_attack) && !(flags & CPF_NOTURN))
+			if ((!player.PlayInVR || (!multiplayer && vanilla_melee_attack)) && !(flags & CPF_NOTURN))
 			{
 				// turn to face target
 				self.Angle = t.angleFromSource;

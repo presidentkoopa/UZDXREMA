@@ -48,14 +48,12 @@ extend class Actor
 {	
 	action void A_Punch()
 	{
-		bool playInVR = false;
 		int laflags = LAF_ISMELEEATTACK;
 		int alflags = 0;
 		FTranslatedLineTarget t;
 
 		if (player != null)
 		{
-			playInVR = player.PlayInVR;
 			Weapon weap = invoker == player.OffhandWeapon ? player.OffhandWeapon : player.ReadyWeapon;
 			if (weap != null && invoker == weap && stateinfo != null && stateinfo.mStateType == STATE_Psprite)
 			{
@@ -78,7 +76,7 @@ extend class Actor
 		LineAttack (ang, range, pitch, damage, 'Melee', "BulletPuff", laflags, t);
 
 		// turn to face target
-		if ((player != null && !player.PlayInVR || vanilla_melee_attack) && t.linetarget)
+		if ((player != null && (!player.PlayInVR || (!multiplayer && vanilla_melee_attack))) && t.linetarget)
 		{
 			A_StartSound ("*fist", CHAN_WEAPON);
 			angle = t.angleFromSource;

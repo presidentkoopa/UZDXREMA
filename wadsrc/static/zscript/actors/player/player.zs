@@ -1346,7 +1346,7 @@ class PlayerPawn : Actor
 		// [RH] 180-degree turn overrides all other yaws
 		if (player.turnticks)
 		{
-			if (player.PlayInVR)
+			if (player.PlayInVR && !multiplayer)
 			{
 				player.turnticks = 0;
 				Angle += 180.;
@@ -1371,7 +1371,7 @@ class PlayerPawn : Actor
 		double friction, movefactor;
 		[friction, movefactor] = GetFriction();
 		//Taken from the Wolf-3D TC - Prevent player having momentum/acceleration to avoid puking
-		if (!vr_momentum && !player.keepmomentum
+		if (!multiplayer && !vr_momentum && !player.keepmomentum
 		&& player.onground && friction == ORIG_FRICTION)
 		{
 			vel.XY *= 0.0001;
@@ -1382,7 +1382,7 @@ class PlayerPawn : Actor
 			Speed = Default.Speed;
 		}
 
-		if (abs(vel.x) < vr_momentum_threshold && abs(vel.y) < vr_momentum_threshold)
+		if (!multiplayer && abs(vel.x) < vr_momentum_threshold && abs(vel.y) < vr_momentum_threshold)
 		{
 			player.keepmomentum = false;
 		}
@@ -1623,14 +1623,11 @@ class PlayerPawn : Actor
 		{ // Player is frozen
 			reactiontime--;
 		}
-		if (menuactive == Menu.Off)
+		MovePlayer();
+		if (reactiontime == 0)
 		{
-			MovePlayer();
-			if (reactiontime == 0)
-			{
-				CheckJump();
-				CheckMoveUpDown();
-			}
+			CheckJump();
+			CheckMoveUpDown();
 		}
 	}
 
@@ -1750,7 +1747,7 @@ class PlayerPawn : Actor
 		}
 		CheckCheats();
 
-		if (bJustAttacked && (!player.PlayInVR || vanilla_melee_attack))
+		if (bJustAttacked && (!player.PlayInVR || (!multiplayer && vanilla_melee_attack)))
 		{ // Chainsaw/Gauntlets attack auto forward motion
 			cmd.yaw = 0;
 			cmd.forwardmove = 0xc800/2;

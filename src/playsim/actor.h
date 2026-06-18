@@ -1606,8 +1606,6 @@ public:
 
 	void Thrust(DAngle angle, double speed)
 	{
-		angle += ThrustAngleOffset;
-		
 		Vel.X += speed * angle.Cos();
 		Vel.Y += speed * angle.Sin();
 	}
