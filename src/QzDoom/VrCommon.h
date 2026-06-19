@@ -50,6 +50,10 @@ extern bool trigger_teleport;
 void VR_QueueTeleportCommandBurst(float forwardUnits, float sideUnits);
 void VR_ClearTeleportCommandBurst();
 bool VR_ConsumeTeleportCommandStep(float maxUnitsPerTick, float* outForwardUnits, float* outSideUnits);
+void VR_ResetTransientNetSafeState();
+void VR_SetMultiplayerCrouchHeight(float hmdHeightMapUnits);
+void VR_ClearMultiplayerCrouchHeight();
+bool VR_GetMultiplayerCrouchHeight(float* outHmdHeightMapUnits);
 
 // Shared smooth-turn helper used by OpenVR/OpenXR.
 float VR_GetAnalogTurnResponseScale(float smoothTurnSetting);

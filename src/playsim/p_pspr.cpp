@@ -50,6 +50,8 @@
 
 #include <QzDoom/VrCommon.h>
 
+EXTERN_CVAR(Int, vr_mode)
+
 // MACROS ------------------------------------------------------------------
 
 #define LOWERSPEED				6.
@@ -80,6 +82,11 @@ enum EWRF_Options
 	WRF_AllowUser3		= 1 << 9,
 	WRF_AllowUser4		= 1 << 10,
 };
+
+static bool P_UseLocalVrViewModelSuppression(const player_t* player)
+{
+	return player != nullptr && player == &players[consoleplayer] && vr_mode != VR_MONO;
+}
 
 // EXTERNAL FUNCTION PROTOTYPES --------------------------------------------
 
@@ -509,7 +516,9 @@ void DPSprite::SetState(FState *newstate, bool pending)
 								WF_OFFHANDUSER1OK | WF_OFFHANDUSER2OK | WF_OFFHANDUSER3OK | WF_OFFHANDUSER4OK | WF_TWOHANDSTABILIZED);
 	}
 
-	if (weaponStabilised)
+	// Two-hand stabilization comes from local VR controller pose/grip state.
+	// It must never affect authoritative weapon state in multiplayer.
+	if (!multiplayer && weaponStabilised)
 	{
 		Owner->WeaponState |= WF_TWOHANDSTABILIZED;
 	}
@@ -690,7 +699,7 @@ void P_BobWeapon (player_t *player, float *x, float *y, double ticfrac)
 			inv = nextinv;
 		}
 
-		if (!player->PlayInVR)
+		if (!P_UseLocalVrViewModelSuppression(player))
 		{
 			*x = (float)result.X;
 			*y = (float)result.Y;
@@ -723,7 +732,7 @@ void P_BobWeapon3D (player_t *player, FVector3 *translation, FVector3 *rotation,
 			inv = nextinv;
 		}
 
-		if (!player->PlayInVR)
+		if (!P_UseLocalVrViewModelSuppression(player))
 		{
 			translation->X = (float)t.X;
 			translation->Y = (float)t.Y;

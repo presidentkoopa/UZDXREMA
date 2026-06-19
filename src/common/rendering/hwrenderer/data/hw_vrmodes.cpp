@@ -837,20 +837,23 @@ void VRMode::SetUp() const
 	player_t* player = &players[consoleplayer];
 	if (player && player->mo)
 	{
-		player->mo->OverrideAttackPosDir = !puristmode && (IsVR() || vr_override_weap_pos);
 		player->mo->AttackDir = MapAttackDir;
 		player->mo->OffhandDir = MapOffhandDir;
+
+		// In multiplayer, attack pose is reconstructed from synchronized input in
+		// playsim code. Do not let renderer setup stamp local VR state into the
+		// player actor.
 		if (!multiplayer)
 		{
+			player->mo->OverrideAttackPosDir = !puristmode && (IsVR() || vr_override_weap_pos);
 			double shootz = player->mo->Center() - player->mo->Floorclip + player->mo->AttackOffset();
 			player->mo->AttackPos = player->mo->PosAtZ(shootz);
 			player->mo->AttackAngle = r_viewpoint.Angles.Yaw - DAngle::fromDeg(90.);
 			player->mo->AttackPitch = -r_viewpoint.Angles.Pitch;
+			player->mo->OffhandPos = player->mo->PosAtZ(shootz);
+			player->mo->OffhandAngle = r_viewpoint.Angles.Yaw - DAngle::fromDeg(90.);
+			player->mo->OffhandPitch = -r_viewpoint.Angles.Pitch;
 		}
-		double shootz = player->mo->Center() - player->mo->Floorclip + player->mo->AttackOffset();
-		player->mo->OffhandPos = player->mo->PosAtZ(shootz);
-		player->mo->OffhandAngle = r_viewpoint.Angles.Yaw - DAngle::fromDeg(90.);
-		player->mo->OffhandPitch = -r_viewpoint.Angles.Pitch;
 	}
 }
 

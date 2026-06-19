@@ -134,6 +134,60 @@ static void VR_ApplyTeleportBurstMove(int forwardScale, int sideScale, int &forw
 	forward += joyint(clamp(burstForwardUnits / kTeleportBurstUnitsPerTick, -1.0f, 1.0f) * forwardScale);
 }
 
+static void VR_ApplyMultiplayerCrouchButton(ticcmd_t* cmd, bool vrActive)
+{
+	static bool vrMpCrouchTarget = false;
+	static float vrMpCrouchBlend = 0.0f;
+
+	if (cmd == nullptr || !multiplayer || !vrActive || vr_crouch_use_button)
+	{
+		vrMpCrouchTarget = false;
+		vrMpCrouchBlend = 0.0f;
+		VR_ClearMultiplayerCrouchHeight();
+		return;
+	}
+
+	auto* player = &players[consoleplayer];
+	float hmdHeightMapUnits = 0.0f;
+	if (player == nullptr || player->mo == nullptr || !VR_GetMultiplayerCrouchHeight(&hmdHeightMapUnits))
+	{
+		vrMpCrouchTarget = false;
+		vrMpCrouchBlend = max(0.0f, vrMpCrouchBlend - 0.35f);
+		return;
+	}
+
+	const double defaultViewHeight = player->DefaultViewHeight();
+	if (defaultViewHeight <= 0.0)
+	{
+		vrMpCrouchTarget = false;
+		vrMpCrouchBlend = 0.0f;
+		return;
+	}
+
+	const float heightRatio = clamp(hmdHeightMapUnits / float(defaultViewHeight), 0.0f, 1.25f);
+	constexpr float kCrouchOnRatio = 0.82f;
+	constexpr float kCrouchOffRatio = 0.90f;
+	constexpr float kBlendRisePerTic = 0.40f;
+	constexpr float kBlendFallPerTic = 0.30f;
+
+	if (heightRatio <= kCrouchOnRatio)
+	{
+		vrMpCrouchTarget = true;
+	}
+	else if (heightRatio >= kCrouchOffRatio)
+	{
+		vrMpCrouchTarget = false;
+	}
+
+	vrMpCrouchBlend += vrMpCrouchTarget ? kBlendRisePerTic : -kBlendFallPerTic;
+	vrMpCrouchBlend = clamp(vrMpCrouchBlend, 0.0f, 1.0f);
+
+	if (vrMpCrouchBlend >= 0.5f)
+	{
+		cmd->ucmd.buttons |= BT_CROUCH;
+	}
+}
+
 extern int startpos, laststartpos;
 
 bool WriteZip(const char* filename, const FileSys::FCompressedBuffer* content, size_t contentcount);
@@ -986,6 +1040,8 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 	{
 		VR_ClearTeleportCommandBurst();
 	}
+
+	VR_ApplyMultiplayerCrouchButton(cmd, vrmode->IsVR());
 
 	cmd->ucmd.pitch = LocalViewPitch >> 16;
 

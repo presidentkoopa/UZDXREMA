@@ -124,8 +124,13 @@ static void PlayerLandedOnThing (AActor *mo, AActor *onmobj);
 EXTERN_CVAR (Int,  cl_rockettrails)
 EXTERN_CVAR (Bool, use_action_spawn_yzoffset)
 EXTERN_CVAR (Int, vr_mode)
+EXTERN_CVAR (Float, fov)
 // TODO gzdoom vr stuff
 EXTERN_CVAR(Float, vr_missile_haptic_level)
+
+extern bool sendturn180;
+extern float mousex;
+extern float mousey;
 
 static DVector3 CanonicalAimDir(DAngle yaw, DAngle pitch)
 {
@@ -5736,9 +5741,14 @@ AActor *FLevelLocals::SpawnPlayer (FPlayerStart *mthing, int playernum, int flag
 		mobj->sprite = Skins[p->userinfo.GetSkin()].sprite;
 	}
 
-	p->DesiredFOV = p->FOV = QzDoom_GetFOV();
+	// In multiplayer, do not seed authoritative player state from the local VR
+	// renderer mode. Runtime FOV changes already go through the net command path.
+	p->DesiredFOV = p->FOV = multiplayer ? 90.f : QzDoom_GetFOV();
 	p->camera = p->mo;
-	p->PlayInVR = vr_mode != VR_MONO;
+	// `PlayInVR` affects gameplay-side script branches. In multiplayer it must
+	// not come from the local renderer mode, or VR and flatscreen peers will
+	// simulate different player logic from spawn.
+	p->PlayInVR = !multiplayer && vr_mode != VR_MONO;
 	p->playerstate = PST_LIVE;
 	p->refire = 0;
 	p->damagecount = 0;
@@ -5762,6 +5772,17 @@ AActor *FLevelLocals::SpawnPlayer (FPlayerStart *mthing, int playernum, int flag
 	p->MUSINFOactor = nullptr;
 	p->MUSINFOtics = -1;
 	p->Vel.Zero();	// killough 10/98: initialize bobbing to 0.
+	if (playernum == consoleplayer)
+	{
+		mousex = mousey = 0;
+		sendturn180 = false;
+		LocalKeyboardTurner = false;
+		LocalViewAngle = 0;
+		LocalViewPitch = 0;
+		resetDoomYaw = true;
+		resetPreviousPitch = true;
+		VR_ResetTransientNetSafeState();
+	}
 
 	IFVIRTUALPTRNAME(p->mo, NAME_PlayerPawn, ResetAirSupply)
 	{

@@ -2087,9 +2087,14 @@ namespace s3d
 			// Set HMD angle game state parameters for NEXT frame
 			static double previousHmdYaw = 0;
 			static bool havePreviousYaw = false;
+			player_t* player = &players[consoleplayer];
 			if (!havePreviousYaw) {
 				previousHmdYaw = hmdYaw;
 				havePreviousYaw = true;
+			}
+			if (resetDoomYaw || (player && player->resetDoomYaw))
+			{
+				previousHmdYaw = hmdYaw;
 			}
 			hmdYawDeltaDegrees = hmdYaw - previousHmdYaw;
 			vrApplyingHmdYaw = true;
@@ -3228,15 +3233,26 @@ namespace s3d
 					double pixelstretch = level.info ? level.info->pixelstretch : 1.2;
 
 					// Thanks to Emawind for the codes for natural crouching
-					if (!vr_crouch_use_button)
+					if (!multiplayer)
 					{
-						static double defaultViewHeight = player->DefaultViewHeight();
-						player->crouching = 10;
-						player->crouchfactor = HmdHeight / defaultViewHeight;
+						if (!vr_crouch_use_button)
+						{
+							static double defaultViewHeight = player->DefaultViewHeight();
+							player->crouching = 10;
+							player->crouchfactor = HmdHeight / defaultViewHeight;
+						}
+						else if (player->crouching == 10)
+						{
+							player->Uncrouch();
+						}
 					}
-					else if (player->crouching == 10)
+					else if (!vr_crouch_use_button)
 					{
-						player->Uncrouch();
+						VR_SetMultiplayerCrouchHeight((float)HmdHeight);
+					}
+					else
+					{
+						VR_ClearMultiplayerCrouchHeight();
 					}
 
 					LSMatrix44 mat;
@@ -3257,7 +3273,7 @@ namespace s3d
 					}
 
 					LSMatrix44 matOffhand;
-					if (GetWeaponTransform(&matOffhand, VR_OFFHAND))
+					if (!multiplayer && GetWeaponTransform(&matOffhand, VR_OFFHAND))
 					{
 						player->mo->OffhandPos.X = matOffhand[3][0];
 						player->mo->OffhandPos.Y = matOffhand[3][2];

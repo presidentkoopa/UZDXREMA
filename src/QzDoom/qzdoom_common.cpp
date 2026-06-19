@@ -38,6 +38,8 @@ float positional_movementSideways;
 float positional_movementForward;
 static float vr_mp_pendingTeleportForwardUnits;
 static float vr_mp_pendingTeleportSideUnits;
+static float vr_mp_crouchHeightMapUnits = -1.0f;
+static bool vr_hasWorldPositionSample = false;
 
 //This is now controlled by the engine
 static bool useVirtualScreen = false;
@@ -111,6 +113,48 @@ bool VR_ConsumeTeleportCommandStep(float maxUnitsPerTick, float* outForwardUnits
     return true;
 }
 
+void VR_ResetTransientNetSafeState()
+{
+    VectorSet(worldPosition, 0.0f, 0.0f, 0.0f);
+    VectorSet(positionDeltaThisFrame, 0.0f, 0.0f, 0.0f);
+
+    remote_movementForward = 0.0f;
+    remote_movementSideways = 0.0f;
+    positional_movementForward = 0.0f;
+    positional_movementSideways = 0.0f;
+
+    ready_teleport = false;
+    trigger_teleport = false;
+    snapTurn = 0.0f;
+    cinemamodeYaw = 0.0f;
+    cinemamodePitch = 0.0f;
+
+    VR_ClearTeleportCommandBurst();
+    VR_ClearMultiplayerCrouchHeight();
+    vr_hasWorldPositionSample = false;
+}
+
+void VR_SetMultiplayerCrouchHeight(float hmdHeightMapUnits)
+{
+    vr_mp_crouchHeightMapUnits = hmdHeightMapUnits;
+}
+
+void VR_ClearMultiplayerCrouchHeight()
+{
+    vr_mp_crouchHeightMapUnits = -1.0f;
+}
+
+bool VR_GetMultiplayerCrouchHeight(float* outHmdHeightMapUnits)
+{
+    if (outHmdHeightMapUnits == nullptr || vr_mp_crouchHeightMapUnits <= 0.0f)
+    {
+        return false;
+    }
+
+    *outHmdHeightMapUnits = vr_mp_crouchHeightMapUnits;
+    return true;
+}
+
 void VR_HapticEvent(const char* event, int position, int intensity, float angle, float yHeight )
 {
 }
@@ -143,9 +187,17 @@ void VR_SetHMDPosition(float x, float y, float z )
 {
  	VectorSet(hmdPosition, x, y, z);
 
-	positionDeltaThisFrame[0] = (worldPosition[0] - x);
-	positionDeltaThisFrame[1] = (worldPosition[1] - y);
-	positionDeltaThisFrame[2] = (worldPosition[2] - z);
+	if (!vr_hasWorldPositionSample)
+	{
+		VectorSet(positionDeltaThisFrame, 0.0f, 0.0f, 0.0f);
+		vr_hasWorldPositionSample = true;
+	}
+	else
+	{
+		positionDeltaThisFrame[0] = (worldPosition[0] - x);
+		positionDeltaThisFrame[1] = (worldPosition[1] - y);
+		positionDeltaThisFrame[2] = (worldPosition[2] - z);
+	}
 
 	worldPosition[0] = x;
 	worldPosition[1] = y;

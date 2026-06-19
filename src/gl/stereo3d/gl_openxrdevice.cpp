@@ -611,15 +611,26 @@ namespace s3d
             {
                 double pixelstretch = level.info ? level.info->pixelstretch : 1.2;
 
-                if (!vr_crouch_use_button)
+                if (!multiplayer)
                 {
-                    static double defaultViewHeight = player->DefaultViewHeight();
-                    player->crouching = 10;
-                    player->crouchfactor = getHmdAdjustedHeightInMapUnit() / defaultViewHeight;
+                    if (!vr_crouch_use_button)
+                    {
+                        static double defaultViewHeight = player->DefaultViewHeight();
+                        player->crouching = 10;
+                        player->crouchfactor = getHmdAdjustedHeightInMapUnit() / defaultViewHeight;
+                    }
+                    else if (player->crouching == 10)
+                    {
+                        player->Uncrouch();
+                    }
                 }
-                else if (player->crouching == 10)
+                else if (!vr_crouch_use_button)
                 {
-                    player->Uncrouch();
+                    VR_SetMultiplayerCrouchHeight((float)getHmdAdjustedHeightInMapUnit());
+                }
+                else
+                {
+                    VR_ClearMultiplayerCrouchHeight();
                 }
 
                 //Weapon firing tracking - Thanks Fishbiter for the inspiration of how/where to use this!
@@ -639,6 +650,7 @@ namespace s3d
                     }
                 }
 
+                if (!multiplayer)
                 {
                     player->mo->OffhandPitch = DAngle::fromDeg(cinemamode ? -offhandangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees()
                             : -offhandangles[PITCH]);
@@ -752,6 +764,10 @@ namespace s3d
             if (!havePreviousYaw) {
                 previousHmdYaw = yaw;
                 havePreviousYaw = true;
+            }
+            if (resetDoomYaw || (player && player->resetDoomYaw))
+            {
+                previousHmdYaw = yaw;
             }
             hmdYawDeltaDegrees = yaw - previousHmdYaw;
             vrApplyingHmdYaw = true;

@@ -2922,11 +2922,16 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 	static bool havePreviousYaw = false;
 	const float currentHmdYaw = hmdorientation[1] + snapTurn;
 	const bool lockGameplayViewToScreenLayer = ShouldUseScreenLayerForCurrentFrame();
+	player_t* player = &players[consoleplayer];
 	if (!havePreviousYaw)
 	{
 		previousHmdYaw = currentHmdYaw;
 		doomYaw = r_viewpoint.Angles.Yaw.Degrees();
 		havePreviousYaw = true;
+	}
+	if (resetDoomYaw || (player && player->resetDoomYaw))
+	{
+		previousHmdYaw = currentHmdYaw;
 	}
 	float hmdYawDeltaDegrees = currentHmdYaw - previousHmdYaw;
 	if (!lockGameplayViewToScreenLayer)
@@ -3605,18 +3610,29 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		if (player && player->mo)
 		{
 			const float hmdHeight = GetHmdAdjustedHeightInMapUnit(xrUsingStageSpace ? false : xrHasLocalHeightAnchor, xrLocalHeightAnchor);
-			if (!vr_crouch_use_button)
+			if (!multiplayer)
 			{
-				const double defaultViewHeight = player->DefaultViewHeight();
-				if (defaultViewHeight > 0.0)
+				if (!vr_crouch_use_button)
 				{
-					player->crouching = 10;
-					player->crouchfactor = hmdHeight / defaultViewHeight;
+					const double defaultViewHeight = player->DefaultViewHeight();
+					if (defaultViewHeight > 0.0)
+					{
+						player->crouching = 10;
+						player->crouchfactor = hmdHeight / defaultViewHeight;
+					}
+				}
+				else if (player->crouching == 10)
+				{
+					player->Uncrouch();
 				}
 			}
-			else if (player->crouching == 10)
+			else if (!vr_crouch_use_button)
 			{
-				player->Uncrouch();
+				VR_SetMultiplayerCrouchHeight(hmdHeight);
+			}
+			else
+			{
+				VR_ClearMultiplayerCrouchHeight();
 			}
 
 			LSMatrix44 mat;
@@ -3636,7 +3652,7 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			}
 
 			LSMatrix44 matOffhand;
-			if (GetWeaponTransform(&matOffhand, VR_OFFHAND))
+			if (!multiplayer && GetWeaponTransform(&matOffhand, VR_OFFHAND))
 			{
 				player->mo->OffhandPos.X = matOffhand[3][0];
 				player->mo->OffhandPos.Y = matOffhand[3][2];
