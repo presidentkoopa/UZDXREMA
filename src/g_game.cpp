@@ -429,10 +429,20 @@ CCMD (switchhand)
 		auto mo = players[consoleplayer].mo;
 		if (mo)
 		{
-			IFVIRTUALPTRNAME(mo, NAME_PlayerPawn, SwitchWeaponHand)
+			if (multiplayer)
 			{
-				VMValue param[] = { mo, hand };
-				VMCall(func, param, 2, nullptr, 0);
+				Net_WriteInt8(DEM_ZSC_CMD);
+				Net_WriteString("vr_switchhand");
+				Net_WriteInt16(1);
+				Net_WriteInt8(hand != 0 ? 1 : 0);
+			}
+			else
+			{
+				IFVIRTUALPTRNAME(mo, NAME_PlayerPawn, SwitchWeaponHand)
+				{
+					VMValue param[] = { mo, hand };
+					VMCall(func, param, 2, nullptr, 0);
+				}
 			}
 		}
 	}

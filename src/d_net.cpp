@@ -2777,6 +2777,62 @@ void Net_DoCommand (int type, uint8_t **stream, int player)
 			FName cmd = ReadStringConst(stream);
 			unsigned int size = ReadInt16(stream);
 
+			if (strcmp(cmd.GetChars(), "vr_switchhand") == 0)
+			{
+				const int hand = size > 0 ? (ReadInt8(stream) != 0 ? 1 : 0) : 0;
+				for (unsigned int i = size > 0 ? 1u : 0u; i < size; ++i)
+				{
+					ReadInt8(stream);
+				}
+
+				if (gamestate == GS_LEVEL && !paused && players[player].playerstate != PST_DEAD && players[player].mo != nullptr)
+				{
+					IFVIRTUALPTRNAME(players[player].mo, NAME_PlayerPawn, SwitchWeaponHand)
+					{
+						VMValue param[] = { players[player].mo, hand };
+						VMCall(func, param, 2, nullptr, 0);
+					}
+				}
+				break;
+			}
+
+			if (strcmp(cmd.GetChars(), "vr_moveweaphand") == 0)
+			{
+				uint32_t which = 0;
+				int hand = 0;
+				if (size >= 4)
+				{
+					which = ReadInt32(stream);
+				}
+				if (size >= 5)
+				{
+					hand = ReadInt8(stream) != 0 ? 1 : 0;
+				}
+				for (unsigned int i = size >= 5 ? 5u : size >= 4 ? 4u : 0u; i < size; ++i)
+				{
+					ReadInt8(stream);
+				}
+
+				if (gamestate == GS_LEVEL && !paused && players[player].playerstate != PST_DEAD && players[player].mo != nullptr)
+				{
+					AActor* item = players[player].mo->Inventory;
+					while (item != nullptr && item->InventoryID != which)
+					{
+						item = item->Inventory;
+					}
+
+					if (item != nullptr)
+					{
+						IFVIRTUALPTRNAME(players[player].mo, NAME_PlayerPawn, MoveWeaponToHand)
+						{
+							VMValue param[] = { players[player].mo, item, hand };
+							VMCall(func, param, 3, nullptr, 0);
+						}
+					}
+				}
+				break;
+			}
+
 			TArray<uint8_t> buffer = {};
 			if (size)
 			{
