@@ -472,12 +472,13 @@ class PlayerPawn : Actor
 		int alt_state = hand ? WF_OFFHANDREADYALT : WF_WEAPONREADYALT;
 		int bt_attack = hand ? BT_OFFHANDATTACK : BT_ATTACK;
 		int bt_altattack = hand ? BT_OFFHANDALTATTACK : BT_ALTATTACK;
+		bool wasAttackDown = hand ? player.ohattackdown : player.attackdown;
 		bool attackdown = false;
 
 		// Check for fire. Some weapons do not auto fire.
 		if ((player.WeaponState & ready_state) && (player.cmd.buttons & bt_attack))
 		{
-			if (!player.attackdown || !weapon.bNoAutofire)
+			if (!wasAttackDown || !weapon.bNoAutofire)
 			{
 				attackdown = true;
 				FireWeapon (NULL, hand);
@@ -485,7 +486,7 @@ class PlayerPawn : Actor
 		}
 		else if ((player.WeaponState & alt_state) && (player.cmd.buttons & bt_altattack))
 		{
-			if (!player.attackdown || !weapon.bNoAutofire)
+			if (!wasAttackDown || !weapon.bNoAutofire)
 			{
 				attackdown = true;
 				FireWeaponAlt (NULL, hand);

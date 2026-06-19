@@ -125,6 +125,17 @@ static void UpdateCanonicalMainHandPose(player_t *player)
 	player->mo->AttackPitch = CmdAngleToDAngle(player->cmd.ucmd.weaponpitch);
 	player->mo->AttackAngle = CmdAngleToDAngle(player->cmd.ucmd.weaponyaw);
 	player->mo->AttackRoll = nullAngle;
+
+	// Multiplayer fake-6DoF uses a single canonical weapon aim. Mirror that
+	// pose into the offhand fields too so any offhand code path that still
+	// consults them remains deterministic across peers.
+	if (multiplayer)
+	{
+		player->mo->OffhandPos = player->mo->AttackPos;
+		player->mo->OffhandPitch = player->mo->AttackPitch;
+		player->mo->OffhandAngle = player->mo->AttackAngle;
+		player->mo->OffhandRoll = player->mo->AttackRoll;
+	}
 }
 
 // [SP] Allows respawn in single player

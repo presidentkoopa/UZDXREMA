@@ -188,6 +188,84 @@ static void VR_ApplyMultiplayerCrouchButton(ticcmd_t* cmd, bool vrActive)
 	}
 }
 
+namespace
+{
+	enum class EVRCanonicalAimOwner : uint8_t
+	{
+		MainHand = 0,
+		Offhand = 1,
+	};
+
+	EVRCanonicalAimOwner GVRCanonicalAimOwner = EVRCanonicalAimOwner::MainHand;
+
+	static bool VR_HandHasActiveSequence(player_t* player, int hand)
+	{
+		if (player == nullptr)
+		{
+			return false;
+		}
+
+		AActor* weapon = hand != 0 ? player->OffhandWeapon : player->ReadyWeapon;
+		if (weapon == nullptr)
+		{
+			return false;
+		}
+
+		DPSprite* pspr = player->FindPSprite(hand != 0 ? PSP_OFFHANDWEAPON : PSP_WEAPON);
+		if (pspr == nullptr || pspr->GetCaller() != weapon)
+		{
+			return false;
+		}
+
+		const uint32_t readyMask = hand != 0
+			? (WF_OFFHANDREADY | WF_OFFHANDREADYALT)
+			: (WF_WEAPONREADY | WF_WEAPONREADYALT);
+
+		return (player->WeaponState & readyMask) == 0;
+	}
+
+	static EVRCanonicalAimOwner VR_ResolveCanonicalAimOwner(player_t* player, uint32_t buttons)
+	{
+		if (player == nullptr)
+		{
+			return EVRCanonicalAimOwner::MainHand;
+		}
+
+		const bool hasMainWeapon = player->ReadyWeapon != nullptr;
+		const bool hasOffhandWeapon = player->OffhandWeapon != nullptr;
+
+		const bool mainInputActive = hasMainWeapon &&
+			(buttons & (BT_ATTACK | BT_ALTATTACK | BT_RELOAD | BT_MAINHANDRELOAD)) != 0;
+		const bool offhandInputActive = hasOffhandWeapon &&
+			(buttons & (BT_OFFHANDATTACK | BT_OFFHANDALTATTACK | BT_OFFHANDRELOAD)) != 0;
+
+		const bool mainSequenceActive = VR_HandHasActiveSequence(player, 0);
+		const bool offhandSequenceActive = VR_HandHasActiveSequence(player, 1);
+
+		if (mainInputActive || mainSequenceActive)
+		{
+			return EVRCanonicalAimOwner::MainHand;
+		}
+
+		if (offhandInputActive)
+		{
+			return EVRCanonicalAimOwner::Offhand;
+		}
+
+		if (GVRCanonicalAimOwner == EVRCanonicalAimOwner::Offhand && offhandSequenceActive)
+		{
+			return EVRCanonicalAimOwner::Offhand;
+		}
+
+		if (offhandSequenceActive)
+		{
+			return EVRCanonicalAimOwner::Offhand;
+		}
+
+		return EVRCanonicalAimOwner::MainHand;
+	}
+}
+
 extern int startpos, laststartpos;
 
 bool WriteZip(const char* filename, const FileSys::FCompressedBuffer* content, size_t contentcount);
@@ -1087,8 +1165,23 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 	{
 		const float cmdAngleScale = 65536.0f / 360.0f;
 		const float bodyYaw = doomYaw;
-		const float weaponYaw = -90.0f + bodyYaw + (weaponangles[YAW] - playerYaw);
-		const float weaponPitch = -weaponangles[PITCH];
+		player_t* localPlayer = &players[consoleplayer];
+		if (multiplayer)
+		{
+			GVRCanonicalAimOwner = VR_ResolveCanonicalAimOwner(localPlayer, cmd->ucmd.buttons);
+		}
+		else
+		{
+			GVRCanonicalAimOwner = EVRCanonicalAimOwner::MainHand;
+		}
+
+		const bool useOffhandAim = multiplayer
+			&& GVRCanonicalAimOwner == EVRCanonicalAimOwner::Offhand
+			&& localPlayer != nullptr
+			&& localPlayer->OffhandWeapon != nullptr;
+		const float* sourceAngles = useOffhandAim ? offhandangles : weaponangles;
+		const float weaponYaw = -90.0f + bodyYaw + (sourceAngles[YAW] - playerYaw);
+		const float weaponPitch = -sourceAngles[PITCH];
 
 		cmd->ucmd.weaponpitch = (short)std::lround(weaponPitch * cmdAngleScale);
 		cmd->ucmd.weaponyaw = (short)std::lround(weaponYaw * cmdAngleScale);

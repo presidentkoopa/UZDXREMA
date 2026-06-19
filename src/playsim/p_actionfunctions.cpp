@@ -5711,6 +5711,10 @@ DEFINE_ACTION_FUNCTION(AActor, OffhandDir)
 	PARAM_OBJECT_NOT_NULL(source, AActor);
 	PARAM_ANGLE(yaw);
 	PARAM_ANGLE(pitch);
+	if (self->player != nullptr && multiplayer && self->OverrideAttackPosDir)
+	{
+		ACTION_RETURN_VEC3(DVector3((self->AttackAngle + DAngle::fromDeg(90.)).Degrees(), (-self->AttackPitch).Degrees(), 0.));
+	}
 	DVector3 dir = self->OffhandDir(source, yaw, pitch);
 	ACTION_RETURN_VEC3(DVector3(dir.Angle().Degrees(), dir.Pitch().Degrees(), 0.));
 }
