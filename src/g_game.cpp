@@ -101,6 +101,39 @@
 static FRandom pr_dmspawn ("DMSpawn");
 static FRandom pr_pspawn ("PlayerSpawn");
 
+static inline int joyint(double val);
+
+static void VR_ApplyStickMove(int forwardScale, int sideScale, float joyforward, float joyside, int &forward, int &side)
+{
+	// Convert local VR locomotion intent into ordinary command movement before sim.
+	side += joyint(joyside * sideScale);
+	forward += joyint(joyforward * forwardScale);
+}
+
+static void VR_ApplyPositionalMove(int forwardScale, int sideScale, float hmdforward, float hmdside, float vrUnitsPerMeter, int &forward, int &side)
+{
+	// Approximate roomscale as deterministic command motion in multiplayer.
+	constexpr float kWorldUnitsPerFullCommand = 127.0f;
+	const float sideNorm = clamp((hmdside * vrUnitsPerMeter) / kWorldUnitsPerFullCommand, -1.0f, 1.0f);
+	const float forwardNorm = clamp((hmdforward * vrUnitsPerMeter) / kWorldUnitsPerFullCommand, -1.0f, 1.0f);
+	side += joyint(sideNorm * sideScale);
+	forward += joyint(forwardNorm * forwardScale);
+}
+
+static void VR_ApplyTeleportBurstMove(int forwardScale, int sideScale, int &forward, int &side)
+{
+	constexpr float kTeleportBurstUnitsPerTick = 127.0f;
+	float burstForwardUnits = 0.0f;
+	float burstSideUnits = 0.0f;
+	if (!VR_ConsumeTeleportCommandStep(kTeleportBurstUnitsPerTick, &burstForwardUnits, &burstSideUnits))
+	{
+		return;
+	}
+
+	side += joyint(clamp(burstSideUnits / kTeleportBurstUnitsPerTick, -1.0f, 1.0f) * sideScale);
+	forward += joyint(clamp(burstForwardUnits / kTeleportBurstUnitsPerTick, -1.0f, 1.0f) * forwardScale);
+}
+
 extern int startpos, laststartpos;
 
 bool WriteZip(const char* filename, const FileSys::FCompressedBuffer* content, size_t contentcount);
@@ -138,6 +171,7 @@ EXTERN_CVAR(Bool, vr_teleport);
 EXTERN_CVAR(Int, vr_move_speed);
 EXTERN_CVAR(Float, vr_run_multiplier);
 EXTERN_CVAR(Float, vr_walk_multiplier);
+EXTERN_CVAR(Float, vr_vunits_per_meter);
 
 //==========================================================================
 //
@@ -912,19 +946,45 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 	{
 		forward += xs_CRoundToInt(mousey * m_forward);
 	}
-#ifdef USE_OPENXR
-	if (vrmode->IsVR() && !vr_teleport) {
-		float joyforward=0;
-		float joyside=0;
-		float dummy=0;
-		VR_GetMove(&joyforward, &joyside, &dummy, &dummy, &dummy, &dummy, &dummy, &dummy);
-		side += joyint(joyside * sidemove[speed]);
-		forward += joyint(joyforward * forwardmove[speed]);
+	if (vrmode->IsVR())
+	{
+		float joyforward = 0;
+		float joyside = 0;
+		float hmdforward = 0;
+		float hmdside = 0;
+		float dummy = 0;
+		float yaw = 0;
+		float pitch = 0;
+		float roll = 0;
+		VR_GetMove(&joyforward, &joyside, &hmdforward, &hmdside, &dummy, &yaw, &pitch, &roll);
+		if (!vr_teleport || !multiplayer)
+		{
+			VR_ApplyStickMove(forwardmove[speed], sidemove[speed], joyforward, joyside, forward, side);
+		}
+		if (multiplayer)
+		{
+			VR_ApplyPositionalMove(forwardmove[1], sidemove[1], hmdforward, hmdside, vr_vunits_per_meter, forward, side);
+			if (vr_teleport)
+			{
+				VR_ApplyTeleportBurstMove(forwardmove[1], sidemove[1], forward, side);
+			}
+			else
+			{
+				VR_ClearTeleportCommandBurst();
+			}
+		}
+		else
+		{
+			VR_ClearTeleportCommandBurst();
+		}
 	}
-#endif
-	if (vrmode->IsVR() && vr_teleport)
+	if (vrmode->IsVR() && vr_teleport && !multiplayer)
 	{
 		side = forward = 0;
+	}
+	else if (!vrmode->IsVR() || !multiplayer)
+	{
+		VR_ClearTeleportCommandBurst();
 	}
 
 	cmd->ucmd.pitch = LocalViewPitch >> 16;

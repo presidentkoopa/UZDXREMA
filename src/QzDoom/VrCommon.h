@@ -46,6 +46,11 @@ extern bool player_moving;
 extern bool ready_teleport;
 extern bool trigger_teleport;
 
+// Multiplayer-safe VR locomotion helpers.
+void VR_QueueTeleportCommandBurst(float forwardUnits, float sideUnits);
+void VR_ClearTeleportCommandBurst();
+bool VR_ConsumeTeleportCommandStep(float maxUnitsPerTick, float* outForwardUnits, float* outSideUnits);
+
 // Shared smooth-turn helper used by OpenVR/OpenXR.
 float VR_GetAnalogTurnResponseScale(float smoothTurnSetting);
 float VR_ApplyAnalogSmoothTurn(float turnAxis, float maxTurnRateDegPerSec, float deltaSeconds, float responseScale, float& currentTurnRateDegPerSec);

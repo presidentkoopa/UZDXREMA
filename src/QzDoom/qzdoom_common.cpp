@@ -1,6 +1,7 @@
 #include "doomtype.h"
 #include "VrCommon.h"
 #include "hw_vrmodes.h"
+#include <cmath>
 
 EXTERN_CVAR(Float, fov)
 EXTERN_CVAR(Int, vr_overlayscreen);
@@ -35,6 +36,8 @@ float remote_movementSideways;
 float remote_movementForward;
 float positional_movementSideways;
 float positional_movementForward;
+static float vr_mp_pendingTeleportForwardUnits;
+static float vr_mp_pendingTeleportSideUnits;
 
 //This is now controlled by the engine
 static bool useVirtualScreen = false;
@@ -61,6 +64,51 @@ float QzDoom_GetFOV()
 	const auto vrmode = VRMode::GetVRModeCached(true);
 	if (vrmode->IsVR()) return 90.;
 	return fov;
+}
+
+void VR_QueueTeleportCommandBurst(float forwardUnits, float sideUnits)
+{
+    vr_mp_pendingTeleportForwardUnits = forwardUnits;
+    vr_mp_pendingTeleportSideUnits = sideUnits;
+}
+
+void VR_ClearTeleportCommandBurst()
+{
+    vr_mp_pendingTeleportForwardUnits = 0.0f;
+    vr_mp_pendingTeleportSideUnits = 0.0f;
+}
+
+bool VR_ConsumeTeleportCommandStep(float maxUnitsPerTick, float* outForwardUnits, float* outSideUnits)
+{
+    if (outForwardUnits == nullptr || outSideUnits == nullptr || maxUnitsPerTick <= 0.0f)
+    {
+        return false;
+    }
+
+    const float forward = vr_mp_pendingTeleportForwardUnits;
+    const float side = vr_mp_pendingTeleportSideUnits;
+    const float length = sqrtf((forward * forward) + (side * side));
+    if (length <= 0.001f)
+    {
+        *outForwardUnits = 0.0f;
+        *outSideUnits = 0.0f;
+        VR_ClearTeleportCommandBurst();
+        return false;
+    }
+
+    const float scale = length > maxUnitsPerTick ? (maxUnitsPerTick / length) : 1.0f;
+    *outForwardUnits = forward * scale;
+    *outSideUnits = side * scale;
+
+    vr_mp_pendingTeleportForwardUnits -= *outForwardUnits;
+    vr_mp_pendingTeleportSideUnits -= *outSideUnits;
+
+    if (fabsf(vr_mp_pendingTeleportForwardUnits) <= 0.001f && fabsf(vr_mp_pendingTeleportSideUnits) <= 0.001f)
+    {
+        VR_ClearTeleportCommandBurst();
+    }
+
+    return true;
 }
 
 void VR_HapticEvent(const char* event, int position, int intensity, float angle, float yHeight )

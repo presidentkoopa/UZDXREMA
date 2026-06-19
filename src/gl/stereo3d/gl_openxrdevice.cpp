@@ -173,6 +173,20 @@ float getViewpointYaw()
     return doomYaw;
 }
 
+static void QueueMultiplayerTeleportBurst(const player_t* player, const DVector3& target)
+{
+    if (player == nullptr || player->mo == nullptr)
+    {
+        return;
+    }
+
+    const DVector2 delta(target.X - player->mo->X(), target.Y - player->mo->Y());
+    const double yawRadians = player->mo->Angles.Yaw.Radians();
+    const float forwardUnits = float(delta.X * std::cos(yawRadians) + delta.Y * std::sin(yawRadians));
+    const float sideUnits = float(delta.X * std::sin(yawRadians) - delta.Y * std::cos(yawRadians));
+    VR_QueueTeleportCommandBurst(forwardUnits, sideUnits);
+}
+
 static float DEG2RAD(float deg)
 {
     return deg * float(M_PI / 180.0);
@@ -661,20 +675,27 @@ namespace s3d
                         }
                     }
                     else if (trigger_teleport && m_TeleportTarget == TRACE_HitFloor) {
-                        auto vel = player->mo->Vel;
-                        player->mo->Vel = DVector3(m_TeleportLocation.X - player->mo->X(),
-                                                   m_TeleportLocation.Y - player->mo->Y(), 0);
-                        bool wasOnGround = player->mo->Z() <= player->mo->floorz + 2;
-                        double oldZ = player->mo->Z();
-                        P_XYMovement(player->mo, DVector2(0, 0));
-
-                        //if we were on the ground before offsetting, make sure we still are (this fixes not being able to move on lifts)
-                        if (player->mo->Z() >= oldZ && wasOnGround) {
-                            player->mo->SetZ(player->mo->floorz);
+                        if (multiplayer) {
+                            QueueMultiplayerTeleportBurst(player, m_TeleportLocation);
                         } else {
-                            player->mo->SetZ(oldZ);
+                            auto vel = player->mo->Vel;
+                            player->mo->Vel = DVector3(m_TeleportLocation.X - player->mo->X(),
+                                                       m_TeleportLocation.Y - player->mo->Y(), 0);
+                            bool wasOnGround = player->mo->Z() <= player->mo->floorz + 2;
+                            double oldZ = player->mo->Z();
+                            P_XYMovement(player->mo, DVector2(0, 0));
+
+                            //if we were on the ground before offsetting, make sure we still are (this fixes not being able to move on lifts)
+                            if (player->mo->Z() >= oldZ && wasOnGround) {
+                                player->mo->SetZ(player->mo->floorz);
+                            } else {
+                                player->mo->SetZ(oldZ);
+                            }
+                            player->mo->Vel = vel;
                         }
-                        player->mo->Vel = vel;
+
+                        m_TeleportTarget = TRACE_HitNone;
+                        m_TeleportLocation = DVector3(0, 0, 0);
                     }
 
                     trigger_teleport = false;
@@ -685,23 +706,27 @@ namespace s3d
                 float dummy=0;
                 VR_GetMove(&dummy, &dummy, &hmd_forward, &hmd_side, &dummy, &dummy, &dummy, &dummy);
 
-                //Positional movement - Thanks fishbiter!!
-                auto vel = player->mo->Vel;
-                player->mo->Vel = DVector3((DVector2(hmd_side, hmd_forward) * vr_vunits_per_meter), 0);
-                bool wasOnGround = player->mo->Z() <= player->mo->floorz + 2;
-                double oldZ = player->mo->Z();
-                P_XYMovement(player->mo, DVector2(0, 0));
+                if (!multiplayer)
+                {
+                    // Roomscale/HMD positional locomotion stays local to single-player until it has
+                    // an explicit deterministic netplay contract.
+                    auto vel = player->mo->Vel;
+                    player->mo->Vel = DVector3((DVector2(hmd_side, hmd_forward) * vr_vunits_per_meter), 0);
+                    bool wasOnGround = player->mo->Z() <= player->mo->floorz + 2;
+                    double oldZ = player->mo->Z();
+                    P_XYMovement(player->mo, DVector2(0, 0));
 
-                //if we were on the ground before offsetting, make sure we still are (this fixes not being able to move on lifts)
-                if (player->mo->Z() >= oldZ && wasOnGround)
-                {
-                    player->mo->SetZ(player->mo->floorz);
+                    //if we were on the ground before offsetting, make sure we still are (this fixes not being able to move on lifts)
+                    if (player->mo->Z() >= oldZ && wasOnGround)
+                    {
+                        player->mo->SetZ(player->mo->floorz);
+                    }
+                    else
+                    {
+                        player->mo->SetZ(oldZ);
+                    }
+                    player->mo->Vel = vel;
                 }
-                else
-                {
-                    player->mo->SetZ(oldZ);
-                }
-                player->mo->Vel = vel;
             }
             updateHmdPose(r_viewpoint);
         }
