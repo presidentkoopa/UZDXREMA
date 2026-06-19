@@ -130,17 +130,27 @@ void FGLRenderer::Flush()
 		for (int eye_ix = 0; eye_ix < eyeCount; ++eye_ix)
 		{
 			const auto &eye = vrmode->mEyes[mBuffers->CurrentEye()];
-			if (vrmode->IsVR())
+			const bool renderNetWaitShell = vrmode->IsVR() && VR_IsNetWaitShellActive();
+			if (renderNetWaitShell)
+			{
+				eye->AdjustBlend(nullptr);
+				VR_RenderNetWaitShellContents(screen->mSceneViewport.width, screen->mSceneViewport.height, true);
+				screen->Draw2D(true);
+			}
+			else if (vrmode->IsVR())
 			{
 				eye->AdjustBlend(nullptr);
 				screen->Draw2D(true);
 			}
-			if (!VR_UseScreenLayer())
+			if (!renderNetWaitShell && !VR_UseScreenLayer())
 			{
 				eye->AdjustHud();
 			}
 
-			screen->Draw2D(false);
+			if (!renderNetWaitShell)
+			{
+				screen->Draw2D(false);
+			}
 			mBuffers->NextEye(eyeCount);
 		}
 		twod->Clear();

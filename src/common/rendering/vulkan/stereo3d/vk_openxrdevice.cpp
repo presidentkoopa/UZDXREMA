@@ -31,6 +31,7 @@
 #include "rendering/hwrenderer/scene/hw_drawinfo.h"
 #include "common/rendering/hwrenderer/data/hw_viewpointbuffer.h"
 #include "v_draw.h"
+#include "i_net.h"
 
 #include <cstring>
 #include <cmath>
@@ -2590,6 +2591,11 @@ void VKOpenXRDeviceMode::DestroyMenuPointerBeamSwapchain() const
 	}
 }
 
+static bool IsNetWaitShellActive()
+{
+	return VR_IsNetWaitShellActive();
+}
+
 void VKOpenXRDeviceMode::DestroyOpenXR() const
 {
 	StopHaptics();
@@ -2736,6 +2742,10 @@ void VKOpenXRDeviceMode::PurgeDeferredOpenXRResources() const
 
 VKOpenXRDeviceMode::FrameRenderMode VKOpenXRDeviceMode::DetermineFrameRenderMode() const
 {
+	if (IsNetWaitShellActive())
+	{
+		return FrameRenderMode::VirtualScreen;
+	}
 	const bool forceVirtualScreen = gamestate == GS_LEVEL && menuactive == MENU_Off && (cinemamode || vr_overlayscreen_always);
 	return (IsGameplaySceneActive() && !forceVirtualScreen) ? FrameRenderMode::GameplayEyes : FrameRenderMode::VirtualScreen;
 }
@@ -4501,16 +4511,18 @@ void VKOpenXRDeviceMode::updateVirtualScreenLayer() const
 
 bool VKOpenXRDeviceMode::ShouldRenderVirtualScreen() const
 {
+	const bool renderNetWaitShell = IsNetWaitShellActive();
 	const int effectiveOverlayMode = (vr_overlayscreen == 0) ? 2 : vr_overlayscreen;
-	const bool overlayEnabled = (effectiveOverlayMode > 0) || vr_overlayscreen_always;
+	const bool overlayEnabled = renderNetWaitShell || (effectiveOverlayMode > 0) || vr_overlayscreen_always;
 	return ShouldUseScreenLayerForCurrentFrame() &&
-		(gamestate != GS_LEVEL || menuactive != MENU_Off || cinemamode || ConsoleState != c_up || vr_overlayscreen_always) &&
+		(renderNetWaitShell || gamestate != GS_LEVEL || menuactive != MENU_Off || cinemamode || ConsoleState != c_up || vr_overlayscreen_always) &&
 		overlayEnabled;
 }
 
 bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 {
 	auto* vkfb = dynamic_cast<VulkanRenderDevice*>(screen);
+	const bool renderNetWaitShell = IsNetWaitShellActive();
 	if (!vkfb || !xrFrameInProgress || xrSession == XR_NULL_HANDLE || xrVkDevice == nullptr || xrVkCommandBuffer == nullptr)
 	{
 		xrVirtualScreenVisible = false;
@@ -4530,8 +4542,8 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 	}
 	xrVirtualScreenWasVisibleLastFrame = true;
 
-	const bool forceOverlay = gamestate != GS_LEVEL || menuactive != MENU_Off || cinemamode || ConsoleState != c_up || vr_overlayscreen_always;
-	const bool allowBlankOverlay = vr_overlayscreen_always || cinemamode || gamestate != GS_LEVEL;
+	const bool forceOverlay = renderNetWaitShell || gamestate != GS_LEVEL || menuactive != MENU_Off || cinemamode || ConsoleState != c_up || vr_overlayscreen_always;
+	const bool allowBlankOverlay = renderNetWaitShell || vr_overlayscreen_always || cinemamode || gamestate != GS_LEVEL;
 	xrMenuPointerBeamImageIndex = -1;
 	if (twod == nullptr || (twod->DrawCount() == 0 && !allowBlankOverlay && !forceOverlay))
 	{
@@ -4601,7 +4613,7 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 
 	xrVirtualScreenImageIndex = (int)imageIndex;
 	auto& target = xrVirtualScreenTextures[imageIndex];
-	const bool useSceneBackdrop = gamestate == GS_LEVEL;
+	const bool useSceneBackdrop = gamestate == GS_LEVEL && !renderNetWaitShell;
 	if (useSceneBackdrop)
 	{
 		vkfb->GetPostprocess()->BlitCurrentToImage(&target, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -4627,7 +4639,7 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 	}
 	else
 	{
-		const XrVector3f bg = GetVirtualScreenBackgroundColor();
+		const XrVector3f bg = renderNetWaitShell ? XrVector3f{ 0.0f, 0.0f, 0.0f } : GetVirtualScreenBackgroundColor();
 		screen->mSceneClearColor[0] = bg.x;
 		screen->mSceneClearColor[1] = bg.y;
 		screen->mSceneClearColor[2] = bg.z;
@@ -4654,11 +4666,17 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 	{
 		renderState->Clear(CT_Color);
 	}
-	if (twod != nullptr && twod->HasCommandsForPass(true))
+	if (renderNetWaitShell)
+	{
+		VR_RenderNetWaitShellContents((int)screenWidth, (int)screenHeight, false);
+		screen->Draw2D(false);
+		twod->Clear();
+	}
+	else if (twod != nullptr && twod->HasCommandsForPass(true))
 	{
 		screen->Draw2D(true);
 	}
-	if (xrMenuPointerActive && xrMenuPointerHasHit && twod != nullptr)
+	if (!renderNetWaitShell && xrMenuPointerActive && xrMenuPointerHasHit && twod != nullptr)
 	{
 		const float beamEndX = xrMenuPointerX;
 		const float beamEndY = xrMenuPointerY;
@@ -4681,7 +4699,7 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 		}
 		twod->AddColorOnlyQuad((int)(beamEndX - 3.0f), (int)(beamEndY - 3.0f), 6, 6, PalEntry(255, cursorColor.r, cursorColor.g, cursorColor.b));
 	}
-	if (twod != nullptr && twod->HasCommandsForPass(false))
+	if (!renderNetWaitShell && twod != nullptr && twod->HasCommandsForPass(false))
 	{
 		screen->Draw2D(false);
 	}

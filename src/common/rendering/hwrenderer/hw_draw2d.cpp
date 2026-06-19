@@ -71,7 +71,7 @@ void Draw2D(F2DDrawer* drawer, FRenderState& state, int x, int y, int width, int
 		GetVRHudSurface().IsValid() &&
 		(vrHudCanvas != nullptr) &&
 		(drawer == &vrHudCanvas->Drawer);
-	const bool isVirtualScreenPass = vrmode->IsVR() && vrmode->IsRenderingVirtualScreen();
+	const bool isVirtualScreenPass = vrmode->IsVR() && (vrmode->IsRenderingVirtualScreen() || VR_IsNetWaitShellActive());
 	if (isVRHudCanvas)
 	{
 		// Mounted HUD/automap canvas must always define its own viewport + 2D

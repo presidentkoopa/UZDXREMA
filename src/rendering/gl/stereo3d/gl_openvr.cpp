@@ -1213,7 +1213,8 @@ namespace s3d
 
 		static VRTextureBounds_t tBounds = { 0, 0, 1, 1 };
 
-		const bool showOverlay = (ConsoleState != c_up) || (!forceDisableOverlay && VR_UseScreenLayer());
+		const bool renderNetWaitShell = VR_IsNetWaitShellActive();
+		const bool showOverlay = renderNetWaitShell || (ConsoleState != c_up) || (!forceDisableOverlay && VR_UseScreenLayer());
 		if (!showOverlay)
 		{
 			//clear and hide overlay when not in use
@@ -1231,7 +1232,7 @@ namespace s3d
 		}
 		else {
 			// create a solid color backdrop texture
-			const bool useBlackBackdrop = (gamestate == GS_STARTUP || gamestate == GS_DEMOSCREEN || gamestate == GS_INTRO || gamestate == GS_TITLELEVEL);
+			const bool useBlackBackdrop = renderNetWaitShell || (gamestate == GS_STARTUP || gamestate == GS_DEMOSCREEN || gamestate == GS_INTRO || gamestate == GS_TITLELEVEL);
 			const int currentBackdropMode = useBlackBackdrop ? 0 : 1;
 			if (prevOverlayBG != vr_overlayscreen_bg || prevOverlayBackdropMode != currentBackdropMode) {
 				prevOverlayBG = vr_overlayscreen_bg;
@@ -3059,7 +3060,7 @@ namespace s3d
 
 		haptics->ProcessHaptics();
 
-		if (gamestate == GS_LEVEL && menuactive == MENU_Off && !paused && ConsoleState == c_up) {
+		if (gamestate == GS_LEVEL && menuactive == MENU_Off && !paused && ConsoleState == c_up && !VR_IsNetWaitShellActive()) {
 			cachedScreenBlocks = screenblocks;
 			screenblocks = 12; // always be full-screen during 3D scene render
 			QzDoom_setUseScreenLayer(false);
@@ -3392,7 +3393,7 @@ namespace s3d
 			{
 				forceDisableOverlay = false;
 			}
-				const bool overlayVisibleNow = (VR_UseScreenLayer() || gamestate == GS_TITLELEVEL || menuactive != MENU_Off || ConsoleState != c_up);
+				const bool overlayVisibleNow = VR_IsNetWaitShellActive() || VR_UseScreenLayer() || gamestate == GS_TITLELEVEL || menuactive != MENU_Off || ConsoleState != c_up;
 				if ((vr_overlayscreen == 1 || vr_overlayscreen == 2) && overlayVisibleNow && !openvrOverlayWasVisible)
 				{
 					// Re-anchor stationary overlay whenever virtual screen is (re)entered.

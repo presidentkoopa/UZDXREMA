@@ -48,6 +48,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <algorithm>
 
 /* [Petteri] Use Winsock for Win32: */
 #ifdef __WIN32__
@@ -75,6 +76,11 @@
 #include "cmdlib.h"
 #include "printf.h"
 #include "i_interface.h"
+#include "hw_vrmodes.h"
+#include "doomstat.h"
+#include "c_dispatch.h"
+#include "menu.h"
+#include "c_console.h"
 
 
 #include "i_net.h"
@@ -116,6 +122,80 @@ static u_short DOOMPORT = (IPPORT_USERRESERVED + 29);
 static SOCKET mysocket = INVALID_SOCKET;
 static sockaddr_in sendaddress[MAXNETNODES];
 static uint8_t sendplayer[MAXNETNODES];
+
+struct NetWaitSessionState
+{
+	bool active = false;
+	ENetWaitBackend backend = NETWAITBACKEND_None;
+	ENetWaitRole role = NETWAITROLE_None;
+	ENetWaitPhase phase = NETWAITPHASE_Inactive;
+	ENetWaitSourceContext sourceContext = NETWAITSOURCE_Boot;
+	FString message;
+	int foundPlayers = 0;
+	int totalPlayers = 0;
+};
+
+static NetWaitSessionState gNetWaitSession;
+static bool gNetWaitCancelledByUser = false;
+
+static bool ShouldUseVRNetWaitShellBackend()
+{
+	return VR_CanUseNetWaitShell();
+}
+
+static void PromoteNetWaitSessionToVRShellIfAvailable()
+{
+	if (!gNetWaitSession.active || gNetWaitSession.backend != NETWAITBACKEND_Widget)
+	{
+		return;
+	}
+
+	if (!ShouldUseVRNetWaitShellBackend())
+	{
+		return;
+	}
+
+	StartWindow->NetClose();
+	gNetWaitSession.backend = NETWAITBACKEND_VRShell;
+}
+
+static void ResetNetWaitSession()
+{
+	gNetWaitSession = NetWaitSessionState();
+}
+
+static void MarkNetWaitCancelledByUser()
+{
+	gNetWaitCancelledByUser = true;
+}
+
+static void RestoreSinglePlayerBootStateAfterNetCancel()
+{
+	CloseNetwork();
+	C_HideConsole();
+	M_ClearMenus();
+	ResetNetWaitSession();
+	autostart = false;
+	StoredWarp = "";
+	netgame = false;
+	multiplayer = false;
+	doomcom.id = DOOMCOM_ID;
+	doomcom.numplayers = doomcom.numnodes = 1;
+	doomcom.consoleplayer = 0;
+	consoleplayer = 0;
+}
+
+bool I_ConsumeCancelledNetWaitBoot()
+{
+	if (!gNetWaitCancelledByUser)
+	{
+		return false;
+	}
+
+	gNetWaitCancelledByUser = false;
+	RestoreSinglePlayerBootStateAfterNetCancel();
+	return true;
+}
 
 #ifdef __WIN32__
 const char *neterror (void);
@@ -1009,11 +1089,19 @@ int I_InitNetwork (void)
 	//		player x: -join <player 1's address>
 	if ( (i = Args->CheckParm ("-host")) )
 	{
-		if (!HostGame (i)) return -1;
+		if (!HostGame (i))
+		{
+			if (I_ConsumeCancelledNetWaitBoot()) return false;
+			return -1;
+		}
 	}
 	else if ( (i = Args->CheckParm ("-join")) )
 	{
-		if (!JoinGame (i)) return -1;
+		if (!JoinGame (i))
+		{
+			if (I_ConsumeCancelledNetWaitBoot()) return false;
+			return -1;
+		}
 	}
 	else
 	{
@@ -1068,29 +1156,255 @@ void I_NetMessage(const char* text, ...)
 #endif
 }
 
+void I_BeginNetWaitSession(ENetWaitRole role, ENetWaitPhase phase, const char* msg, int foundPlayers, int totalPlayers, ENetWaitSourceContext source)
+{
+	if (!gNetWaitSession.active || gNetWaitSession.backend == NETWAITBACKEND_None)
+	{
+		gNetWaitSession.backend = ShouldUseVRNetWaitShellBackend() ? NETWAITBACKEND_VRShell : NETWAITBACKEND_Widget;
+	}
+	else
+	{
+		PromoteNetWaitSessionToVRShellIfAvailable();
+	}
+
+	gNetWaitSession.active = true;
+	gNetWaitSession.role = role;
+	gNetWaitSession.phase = phase;
+	gNetWaitSession.sourceContext = source;
+	gNetWaitSession.message = msg != nullptr ? msg : "";
+	gNetWaitSession.foundPlayers = std::max(0, foundPlayers);
+	gNetWaitSession.totalPlayers = std::max(0, totalPlayers);
+
+	if (gNetWaitSession.backend == NETWAITBACKEND_Widget)
+	{
+		StartWindow->NetInit(gNetWaitSession.message.GetChars(), gNetWaitSession.totalPlayers);
+	}
+}
+
+void I_UpdateNetWaitSession(ENetWaitPhase phase, const char* msg, int foundPlayers, int totalPlayers)
+{
+	if (!gNetWaitSession.active)
+	{
+		return;
+	}
+
+	PromoteNetWaitSessionToVRShellIfAvailable();
+
+	gNetWaitSession.phase = phase;
+	if (msg != nullptr)
+	{
+		gNetWaitSession.message = msg;
+	}
+	if (foundPlayers >= 0)
+	{
+		gNetWaitSession.foundPlayers = foundPlayers;
+	}
+	if (totalPlayers >= 0)
+	{
+		gNetWaitSession.totalPlayers = totalPlayers;
+	}
+
+	gNetWaitSession.foundPlayers = std::max(0, gNetWaitSession.foundPlayers);
+	gNetWaitSession.totalPlayers = std::max(0, gNetWaitSession.totalPlayers);
+
+	if (gNetWaitSession.backend == NETWAITBACKEND_Widget)
+	{
+		if (msg != nullptr)
+		{
+			StartWindow->NetInit(gNetWaitSession.message.GetChars(), gNetWaitSession.totalPlayers);
+		}
+	}
+}
+
+void I_FinishNetWaitSession()
+{
+	if (!gNetWaitSession.active)
+	{
+		return;
+	}
+
+	if (gNetWaitSession.backend == NETWAITBACKEND_Widget)
+	{
+		StartWindow->NetDone();
+	}
+	ResetNetWaitSession();
+}
+
+void I_CancelNetWaitSession()
+{
+	if (!gNetWaitSession.active)
+	{
+		return;
+	}
+
+	if (gNetWaitSession.backend == NETWAITBACKEND_Widget)
+	{
+		StartWindow->NetClose();
+	}
+	ResetNetWaitSession();
+}
+
+void I_FailNetWaitSession(const char* error)
+{
+	if (!gNetWaitSession.active || gNetWaitSession.backend == NETWAITBACKEND_Widget)
+	{
+		StartWindow->NetClose();
+	}
+	ResetNetWaitSession();
+	I_FatalError("%s", error);
+}
+
+bool I_IsNetWaitSessionActive()
+{
+	return gNetWaitSession.active;
+}
+
+bool I_IsUsingVRNetWaitShell()
+{
+	return gNetWaitSession.active && gNetWaitSession.backend == NETWAITBACKEND_VRShell;
+}
+
+ENetWaitBackend I_GetNetWaitBackend()
+{
+	return gNetWaitSession.backend;
+}
+
+ENetWaitRole I_GetNetWaitRole()
+{
+	return gNetWaitSession.role;
+}
+
+ENetWaitPhase I_GetNetWaitPhase()
+{
+	return gNetWaitSession.phase;
+}
+
+ENetWaitSourceContext I_GetNetWaitSourceContext()
+{
+	return gNetWaitSession.sourceContext;
+}
+
+const char* I_GetNetWaitMessage()
+{
+	return gNetWaitSession.message.GetChars();
+}
+
+int I_GetNetWaitFoundPlayers()
+{
+	return gNetWaitSession.foundPlayers;
+}
+
+int I_GetNetWaitTotalPlayers()
+{
+	return gNetWaitSession.totalPlayers;
+}
+
 void I_NetError(const char* error)
 {
 	doomcom.numnodes = 0;
-	StartWindow->NetClose();
-	I_FatalError("%s", error);
+	I_FailNetWaitSession(error);
 }
 
 // todo: later these must be dispatched by the main menu, not the start screen.
 void I_NetProgress(int val)
 {
-	StartWindow->NetProgress(val);
+	if (gNetWaitSession.active)
+	{
+		int foundPlayers = gNetWaitSession.foundPlayers;
+		if (val == 0)
+		{
+			foundPlayers++;
+		}
+		else if (val > 0)
+		{
+			foundPlayers = val;
+		}
+		I_UpdateNetWaitSession(gNetWaitSession.phase, nullptr, foundPlayers, gNetWaitSession.totalPlayers);
+		if (gNetWaitSession.backend == NETWAITBACKEND_Widget)
+		{
+			StartWindow->NetProgress(val);
+		}
+	}
 }
 void I_NetInit(const char* msg, int num)
 {
-	StartWindow->NetInit(msg, num);
+	ENetWaitRole role = gNetWaitSession.role;
+	ENetWaitPhase phase = gNetWaitSession.phase;
+	int foundPlayers = gNetWaitSession.active ? gNetWaitSession.foundPlayers : 0;
+	int totalPlayers = num;
+
+	if (msg != nullptr && strcmp(msg, "Contacting host") == 0)
+	{
+		role = NETWAITROLE_Client;
+		phase = NETWAITPHASE_Contacting;
+		foundPlayers = 0;
+		totalPlayers = 0;
+	}
+	else if (msg != nullptr && strcmp(msg, "Waiting for other players") == 0)
+	{
+		role = NETWAITROLE_Client;
+		phase = NETWAITPHASE_WaitingForPlayers;
+	}
+	else if (msg != nullptr && strcmp(msg, "Hosting game") == 0)
+	{
+		role = NETWAITROLE_Host;
+		phase = NETWAITPHASE_WaitingForPlayers;
+		foundPlayers = 1;
+	}
+	else if (msg != nullptr && strcmp(msg, "Done waiting") == 0)
+	{
+		phase = NETWAITPHASE_Ready;
+		if (gNetWaitSession.totalPlayers > 1)
+		{
+			totalPlayers = gNetWaitSession.totalPlayers;
+		}
+	}
+	else
+	{
+		if (role == NETWAITROLE_None)
+		{
+			role = (num > 0) ? NETWAITROLE_Host : NETWAITROLE_Client;
+		}
+		if (phase == NETWAITPHASE_Inactive)
+		{
+			phase = (num > 0) ? NETWAITPHASE_WaitingForPlayers : NETWAITPHASE_Contacting;
+		}
+		if (foundPlayers <= 0 && num > 0)
+		{
+			foundPlayers = 1;
+		}
+	}
+
+	if (gNetWaitSession.active && totalPlayers <= 1 && gNetWaitSession.totalPlayers > 1)
+	{
+		totalPlayers = gNetWaitSession.totalPlayers;
+	}
+
+	I_BeginNetWaitSession(role, phase, msg, foundPlayers, totalPlayers, NETWAITSOURCE_Boot);
 }
 bool I_NetLoop(bool (*timer_callback)(void*), void* userdata)
 {
-	return StartWindow->NetLoop(timer_callback, userdata);
+	PromoteNetWaitSessionToVRShellIfAvailable();
+	bool completed = false;
+	if (I_IsUsingVRNetWaitShell())
+	{
+		completed = VR_NetWaitLoop(timer_callback, userdata);
+	}
+	else
+	{
+		completed = StartWindow->NetLoop(timer_callback, userdata);
+	}
+
+	if (!completed)
+	{
+		MarkNetWaitCancelledByUser();
+		I_CancelNetWaitSession();
+	}
+	return completed;
 }
 void I_NetDone()
 {
-	StartWindow->NetDone();
+	I_FinishNetWaitSession();
 }
 #ifdef __WIN32__
 const char *neterror (void)

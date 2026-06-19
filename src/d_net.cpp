@@ -1758,7 +1758,11 @@ bool D_CheckNetGame (void)
 	if (netgame)
 	{
 		GameConfig->ReadNetVars ();	// [RH] Read network ServerInfo cvars
-		if (!D_ArbitrateNetStart ()) return false;
+		if (!D_ArbitrateNetStart ())
+		{
+			if (I_ConsumeCancelledNetWaitBoot()) return true;
+			return false;
+		}
 	}
 
 	// read values out of doomcom
