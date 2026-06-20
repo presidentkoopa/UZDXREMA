@@ -1143,6 +1143,36 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 
 	VR_ApplyMultiplayerCrouchButton(cmd, vrmode->IsVR());
 
+	if (multiplayer && vrmode->IsVR() && vr_teleport)
+	{
+		float teleportX = 0.0f;
+		float teleportY = 0.0f;
+		float teleportZ = 0.0f;
+		if (VR_ConsumeMultiplayerTeleportTarget(&teleportX, &teleportY, &teleportZ))
+		{
+			player_t* player = &players[consoleplayer];
+			if (player != nullptr && player->mo != nullptr)
+			{
+				// Multiplayer teleport is an explicit warp, not a locomotion burst.
+				P_TeleportMove(player->mo, DVector3(teleportX, teleportY, teleportZ), true);
+			}
+
+			auto encodeTeleportCoord = [](float value)
+			{
+				return (short)clamp((int)lroundf(value), -32768, 32767);
+			};
+
+			Net_WriteInt8(DEM_WARPCHEAT);
+			Net_WriteInt16(encodeTeleportCoord(teleportX));
+			Net_WriteInt16(encodeTeleportCoord(teleportY));
+			Net_WriteInt16(encodeTeleportCoord(teleportZ));
+		}
+	}
+	else
+	{
+		VR_ClearMultiplayerTeleportTarget();
+	}
+
 	cmd->ucmd.pitch = LocalViewPitch >> 16;
 
 	if (SendLand)

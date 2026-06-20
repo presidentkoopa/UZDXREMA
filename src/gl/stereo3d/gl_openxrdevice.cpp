@@ -173,18 +173,14 @@ float getViewpointYaw()
     return doomYaw;
 }
 
-static void QueueMultiplayerTeleportBurst(const player_t* player, const DVector3& target)
+static void QueueMultiplayerTeleportTarget(const player_t* player, const DVector3& target)
 {
-    if (player == nullptr || player->mo == nullptr)
-    {
-        return;
-    }
+	if (player == nullptr || player->mo == nullptr)
+	{
+		return;
+	}
 
-    const DVector2 delta(target.X - player->mo->X(), target.Y - player->mo->Y());
-    const double yawRadians = player->mo->Angles.Yaw.Radians();
-    const float forwardUnits = float(delta.X * std::cos(yawRadians) + delta.Y * std::sin(yawRadians));
-    const float sideUnits = float(delta.X * std::sin(yawRadians) - delta.Y * std::cos(yawRadians));
-    VR_QueueTeleportCommandBurst(forwardUnits, sideUnits);
+	VR_QueueMultiplayerTeleportTarget((float)target.X, (float)target.Y, (float)target.Z);
 }
 
 static float DEG2RAD(float deg)
@@ -688,7 +684,7 @@ namespace s3d
                     }
                     else if (trigger_teleport && m_TeleportTarget == TRACE_HitFloor) {
                         if (multiplayer) {
-                            QueueMultiplayerTeleportBurst(player, m_TeleportLocation);
+                            QueueMultiplayerTeleportTarget(player, m_TeleportLocation);
                         } else {
                             auto vel = player->mo->Vel;
                             player->mo->Vel = DVector3(m_TeleportLocation.X - player->mo->X(),

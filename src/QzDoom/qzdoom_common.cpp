@@ -44,6 +44,10 @@ float positional_movementSideways;
 float positional_movementForward;
 static float vr_mp_pendingTeleportForwardUnits;
 static float vr_mp_pendingTeleportSideUnits;
+static float vr_mp_pendingTeleportTargetX;
+static float vr_mp_pendingTeleportTargetY;
+static float vr_mp_pendingTeleportTargetZ;
+static bool vr_mp_pendingTeleportTargetValid = false;
 static float vr_mp_crouchHeightMapUnits = -1.0f;
 static bool vr_hasWorldPositionSample = false;
 
@@ -84,6 +88,34 @@ void VR_ClearTeleportCommandBurst()
 {
     vr_mp_pendingTeleportForwardUnits = 0.0f;
     vr_mp_pendingTeleportSideUnits = 0.0f;
+}
+
+void VR_QueueMultiplayerTeleportTarget(float x, float y, float z)
+{
+    vr_mp_pendingTeleportTargetX = x;
+    vr_mp_pendingTeleportTargetY = y;
+    vr_mp_pendingTeleportTargetZ = z;
+    vr_mp_pendingTeleportTargetValid = true;
+    VR_ClearTeleportCommandBurst();
+}
+
+bool VR_ConsumeMultiplayerTeleportTarget(float* outX, float* outY, float* outZ)
+{
+    if (outX == nullptr || outY == nullptr || outZ == nullptr || !vr_mp_pendingTeleportTargetValid)
+    {
+        return false;
+    }
+
+    *outX = vr_mp_pendingTeleportTargetX;
+    *outY = vr_mp_pendingTeleportTargetY;
+    *outZ = vr_mp_pendingTeleportTargetZ;
+    vr_mp_pendingTeleportTargetValid = false;
+    return true;
+}
+
+void VR_ClearMultiplayerTeleportTarget()
+{
+    vr_mp_pendingTeleportTargetValid = false;
 }
 
 bool VR_ConsumeTeleportCommandStep(float maxUnitsPerTick, float* outForwardUnits, float* outSideUnits)
@@ -136,6 +168,7 @@ void VR_ResetTransientNetSafeState()
     cinemamodePitch = 0.0f;
 
     VR_ClearTeleportCommandBurst();
+    VR_ClearMultiplayerTeleportTarget();
     VR_ClearMultiplayerCrouchHeight();
     vr_hasWorldPositionSample = false;
 }
