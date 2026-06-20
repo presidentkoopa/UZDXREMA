@@ -14,6 +14,7 @@ extern FNewGameStartup NewGameStartupInfo;
 void M_StartupEpisodeMenu(FNewGameStartup *gs);
 void M_StartupSkillMenu(FNewGameStartup *gs);
 void M_CreateGameMenus();
+void M_BuildMultiplayerOptionGroups();
 void SetDefaultMenuColors();
 void OnMenuOpen(bool makeSound);
 

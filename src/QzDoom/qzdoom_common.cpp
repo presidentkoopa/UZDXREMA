@@ -3,6 +3,12 @@
 #include "hw_vrmodes.h"
 #include <cmath>
 
+#if defined(_WIN32) && !defined(__ANDROID__)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <shellapi.h>
+#endif
+
 EXTERN_CVAR(Float, fov)
 EXTERN_CVAR(Int, vr_overlayscreen);
 EXTERN_CVAR(Bool, vr_overlayscreen_always);
@@ -161,6 +167,15 @@ void VR_HapticEvent(const char* event, int position, int intensity, float angle,
 
 void QzDoom_Restart()
 {
+#if defined(__ANDROID__)
+	return;
+#elif defined(_WIN32)
+	WCHAR path[MAX_PATH] = {};
+	if (GetModuleFileNameW(GetModuleHandleW(nullptr), path, MAX_PATH) > 0)
+	{
+		ShellExecuteW(nullptr, L"open", path, GetCommandLineW(), nullptr, SW_SHOWNORMAL);
+	}
+#endif
 }
 
 void QzDoom_setUseScreenLayer(bool use)

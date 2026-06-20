@@ -74,6 +74,7 @@ LISTMENU "MainMenu"
 	IfGame(Doom, Strife, Chex)
 	{
 		PatchItem "M_NGAME", "n", "PlayerclassMenu"
+		TextItem "$MNU_MULTIPLAYER", "m", "MultiplayerMenu"
 		ifOption(SwapMenu)
 		{
 			PatchItem "M_LOADG", "l", "LoadGameMenu", 0
@@ -96,6 +97,7 @@ LISTMENU "MainMenu"
 	IfGame(Heretic, Hexen)
 	{
 		TextItem "$MNU_NEWGAME", "n", "PlayerclassMenu"
+		TextItem "$MNU_MULTIPLAYER", "m", "MultiplayerMenu"
 		TextItem "$MNU_OPTIONS", "o", "OptionsMenu"
 		TextItem "$MNU_GAMEFILES", "g", "GameFilesMenu"
 		TextItem "$MNU_INFO", "i", "ReadThisMenu"
@@ -127,6 +129,7 @@ LISTMENU "MainMenuTextOnly"
 	}
 	
 	TextItem "$MNU_NEWGAME", "n", "PlayerclassMenu"
+	TextItem "$MNU_MULTIPLAYER", "m", "MultiplayerMenu"
 	TextItem "$MNU_OPTIONS", "o", "OptionsMenu"
 	TextItem "$MNU_LOADGAME", "l", "LoadGameMenu"
 	TextItem "$MNU_SAVEGAME", "s", "SaveGameMenu"
@@ -135,6 +138,69 @@ LISTMENU "MainMenuTextOnly"
 		TextItem "$MNU_INFO", "i", "ReadThisMenu"
 	}
 	TextItem "$MNU_QUITGAME", "q", "QuitMenu"
+}
+
+OptionMenu "MultiplayerMenu" protected
+{
+	Title "$MNU_MULTIPLAYER"
+	StaticText ""
+	Submenu "$OPTMNU_PLAYER",					"NewPlayerMenu"
+	StaticText ""
+	Submenu "$OPTMNU_MULTIPLAYER_HOST_GAME",	"HostMultiplayerMenu"
+	Submenu "$OPTMNU_MULTIPLAYER_JOIN_GAME",	"JoinMultiplayerMenu"
+}
+
+OptionValue "MultiplayerPlayers"
+{
+	// Filled in programmatically
+}
+
+OptionValue "MultiplayerSkills"
+{
+	// Filled in programmatically
+}
+
+OptionValue "MultiplayerMaps"
+{
+	// Filled in programmatically
+}
+
+OptionValue "MultiplayerGameModes"
+{
+	// Filled in programmatically
+}
+
+OptionValue "MultiplayerNetModes"
+{
+	// Filled in programmatically
+}
+
+OptionMenu "HostMultiplayerMenu" protected
+{
+	Title "$OPTMNU_MULTIPLAYER_HOST"
+	StaticText ""
+	Option "$OPTMNU_MULTIPLAYER_NUM_PLAYERS",	"mp_host_players", "MultiplayerPlayers"
+	Option "$OPTMNU_MULTIPLAYER_DIFFICULTY",	"mp_host_skill", "MultiplayerSkills"
+	Option "$OPTMNU_MULTIPLAYER_MAP",			"mp_host_map", "MultiplayerMaps"
+	Option "$OPTMNU_MULTIPLAYER_GAME_MODE",		"mp_host_gamemode", "MultiplayerGameModes"
+	Option "$OPTMNU_MULTIPLAYER_NET_MODE",		"mp_host_netmode", "MultiplayerNetModes"
+	StaticText "$OPTMNU_MULTIPLAYER_NETMODE_TIP1", "Brown"
+	StaticText "$OPTMNU_MULTIPLAYER_NETMODE_TIP2", "Brown"
+	StaticText ""
+	SafeCommand "$OPTMNU_MULTIPLAYER_ENTER",	"mp_launch_host"
+	StaticText ""
+	SafeCommand "$OPTMNU_DEFAULTS",				"mp_reset_defaults"
+}
+
+OptionMenu "JoinMultiplayerMenu" protected
+{
+	Title "$OPTMNU_MULTIPLAYER_JOIN"
+	StaticText ""
+	TextField "$OPTMNU_MULTIPLAYER_SERVER",		mp_join_address
+	StaticText ""
+	SafeCommand "$OPTMNU_MULTIPLAYER_ENTER",	"mp_launch_join"
+	StaticText ""
+	SafeCommand "$OPTMNU_DEFAULTS",				"mp_reset_defaults"
 }
 
 //-------------------------------------------------------------------------------------------
@@ -374,6 +440,7 @@ OptionMenu "OptionsMenu" protected
 	Submenu "$OPTMNU_JOYSTICK",			"JoystickOptions"
 	StaticText " "
 	Submenu "$OPTMNU_PLAYER",			"NewPlayerMenu"
+	Submenu "$OPTMNU_MULTIPLAYER",		"MultiplayerMenu"
 	Submenu "$OPTMNU_GAMEPLAY",			"GameplayOptions"
 	Submenu "$OPTMNU_COMPATIBILITY",	"CompatibilityOptions"
 	Submenu "$OPTMNU_AUTOMAP",			"AutomapOptions"

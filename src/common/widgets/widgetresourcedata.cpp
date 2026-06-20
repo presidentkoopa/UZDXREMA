@@ -26,6 +26,10 @@ void CloseWidgetResources()
 
 static std::vector<uint8_t> LoadFile(const char* name)
 {
+	if (WidgetResources == nullptr)
+	{
+		I_FatalError("Widget resources are not initialized");
+	}
 	auto lump = WidgetResources->FindEntry(name);
 	if (lump == -1)
 		I_FatalError("Unable to find %s", name);

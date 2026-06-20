@@ -73,6 +73,7 @@
 #include "cmdlib.h"
 #include "v_text.h"
 #include "gi.h"
+#include "multiplayerlaunch.h"
 #include "a_dynlight.h"
 #include "gameconfigfile.h"
 #include "sbar.h"
@@ -200,6 +201,9 @@ bool OkForLocalization(FTextureID texnum, const char* substitute);
 
 void D_DoomLoop ();
 
+static constexpr int GAMEEXIT_NORUN = 1337;
+static constexpr int GAMEEXIT_HARD_RESTART = 1338;
+
 // EXTERNAL DATA DECLARATIONS ----------------------------------------------
 
 EXTERN_CVAR (Float, turbo)
@@ -261,7 +265,10 @@ CUSTOM_CVAR(Int, vid_rendermode, 4, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOIN
 		// [SP] Update pitch limits to the netgame/gamesim.
 		players[consoleplayer].SendPitchLimits();
 	}
-	screen->SetTextureFilterMode();
+	if (screen != nullptr)
+	{
+		screen->SetTextureFilterMode();
+	}
 
 	// No further checks needed. All this changes now is which scene drawer the render backend calls.
 }
@@ -326,6 +333,10 @@ CUSTOM_CVAR(Int, I_FriendlyWindowTitle, 1, CVAR_GLOBALCONFIG|CVAR_ARCHIVE|CVAR_N
 	I_UpdateWindowTitle();
 }
 CVAR(Bool, cl_nointros, false, CVAR_ARCHIVE)
+EXTERN_CVAR(String, language)
+EXTERN_CVAR(Bool, queryiwad)
+EXTERN_CVAR(String, defaultiwad)
+EXTERN_CVAR(Int, i_loadsupportwad)
 
 bool wantToRestart;
 bool DrawFSHUD;				// [RH] Draw fullscreen HUD?
@@ -354,6 +365,26 @@ cycle_t FrameCycles;
 
 // [SP] Store the capabilities of the renderer in a global variable, to prevent excessive per-frame processing
 uint32_t r_renderercaps = 0;
+
+const char* D_GetStartupLanguage()
+{
+	return language;
+}
+
+bool D_GetStartupQueryIWad()
+{
+	return queryiwad;
+}
+
+const char* D_GetStartupDefaultIWad()
+{
+	return defaultiwad;
+}
+
+int D_GetStartupLoadSupportWad()
+{
+	return i_loadsupportwad;
+}
 
 
 // PRIVATE DATA DEFINITIONS ------------------------------------------------
@@ -2172,6 +2203,52 @@ static void ParseCommandLineFile()
 	Args->CollectFiles("-file", NULL);
 }
 
+static void ParseMultiplayerCommandLineFile()
+{
+	const FString paths[] =
+	{
+		progdir + "commandline_mp.txt",
+		"commandline_mp.txt"
+	};
+
+	for (const FString& restartPath : paths)
+	{
+		FileReader restartFile;
+		if (!restartFile.OpenFile(restartPath.GetChars()))
+		{
+			continue;
+		}
+
+		TArray<uint8_t> readbuf;
+		FCmdFile cmdfile(restartPath.GetChars());
+		FString value;
+		while (cmdfile.ReadLine(readbuf, &restartFile) != NULL)
+		{
+			value.StripRight("\n\r");
+			value.AppendFormat(" ");
+			value << readbuf;
+		}
+
+		FCommandLine argv(value.GetChars());
+		int firstArg = 1;
+		if (argv.argc() > 0)
+		{
+			const char* token0 = argv[0];
+			if (token0 != nullptr && (token0[0] == '-' || token0[0] == '+'))
+			{
+				firstArg = 0;
+			}
+		}
+		for (int i = firstArg; i < argv.argc(); ++i)
+		{
+			Args->AppendArg(argv[i]);
+		}
+		Args->CollectFiles("-file", NULL);
+		restartFile.Close();
+		RemoveFile(restartPath.GetChars());
+	}
+}
+
 static FString ParseGameInfo(std::vector<std::string> &pwads, const char *fn, const char *data, int size)
 {
 	FScanner sc;
@@ -3647,7 +3724,7 @@ static int D_InitGame(const FIWADInfo* iwad_info, std::vector<std::string>& allw
 		V_Init2();
 
 	// [RH] Initialize localizable strings. 
-	GStrings.LoadStrings(fileSystem, language);
+	GStrings.LoadStrings(fileSystem, D_GetStartupLanguage());
 
 	V_InitFontColors ();
 
@@ -3905,7 +3982,7 @@ static int D_InitGame(const FIWADInfo* iwad_info, std::vector<std::string>& allw
 
 		if (Args->CheckParm("-norun") || batchrun)
 		{
-			return 1337; // special exit
+			return GAMEEXIT_NORUN; // special exit
 		}
 
 		if (StartScreen)
@@ -4069,6 +4146,7 @@ static int D_DoomMain_Internal (void)
 	};
 
 	profileManager.CollectProfiles();
+	ParseMultiplayerCommandLineFile();
 #ifndef __MOBILE__
 	ParseCommandLineFile();
 #endif
@@ -4217,12 +4295,17 @@ static int D_DoomMain_Internal (void)
 		I_UpdateWindowTitle();
 		I_FocusWindow();
 		D_DoomLoop ();		// this only returns if a 'restart' CCMD is given.
+
+		if (M_ConsumePendingMultiplayerHardRestart())
+		{
+			return GAMEEXIT_HARD_RESTART;
+		}
 		// 
 		// Clean up after a restart
 		//
-#ifdef USE_OPENXR
-		// We replace the vanilla zdoom restart with a complete Android application restart instead
-		// all the arguments passed are retained since we read the commandline file again.
+#if defined(USE_OPENXR) && defined(__ANDROID__)
+		// The Android no-SDL OpenXR port performs a process-level restart here.
+		// Desktop OpenXR keeps using the normal in-process cleanup/rebootstrap path.
 		InitShutdown();
 		QzDoom_Restart();
 #else
@@ -4263,6 +4346,12 @@ int GameMain()
 	{
 		I_ShowFatalError(error.what());
 		ret = -1;
+	}
+	if (ret == GAMEEXIT_HARD_RESTART)
+	{
+		InitShutdown();
+		QzDoom_Restart();
+		return 0;
 	}
 	// Unless something really bad happened, the game should only exit through this single point in the code.
 	// No more 'exit', please.

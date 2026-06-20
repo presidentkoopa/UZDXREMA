@@ -330,7 +330,7 @@ FIWadManager::FIWadManager(const char *firstfn, const char *optfn)
 	if (check.InitMultipleFiles(fns, &lfi, nullptr))
 	{
 		// this is for the IWAD picker. As we have a filesystem open here that contains the base files, it is the easiest place to load the strings early.
-		GStrings.LoadStrings(check, language);
+		GStrings.LoadStrings(check, D_GetStartupLanguage());
 		int num = check.CheckNumForName("IWADINFO");
 		if (num >= 0)
 		{
@@ -755,17 +755,18 @@ int FIWadManager::IdentifyVersion (std::vector<std::string>&wadfiles, const char
 	int pick = 0;
 
 	// Present the IWAD selection box.
-	bool alwaysshow = (queryiwad && !Args->CheckParm("-iwad") && !foundprio);
+	bool alwaysshow = (D_GetStartupQueryIWad() && !Args->CheckParm("-iwad") && !foundprio);
 
 	if (alwaysshow || picks.Size() > 1)
 	{
 		// Locate the user's prefered IWAD, if it was found.
-		if (defaultiwad[0] != '\0')
+		const char *preferredIwad = D_GetStartupDefaultIWad();
+		if (preferredIwad[0] != '\0')
 		{
 			for (unsigned i = 0; i < picks.Size(); ++i)
 			{
 				FString &basename = mIWadInfos[picks[i].mInfoIndex].Name;
-				if (basename.CompareNoCase(defaultiwad) == 0)
+				if (basename.CompareNoCase(preferredIwad) == 0)
 				{
 					pick = i;
 					break;
@@ -793,7 +794,7 @@ int FIWadManager::IdentifyVersion (std::vector<std::string>&wadfiles, const char
 
 				FString extraArgs;
 
-				pick = I_PickIWad(&wads[0], (int)wads.Size(), queryiwad, pick, flags, extraArgs);
+				pick = I_PickIWad(&wads[0], (int)wads.Size(), D_GetStartupQueryIWad(), pick, flags, extraArgs);
 				if (pick >= 0)
 				{
 					extraArgs.StripLeftRight();
@@ -809,7 +810,7 @@ int FIWadManager::IdentifyVersion (std::vector<std::string>&wadfiles, const char
 					autoloadwidescreen = !!(flags & 8);
 
 					// The newly selected IWAD becomes the new default
-					defaultiwad = mIWadInfos[picks[pick].mInfoIndex].Name.GetChars();
+					cvar_set("defaultiwad", mIWadInfos[picks[pick].mInfoIndex].Name.GetChars());
 				}
 				else
 				{
@@ -846,7 +847,8 @@ int FIWadManager::IdentifyVersion (std::vector<std::string>&wadfiles, const char
 	{
 		bool wantsnetgame = (Args->CheckParm("-join") || Args->CheckParm("-host"));
 
-		if ((!wantsnetgame && i_loadsupportwad == 1) || (i_loadsupportwad == 2))
+		const int loadSupportWad = D_GetStartupLoadSupportWad();
+		if ((!wantsnetgame && loadSupportWad == 1) || (loadSupportWad == 2))
 		{
 			FString supportWAD = IWADPathFileSearch(info.SupportWAD);
 

@@ -54,6 +54,10 @@ struct CRestartException
 };
 
 void VR_DoomMain(int argc, char** argv);
+const char* D_GetStartupLanguage();
+bool D_GetStartupQueryIWad();
+const char* D_GetStartupDefaultIWad();
+int D_GetStartupLoadSupportWad();
 
 void D_Display ();
 

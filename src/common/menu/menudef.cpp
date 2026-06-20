@@ -51,6 +51,7 @@
 #include "printf.h"
 #include "i_interface.h"
 #include "hwrenderer/data/hw_vrmodes.h"
+#include "doommenu.h"
 
 EXTERN_CVAR(Int, developer);
 EXTERN_CVAR(Int, vr_mode);
@@ -1734,6 +1735,7 @@ void I_BuildMIDIMenuList(FOptionValues*);
 void M_CreateMenus()
 {
 	InitMusicMenus();
+	M_BuildMultiplayerOptionGroups();
 	FOptionValues **opt = OptionValues.CheckKey(NAME_Mididevices);
 	if (opt != nullptr) 
 	{

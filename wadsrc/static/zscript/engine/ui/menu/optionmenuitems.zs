@@ -355,7 +355,13 @@ class OptionMenuItemOptionBase : OptionMenuItem
 		drawLabel(indent, y, selected? OptionMenuSettings.mFontColorSelection : OptionMenuSettings.mFontColor, isGrayed());
 
 		int Selection = GetSelection();
-		String text = StringTable.Localize(OptionValues.GetText(mValues, Selection));
+		if (Selection < 0 && OptionValues.GetCount(mValues) > 0)
+		{
+			Selection = 0;
+		}
+		String rawtext = OptionValues.GetText(mValues, Selection);
+		String text = StringTable.Localize(rawtext);
+		if (text.Length() == 0) text = rawtext;
 		if (text.Length() == 0) text = StringTable.Localize("$TXT_UNKNOWN");
 		drawValue(indent, y, OptionMenuSettings.mFontColorValue, text, isGrayed());
 		return indent;
