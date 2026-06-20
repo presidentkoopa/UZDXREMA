@@ -103,11 +103,23 @@ static FRandom pr_pspawn ("PlayerSpawn");
 
 static inline int joyint(double val);
 
+static inline int joyint_deadzone(double val)
+{
+	// `joyint` rounds away from zero, so tiny floating-point noise can still
+	// become a 1-unit ticcmd delta. VR locomotion is especially sensitive to
+	// that in multiplayer because those deltas are serialized into netcmds.
+	if (fabs(val) < 0.5)
+	{
+		return 0;
+	}
+	return joyint(val);
+}
+
 static void VR_ApplyStickMove(int forwardScale, int sideScale, float joyforward, float joyside, int &forward, int &side)
 {
 	// Convert local VR locomotion intent into ordinary command movement before sim.
-	side += joyint(joyside * sideScale);
-	forward += joyint(joyforward * forwardScale);
+	side += joyint_deadzone(joyside * sideScale);
+	forward += joyint_deadzone(joyforward * forwardScale);
 }
 
 static void VR_ApplyPositionalMove(int forwardScale, int sideScale, float hmdforward, float hmdside, float vrUnitsPerMeter, int &forward, int &side)
@@ -116,8 +128,8 @@ static void VR_ApplyPositionalMove(int forwardScale, int sideScale, float hmdfor
 	constexpr float kWorldUnitsPerFullCommand = 127.0f;
 	const float sideNorm = clamp((hmdside * vrUnitsPerMeter) / kWorldUnitsPerFullCommand, -1.0f, 1.0f);
 	const float forwardNorm = clamp((hmdforward * vrUnitsPerMeter) / kWorldUnitsPerFullCommand, -1.0f, 1.0f);
-	side += joyint(sideNorm * sideScale);
-	forward += joyint(forwardNorm * forwardScale);
+	side += joyint_deadzone(sideNorm * sideScale);
+	forward += joyint_deadzone(forwardNorm * forwardScale);
 }
 
 static void VR_ApplyTeleportBurstMove(int forwardScale, int sideScale, int &forward, int &side)
@@ -130,8 +142,8 @@ static void VR_ApplyTeleportBurstMove(int forwardScale, int sideScale, int &forw
 		return;
 	}
 
-	side += joyint(clamp(burstSideUnits / kTeleportBurstUnitsPerTick, -1.0f, 1.0f) * sideScale);
-	forward += joyint(clamp(burstForwardUnits / kTeleportBurstUnitsPerTick, -1.0f, 1.0f) * forwardScale);
+	side += joyint_deadzone(clamp(burstSideUnits / kTeleportBurstUnitsPerTick, -1.0f, 1.0f) * sideScale);
+	forward += joyint_deadzone(clamp(burstForwardUnits / kTeleportBurstUnitsPerTick, -1.0f, 1.0f) * forwardScale);
 }
 
 static void VR_ApplyMultiplayerCrouchButton(ticcmd_t* cmd, bool vrActive)
