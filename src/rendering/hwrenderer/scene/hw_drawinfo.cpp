@@ -51,6 +51,8 @@
 #include "actorinlines.h"
 #include "g_levellocals.h"
 
+void DrawLaserSightWorld(FRenderState& state);
+
 EXTERN_CVAR(Float, r_visibility)
 EXTERN_CVAR(Int, gl_max_portals);
 CVAR(Bool, gl_bandedswlight, false, CVAR_ARCHIVE)
@@ -1196,6 +1198,10 @@ void HWDrawInfo::DrawScene(int drawmode)
 	portalState.EndFrame(this, RenderState);
 	recursion--;
 	RenderTranslucent(RenderState);
+	if (drawmode == DM_MAINVIEW)
+	{
+		DrawLaserSightWorld(RenderState);
+	}
 }
 
 

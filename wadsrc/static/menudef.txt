@@ -2951,6 +2951,51 @@ OptionMenu VRWeaponOptions protected
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar r_PlayerSprites3DMode gl_fatItemWidth vr_2dweaponOffsetX vr_2dweaponOffsetY vr_2dweaponOffsetZ vr_2dweaponScale"
 }
 
+OptionValue "LaserBeamLength"
+{
+	0, "$VRLASERMNU_LENGTH_FULL"
+	1, "$VRLASERMNU_LENGTH_HALF"
+	2, "$VRLASERMNU_LENGTH_FIXED"
+}
+
+OptionValue "LaserPointerGlow"
+{
+	0, "$VRLASERMNU_POINTER_GLOW_OFF"
+	1, "$VRLASERMNU_POINTER_GLOW_POINT"
+	2, "$VRLASERMNU_POINTER_GLOW_DYNAMIC"
+}
+
+OptionMenu VRLaserSightOptions protected
+{
+	Title "$VRLASERMNU_TITLE"
+
+	StaticText ""
+	StaticText "$VRLASERMNU_LASER_OPTIONS", gold
+	Option "$VRLASERMNU_ENABLED",				"vr_laser_sight", "OnOff"
+	Option "$VRLASERMNU_MELEE",					"vr_laser_show_melee", "YesNo"
+	Option "$VRLASERMNU_HIDE_ON_WHEEL",			"vr_laser_hide_on_wheel", "YesNo"
+	ColorPicker "$VRLASERMNU_COLOR",			"vr_laser_color"
+	Slider "$VRLASERMNU_POINTER_SCALE",			"vr_laser_pointer_scale", 0.1, 1.0, 0.05, 2
+	Slider "$VRLASERMNU_POINTER_ALPHA",			"vr_laser_pointer_alpha", 0.0, 1.0, 0.05, 2
+	Option "$VRLASERMNU_POINTER_GLOW",			"vr_laser_pointer_glow", "LaserPointerGlow"
+	Slider "$VRLASERMNU_POINTER_GLOW_SCALE",	"vr_laser_pointer_glow_scale", 1.1, 4.0, 0.05, 2
+	Slider "$VRLASERMNU_POINTER_GLOW_INTENSITY", "vr_laser_pointer_glow_intensity", 0.1, 4.0, 0.05, 2
+
+	StaticText ""
+	StaticText "$VRLASERMNU_BEAM_OPTIONS", gold
+	Option "$VRLASERMNU_BEAM_ENABLED",			"vr_laser_beam", "OnOff"
+	Slider "$VRLASERMNU_BEAM_ALPHA",			"vr_laser_beam_alpha", 0.0, 1.0, 0.05, 2
+	Slider "$VRLASERMNU_BEAM_WIDTH",			"vr_laser_beam_width", 0.1, 2.0, 0.05, 2
+	Option "$VRLASERMNU_BEAM_LENGTH",			"vr_laser_beam_length", "LaserBeamLength"
+	Slider "$VRLASERMNU_SHORT_LENGTH",			"vr_laser_fixed_length", 60, 1000, 10, 0
+	Slider "$VRLASERMNU_SOURCE_OFFSET_X",		"vr_laser_source_offset_x", -64, 64, 1, 0
+	Slider "$VRLASERMNU_SOURCE_OFFSET_Y",		"vr_laser_source_offset_y", -64, 64, 1, 0
+	Slider "$VRLASERMNU_SOURCE_OFFSET_Z",		"vr_laser_source_offset_z", -64, 64, 1, 0
+	StaticText " "
+
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_laser_sight vr_laser_show_melee vr_laser_hide_on_wheel vr_laser_beam vr_laser_color vr_laser_beam_alpha vr_laser_beam_width vr_laser_pointer_scale vr_laser_pointer_alpha vr_laser_pointer_glow vr_laser_pointer_glow_scale vr_laser_pointer_glow_intensity vr_laser_beam_length vr_laser_fixed_length vr_laser_source_offset_x vr_laser_source_offset_y vr_laser_source_offset_z"
+}
+
 OptionValue "WheelListOption"
 {
 	0, "$OPTVAL_VR_ONLY_AVAILABLE"
@@ -3026,9 +3071,10 @@ OptionMenu VROptionsMenu protected
 	{
 		Submenu "$VRCMODEMNU_TITLE",        "CinemaModeOptions"
 	}
-	Submenu "$VRHUDMNU_HUDAUTOMAPOPTIONS",   "VRHUDOptions"
-	Submenu "$VRWEAPONMNU_TITLE",        "VRWeaponOptions"
-	Submenu "$VRWHEELMNU_TITLE",  "VRWeaponWheelOptions"
+	Submenu "$VRHUDMNU_HUDAUTOMAPOPTIONS",  "VRHUDOptions"
+	Submenu "$VRWEAPONMNU_TITLE",			"VRWeaponOptions"
+	Submenu "$VRLASERMNU_TITLE",			"VRLaserSightOptions"
+	Submenu "$VRWHEELMNU_TITLE",			"VRWeaponWheelOptions"
 	StaticText ""
 	StaticText "$VRPREFMNU_MISC", gold
 	ifOption(OpenXR)
