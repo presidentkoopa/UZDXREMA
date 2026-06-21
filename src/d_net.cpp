@@ -2306,9 +2306,9 @@ void Net_DoCommand (int type, uint8_t **stream, int player)
 		{
 			int x, y, z;
 			bool telefrag;
-			x = ReadInt16 (stream);
-			y = ReadInt16 (stream);
-			z = ReadInt16 (stream);
+			x = ReadInt32 (stream);
+			y = ReadInt32 (stream);
+			z = ReadInt32 (stream);
 			telefrag = !!ReadInt8(stream);
 			auto mo = players[player].mo;
 			if (mo != nullptr)
@@ -2954,7 +2954,7 @@ void Net_SkipCommand (int type, uint8_t **stream)
 			break;
 
 		case DEM_WARPCHEAT:
-			skip = 7;
+			skip = 13;
 			break;
 
 		case DEM_INVUSE:

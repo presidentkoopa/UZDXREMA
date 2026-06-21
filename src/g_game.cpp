@@ -1118,9 +1118,11 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 				if (localPlayer != nullptr && localPlayer->mo != nullptr)
 				{
 					VR_QueueMultiplayerRoomscaleTeleportTarget(
-						float(localPlayer->mo->X() + roomscaleOffsetX),
-						float(localPlayer->mo->Y() + roomscaleOffsetY),
-						float(localPlayer->mo->Z()));
+						VR_MakeCanonicalMultiplayerTeleportTarget(
+							localPlayer->mo->X() + roomscaleOffsetX,
+							localPlayer->mo->Y() + roomscaleOffsetY,
+							localPlayer->mo->Z(),
+							false));
 				}
 			}
 			if (vr_teleport)
@@ -1151,36 +1153,36 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 
 	if (multiplayer && vrmode->IsVR())
 	{
-		float teleportX = 0.0f;
-		float teleportY = 0.0f;
-		float teleportZ = 0.0f;
-		bool teleportTelefrag = true;
-		if (VR_ConsumeMultiplayerTeleportTarget(&teleportX, &teleportY, &teleportZ, &teleportTelefrag))
+		VRMultiplayerTeleportTarget teleportTarget;
+		if (VR_ConsumeMultiplayerTeleportTarget(&teleportTarget))
 		{
 			player_t* player = &players[consoleplayer];
+			bool teleportApplied = false;
 			if (player != nullptr && player->mo != nullptr)
 			{
 				// Explicit teleport locomotion still uses telefrag; roomscale recenter does not.
+				const DVector3 destination(teleportTarget.x, teleportTarget.y, teleportTarget.z);
+				const bool blockPlayerTelefrag = teleportTarget.telefrag && P_TeleportDestinationHitsPlayer(player->mo, destination);
+				const bool applyTelefrag = teleportTarget.telefrag && !blockPlayerTelefrag;
 				const auto savedFlags2 = player->mo->flags2;
-				if (!teleportTelefrag)
+				if (!applyTelefrag)
 				{
 					player->mo->flags2 &= ~MF2_TELESTOMP;
 				}
-				P_TeleportMove(player->mo, DVector3(teleportX, teleportY, teleportZ), teleportTelefrag);
+				teleportApplied = P_TeleportMove(player->mo, destination, applyTelefrag);
 				player->mo->flags2 = savedFlags2;
+				teleportTarget.telefrag = applyTelefrag;
 			}
-			VR_ClearMultiplayerRoomscaleWorldOffset();
 
-			auto encodeTeleportCoord = [](float value)
+			if (teleportApplied)
 			{
-				return (short)clamp((int)lroundf(value), -32768, 32767);
-			};
-
-			Net_WriteInt8(DEM_WARPCHEAT);
-			Net_WriteInt16(encodeTeleportCoord(teleportX));
-			Net_WriteInt16(encodeTeleportCoord(teleportY));
-			Net_WriteInt16(encodeTeleportCoord(teleportZ));
-			Net_WriteInt8(teleportTelefrag ? 1 : 0);
+				Net_WriteInt8(DEM_WARPCHEAT);
+				Net_WriteInt32(teleportTarget.x);
+				Net_WriteInt32(teleportTarget.y);
+				Net_WriteInt32(teleportTarget.z);
+				Net_WriteInt8(teleportTarget.telefrag ? 1 : 0);
+				VR_ClearMultiplayerRoomscaleWorldOffset();
+			}
 		}
 	}
 	else

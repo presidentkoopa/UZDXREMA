@@ -343,7 +343,7 @@ static void QueueMultiplayerTeleportTarget(const player_t* player, const DVector
 		return;
 	}
 
-	VR_QueueMultiplayerTeleportTarget((float)target.X, (float)target.Y, (float)target.Z);
+	VR_QueueMultiplayerTeleportTarget(VR_MakeCanonicalMultiplayerTeleportTarget(target.X, target.Y, target.Z, true));
 }
 
 // feature toggles, for testing and debugging

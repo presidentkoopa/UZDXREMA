@@ -1,6 +1,7 @@
 #if !defined(vrcommon_h)
 #define vrcommon_h
 
+#include <stdint.h>
 #include "c_cvars.h"
 
 typedef float vec_t;
@@ -46,13 +47,23 @@ extern bool player_moving;
 extern bool ready_teleport;
 extern bool trigger_teleport;
 
+struct VRMultiplayerTeleportTarget
+{
+	int32_t x = 0;
+	int32_t y = 0;
+	int32_t z = 0;
+	bool telefrag = true;
+	bool valid = false;
+};
+
 // Multiplayer-safe VR locomotion helpers.
 void VR_QueueTeleportCommandBurst(float forwardUnits, float sideUnits);
 void VR_ClearTeleportCommandBurst();
 bool VR_ConsumeTeleportCommandStep(float maxUnitsPerTick, float* outForwardUnits, float* outSideUnits);
-void VR_QueueMultiplayerTeleportTarget(float x, float y, float z);
-void VR_QueueMultiplayerRoomscaleTeleportTarget(float x, float y, float z);
-bool VR_ConsumeMultiplayerTeleportTarget(float* outX, float* outY, float* outZ, bool* outTelefrag);
+VRMultiplayerTeleportTarget VR_MakeCanonicalMultiplayerTeleportTarget(double x, double y, double z, bool telefrag);
+void VR_QueueMultiplayerTeleportTarget(const VRMultiplayerTeleportTarget& target);
+void VR_QueueMultiplayerRoomscaleTeleportTarget(const VRMultiplayerTeleportTarget& target);
+bool VR_ConsumeMultiplayerTeleportTarget(VRMultiplayerTeleportTarget* outTarget);
 void VR_ClearMultiplayerTeleportTarget();
 void VR_AddMultiplayerRoomscaleWorldOffset(float xUnits, float yUnits);
 bool VR_GetMultiplayerRoomscaleWorldOffset(float* outXUnits, float* outYUnits);

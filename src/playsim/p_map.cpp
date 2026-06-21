@@ -465,6 +465,74 @@ CCMD(ffcf)
 // TELEPORT MOVE
 // 
 
+bool P_TeleportDestinationHitsPlayer(AActor* thing, const DVector3& pos)
+{
+	if (thing == nullptr)
+	{
+		return false;
+	}
+
+	sector_t* sector = thing->Level->PointInSector(pos);
+	FPortalGroupArray grouplist;
+	FMultiBlockThingsIterator mit(grouplist, thing->Level, pos.X, pos.Y, pos.Z, thing->Height, thing->radius, false, sector);
+	FMultiBlockThingsIterator::CheckResult cres;
+
+	while (mit.Next(&cres))
+	{
+		AActor* th = cres.thing;
+		if (th == nullptr || th == thing || th->player == nullptr || th->player->mo != th || th->player->playerstate != PST_LIVE)
+		{
+			continue;
+		}
+
+		if (!(th->flags & MF_SHOOTABLE))
+		{
+			continue;
+		}
+
+		if ((th->flags2 | thing->flags2) & MF2_THRUACTORS)
+		{
+			continue;
+		}
+
+		if ((th->ThruBits & thing->ThruBits) && ((th->flags8 | thing->flags8) & MF8_ALLOWTHRUBITS))
+		{
+			continue;
+		}
+
+		const double blockdist = th->radius + thing->radius;
+		if (fabs(th->X() - cres.Position.X) >= blockdist || fabs(th->Y() - cres.Position.Y) >= blockdist)
+		{
+			continue;
+		}
+
+		if ((thing->flags2 & MF2_PASSMOBJ || th->flags4 & MF4_ACTLIKEBRIDGE) && !(thing->Level->i_compatflags & COMPATF_NO_PASSMOBJ))
+		{
+			if (!(th->flags3 & thing->flags3 & MF3_DONTOVERLAP))
+			{
+				if (pos.Z > th->Top() || pos.Z + thing->Height < th->Z())
+				{
+					continue;
+				}
+			}
+		}
+
+		if (!P_CanCollideWith(thing, th))
+		{
+			continue;
+		}
+
+		if (thing->player && P_ShouldPassThroughPlayer(thing, th))
+		{
+			continue;
+		}
+
+		return true;
+	}
+
+	return false;
+}
+
 //
 // P_TeleportMove
 //

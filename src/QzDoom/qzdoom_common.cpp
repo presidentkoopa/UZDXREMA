@@ -44,11 +44,7 @@ float positional_movementSideways;
 float positional_movementForward;
 static float vr_mp_pendingTeleportForwardUnits;
 static float vr_mp_pendingTeleportSideUnits;
-static float vr_mp_pendingTeleportTargetX;
-static float vr_mp_pendingTeleportTargetY;
-static float vr_mp_pendingTeleportTargetZ;
-static bool vr_mp_pendingTeleportTargetValid = false;
-static bool vr_mp_pendingTeleportTargetTelefrag = true;
+static VRMultiplayerTeleportTarget vr_mp_pendingTeleportTarget;
 static float vr_mp_roomscaleWorldOffsetX = 0.0f;
 static float vr_mp_roomscaleWorldOffsetY = 0.0f;
 static float vr_mp_crouchHeightMapUnits = -1.0f;
@@ -93,46 +89,45 @@ void VR_ClearTeleportCommandBurst()
     vr_mp_pendingTeleportSideUnits = 0.0f;
 }
 
-void VR_QueueMultiplayerTeleportTarget(float x, float y, float z)
+VRMultiplayerTeleportTarget VR_MakeCanonicalMultiplayerTeleportTarget(double x, double y, double z, bool telefrag)
 {
-    vr_mp_pendingTeleportTargetX = x;
-    vr_mp_pendingTeleportTargetY = y;
-    vr_mp_pendingTeleportTargetZ = z;
-    vr_mp_pendingTeleportTargetValid = true;
-    vr_mp_pendingTeleportTargetTelefrag = true;
+    VRMultiplayerTeleportTarget target;
+    target.x = (int32_t)clamp((int64_t)llround(x), (int64_t)INT32_MIN, (int64_t)INT32_MAX);
+    target.y = (int32_t)clamp((int64_t)llround(y), (int64_t)INT32_MIN, (int64_t)INT32_MAX);
+    target.z = (int32_t)clamp((int64_t)llround(z), (int64_t)INT32_MIN, (int64_t)INT32_MAX);
+    target.telefrag = telefrag;
+    target.valid = true;
+    return target;
+}
+
+void VR_QueueMultiplayerTeleportTarget(const VRMultiplayerTeleportTarget& target)
+{
+    vr_mp_pendingTeleportTarget = target;
     VR_ClearTeleportCommandBurst();
 }
 
-void VR_QueueMultiplayerRoomscaleTeleportTarget(float x, float y, float z)
+void VR_QueueMultiplayerRoomscaleTeleportTarget(const VRMultiplayerTeleportTarget& target)
 {
-    vr_mp_pendingTeleportTargetX = x;
-    vr_mp_pendingTeleportTargetY = y;
-    vr_mp_pendingTeleportTargetZ = z;
-    vr_mp_pendingTeleportTargetValid = true;
-    vr_mp_pendingTeleportTargetTelefrag = false;
+    vr_mp_pendingTeleportTarget = target;
+    vr_mp_pendingTeleportTarget.telefrag = false;
     VR_ClearTeleportCommandBurst();
 }
 
-bool VR_ConsumeMultiplayerTeleportTarget(float* outX, float* outY, float* outZ, bool* outTelefrag)
+bool VR_ConsumeMultiplayerTeleportTarget(VRMultiplayerTeleportTarget* outTarget)
 {
-    if (outX == nullptr || outY == nullptr || outZ == nullptr || outTelefrag == nullptr || !vr_mp_pendingTeleportTargetValid)
+    if (outTarget == nullptr || !vr_mp_pendingTeleportTarget.valid)
     {
         return false;
     }
 
-    *outX = vr_mp_pendingTeleportTargetX;
-    *outY = vr_mp_pendingTeleportTargetY;
-    *outZ = vr_mp_pendingTeleportTargetZ;
-    *outTelefrag = vr_mp_pendingTeleportTargetTelefrag;
-    vr_mp_pendingTeleportTargetValid = false;
-    vr_mp_pendingTeleportTargetTelefrag = true;
+    *outTarget = vr_mp_pendingTeleportTarget;
+    vr_mp_pendingTeleportTarget = {};
     return true;
 }
 
 void VR_ClearMultiplayerTeleportTarget()
 {
-    vr_mp_pendingTeleportTargetValid = false;
-    vr_mp_pendingTeleportTargetTelefrag = true;
+    vr_mp_pendingTeleportTarget = {};
 }
 
 void VR_AddMultiplayerRoomscaleWorldOffset(float xUnits, float yUnits)
