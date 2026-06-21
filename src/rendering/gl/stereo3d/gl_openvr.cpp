@@ -227,7 +227,6 @@ EXTERN_CVAR(Color, vr_menu_pointer_color);
 CVAR(Float, vr_openvr_menu_pointer_pitch_bias, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR(Float, vr_openvr_menu_pointer_tip_offset, 0.035f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 
-EXTERN_CVAR(Bool, vr_use_alternate_mapping);
 EXTERN_CVAR(Bool, vr_secondary_button_mappings);
 EXTERN_CVAR(Bool, vr_teleport);
 EXTERN_CVAR(Bool, vr_switch_sticks);
@@ -235,7 +234,6 @@ EXTERN_CVAR(Bool, vr_two_handed_weapons);
 EXTERN_CVAR(Int, vid_refreshrate);
 
 EXTERN_CVAR(Bool, vr_enable_haptics);
-EXTERN_CVAR(Float, vr_kill_momentum);
 EXTERN_CVAR(Bool, vr_crouch_use_button);
 EXTERN_CVAR(Float, vr_snapTurn);
 
@@ -3169,20 +3167,6 @@ namespace s3d
 							}
 						}
 					}
-#if 0  // pcvr kill momentum and controller mapping
-					if (player && vr_kill_momentum)
-					{
-						if (role == (openvr_rightHanded ? 0 : 1))
-						{
-							if (JustStoppedMoving(controllers[role].lastState, newState, axisTrackpad)
-								|| JustStoppedMoving(controllers[role].lastState, newState, axisJoystick))
-							{
-								player->mo->Vel[0] = 0;
-								player->mo->Vel[1] = 0;
-							}
-						}
-					}
-#endif
 					static int joy_mode = vr_joy_mode;
 					if (joy_mode == 0)
 					{

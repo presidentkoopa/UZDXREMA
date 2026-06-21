@@ -9,7 +9,7 @@ gzdoom-crash.log
 fmodapi*linux/
 /libs/*
 /obj/*
-/docs/*
+/docs/*.md
 
 # editor/tooling/os files
 *~

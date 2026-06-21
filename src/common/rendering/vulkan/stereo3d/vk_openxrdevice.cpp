@@ -3216,12 +3216,6 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			moveX = playerMoving ? moveX : 0.0f;
 			moveY = playerMoving ? moveY : 0.0f;
 
-			// Keep OpenXR locomotion in line with the OpenVR path's effective speed.
-			// OpenVR movement is accumulated through both joystick axes and VR_GetMove.
-			// OpenXR currently feeds VR_GetMove only.
-			constexpr float kOpenXrLocomotionCompatScale = 2.0f;
-			moveX *= kOpenXrLocomotionCompatScale;
-			moveY *= kOpenXrLocomotionCompatScale;
 			remote_movementSideways = moveX;
 			remote_movementForward = moveY;
 
@@ -3327,7 +3321,9 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			PostControllerKeyTransition(face2Old, face2Pressed, face2BaseKey);
 		}
 
-		if (emitAxes)
+		// Match the OpenVR control-mode split: mode 1 keeps the extra joystick
+		// remapping layer, while mode 0 stays on the leaner controller mapping.
+		if (emitAxes && vr_joy_mode == 1)
 		{
 			const XrVector2f& lastAxisState = useTrackpad ? xrLastTrackpadState[hand] : xrLastThumbstickState[hand];
 			const XrVector2f& newAxisState = useTrackpad ? handInput[hand].trackpad : handInput[hand].thumbstick;
@@ -3533,6 +3529,7 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 
 		// Allow scrolling long menus with right-thumbstick vertical movement,
 		// even if the current ray cast misses the panel.
+		if (vr_joy_mode == 1)
 		{
 			constexpr float wheelDeadZone = 0.55f;
 			static int wheelRepeatCooldown = 0;
