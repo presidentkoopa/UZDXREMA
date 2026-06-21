@@ -490,6 +490,36 @@ bool P_NoInterpolation(player_t const *player, AActor const *actor)
 		&& !player->mo->isFrozen();
 }
 
+static void VR_ApplyLocalMultiplayerRoomscaleViewOffset(InterpolationViewer* iView, const player_t* player)
+{
+	if (iView == nullptr || player == nullptr || player - players != consoleplayer || !multiplayer)
+	{
+		return;
+	}
+
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	if (vrmode == nullptr || !vrmode->IsVR())
+	{
+		return;
+	}
+
+	AActor* const localCamera = player->camera.Get();
+	if (localCamera == nullptr || iView->ViewActor != localCamera)
+	{
+		return;
+	}
+
+	float roomscaleOffsetX = 0.0f;
+	float roomscaleOffsetY = 0.0f;
+	if (!VR_GetMultiplayerRoomscaleWorldOffset(&roomscaleOffsetX, &roomscaleOffsetY))
+	{
+		return;
+	}
+
+	// Apply the accumulated roomscale drift only to the local rendered view.
+	iView->ViewOffset += DVector3(roomscaleOffsetX, roomscaleOffsetY, 0.0);
+}
+
 //==========================================================================
 //
 // R_InterpolateView
@@ -658,6 +688,8 @@ void R_InterpolateView(FRenderViewpoint& viewPoint, const player_t* const player
 		else
 			iView->RelativeViewOffset += vOfs;
 	}
+
+	VR_ApplyLocalMultiplayerRoomscaleViewOffset(iView, player);
 
 	DVector3 posOfs = iView->ViewOffset;
 	if (!iView->RelativeViewOffset.isZero())

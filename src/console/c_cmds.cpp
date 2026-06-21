@@ -644,6 +644,7 @@ CCMD (warp)
 		Net_WriteInt16 (atoi (argv[1]));
 		Net_WriteInt16 (atoi (argv[2]));
 		Net_WriteInt16 (argv.argc() == 3 ? ONFLOORZ/65536 : atoi (argv[3]));
+		Net_WriteInt8 (1);
 	}
 }
 

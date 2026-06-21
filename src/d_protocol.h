@@ -128,7 +128,7 @@ enum EDemoCommand
 	DEM_RUNSCRIPT,		// 32 Word: Script#, Byte: # of args; each arg is a 4-byte int
 	DEM_SINFCHANGEDXOR,	// 33 Like DEM_SINFCHANGED, but data is a byte indicating how to set a bit
 	DEM_INVDROP,		// 34 4 bytes: ID of item to drop
-	DEM_WARPCHEAT,		// 35 4 bytes: 2 for x, 2 for y
+	DEM_WARPCHEAT,		// 35 7 bytes: 2 for x, 2 for y, 2 for z, 1 for telefrag
 	DEM_CENTERVIEW,		// 36
 	DEM_SUMMONFRIEND,	// 37 String: Thing to fabricate
 	DEM_SPRAY,			// 38 String: The decal to spray

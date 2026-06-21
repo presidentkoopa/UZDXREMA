@@ -93,7 +93,6 @@
 #include "fs_findfile.h"
 #include "hw_vrmodes.h"
 #include "hw_vrwheel.h"
-
 #include <QzDoom/VrCommon.h>
 #include <cmath>
 
@@ -102,6 +101,7 @@ static FRandom pr_dmspawn ("DMSpawn");
 static FRandom pr_pspawn ("PlayerSpawn");
 
 static inline int joyint(double val);
+EXTERN_CVAR(Float, vr_vunits_per_meter);
 
 static inline int joyint_deadzone(double val)
 {
@@ -120,16 +120,6 @@ static void VR_ApplyStickMove(int forwardScale, int sideScale, float joyforward,
 	// Convert local VR locomotion intent into ordinary command movement before sim.
 	side += joyint_deadzone(joyside * sideScale);
 	forward += joyint_deadzone(joyforward * forwardScale);
-}
-
-static void VR_ApplyPositionalMove(int forwardScale, int sideScale, float hmdforward, float hmdside, float vrUnitsPerMeter, int &forward, int &side)
-{
-	// Approximate roomscale as deterministic command motion in multiplayer.
-	constexpr float kWorldUnitsPerFullCommand = 127.0f;
-	const float sideNorm = clamp((hmdside * vrUnitsPerMeter) / kWorldUnitsPerFullCommand, -1.0f, 1.0f);
-	const float forwardNorm = clamp((hmdforward * vrUnitsPerMeter) / kWorldUnitsPerFullCommand, -1.0f, 1.0f);
-	side += joyint_deadzone(sideNorm * sideScale);
-	forward += joyint_deadzone(forwardNorm * forwardScale);
 }
 
 static void VR_ApplyTeleportBurstMove(int forwardScale, int sideScale, int &forward, int &side)
@@ -315,7 +305,6 @@ EXTERN_CVAR(Bool, vr_teleport);
 EXTERN_CVAR(Int, vr_move_speed);
 EXTERN_CVAR(Float, vr_run_multiplier);
 EXTERN_CVAR(Float, vr_walk_multiplier);
-EXTERN_CVAR(Float, vr_vunits_per_meter);
 
 //==========================================================================
 //
@@ -1117,7 +1106,23 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 		}
 		if (multiplayer)
 		{
-			VR_ApplyPositionalMove(forwardmove[1], sidemove[1], hmdforward, hmdside, vr_vunits_per_meter, forward, side);
+			float roomscaleOffsetX = 0.0f;
+			float roomscaleOffsetY = 0.0f;
+			VR_GetMultiplayerRoomscaleWorldOffset(&roomscaleOffsetX, &roomscaleOffsetY);
+
+			const float roomscaleDistanceSquared = roomscaleOffsetX * roomscaleOffsetX + roomscaleOffsetY * roomscaleOffsetY;
+			const float roomscaleRecenterThresholdUnits = 0.35f * vr_vunits_per_meter;
+			if (roomscaleDistanceSquared >= roomscaleRecenterThresholdUnits * roomscaleRecenterThresholdUnits)
+			{
+				player_t* localPlayer = &players[consoleplayer];
+				if (localPlayer != nullptr && localPlayer->mo != nullptr)
+				{
+					VR_QueueMultiplayerRoomscaleTeleportTarget(
+						float(localPlayer->mo->X() + roomscaleOffsetX),
+						float(localPlayer->mo->Y() + roomscaleOffsetY),
+						float(localPlayer->mo->Z()));
+				}
+			}
 			if (vr_teleport)
 			{
 				VR_ApplyTeleportBurstMove(forwardmove[1], sidemove[1], forward, side);
@@ -1139,23 +1144,32 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 	else if (!vrmode->IsVR() || !multiplayer)
 	{
 		VR_ClearTeleportCommandBurst();
+		VR_ClearMultiplayerRoomscaleWorldOffset();
 	}
 
 	VR_ApplyMultiplayerCrouchButton(cmd, vrmode->IsVR());
 
-	if (multiplayer && vrmode->IsVR() && vr_teleport)
+	if (multiplayer && vrmode->IsVR())
 	{
 		float teleportX = 0.0f;
 		float teleportY = 0.0f;
 		float teleportZ = 0.0f;
-		if (VR_ConsumeMultiplayerTeleportTarget(&teleportX, &teleportY, &teleportZ))
+		bool teleportTelefrag = true;
+		if (VR_ConsumeMultiplayerTeleportTarget(&teleportX, &teleportY, &teleportZ, &teleportTelefrag))
 		{
 			player_t* player = &players[consoleplayer];
 			if (player != nullptr && player->mo != nullptr)
 			{
-				// Multiplayer teleport is an explicit warp, not a locomotion burst.
-				P_TeleportMove(player->mo, DVector3(teleportX, teleportY, teleportZ), true);
+				// Explicit teleport locomotion still uses telefrag; roomscale recenter does not.
+				const auto savedFlags2 = player->mo->flags2;
+				if (!teleportTelefrag)
+				{
+					player->mo->flags2 &= ~MF2_TELESTOMP;
+				}
+				P_TeleportMove(player->mo, DVector3(teleportX, teleportY, teleportZ), teleportTelefrag);
+				player->mo->flags2 = savedFlags2;
 			}
+			VR_ClearMultiplayerRoomscaleWorldOffset();
 
 			auto encodeTeleportCoord = [](float value)
 			{
@@ -1166,6 +1180,7 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 			Net_WriteInt16(encodeTeleportCoord(teleportX));
 			Net_WriteInt16(encodeTeleportCoord(teleportY));
 			Net_WriteInt16(encodeTeleportCoord(teleportZ));
+			Net_WriteInt8(teleportTelefrag ? 1 : 0);
 		}
 	}
 	else

@@ -1392,7 +1392,6 @@ void P_PlayerThink (player_t *player)
 	player->cheats &= ~CF_NOVIEWPOSINTERP;
 	player->mo->FloatVar("prevBob") = player->bob;
 
-
 	IFVIRTUALPTRNAME(player->mo, NAME_PlayerPawn, PlayerThink)
 	{
 		VMValue param = player->mo;

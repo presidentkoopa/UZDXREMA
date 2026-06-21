@@ -2909,6 +2909,12 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 		DVector2 rotated = DVector2(positionDeltaThisFrame[0], positionDeltaThisFrame[2]).Rotated(DAngle::fromDeg(-rotation));
 		positional_movementSideways = rotated.Y;
 		positional_movementForward = rotated.X;
+		if (multiplayer)
+		{
+			VR_AddMultiplayerRoomscaleWorldOffset(
+				positional_movementSideways * vr_vunits_per_meter,
+				positional_movementForward * vr_vunits_per_meter);
+		}
 	}
 
 	if (!xrUsingStageSpace && !xrHasLocalHeightAnchor)

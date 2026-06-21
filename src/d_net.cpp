@@ -2305,10 +2305,22 @@ void Net_DoCommand (int type, uint8_t **stream, int player)
 	case DEM_WARPCHEAT:
 		{
 			int x, y, z;
+			bool telefrag;
 			x = ReadInt16 (stream);
 			y = ReadInt16 (stream);
 			z = ReadInt16 (stream);
-			P_TeleportMove (players[player].mo, DVector3(x, y, z), true);
+			telefrag = !!ReadInt8(stream);
+			auto mo = players[player].mo;
+			if (mo != nullptr)
+			{
+				const auto savedFlags2 = mo->flags2;
+				if (!telefrag)
+				{
+					mo->flags2 &= ~MF2_TELESTOMP;
+				}
+				P_TeleportMove(mo, DVector3(x, y, z), telefrag);
+				mo->flags2 = savedFlags2;
+			}
 		}
 		break;
 
@@ -2942,7 +2954,7 @@ void Net_SkipCommand (int type, uint8_t **stream)
 			break;
 
 		case DEM_WARPCHEAT:
-			skip = 6;
+			skip = 7;
 			break;
 
 		case DEM_INVUSE:

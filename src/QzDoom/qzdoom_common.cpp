@@ -48,6 +48,9 @@ static float vr_mp_pendingTeleportTargetX;
 static float vr_mp_pendingTeleportTargetY;
 static float vr_mp_pendingTeleportTargetZ;
 static bool vr_mp_pendingTeleportTargetValid = false;
+static bool vr_mp_pendingTeleportTargetTelefrag = true;
+static float vr_mp_roomscaleWorldOffsetX = 0.0f;
+static float vr_mp_roomscaleWorldOffsetY = 0.0f;
 static float vr_mp_crouchHeightMapUnits = -1.0f;
 static bool vr_hasWorldPositionSample = false;
 
@@ -96,12 +99,23 @@ void VR_QueueMultiplayerTeleportTarget(float x, float y, float z)
     vr_mp_pendingTeleportTargetY = y;
     vr_mp_pendingTeleportTargetZ = z;
     vr_mp_pendingTeleportTargetValid = true;
+    vr_mp_pendingTeleportTargetTelefrag = true;
     VR_ClearTeleportCommandBurst();
 }
 
-bool VR_ConsumeMultiplayerTeleportTarget(float* outX, float* outY, float* outZ)
+void VR_QueueMultiplayerRoomscaleTeleportTarget(float x, float y, float z)
 {
-    if (outX == nullptr || outY == nullptr || outZ == nullptr || !vr_mp_pendingTeleportTargetValid)
+    vr_mp_pendingTeleportTargetX = x;
+    vr_mp_pendingTeleportTargetY = y;
+    vr_mp_pendingTeleportTargetZ = z;
+    vr_mp_pendingTeleportTargetValid = true;
+    vr_mp_pendingTeleportTargetTelefrag = false;
+    VR_ClearTeleportCommandBurst();
+}
+
+bool VR_ConsumeMultiplayerTeleportTarget(float* outX, float* outY, float* outZ, bool* outTelefrag)
+{
+    if (outX == nullptr || outY == nullptr || outZ == nullptr || outTelefrag == nullptr || !vr_mp_pendingTeleportTargetValid)
     {
         return false;
     }
@@ -109,13 +123,40 @@ bool VR_ConsumeMultiplayerTeleportTarget(float* outX, float* outY, float* outZ)
     *outX = vr_mp_pendingTeleportTargetX;
     *outY = vr_mp_pendingTeleportTargetY;
     *outZ = vr_mp_pendingTeleportTargetZ;
+    *outTelefrag = vr_mp_pendingTeleportTargetTelefrag;
     vr_mp_pendingTeleportTargetValid = false;
+    vr_mp_pendingTeleportTargetTelefrag = true;
     return true;
 }
 
 void VR_ClearMultiplayerTeleportTarget()
 {
     vr_mp_pendingTeleportTargetValid = false;
+    vr_mp_pendingTeleportTargetTelefrag = true;
+}
+
+void VR_AddMultiplayerRoomscaleWorldOffset(float xUnits, float yUnits)
+{
+    vr_mp_roomscaleWorldOffsetX += xUnits;
+    vr_mp_roomscaleWorldOffsetY += yUnits;
+}
+
+bool VR_GetMultiplayerRoomscaleWorldOffset(float* outXUnits, float* outYUnits)
+{
+    if (outXUnits == nullptr || outYUnits == nullptr)
+    {
+        return false;
+    }
+
+    *outXUnits = vr_mp_roomscaleWorldOffsetX;
+    *outYUnits = vr_mp_roomscaleWorldOffsetY;
+    return fabsf(vr_mp_roomscaleWorldOffsetX) > 0.0001f || fabsf(vr_mp_roomscaleWorldOffsetY) > 0.0001f;
+}
+
+void VR_ClearMultiplayerRoomscaleWorldOffset()
+{
+    vr_mp_roomscaleWorldOffsetX = 0.0f;
+    vr_mp_roomscaleWorldOffsetY = 0.0f;
 }
 
 bool VR_ConsumeTeleportCommandStep(float maxUnitsPerTick, float* outForwardUnits, float* outSideUnits)
@@ -169,6 +210,7 @@ void VR_ResetTransientNetSafeState()
 
     VR_ClearTeleportCommandBurst();
     VR_ClearMultiplayerTeleportTarget();
+    VR_ClearMultiplayerRoomscaleWorldOffset();
     VR_ClearMultiplayerCrouchHeight();
     vr_hasWorldPositionSample = false;
 }

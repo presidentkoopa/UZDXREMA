@@ -1100,19 +1100,22 @@ namespace s3d
 		}
 
 		if (doTrackHmdHorizontalPosition) {
-			// shift viewpoint when hmd position shifts
-			static bool is_initial_origin_set = false;
-			if (!is_initial_origin_set) {
-				// initialize origin to first noted HMD location
-				// TODO: implement recentering based on a CCMD
-				openvr_origin = openvr_HmdPos;
-				is_initial_origin_set = true;
-			}
-			openvr_dpos = openvr_HmdPos - openvr_origin;
+			if (!multiplayer)
+			{
+				// shift viewpoint when hmd position shifts
+				static bool is_initial_origin_set = false;
+				if (!is_initial_origin_set) {
+					// initialize origin to first noted HMD location
+					// TODO: implement recentering based on a CCMD
+					openvr_origin = openvr_HmdPos;
+					is_initial_origin_set = true;
+				}
+				openvr_dpos = openvr_HmdPos - openvr_origin;
 
-			LSVec3 doom_dpos = LSMatrix44(doomInOpenVR) * openvr_dpos;
-			doom_EyeOffset[0] += doom_dpos[0];
-			doom_EyeOffset[1] += doom_dpos[1];
+				LSVec3 doom_dpos = LSMatrix44(doomInOpenVR) * openvr_dpos;
+				doom_EyeOffset[0] += doom_dpos[0];
+				doom_EyeOffset[1] += doom_dpos[1];
+			}
 		}
 
 		return { doom_EyeOffset[0], doom_EyeOffset[1], doom_EyeOffset[2] };
@@ -2462,6 +2465,12 @@ namespace s3d
 				//DVector2 v = DVector2(-openvr_dpos.x, openvr_dpos.z).Rotated(openvr_to_doom_angle);
 				positional_movementSideways = v.Y;
 				positional_movementForward = v.X;
+				if (multiplayer)
+				{
+					VR_AddMultiplayerRoomscaleWorldOffset(
+						positional_movementSideways * vr_vunits_per_meter,
+						positional_movementForward * vr_vunits_per_meter);
+				}
 			}
 
 			//Off-hand specific stuff
@@ -3368,7 +3377,12 @@ namespace s3d
 						}
 						player->mo->Vel = vel;
 					}
-					openvr_origin += openvr_dpos;
+					if (!multiplayer)
+					{
+						// In single-player we convert roomscale deltas into pawn motion,
+						// so the local HMD anchor advances with the consumed movement.
+						openvr_origin += openvr_dpos;
+					}
 				}
 				updateHmdPose(r_viewpoint);
 			}  // not in menu section
