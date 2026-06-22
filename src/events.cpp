@@ -40,6 +40,7 @@
 #include "d_net.h"
 #include "g_game.h"
 #include "info.h"
+#include "playsim/p_hitscantracer.h"
 #include "utf8.h"
 
 EventManager staticEventManager;
@@ -657,6 +658,7 @@ void EventManager::OnEngineInitialize()
 // Because the main point of safe WorldLoaded/Unloading is that it will be preserved in savegames.
 void EventManager::WorldLoaded()
 {
+	P_ClearHitscanTracers();
 	for (DStaticEventHandler* handler = FirstEventHandler; handler; handler = handler->next)
 	{
 		if (!handler->IsStatic() && savegamerestore) continue; // don't execute WorldLoaded for handlers loaded from the savegame.
@@ -666,6 +668,7 @@ void EventManager::WorldLoaded()
 
 void EventManager::WorldUnloaded(const FString& nextmap)
 {
+	P_ClearHitscanTracers();
 	for (DStaticEventHandler* handler = LastEventHandler; handler; handler = handler->prev)
 	{
 		handler->WorldUnloaded(nextmap);
@@ -746,6 +749,8 @@ void EventManager::WorldHitscanFired(AActor* actor, const DVector3& AttackPos, c
 	if (actor->ObjectFlags & OF_EuthanizeMe)
 		return;
 
+	P_QueueHitscanTracer(actor, AttackPos, DamagePosition, flags);
+
 	if (ShouldCallStatic(true)) staticEventManager.WorldHitscanFired(actor, AttackPos, DamagePosition, Inflictor, flags);
 
 	for (DStaticEventHandler* handler = FirstEventHandler; handler; handler = handler->next)
@@ -757,6 +762,8 @@ void EventManager::WorldRailgunFired(AActor* actor, const DVector3& AttackPos, c
 	// don't call anything if actor was destroyed on PostBeginPlay/BeginPlay/whatever.
 	if (actor->ObjectFlags & OF_EuthanizeMe)
 		return;
+
+	P_QueueHitscanTracer(actor, AttackPos, DamagePosition, flags);
 
 	if (ShouldCallStatic(true)) staticEventManager.WorldRailgunFired(actor, AttackPos, DamagePosition, Inflictor, flags);
 

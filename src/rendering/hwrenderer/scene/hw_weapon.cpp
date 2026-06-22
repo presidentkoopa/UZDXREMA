@@ -52,6 +52,7 @@
 #include <algorithm>
 #include <cmath>
 #include "playsim/p_local.h"
+#include "playsim/p_hitscantracer.h"
 #include "playsim/p_linetracedata.h"
 #include "playsim/p_trace.h"
 
@@ -78,6 +79,11 @@ EXTERN_CVAR(Int, vr_laser_fixed_length)
 EXTERN_CVAR(Float, vr_laser_source_offset_x)
 EXTERN_CVAR(Float, vr_laser_source_offset_y)
 EXTERN_CVAR(Float, vr_laser_source_offset_z)
+EXTERN_CVAR(Color, vr_hitscan_tracer_color)
+EXTERN_CVAR(Float, vr_hitscan_tracer_alpha)
+EXTERN_CVAR(Float, vr_hitscan_tracer_length)
+EXTERN_CVAR(Float, vr_hitscan_tracer_width)
+EXTERN_CVAR(Float, vr_hitscan_tracer_speed)
 
 extern float hmdorientation[3];
 extern float weaponangles[3];
@@ -598,6 +604,176 @@ static void DrawLaserBeamGeometry(FRenderState& state, const DVector3& beamStart
 	state.EnableBrightmap(false);
 	state.EnableModelMatrix(false);
 	state.ResetColor();
+}
+
+static void DrawHitscanTracerGeometry(FRenderState& state, const DVector3& tracerStart, const DVector3& tracerEnd)
+{
+	DVector3 tracerVec = tracerEnd - tracerStart;
+	const double tracerLength = tracerVec.Length();
+	if (tracerLength <= 0.01)
+	{
+		return;
+	}
+
+	tracerVec.MakeUnit();
+
+	DVector3 tracerRight, tracerUp;
+	tracerVec.GetRightUp(tracerRight, tracerUp);
+
+	const int tracerColor = (int)vr_hitscan_tracer_color;
+	const float tracerAlpha = std::clamp<float>(vr_hitscan_tracer_alpha, 0.0f, 1.0f);
+	if (tracerAlpha <= 0.0f)
+	{
+		return;
+	}
+
+	const float tracerRadius = 0.5f * std::max(0.01f, (float)vr_hitscan_tracer_width);
+	constexpr int tracerSegments = 8;
+	const int vertexCount = (tracerSegments + 1) * 2;
+
+	state.EnableModelMatrix(false);
+	state.SetLightIndex(-1);
+	state.AlphaFunc(Alpha_Greater, 0.0f);
+	state.SetObjectColor(0xffffffff);
+	state.SetAddColor(0);
+	state.SetDynLight(0, 0, 0);
+	state.EnableBrightmap(false);
+	state.EnableTexture(false);
+	state.EnableDepthTest(true);
+	state.SetDepthMask(false);
+	state.SetRenderStyle(tracerAlpha >= 0.999f ? STYLE_Source : STYLE_Add);
+	state.SetColor(RPART(tracerColor) / 255.0f, GPART(tracerColor) / 255.0f, BPART(tracerColor) / 255.0f, tracerAlpha);
+
+	screen->mVertexData->Map();
+	auto verts = screen->mVertexData->AllocVertices(vertexCount);
+	auto vp = verts.first;
+	for (int i = 0; i <= tracerSegments; ++i)
+	{
+		const double t = (double)i / (double)tracerSegments;
+		const double ang = t * 6.28318530717958647692;
+		const double cs = std::cos(ang);
+		const double sn = std::sin(ang);
+		const DVector3 ringOffset = (tracerRight * cs + tracerUp * sn) * tracerRadius;
+		const DVector3 startPos = tracerStart + ringOffset;
+		const DVector3 endPos = tracerEnd + ringOffset;
+		vp[i * 2 + 0].Set((float)startPos.X, (float)startPos.Z, (float)startPos.Y, 0.0f, 0.0f);
+		vp[i * 2 + 1].Set((float)endPos.X, (float)endPos.Z, (float)endPos.Y, 0.0f, 1.0f);
+	}
+	screen->mVertexData->Unmap();
+
+	state.Draw(DT_TriangleStrip, verts.second, vertexCount, true);
+
+	state.EnableTexture(true);
+	state.SetDepthMask(true);
+	state.SetRenderStyle(DefaultRenderStyle());
+	state.SetTextureMode(TM_NORMAL);
+	state.SetColor(1.f, 1.f, 1.f, 1.f);
+	state.SetObjectColor(0xffffffff);
+	state.SetAddColor(0);
+	state.SetDynLight(0, 0, 0);
+	state.EnableBrightmap(false);
+	state.EnableModelMatrix(false);
+	state.ResetColor();
+}
+
+static bool IsPointInView(const DVector3& point)
+{
+	DVector3 toPoint = point - r_viewpoint.Pos;
+	const double distance = toPoint.Length();
+	if (distance <= 0.01)
+	{
+		return true;
+	}
+
+	toPoint /= distance;
+	if (toPoint.dot(r_viewpoint.ViewVector3D) <= 0.0)
+	{
+		return false;
+	}
+
+	DVector3 right, up;
+	r_viewpoint.ViewVector3D.GetRightUp(right, up);
+	if (right.LengthSquared() < 1e-8)
+	{
+		right = DVector3(0.0, 1.0, 0.0);
+	}
+	if (up.LengthSquared() < 1e-8)
+	{
+		up = DVector3(0.0, 0.0, 1.0);
+	}
+	right.MakeUnit();
+	up.MakeUnit();
+
+	const double tanHalfFov = std::tan(r_viewpoint.GetFieldOfView().Radians() * 0.5);
+	const double forward = toPoint.dot(r_viewpoint.ViewVector3D);
+	const double rightOffset = std::abs(toPoint.dot(right));
+	const double upOffset = std::abs(toPoint.dot(up));
+	const double limit = forward * tanHalfFov * 1.05;
+	return rightOffset <= limit && upOffset <= limit;
+}
+
+void DrawHitscanTracers(FRenderState& state)
+{
+	if (menuactive != MENU_Off || VRWheel_IsActive())
+	{
+		return;
+	}
+
+	auto& tracers = P_GetHitscanTracers();
+	if (tracers.empty())
+	{
+		return;
+	}
+
+	if (primaryLevel == nullptr)
+	{
+		return;
+	}
+
+	const double now = (double)primaryLevel->maptime + r_viewpoint.TicFrac;
+	const double speed = std::max(1.0, (double)vr_hitscan_tracer_speed * 100.0 / (double)TICRATE);
+	const double tracerLength = std::max(0.0, (double)vr_hitscan_tracer_length);
+
+	tracers.erase(std::remove_if(tracers.begin(), tracers.end(), [now, speed](const FHitscanTracer& tracer)
+	{
+		if (now < tracer.SpawnTime)
+		{
+			return true;
+		}
+
+		const double age = now - tracer.SpawnTime;
+		if (tracer.Lifetime > 0.0 && age >= tracer.Lifetime)
+		{
+			return true;
+		}
+
+		return (age * speed * tracer.SpeedScale) >= tracer.Distance;
+	}), tracers.end());
+
+	for (const auto& tracer : tracers)
+	{
+		const double age = now - tracer.SpawnTime;
+		if (age < 0.0)
+		{
+			continue;
+		}
+
+		if (tracer.bRicochet && !IsPointInView(tracer.Start))
+		{
+			continue;
+		}
+
+		const double frontDistance = std::min(tracer.Distance, age * speed * tracer.SpeedScale);
+		if (frontDistance <= 0.01 || frontDistance >= tracer.Distance)
+		{
+			continue;
+		}
+
+		const double backDistance = std::max(0.0, frontDistance - tracerLength);
+		const DVector3 tracerStart = tracer.Start + tracer.Direction * backDistance;
+		const DVector3 tracerEnd = tracer.Start + tracer.Direction * frontDistance;
+		DrawHitscanTracerGeometry(state, tracerStart, tracerEnd);
+	}
 }
 
 void DrawLaserSightWorld(FRenderState& state)

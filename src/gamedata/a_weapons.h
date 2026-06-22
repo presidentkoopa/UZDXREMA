@@ -164,5 +164,6 @@ enum
 	WIF_TWOHANDED =			0x00400000, // two handed weapon
 	WIF_NO_AUTO_REVERSE =	0x00800000, // prevent auto reverse of model and sprite when switching to offhand
 	WIF_HASLASERBEAM =		0x01000000, // weapon has a laser beam by default
+	WIF_HASHITSCANTRACER =	0x02000000, // weapon forces hitscan tracers on
 };
 

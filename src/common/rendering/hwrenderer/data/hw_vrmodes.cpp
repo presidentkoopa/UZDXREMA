@@ -440,6 +440,25 @@ CVAR(Int, vr_laser_fixed_length, 100, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR(Float, vr_laser_source_offset_x, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR(Float, vr_laser_source_offset_y, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR(Float, vr_laser_source_offset_z, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CUSTOM_CVAR(Int, vr_hitscan_tracer, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0)
+	{
+		self = 0;
+	}
+	else if (self > 2)
+	{
+		self = 2;
+	}
+}
+CVAR(Color, vr_hitscan_tracer_color, 0xffc040, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Float, vr_hitscan_tracer_alpha, 0.75f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Float, vr_hitscan_tracer_length, 50.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Float, vr_hitscan_tracer_width, 0.25f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Float, vr_hitscan_tracer_speed, 26.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Float, vr_hitscan_tracer_offset, 8.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Bool, vr_hitscan_ricochet, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Float, vr_hitscan_ricochet_chance, 20.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR(Float, vr_snapTurn, 45.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_switch_sticks, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_secondary_button_mappings, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)

@@ -2841,6 +2841,13 @@ OptionValue "DesktopViewModes"
 	2, "$OPTVAL_VR_RIGHT_EYE"
 }
 
+OptionValue HitscanTracerMode
+{
+	0, "$OPTVAL_VR_DISABLED"
+	1, "$OPTVAL_VR_PLAYER_ONLY"
+	2, "$OPTVAL_VR_EVERYONE"
+}
+
 OptionMenu CinemaModeOptions protected
 {
 	Title "$VRCMODEMNU_TITLE"
@@ -3062,6 +3069,28 @@ OptionMenu VRWeaponWheelOptions protected
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_wheel_icon_bg_color vr_wheel_icon_select_color vr_wheel_icon_scale vr_wheel_radius vr_wheel_distance vr_wheel_xoffset vr_wheel_yoffset vr_wheel_time_slow vr_wheel_weapon_all vr_wheel_switch_hands vr_wheel_selection_type vr_wheel_select_angle vr_wheel_deadzone vr_wheel_sound vr_wheel_hide_hand_weapon vr_wheel_icon_load_model vr_wheel_icon_model_scale vr_wheel_icon_model_yaw vr_wheel_icon_model_xoffset vr_wheel_icon_model_zoffset"
 }
 
+OptionMenu VRHitscanTracerOptions protected
+{
+	Title "$VRTRACERMNU_TITLE"
+
+	StaticText ""
+	StaticText "$VRTRACERMNU_TRACE_OPTIONS", gold
+	Option "$VRTRACERMNU_ENABLED",			"vr_hitscan_tracer", "HitscanTracerMode"
+	ColorPicker "$VRTRACERMNU_COLOR",		"vr_hitscan_tracer_color"
+	Slider "$VRTRACERMNU_OPACITY",			"vr_hitscan_tracer_alpha", 0.0, 1.0, 0.05, 2
+	Slider "$VRTRACERMNU_LENGTH",			"vr_hitscan_tracer_length", 1.0, 64.0, 1.0, 0
+	Slider "$VRTRACERMNU_WIDTH",			"vr_hitscan_tracer_width", 0.01, 2.0, 0.01, 2
+	Slider "$VRTRACERMNU_SPEED",			"vr_hitscan_tracer_speed", 0.0, 40.0, 0.1, 1
+	Slider "$VRTRACERMNU_OFFSET",			"vr_hitscan_tracer_offset", 0.0, 64.0, 1.0, 0
+	StaticText ""
+	StaticText "$VRTRACERMNU_RICOCHET_OPTIONS", gold
+	Option "$VRTRACERMNU_RICOCHET_ENABLED",	"vr_hitscan_ricochet", "YesNo"
+	Slider "$VRTRACERMNU_RICOCHET_CHANCE",	"vr_hitscan_ricochet_chance", 0.0, 100.0, 1.0, 0
+	StaticText ""
+
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_hitscan_tracer vr_hitscan_ricochet vr_hitscan_ricochet_chance vr_hitscan_tracer_color vr_hitscan_tracer_alpha vr_hitscan_tracer_length vr_hitscan_tracer_width vr_hitscan_tracer_speed vr_hitscan_tracer_offset"
+}
+
 OptionMenu VROptionsMenu protected
 {
 	Title "$VRPREFMNU_TITLE"
@@ -3074,6 +3103,7 @@ OptionMenu VROptionsMenu protected
 	Submenu "$VRHUDMNU_HUDAUTOMAPOPTIONS",  "VRHUDOptions"
 	Submenu "$VRWEAPONMNU_TITLE",			"VRWeaponOptions"
 	Submenu "$VRLASERMNU_TITLE",			"VRLaserSightOptions"
+	Submenu "$VRTRACERMNU_TITLE",			"VRHitscanTracerOptions"
 	Submenu "$VRWHEELMNU_TITLE",			"VRWeaponWheelOptions"
 	StaticText ""
 	StaticText "$VRPREFMNU_MISC", gold

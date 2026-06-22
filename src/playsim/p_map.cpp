@@ -77,6 +77,7 @@
 #include "p_effect.h"
 #include "p_terrain.h"
 #include "p_trace.h"
+#include "p_hitscantracer.h"
 #include "p_checkposition.h"
 #include "p_linetracedata.h"
 #include "r_utility.h"
@@ -5102,6 +5103,10 @@ AActor *P_LineAttack(AActor *t1, DAngle angle, double distance,
 			}
 			SpawnDeepSplash(t1, trace, puff);
 		}
+		else if (trace.HitType == TRACE_HitWall || trace.HitType == TRACE_HitFloor || trace.HitType == TRACE_HitCeiling)
+		{
+			P_QueueHitscanRicochet(t1, tempos, trace.HitPos, flags);
+		}
 	}
 
 	t1->Level->localEventManager->WorldHitscanFired(t1, tempos, puffpos, puff, flags);
@@ -5835,6 +5840,11 @@ void P_RailAttack(FRailParams *p)
 				puff->Destroy();
 			}
 		}
+	}
+
+	if (trace.HitType == TRACE_HitWall || trace.HitType == TRACE_HitFloor || trace.HitType == TRACE_HitCeiling)
+	{
+		P_QueueHitscanRicochet(source, start, trace.HitPos, flags);
 	}
 
 	source->Level->localEventManager->WorldRailgunFired(source, start, trace.HitPos, thepuff, flags);

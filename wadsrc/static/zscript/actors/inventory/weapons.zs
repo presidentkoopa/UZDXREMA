@@ -32,6 +32,7 @@ class Weapon : StateProvider
 	double LookScale;						// Multiplier for look sensitivity (like FOV scaling but without the zooming)
 	int Crosshair;							// 0 to use player's crosshair
 	Vector3 LaserBeamOffset;				// Per-weapon local laser beam origin offset
+	double HitscanTracerOffset;				// Per-weapon local hitscan tracer origin offset override
 	bool GivenAsMorphWeapon;
 	bool bAltFire;							// Set when this weapon's alternate fire is used.
 	double UseRange;						// [NS] Distance at which player can +use
@@ -75,6 +76,7 @@ class Weapon : StateProvider
 	property LookScale: LookScale;
 	property BobPivot3D : BobPivot3D;
 	property LaserBeamOffset : LaserBeamOffset;
+	property HitscanTracerOffset : HitscanTracerOffset;
 	property UseRange: UseRange;
 
 	flagdef NoAutoFire: WeaponFlags, 0;			// weapon does not autofire
@@ -102,6 +104,7 @@ class Weapon : StateProvider
 	flagdef TwoHanded: WeaponFlags, 22;			// two handed weapon
 	flagdef NoAutoReverse: WeaponFlags, 23;		// prevent auto reverse of model and sprite when switching to offhand
 	flagdef HasLaserBeam: WeaponFlags, 24;		// weapon has a laser beam
+	flagdef HasHitscanTracer: WeaponFlags, 25;	// weapon forces hitscan tracer visuals on
 
 	// no-op flags
 	flagdef NoLMS: none, 0;
@@ -122,6 +125,7 @@ class Weapon : StateProvider
 		Weapon.SlotPriority 32767;
 		Weapon.BobPivot3D (0.0, 0.0, 0.0);
 		Weapon.LaserBeamOffset (0.0, 0.0, 0.0);
+		Weapon.HitscanTracerOffset (-1.0);
 		Weapon.UseRange 48;
 		+WEAPONSPAWN
 		DefaultStateUsage SUF_ACTOR|SUF_OVERLAY|SUF_WEAPON;

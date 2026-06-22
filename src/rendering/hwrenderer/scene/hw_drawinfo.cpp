@@ -52,6 +52,7 @@
 #include "g_levellocals.h"
 
 void DrawLaserSightWorld(FRenderState& state);
+void DrawHitscanTracers(FRenderState& state);
 
 EXTERN_CVAR(Float, r_visibility)
 EXTERN_CVAR(Int, gl_max_portals);
@@ -1200,6 +1201,7 @@ void HWDrawInfo::DrawScene(int drawmode)
 	RenderTranslucent(RenderState);
 	if (drawmode == DM_MAINVIEW)
 	{
+		DrawHitscanTracers(RenderState);
 		DrawLaserSightWorld(RenderState);
 	}
 }
