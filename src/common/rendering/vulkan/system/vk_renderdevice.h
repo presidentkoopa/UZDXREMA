@@ -44,6 +44,9 @@ struct VkTexLoadOut
 	int height = 0;
 	int scaleFlags = 0;
 	VkHardwareTexture* hardwareTexture = nullptr;
+	bool uploadedInThread = false;
+	bool needsQueueOwnershipTransfer = false;
+	int uploadQueueFamily = -1;
 };
 
 struct VkModelLoadIn
@@ -62,12 +65,20 @@ struct VkModelLoadOut
 class VkTexLoadThread : public ResourceLoader2<VkTexLoadIn, VkTexLoadOut>
 {
 public:
-	VkTexLoadThread(TSQueue<VkTexLoadIn>* inQueue, TSQueue<VkTexLoadIn>* secondaryQueue, TSQueue<VkTexLoadOut>* outQueue)
+	VkTexLoadThread(VkCommandBufferManager* bgCmd, VulkanDevice* device, int uploadQueueIndex, TSQueue<VkTexLoadIn>* inQueue, TSQueue<VkTexLoadIn>* secondaryQueue, TSQueue<VkTexLoadOut>* outQueue)
 		: ResourceLoader2<VkTexLoadIn, VkTexLoadOut>(inQueue, secondaryQueue, outQueue)
 	{
+		cmd = bgCmd;
+		if (device != nullptr && uploadQueueIndex >= 0 && uploadQueueIndex < (int)device->uploadQueues.size())
+		{
+			uploadQueue = device->uploadQueues[uploadQueueIndex];
+		}
 	}
 
 protected:
+	VkCommandBufferManager* cmd = nullptr;
+	VulkanUploadSlot uploadQueue = {};
+
 	bool loadResource(VkTexLoadIn& input, VkTexLoadOut& output) override;
 };
 
@@ -184,6 +195,7 @@ private:
 	};
 
 	std::unique_ptr<VkCommandBufferManager> mCommands;
+	std::vector<std::unique_ptr<VkCommandBufferManager>> mBGTransferCommands;
 	std::unique_ptr<VkBufferManager> mBufferManager;
 	std::unique_ptr<VkSamplerManager> mSamplerManager;
 	std::unique_ptr<VkTextureManager> mTextureManager;

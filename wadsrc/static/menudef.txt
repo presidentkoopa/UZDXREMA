@@ -3202,7 +3202,9 @@ OptionMenu DeveloperOptionsMenu protected
 	Option "$DEVOPTMNU_FORCE_RECOMMENDED_VIEWPORT", "vr_openxr_force_recommended_viewport", "OnOff"
 	Option "$DEVOPTMNU_USE_SCREEN_VIEWPORT_FOR_SUBMIT", "vr_openxr_use_screen_viewport_for_submit", "YesNo"
 	Option "Model preload *", "gl_texture_thread_models", "OnOff"
+	Option "BG upload queues *", "gl_texture_thread_upload", "OnOff"
 	Slider "Asset stream workers *", "gl_texture_thread_workers", 1, 8, 1
+	Slider "Transfer threads *", "vk_max_transfer_threads", 0, 8, 1
 	Slider "Asset stream flush budget", "gl_background_flush_count", 1, 1000, 1
 	}
 	ifOption(OpenVR)

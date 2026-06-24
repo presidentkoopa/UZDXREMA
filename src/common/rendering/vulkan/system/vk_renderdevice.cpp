@@ -78,8 +78,10 @@ EXTERN_CVAR(Bool, cl_capfps)
 EXTERN_CVAR(Int, vr_mode)
 EXTERN_CVAR(Bool, gl_texture_thread)
 EXTERN_CVAR(Bool, gl_texture_thread_models)
+EXTERN_CVAR(Bool, gl_texture_thread_upload)
 EXTERN_CVAR(Int, gl_texture_thread_workers)
 EXTERN_CVAR(Int, gl_background_flush_count)
+EXTERN_CVAR(Int, vk_max_transfer_threads)
 
 CVAR(Bool, vk_raytrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
@@ -144,7 +146,45 @@ bool VkTexLoadThread::loadResource(VkTexLoadIn& input, VkTexLoadOut& output)
 	output.height = texBuffer.mHeight;
 	output.scaleFlags = input.scaleFlags;
 	output.hardwareTexture = input.hardwareTexture;
-	return output.pixels != nullptr;
+
+	const bool indexed = !!(input.scaleFlags & CTF_Indexed);
+	const bool canUploadInThread = cmd != nullptr && uploadQueue.familySupportsGraphics;
+	if (canUploadInThread && output.pixels != nullptr)
+	{
+		output.hardwareTexture->BackgroundCreateTexture(
+			cmd,
+			output.width,
+			output.height,
+			indexed ? 1 : 4,
+			indexed ? VK_FORMAT_R8_UNORM : VK_FORMAT_B8G8R8A8_UNORM,
+			output.pixels.get(),
+			indexed ? 0 : -1,
+			!indexed);
+		output.hardwareTexture->CheckFinalTransition(cmd->GetTransferCommands(), true);
+		cmd->WaitForCommands(false, true);
+		output.uploadedInThread = true;
+		output.needsQueueOwnershipTransfer = uploadQueue.queueFamily >= 0 && uploadQueue.queueFamily != cmd->GetRenderDevice()->device->GraphicsFamily;
+		output.uploadQueueFamily = uploadQueue.queueFamily;
+
+		if (output.needsQueueOwnershipTransfer)
+		{
+			auto releaseCommands = cmd->CreateUnmanagedCommands();
+			output.hardwareTexture->ReleaseLoadedFromQueue(releaseCommands.get(), output.uploadQueueFamily, cmd->GetRenderDevice()->device->GraphicsFamily);
+			releaseCommands->end();
+
+			auto releaseFence = std::make_unique<VulkanFence>(cmd->GetRenderDevice()->device.get());
+			QueueSubmit releaseSubmit;
+			releaseSubmit.AddCommandBuffer(releaseCommands.get());
+			releaseSubmit.Execute(cmd->GetRenderDevice()->device.get(), uploadQueue.queue, releaseFence.get());
+
+			vkWaitForFences(cmd->GetRenderDevice()->device->device, 1, &releaseFence->fence, VK_TRUE, std::numeric_limits<uint64_t>::max());
+			vkResetFences(cmd->GetRenderDevice()->device->device, 1, &releaseFence->fence);
+		}
+
+		output.pixels.reset();
+	}
+
+	return output.pixels != nullptr || output.uploadedInThread;
 }
 
 bool VkModelLoadThread::loadResource(VkModelLoadIn& input, VkModelLoadOut& output)
@@ -199,23 +239,56 @@ VulkanRenderDevice::VulkanRenderDevice(void *hMonitor, bool fullscreen, std::sha
 		}
 	}
 	SupportedDevices = builder.FindDevices(surface->Instance);
-	device = builder.Create(surface->Instance);
+	device = builder.Create(surface->Instance, gl_texture_thread ? vk_max_transfer_threads : 0, 0);
 
 	if (gl_texture_thread)
 	{
 		modelThread = std::make_unique<VkModelLoadThread>(&modelInQueue, &modelOutQueue);
-		unsigned int threadCount = std::max(1u, std::thread::hardware_concurrency());
-		threadCount = threadCount > 1 ? threadCount - 1 : 1;
-		threadCount = std::min(threadCount, (unsigned int)gl_texture_thread_workers);
-		bgTransferThreads.reserve(threadCount);
-		for (unsigned int i = 0; i < threadCount; i++)
+		unsigned int cpuThreadCount = std::max(1u, std::thread::hardware_concurrency());
+		cpuThreadCount = cpuThreadCount > 1 ? cpuThreadCount - 1 : 1;
+		cpuThreadCount = std::min(cpuThreadCount, (unsigned int)gl_texture_thread_workers);
+		unsigned int threadCount = cpuThreadCount;
+		const bool useUploadQueues = gl_texture_thread_upload && !device->uploadQueues.empty();
+
+		if (useUploadQueues)
 		{
-			auto worker = std::make_unique<VkTexLoadThread>(&primaryTexQueue, &secondaryTexQueue, &outputTexQueue);
-			worker->start();
-			bgTransferThreads.push_back(std::move(worker));
+			threadCount = std::min<unsigned int>(threadCount, (unsigned int)device->uploadQueues.size());
+			bgTransferThreads.reserve(threadCount);
+			mBGTransferCommands.reserve(threadCount);
+			for (unsigned int i = 0; i < threadCount; i++)
+			{
+				const auto& slot = device->uploadQueues[i];
+				if (!slot.familySupportsGraphics)
+				{
+					break;
+				}
+
+				auto bgCommands = std::make_unique<VkCommandBufferManager>(this, &device->uploadQueues[i].queue, device->uploadQueues[i].queueFamily, true);
+				auto worker = std::make_unique<VkTexLoadThread>(bgCommands.get(), device.get(), (int)i, &primaryTexQueue, &secondaryTexQueue, &outputTexQueue);
+				worker->start();
+				mBGTransferCommands.push_back(std::move(bgCommands));
+				bgTransferThreads.push_back(std::move(worker));
+			}
+		}
+
+		if (bgTransferThreads.empty())
+		{
+			threadCount = std::max(1u, cpuThreadCount);
+			bgTransferThreads.reserve(threadCount);
+			for (unsigned int i = 0; i < threadCount; i++)
+			{
+				auto worker = std::make_unique<VkTexLoadThread>(nullptr, device.get(), -1, &primaryTexQueue, &secondaryTexQueue, &outputTexQueue);
+				worker->start();
+				bgTransferThreads.push_back(std::move(worker));
+			}
 		}
 		modelThread->start();
 		bgTransferEnabled = !bgTransferThreads.empty();
+
+		if (gl_texture_thread_upload && mBGTransferCommands.empty() && !device->uploadQueues.empty())
+		{
+			Printf("Asset streaming upload queues requested, but available upload queues do not support graphics. Falling back to load-only worker threads.\n");
+		}
 	}
 }
 
@@ -241,6 +314,10 @@ VulkanRenderDevice::~VulkanRenderDevice()
 		mShaderManager->Deinit();
 
 	mCommands->DeleteFrameObjects();
+	for (auto& bgCommands : mBGTransferCommands)
+	{
+		bgCommands->DeleteFrameObjects();
+	}
 }
 
 void VulkanRenderDevice::InitializeState()
@@ -266,7 +343,7 @@ void VulkanRenderDevice::InitializeState()
 	uniformblockalignment = (unsigned int)device->PhysicalDevice.Properties.Properties.limits.minUniformBufferOffsetAlignment;
 	maxuniformblock = device->PhysicalDevice.Properties.Properties.limits.maxUniformBufferRange;
 
-	mCommands.reset(new VkCommandBufferManager(this));
+	mCommands.reset(new VkCommandBufferManager(this, &device->GraphicsQueue, device->GraphicsFamily));
 
 	mSamplerManager.reset(new VkSamplerManager(this));
 	mTextureManager.reset(new VkTextureManager(this));
@@ -624,11 +701,17 @@ float VulkanRenderDevice::CacheProgress()
 
 void VulkanRenderDevice::StopBackgroundCache()
 {
+	primaryTexQueue.clear();
+	secondaryTexQueue.clear();
+	patchQueue.clear();
+	modelInQueue.clear();
+
 	for (auto& thread : bgTransferThreads)
 	{
 		thread->stop();
 	}
 	bgTransferThreads.clear();
+	mBGTransferCommands.clear();
 	if (modelThread)
 	{
 		modelThread->stop();
@@ -656,7 +739,22 @@ void VulkanRenderDevice::UploadLoadedTextures(bool flush)
 	VkTexLoadOut loaded;
 	while (uploadBudget > 0 && outputTexQueue.dequeue(loaded))
 	{
-		if (loaded.hardwareTexture != nullptr && loaded.pixels != nullptr)
+		if (loaded.hardwareTexture == nullptr)
+		{
+			uploadBudget--;
+			continue;
+		}
+
+		if (loaded.needsQueueOwnershipTransfer)
+		{
+			loaded.hardwareTexture->AcquireLoadedFromQueue(mCommands->GetTransferCommands(), loaded.uploadQueueFamily, device->GraphicsFamily);
+		}
+
+		if (loaded.uploadedInThread)
+		{
+			loaded.hardwareTexture->SetHardwareState(IHardwareTexture::READY);
+		}
+		else if (loaded.pixels != nullptr)
 		{
 			const bool indexed = !!(loaded.scaleFlags & CTF_Indexed);
 			loaded.hardwareTexture->BackgroundCreateTexture(
@@ -1044,6 +1142,10 @@ void VulkanRenderDevice::PrintStartupLog()
 	Printf("Max. texture size: %d\n", limits.maxImageDimension2D);
 	Printf("Max. uniform buffer range: %d\n", limits.maxUniformBufferRange);
 	Printf("Min. uniform buffer offset alignment: %" PRIu64 "\n", limits.minUniformBufferOffsetAlignment);
+	Printf("Graphics Queue Family: #%d\n", device->GraphicsFamily);
+	Printf("Present Queue Family: #%d\n", device->PresentFamily);
+	Printf("Upload Queue Family: #%d (%s)\n", device->UploadFamily, device->UploadFamilySupportsGraphics ? "graphics-capable" : "transfer-only");
+	Printf("Upload Queue Slots: %d\n", (int)device->uploadQueues.size());
 }
 
 void VulkanRenderDevice::SetLevelMesh(hwrenderer::LevelMesh* mesh)

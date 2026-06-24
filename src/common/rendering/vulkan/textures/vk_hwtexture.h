@@ -38,6 +38,8 @@ public:
 	unsigned int CreateTexture(unsigned char * buffer, int w, int h, int texunit, bool mipmap, const char *name) override;
 	void BackgroundCreateTexture(VkCommandBufferManager* bufManager, int w, int h, int pixelsize, VkFormat format, const void *pixels, int numMipLevels, bool createMips, int totalSize = -1);
 	void CheckFinalTransition(VulkanCommandBuffer* cmd, bool background);
+	void ReleaseLoadedFromQueue(VulkanCommandBuffer* cmd, int fromQueueFamily, int toQueueFamily);
+	void AcquireLoadedFromQueue(VulkanCommandBuffer* cmd, int fromQueueFamily, int toQueueFamily);
 
 	// Wipe screen
 	void CreateWipeTexture(int w, int h, const char *name);

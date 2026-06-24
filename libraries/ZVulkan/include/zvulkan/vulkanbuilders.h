@@ -57,7 +57,7 @@ public:
 	VulkanDeviceBuilder& PreferredPhysicalDevice(VkPhysicalDevice device);
 
 	std::vector<VulkanCompatibleDevice> FindDevices(const std::shared_ptr<VulkanInstance>& instance);
-	std::shared_ptr<VulkanDevice> Create(std::shared_ptr<VulkanInstance> instance);
+	std::shared_ptr<VulkanDevice> Create(std::shared_ptr<VulkanInstance> instance, int numUploadSlots = 2, int flags = 0);
 
 private:
 	std::set<std::string> requiredDeviceExtensions;

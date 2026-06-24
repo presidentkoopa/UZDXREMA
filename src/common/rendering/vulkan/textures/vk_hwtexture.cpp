@@ -183,6 +183,30 @@ void VkHardwareTexture::CheckFinalTransition(VulkanCommandBuffer *cmd, bool back
 	}
 }
 
+void VkHardwareTexture::ReleaseLoadedFromQueue(VulkanCommandBuffer* cmd, int fromQueueFamily, int toQueueFamily)
+{
+	if (!mLoadedImage.Image)
+	{
+		return;
+	}
+
+	PipelineBarrier()
+		.AddQueueTransfer(fromQueueFamily, toQueueFamily, mLoadedImage.Image.get(), mLoadedImage.Layout, VK_IMAGE_ASPECT_COLOR_BIT, 0, mLoadedImage.Image->mipLevels)
+		.Execute(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+}
+
+void VkHardwareTexture::AcquireLoadedFromQueue(VulkanCommandBuffer* cmd, int fromQueueFamily, int toQueueFamily)
+{
+	if (!mLoadedImage.Image)
+	{
+		return;
+	}
+
+	PipelineBarrier()
+		.AddQueueTransfer(fromQueueFamily, toQueueFamily, mLoadedImage.Image.get(), mLoadedImage.Layout, VK_IMAGE_ASPECT_COLOR_BIT, 0, mLoadedImage.Image->mipLevels)
+		.Execute(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+}
+
 void VkHardwareTexture::BackgroundCreateTexture(VkCommandBufferManager* bufManager, int w, int h, int pixelsize, VkFormat format, const void *pixels, int numMipLevels, bool createMips, int totalSize)
 {
 	CreateTexture(bufManager, &mLoadedImage, w, h, pixelsize, format, pixels, numMipLevels, createMips, totalSize);
