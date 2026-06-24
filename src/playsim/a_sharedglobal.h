@@ -47,7 +47,7 @@ public:
 	double Alpha = 1;
 	uint32_t AlphaColor = 0;
 	FTranslationID Translation = NO_TRANSLATION;
-	FTextureID PicNum;
+	FTextureID PicNum, LastPatch;
 	uint32_t RenderFlags = 0;
 	FRenderStyle RenderStyle;
 	side_t *Side = nullptr;

@@ -1129,6 +1129,44 @@ void HWSprite::Process(HWDrawInfo *di, AActor* thing, sector_t * sector, area_t 
 		int type = thing->renderflags & RF_SPRITETYPEMASK;
 		auto tex = TexMan.GetGameTexture(patch, false);
 		if (!tex || !tex->isValid()) return;
+		int scaleflags = tex->ShouldExpandSprite() ? CTF_Expand : 0;
+		if (shouldUpscale(tex, UF_Sprite)) scaleflags |= CTF_Upscale;
+
+		FTextureID lastPatch = thing->LastPatch;
+		if (gametic - primaryLevel->starttime > 2 &&
+			(patch != lastPatch || scaleflags != thing->lastScaleFlags) &&
+			gl_texture_thread &&
+			screen->SupportsBackgroundCache())
+		{
+			FMaterial* gltex = FMaterial::ValidateTexture(tex, scaleflags, false);
+			MaterialLayerInfo* layer = nullptr;
+			IHardwareTexture* hwtex = gltex != nullptr ? gltex->GetLayer(0, thing->Translation.index(), &layer) : nullptr;
+			if (gltex == nullptr || hwtex == nullptr || !hwtex->IsValid())
+			{
+				if (gltex)
+				{
+					screen->BackgroundCacheMaterial(gltex, thing->Translation, true);
+				}
+				else
+				{
+					screen->BackgroundCacheTextureMaterial(tex, thing->Translation, scaleflags, true);
+				}
+
+				if (lastPatch.isValid() && scaleflags == thing->lastScaleFlags)
+				{
+					patch = lastPatch;
+					tex = TexMan.GetGameTexture(patch, false);
+					if (!tex || !tex->isValid()) return;
+				}
+				else
+				{
+					return;
+				}
+			}
+		}
+
+		thing->LastPatch = patch;
+		thing->lastScaleFlags = scaleflags;
 		auto& spi = tex->GetSpritePositioning(type == RF_FACESPRITE);
 
 		offx = (float)thing->GetSpriteOffset(false);

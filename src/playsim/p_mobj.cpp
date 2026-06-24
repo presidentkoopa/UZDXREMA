@@ -4800,6 +4800,8 @@ void ConstructActor(AActor *actor, const DVector3 &pos, bool SpawningMapThing)
 	auto Level = actor->Level;
 	actor->SpawnTime = Level->totaltime;
 	actor->SpawnOrder = Level->spawnindex++;
+	actor->LastPatch.SetInvalid();
+	actor->lastScaleFlags = -1;
 	actor->lastModelSprite = -1;
 	actor->lastModelFrame = 255;
 

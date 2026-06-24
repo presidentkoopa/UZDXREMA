@@ -1128,6 +1128,8 @@ public:
 	FTextureID		picnum;				// Draw this instead of sprite if valid
 	uint32_t			fillcolor;			// Color to draw when STYLE_Shaded
 	FTranslationID			Translation;
+	FTextureID		LastPatch;
+	int				lastScaleFlags;
 	int				lastModelSprite;
 	uint8_t			lastModelFrame;
 

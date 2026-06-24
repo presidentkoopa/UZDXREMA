@@ -39,6 +39,8 @@
 #include "hw_renderstate.h"
 #include "texturemanager.h"
 
+EXTERN_CVAR(Bool, gl_texture_thread)
+
 //==========================================================================
 //
 //
@@ -219,6 +221,44 @@ void HWWall::ProcessDecal(HWDrawInfo *di, DBaseDecal *decal, const FVector3 &nor
 	
 	auto texture = TexMan.GetGameTexture(decalTile);
 	if (texture == NULL) return;
+
+	FTextureID lastPatch = decal->LastPatch;
+	if (gametic - primaryLevel->starttime > 2 &&
+		decalTile != lastPatch &&
+		gl_texture_thread &&
+		screen->SupportsBackgroundCache())
+	{
+		int scaleflags = 0;
+		if (shouldUpscale(texture, UF_Sprite)) scaleflags |= CTF_Upscale;
+
+		FMaterial* gltex = FMaterial::ValidateTexture(texture, scaleflags, false);
+		MaterialLayerInfo* layer = nullptr;
+		IHardwareTexture* hwtex = gltex != nullptr ? gltex->GetLayer(0, decal->Translation.index(), &layer) : nullptr;
+		if (gltex == nullptr || hwtex == nullptr || !hwtex->IsValid())
+		{
+			if (gltex)
+			{
+				screen->BackgroundCacheMaterial(gltex, decal->Translation, true);
+			}
+			else
+			{
+				screen->BackgroundCacheTextureMaterial(texture, decal->Translation, scaleflags, true);
+			}
+
+			if (lastPatch.isValid())
+			{
+				decalTile = lastPatch;
+				texture = TexMan.GetGameTexture(decalTile, false);
+				if (texture == NULL || !texture->isValid()) return;
+			}
+			else
+			{
+				return;
+			}
+		}
+	}
+
+	decal->LastPatch = decalTile;
 
 	
 	// the sectors are only used for their texture origin coordinates

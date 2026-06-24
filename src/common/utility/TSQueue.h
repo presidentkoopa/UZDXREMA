@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <condition_variable>
 #include <functional>
@@ -10,6 +11,32 @@
 
 #include "stats.h"
 #include "tarray.h"
+
+template <typename T, int IN_NUM>
+struct RingBuffer
+{
+	const int length = IN_NUM;
+	T input[IN_NUM] = {};
+	long pos = -1;
+
+	void add(T value)
+	{
+		pos++;
+		if (pos < 0) pos = 0;
+		(*this)[0] = value;
+	}
+
+	T& operator[](int index)
+	{
+		assert(index >= 0 && index <= pos);
+		return input[(pos - index) % IN_NUM];
+	}
+
+	void reset()
+	{
+		pos = -1;
+	}
+};
 
 template <typename T>
 class TSQueue

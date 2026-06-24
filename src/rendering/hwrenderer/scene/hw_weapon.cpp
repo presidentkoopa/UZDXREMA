@@ -60,6 +60,7 @@
 
 EXTERN_CVAR(Float, transsouls)
 EXTERN_CVAR(Int, gl_fuzztype)
+EXTERN_CVAR(Bool, gl_texture_thread)
 EXTERN_CVAR(Bool, r_drawplayersprites)
 EXTERN_CVAR(Bool, r_deathcamera)
 EXTERN_CVAR(Bool, vr_laser_sight)
@@ -1275,6 +1276,94 @@ bool HUDSprite::GetWeaponRect(HWDrawInfo *di, DPSprite *psp, float sx, float sy,
 
 	auto tex = TexMan.GetGameTexture(lump, false);
 	if (!tex || !tex->isValid()) return false;
+
+	FTextureID lastPatch = psp->LastPatch;
+	if (gametic - primaryLevel->starttime > 2 &&
+		lump != lastPatch &&
+		gl_texture_thread &&
+		screen->SupportsBackgroundCache())
+	{
+		int scaleflags = CTF_Expand;
+		if (shouldUpscale(tex, UF_Sprite)) scaleflags |= CTF_Upscale;
+
+		FState* nextState = psp->GetState();
+		for (int i = 0; i < 5; i++)
+		{
+			if (nextState == nullptr) break;
+
+			FState* renderState = nextState->GetNextState();
+			for (int skip = 0; skip < 8 && renderState != nullptr && renderState->GetTics() <= 0; skip++)
+			{
+				renderState = renderState->GetNextState();
+			}
+			nextState = renderState;
+
+			if (renderState != nullptr && renderState->GetTics() > 0)
+			{
+				FTextureID lump2 = sprites[psp->GetSprite()].GetSpriteFrame(renderState->GetFrame(), 0, nullAngle, nullptr);
+				if (lump2.isValid())
+				{
+					auto tex2 = TexMan.GetGameTexture(lump2, false);
+					if (tex2 && tex2->isValid())
+					{
+						int scaleflags2 = CTF_Expand;
+						if (shouldUpscale(tex2, UF_Sprite)) scaleflags2 |= CTF_Upscale;
+						screen->BackgroundCacheTextureMaterial(tex2, psp->Translation, scaleflags2, true);
+					}
+				}
+			}
+		}
+
+		FMaterial* gltex = FMaterial::ValidateTexture(tex, scaleflags, false);
+		MaterialLayerInfo* layer = nullptr;
+		IHardwareTexture* hwtex = gltex != nullptr ? gltex->GetLayer(0, psp->Translation.index(), &layer) : nullptr;
+		if (gltex == nullptr || hwtex == nullptr || !hwtex->IsValid())
+		{
+			if (gltex)
+			{
+				screen->BackgroundCacheMaterial(gltex, psp->Translation, true);
+			}
+			else
+			{
+				screen->BackgroundCacheTextureMaterial(tex, psp->Translation, scaleflags, true);
+			}
+
+			bool foundNewer = false;
+			for (int i = 0; i < min((long)psp->LastPatches.length, psp->LastPatches.pos); i++)
+			{
+				if (psp->LastPatches[i] == 0) continue;
+
+				FTextureID lump2;
+				lump2.SetIndex(psp->LastPatches[i]);
+				if (!lump2.isValid()) continue;
+
+				auto tex2 = TexMan.GetGameTexture(lump2, false);
+				FMaterial* gltex2 = FMaterial::ValidateTexture(tex2, scaleflags, false);
+				MaterialLayerInfo* layer2 = nullptr;
+				IHardwareTexture* hwtex2 = gltex2 != nullptr ? gltex2->GetLayer(0, psp->Translation.index(), &layer2) : nullptr;
+				if (gltex2 != nullptr && hwtex2 != nullptr && hwtex2->IsValid())
+				{
+					lump = lump2;
+					tex = tex2;
+					foundNewer = true;
+					break;
+				}
+			}
+
+			if (!foundNewer && lastPatch.isValid())
+			{
+				lump = lastPatch;
+				tex = TexMan.GetGameTexture(lump, false);
+				if (!tex || !tex->isValid()) return false;
+			}
+			else if (!foundNewer)
+			{
+				return false;
+			}
+		}
+	}
+
+	psp->LastPatch = lump;
 	auto& spi = tex->GetSpritePositioning(1);
 
 	float vw = (float)viewwidth;
