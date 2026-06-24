@@ -4,6 +4,7 @@
 #include "engineerrors.h"
 #include "TSQueue.h"
 #include "textures.h"
+#include "fs_files.h"
 #include <zvulkan/vulkandevice.h>
 #include <zvulkan/vulkanobjects.h>
 
@@ -26,6 +27,7 @@ class VkPostprocess;
 class VkTextureImage;
 class SWSceneDrawer;
 enum class PPTextureType;
+class FModel;
 
 struct VkTexLoadIn
 {
@@ -44,6 +46,19 @@ struct VkTexLoadOut
 	VkHardwareTexture* hardwareTexture = nullptr;
 };
 
+struct VkModelLoadIn
+{
+	int lump = -1;
+	FModel* model = nullptr;
+};
+
+struct VkModelLoadOut
+{
+	int lump = -1;
+	FileSys::FileData data;
+	FModel* model = nullptr;
+};
+
 class VkTexLoadThread : public ResourceLoader2<VkTexLoadIn, VkTexLoadOut>
 {
 public:
@@ -54,6 +69,18 @@ public:
 
 protected:
 	bool loadResource(VkTexLoadIn& input, VkTexLoadOut& output) override;
+};
+
+class VkModelLoadThread : public ResourceLoader2<VkModelLoadIn, VkModelLoadOut>
+{
+public:
+	VkModelLoadThread(TSQueue<VkModelLoadIn>* inQueue, TSQueue<VkModelLoadOut>* outQueue)
+		: ResourceLoader2<VkModelLoadIn, VkModelLoadOut>(inQueue, nullptr, outQueue)
+	{
+	}
+
+protected:
+	bool loadResource(VkModelLoadIn& input, VkModelLoadOut& output) override;
 };
 
 class VulkanRenderDevice : public SystemBaseFrameBuffer
@@ -94,6 +121,7 @@ public:
 	void PrequeueMaterial(FMaterial *mat, int translation) override;
 	bool BackgroundCacheMaterial(FMaterial *mat, FTranslationID translation, bool makeSPI = false, bool secondary = false) override;
 	bool BackgroundCacheTextureMaterial(FGameTexture *tex, FTranslationID translation, int scaleFlags, bool makeSPI = false) override;
+	bool BackgroundLoadModel(FModel* model) override;
 	bool CachingActive() override;
 	bool SupportsBackgroundCache() override { return bgTransferEnabled; }
 	void StopBackgroundCache() override;
@@ -179,6 +207,9 @@ private:
 	TSQueue<VkTexLoadIn> secondaryTexQueue;
 	TSQueue<VkTexLoadOut> outputTexQueue;
 	TSQueue<QueuedPatch> patchQueue;
+	TSQueue<VkModelLoadIn> modelInQueue;
+	TSQueue<VkModelLoadOut> modelOutQueue;
+	std::unique_ptr<VkModelLoadThread> modelThread;
 	std::vector<std::unique_ptr<VkTexLoadThread>> bgTransferThreads;
 	bool bgTransferEnabled = false;
 };

@@ -74,6 +74,8 @@ EXTERN_CVAR(Bool, r_debug_disable_vis_filter)
 EXTERN_CVAR(Float, transsouls)
 EXTERN_CVAR(Float, r_actorspriteshadowalpha)
 EXTERN_CVAR(Float, r_actorspriteshadowfadeheight)
+EXTERN_CVAR(Bool, gl_texture_thread)
+EXTERN_CVAR(Bool, gl_texture_thread_models)
 
 //==========================================================================
 //
@@ -884,6 +886,108 @@ void HWSprite::Process(HWDrawInfo *di, AActor* thing, sector_t * sector, area_t 
 
 	modelframe = isPicnumOverride ? nullptr : FindModelFrame(thing, spritenum, thing->frame, !!(thing->flags & MF_DROPPED));
 	modelframeflags = modelframe ? modelframe->getFlags(thing->modelData) : 0;
+
+	if (modelframe != nullptr &&
+		!modelframe->isVoxel &&
+		gametic - primaryLevel->starttime > 2 &&
+		gl_texture_thread &&
+		gl_texture_thread_models &&
+		(spritenum != thing->lastModelSprite || thing->frame != thing->lastModelFrame) &&
+		screen->SupportsBackgroundCache())
+	{
+		bool success = true;
+
+		for (int i = modelframe->skinIDs.Size() - 1; i >= 0; i--)
+		{
+			auto tex = TexMan.GetGameTexture(modelframe->skinIDs[i], false);
+			if (tex == nullptr || !tex->isValid())
+			{
+				continue;
+			}
+
+			int scaleflags = 0;
+			if (shouldUpscale(tex, UF_Sprite)) scaleflags |= CTF_Upscale;
+
+			FMaterial* gltex = FMaterial::ValidateTexture(tex, scaleflags, false);
+			MaterialLayerInfo* layer = nullptr;
+			IHardwareTexture* hwtex = gltex != nullptr ? gltex->GetLayer(0, thing->Translation.index(), &layer) : nullptr;
+			if (gltex == nullptr || hwtex == nullptr || !hwtex->IsValid())
+			{
+				if (gltex != nullptr)
+				{
+					screen->BackgroundCacheMaterial(gltex, thing->Translation, false);
+				}
+				else
+				{
+					screen->BackgroundCacheTextureMaterial(tex, thing->Translation, scaleflags, false);
+				}
+				success = false;
+			}
+		}
+
+		for (int i = modelframe->surfaceskinIDs.Size() - 1; i >= 0; i--)
+		{
+			auto tex = TexMan.GetGameTexture(modelframe->surfaceskinIDs[i], false);
+			if (tex == nullptr || !tex->isValid())
+			{
+				continue;
+			}
+
+			int scaleflags = 0;
+			if (shouldUpscale(tex, UF_Sprite)) scaleflags |= CTF_Upscale;
+
+			FMaterial* gltex = FMaterial::ValidateTexture(tex, scaleflags, false);
+			MaterialLayerInfo* layer = nullptr;
+			IHardwareTexture* hwtex = gltex != nullptr ? gltex->GetLayer(0, thing->Translation.index(), &layer) : nullptr;
+			if (gltex == nullptr || hwtex == nullptr || !hwtex->IsValid())
+			{
+				if (gltex != nullptr)
+				{
+					screen->BackgroundCacheMaterial(gltex, thing->Translation, false);
+				}
+				else
+				{
+					screen->BackgroundCacheTextureMaterial(tex, thing->Translation, scaleflags, false);
+				}
+				success = false;
+			}
+		}
+
+		for (int i = 0; i < modelframe->modelsAmount; i++)
+		{
+			int id = modelframe->modelIDs[i];
+			if (id >= 0)
+			{
+				auto* model = Models[id];
+				if (model != nullptr && model->GetVertexBuffer(GLModelRendererType) == nullptr)
+				{
+					if (screen->BackgroundLoadModel(model))
+					{
+						success = false;
+					}
+				}
+			}
+		}
+
+		if (!success)
+		{
+			if (thing->lastModelSprite > -1)
+			{
+				modelframe = FindModelFrame(thing, thing->lastModelSprite, thing->lastModelFrame, !!(thing->flags & MF_DROPPED));
+				modelframeflags = modelframe ? modelframe->getFlags(thing->modelData) : 0;
+				if (modelframe == nullptr) return;
+			}
+			else
+			{
+				return;
+			}
+		}
+		else
+		{
+			thing->lastModelSprite = spritenum;
+			thing->lastModelFrame = thing->frame;
+		}
+	}
 
 	// Too close to the camera. This doesn't look good if it is a sprite.
 	if (thing != camera && fabs(thingpos.X - vp.CenterEyePos.X) < 2 && fabs(thingpos.Y - vp.CenterEyePos.Y) < 2

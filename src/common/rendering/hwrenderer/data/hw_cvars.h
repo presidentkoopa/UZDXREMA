@@ -33,6 +33,7 @@ EXTERN_CVAR(Bool, gl_skydome);
 EXTERN_CVAR(Int, gl_fogmode)
 EXTERN_CVAR(Bool,gl_mirror_envmap)
 EXTERN_CVAR(Bool, gl_texture_thread)
+EXTERN_CVAR(Bool, gl_texture_thread_models)
 EXTERN_CVAR(Int, gl_texture_thread_workers)
 EXTERN_CVAR(Int, gl_background_flush_count)
 

@@ -68,6 +68,7 @@ extern bool cinemamode;
 #include "engineerrors.h"
 #include "c_dispatch.h"
 #include "common/rendering/stereo3d/openxr/oxr_loader.h"
+#include "model.h"
 
 FString JitCaptureStackTrace(int framesToSkip, bool includeNativeFrames, int maxFrames = -1);
 
@@ -76,6 +77,7 @@ EXTERN_CVAR(Int, screenblocks)
 EXTERN_CVAR(Bool, cl_capfps)
 EXTERN_CVAR(Int, vr_mode)
 EXTERN_CVAR(Bool, gl_texture_thread)
+EXTERN_CVAR(Bool, gl_texture_thread_models)
 EXTERN_CVAR(Int, gl_texture_thread_workers)
 EXTERN_CVAR(Int, gl_background_flush_count)
 
@@ -145,6 +147,35 @@ bool VkTexLoadThread::loadResource(VkTexLoadIn& input, VkTexLoadOut& output)
 	return output.pixels != nullptr;
 }
 
+bool VkModelLoadThread::loadResource(VkModelLoadIn& input, VkModelLoadOut& output)
+{
+	if (input.model == nullptr || input.lump < 0)
+	{
+		return false;
+	}
+
+	FileReader reader;
+	try
+	{
+		reader = fileSystem.OpenFileReader(input.lump, FileSys::EReaderType::READER_NEW, 0);
+	}
+	catch (...)
+	{
+		return false;
+	}
+
+	if (!reader.isOpen())
+	{
+		return false;
+	}
+
+	output.data = reader.Read();
+	reader.Close();
+	output.lump = input.lump;
+	output.model = input.model;
+	return true;
+}
+
 VulkanRenderDevice::VulkanRenderDevice(void *hMonitor, bool fullscreen, std::shared_ptr<VulkanSurface> surface) :
 	Super(hMonitor, fullscreen) 
 {
@@ -172,6 +203,7 @@ VulkanRenderDevice::VulkanRenderDevice(void *hMonitor, bool fullscreen, std::sha
 
 	if (gl_texture_thread)
 	{
+		modelThread = std::make_unique<VkModelLoadThread>(&modelInQueue, &modelOutQueue);
 		unsigned int threadCount = std::max(1u, std::thread::hardware_concurrency());
 		threadCount = threadCount > 1 ? threadCount - 1 : 1;
 		threadCount = std::min(threadCount, (unsigned int)gl_texture_thread_workers);
@@ -182,6 +214,7 @@ VulkanRenderDevice::VulkanRenderDevice(void *hMonitor, bool fullscreen, std::sha
 			worker->start();
 			bgTransferThreads.push_back(std::move(worker));
 		}
+		modelThread->start();
 		bgTransferEnabled = !bgTransferThreads.empty();
 	}
 }
@@ -452,6 +485,33 @@ bool VulkanRenderDevice::BackgroundCacheTextureMaterial(FGameTexture *tex, FTran
 	return true;
 }
 
+bool VulkanRenderDevice::BackgroundLoadModel(FModel* model)
+{
+	if (!bgTransferEnabled || !gl_texture_thread_models || model == nullptr || model->GetLumpNum() < 0)
+	{
+		return false;
+	}
+
+	if (model->GetLoadState() == FModel::READY)
+	{
+		return false;
+	}
+
+	if (model->GetLoadState() == FModel::LOADING)
+	{
+		return true;
+	}
+
+	model->SetLoadState(FModel::LOADING);
+
+	VkModelLoadIn input;
+	input.lump = model->GetLumpNum();
+	input.model = model;
+	modelInQueue.queue(std::move(input));
+	if (modelThread) modelThread->wake();
+	return true;
+}
+
 bool VulkanRenderDevice::BackgroundCacheMaterial(FMaterial *mat, FTranslationID translation, bool makeSPI, bool secondary)
 {
 	if (!bgTransferEnabled || mat == nullptr || mat->Source()->GetUseType() == ETextureType::SWCanvas)
@@ -538,6 +598,11 @@ bool VulkanRenderDevice::CachingActive()
 		return true;
 	}
 
+	if (modelInQueue.size() > 0 || modelOutQueue.size() > 0)
+	{
+		return true;
+	}
+
 	for (auto& thread : bgTransferThreads)
 	{
 		if (thread->isActive())
@@ -545,12 +610,16 @@ bool VulkanRenderDevice::CachingActive()
 			return true;
 		}
 	}
+	if (modelThread && modelThread->isActive())
+	{
+		return true;
+	}
 	return false;
 }
 
 float VulkanRenderDevice::CacheProgress()
 {
-	return (float)(primaryTexQueue.size() + secondaryTexQueue.size() + patchQueue.size());
+	return (float)(primaryTexQueue.size() + secondaryTexQueue.size() + patchQueue.size() + modelInQueue.size());
 }
 
 void VulkanRenderDevice::StopBackgroundCache()
@@ -560,6 +629,12 @@ void VulkanRenderDevice::StopBackgroundCache()
 		thread->stop();
 	}
 	bgTransferThreads.clear();
+	if (modelThread)
+	{
+		modelThread->stop();
+	}
+	modelOutQueue.clear();
+	outputTexQueue.clear();
 	bgTransferEnabled = false;
 }
 
@@ -607,23 +682,48 @@ void VulkanRenderDevice::UpdateBackgroundCache(bool flush)
 		return;
 	}
 
-	QueuedPatch patch;
-	while (patchQueue.dequeue(patch))
+	auto processPendingWork = [&]()
 	{
-		if (patch.tex != nullptr)
+		QueuedPatch patch;
+		while (patchQueue.dequeue(patch))
 		{
-			auto material = FMaterial::ValidateTexture(patch.tex, patch.scaleFlags, true);
-			if (material != nullptr)
+			if (patch.tex != nullptr)
 			{
-				BackgroundCacheMaterial(material, FTranslationID::fromInt(patch.translation), false, patch.secondary);
+				auto material = FMaterial::ValidateTexture(patch.tex, patch.scaleFlags, true);
+				if (material != nullptr)
+				{
+					BackgroundCacheMaterial(material, FTranslationID::fromInt(patch.translation), false, patch.secondary);
+				}
 			}
 		}
-	}
+
+		VkModelLoadOut modelOut;
+		while (modelOutQueue.dequeue(modelOut))
+		{
+			if (modelOut.model == nullptr)
+			{
+				continue;
+			}
+
+			if (modelOut.model->GetLoadState() != FModel::LOADING)
+			{
+				modelOut.data.clear();
+				continue;
+			}
+
+			modelOut.model->LoadGeometry(&modelOut.data);
+			modelOut.model->SetLoadState(FModel::READY);
+			modelOut.data.clear();
+		}
+	};
+
+	processPendingWork();
 
 	if (flush)
 	{
 		while (CachingActive())
 		{
+			processPendingWork();
 			UploadLoadedTextures(true);
 			std::this_thread::sleep_for(std::chrono::milliseconds(1));
 		}

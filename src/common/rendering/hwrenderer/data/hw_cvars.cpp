@@ -52,6 +52,7 @@ CUSTOM_CVAR(Int, gl_fogmode, 2, CVAR_ARCHIVE | CVAR_NOINITCALL)
 
 // Optional family toggle for Selaco-style background texture/material streaming.
 CVAR(Bool, gl_texture_thread, false, CVAR_GLOBALCONFIG | CVAR_ARCHIVE)
+CVAR(Bool, gl_texture_thread_models, true, CVAR_GLOBALCONFIG | CVAR_ARCHIVE)
 
 // Optional tuning for the texture-thread family. The master toggle above still gates the whole feature set.
 CUSTOM_CVAR(Int, gl_texture_thread_workers, 2, CVAR_GLOBALCONFIG | CVAR_ARCHIVE)

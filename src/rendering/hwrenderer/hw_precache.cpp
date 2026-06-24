@@ -43,6 +43,7 @@
 
 EXTERN_CVAR(Bool, gl_precache)
 EXTERN_CVAR(Bool, gl_texture_thread)
+EXTERN_CVAR(Bool, gl_texture_thread_models)
 
 //==========================================================================
 //
@@ -334,8 +335,23 @@ void hw_PrecacheTexture(uint8_t *texhitlist, TMap<PClassActor*, bool> &actorhitl
 		FModelRenderer* renderer = new FHWModelRenderer(nullptr, *screen->RenderState(), -1);
 		for (unsigned i = 0; i < Models.Size(); i++)
 		{
-			if (modellist[i]) 
+			if (modellist[i] && gl_texture_thread && gl_texture_thread_models && screen->SupportsBackgroundCache())
+			{
+				screen->BackgroundLoadModel(Models[i]);
+			}
+		}
+
+		if (gl_texture_thread && gl_texture_thread_models && screen->SupportsBackgroundCache())
+		{
+			screen->FlushBackground();
+		}
+
+		for (unsigned i = 0; i < Models.Size(); i++)
+		{
+			if (modellist[i])
+			{
 				Models[i]->BuildVertexBuffer(renderer);
+			}
 		}
 		delete renderer;
 

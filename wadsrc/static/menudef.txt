@@ -3201,8 +3201,9 @@ OptionMenu DeveloperOptionsMenu protected
 	Slider "$DEVOPTMNU_EYE_SHIFT_SCALE", "vr_openxr_eye_shift_scale", 0.1, 3.0, 0.05, 2
 	Option "$DEVOPTMNU_FORCE_RECOMMENDED_VIEWPORT", "vr_openxr_force_recommended_viewport", "OnOff"
 	Option "$DEVOPTMNU_USE_SCREEN_VIEWPORT_FOR_SUBMIT", "vr_openxr_use_screen_viewport_for_submit", "YesNo"
-	Slider "Texture stream workers *", "gl_texture_thread_workers", 1, 8, 1
-	Slider "Texture stream flush budget", "gl_background_flush_count", 1, 1000, 1
+	Option "Model preload *", "gl_texture_thread_models", "OnOff"
+	Slider "Asset stream workers *", "gl_texture_thread_workers", 1, 8, 1
+	Slider "Asset stream flush budget", "gl_background_flush_count", 1, 1000, 1
 	}
 	ifOption(OpenVR)
 	{
