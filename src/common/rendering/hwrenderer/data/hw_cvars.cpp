@@ -50,6 +50,22 @@ CUSTOM_CVAR(Int, gl_fogmode, 2, CVAR_ARCHIVE | CVAR_NOINITCALL)
 	if (self < 0) self = 0;
 }
 
+// Optional family toggle for Selaco-style background texture/material streaming.
+CVAR(Bool, gl_texture_thread, false, CVAR_GLOBALCONFIG | CVAR_ARCHIVE)
+
+// Optional tuning for the texture-thread family. The master toggle above still gates the whole feature set.
+CUSTOM_CVAR(Int, gl_texture_thread_workers, 2, CVAR_GLOBALCONFIG | CVAR_ARCHIVE)
+{
+	if (self < 1) self = 1;
+	else if (self > 8) self = 8;
+}
+
+CUSTOM_CVAR(Int, gl_background_flush_count, 100, CVAR_GLOBALCONFIG | CVAR_ARCHIVE)
+{
+	if (self < 1) self = 1;
+	else if (self > 1000) self = 1000;
+}
+
 
 // OpenGL stuff moved here
 // GL related CVARs

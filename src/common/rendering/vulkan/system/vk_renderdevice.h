@@ -2,6 +2,8 @@
 
 #include "gl_sysfb.h"
 #include "engineerrors.h"
+#include "TSQueue.h"
+#include "textures.h"
 #include <zvulkan/vulkandevice.h>
 #include <zvulkan/vulkanobjects.h>
 
@@ -24,6 +26,35 @@ class VkPostprocess;
 class VkTextureImage;
 class SWSceneDrawer;
 enum class PPTextureType;
+
+struct VkTexLoadIn
+{
+	FTexture* texture = nullptr;
+	int translation = 0;
+	int scaleFlags = 0;
+	VkHardwareTexture* hardwareTexture = nullptr;
+};
+
+struct VkTexLoadOut
+{
+	std::shared_ptr<uint8_t> pixels;
+	int width = 0;
+	int height = 0;
+	int scaleFlags = 0;
+	VkHardwareTexture* hardwareTexture = nullptr;
+};
+
+class VkTexLoadThread : public ResourceLoader2<VkTexLoadIn, VkTexLoadOut>
+{
+public:
+	VkTexLoadThread(TSQueue<VkTexLoadIn>* inQueue, TSQueue<VkTexLoadIn>* secondaryQueue, TSQueue<VkTexLoadOut>* outQueue)
+		: ResourceLoader2<VkTexLoadIn, VkTexLoadOut>(inQueue, secondaryQueue, outQueue)
+	{
+	}
+
+protected:
+	bool loadResource(VkTexLoadIn& input, VkTexLoadOut& output) override;
+};
 
 class VulkanRenderDevice : public SystemBaseFrameBuffer
 {
@@ -60,6 +91,15 @@ public:
 	void InitializeState() override;
 	bool CompileNextShader() override;
 	void PrecacheMaterial(FMaterial *mat, int translation) override;
+	void PrequeueMaterial(FMaterial *mat, int translation) override;
+	bool BackgroundCacheMaterial(FMaterial *mat, FTranslationID translation, bool makeSPI = false, bool secondary = false) override;
+	bool BackgroundCacheTextureMaterial(FGameTexture *tex, FTranslationID translation, int scaleFlags, bool makeSPI = false) override;
+	bool CachingActive() override;
+	bool SupportsBackgroundCache() override { return bgTransferEnabled; }
+	void StopBackgroundCache() override;
+	void FlushBackground() override;
+	float CacheProgress() override;
+	void UpdateBackgroundCache(bool flush = false) override;
 	void UpdatePalette() override;
 	const char* DeviceName() const override;
 	int Backend() override { return 1; }
@@ -105,6 +145,15 @@ private:
 	void RenderTextureView(FCanvasTexture* tex, std::function<void(IntRect &)> renderFunc) override;
 	void PrintStartupLog();
 	void CopyScreenToBuffer(int w, int h, uint8_t *data) override;
+	void UploadLoadedTextures(bool flush = false);
+
+	struct QueuedPatch
+	{
+		FGameTexture *tex = nullptr;
+		int translation = 0;
+		int scaleFlags = 0;
+		bool secondary = false;
+	};
 
 	std::unique_ptr<VkCommandBufferManager> mCommands;
 	std::unique_ptr<VkBufferManager> mBufferManager;
@@ -126,6 +175,12 @@ private:
 	bool mXRFrameBeganThisFrame = false;
 	int mCurrentEyeIndex = 0;
 	int mEyeFinalPipelineImage[2] = { 0, 2 };
+	TSQueue<VkTexLoadIn> primaryTexQueue;
+	TSQueue<VkTexLoadIn> secondaryTexQueue;
+	TSQueue<VkTexLoadOut> outputTexQueue;
+	TSQueue<QueuedPatch> patchQueue;
+	std::vector<std::unique_ptr<VkTexLoadThread>> bgTransferThreads;
+	bool bgTransferEnabled = false;
 };
 
 class CVulkanError : public CEngineError

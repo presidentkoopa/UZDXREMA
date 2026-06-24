@@ -42,6 +42,7 @@
 #include "d_main.h"
 
 EXTERN_CVAR(Bool, gl_precache)
+EXTERN_CVAR(Bool, gl_texture_thread)
 
 //==========================================================================
 //
@@ -70,7 +71,17 @@ static void PrecacheList(FMaterial *gltex, SpriteHits& translations)
 {
 	SpriteHits::Iterator it(translations);
 	SpriteHits::Pair* pair;
-	while (it.NextPair(pair)) screen->PrecacheMaterial(gltex, pair->Key);
+	while (it.NextPair(pair))
+	{
+		if (gl_texture_thread && screen->SupportsBackgroundCache())
+		{
+			screen->PrequeueMaterial(gltex, pair->Key);
+		}
+		else
+		{
+			screen->PrecacheMaterial(gltex, pair->Key);
+		}
+	}
 }
 
 //==========================================================================
@@ -312,6 +323,10 @@ void hw_PrecacheTexture(uint8_t *texhitlist, TMap<PClassActor*, bool> &actorhitl
 			}
 		}
 
+		if (gl_texture_thread && screen->SupportsBackgroundCache())
+		{
+			screen->FlushBackground();
+		}
 
 		FImageSource::EndPrecaching();
 

@@ -23,6 +23,8 @@
 #include <zvulkan/vulkanobjects.h>
 
 #include <inttypes.h>
+#include <limits>
+#include <thread>
 
 #include "v_video.h"
 #include "r_videoscale.h"
@@ -73,6 +75,9 @@ EXTERN_CVAR(Int, gl_tonemap)
 EXTERN_CVAR(Int, screenblocks)
 EXTERN_CVAR(Bool, cl_capfps)
 EXTERN_CVAR(Int, vr_mode)
+EXTERN_CVAR(Bool, gl_texture_thread)
+EXTERN_CVAR(Int, gl_texture_thread_workers)
+EXTERN_CVAR(Int, gl_background_flush_count)
 
 CVAR(Bool, vk_raytrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
@@ -123,6 +128,23 @@ void VulkanPrintLog(const char* typestr, const std::string& msg)
 	}
 }
 
+bool VkTexLoadThread::loadResource(VkTexLoadIn& input, VkTexLoadOut& output)
+{
+	if (input.texture == nullptr || input.hardwareTexture == nullptr)
+	{
+		return false;
+	}
+
+	auto texBuffer = input.texture->CreateTexBuffer(input.translation, input.scaleFlags | CTF_ProcessData);
+	output.pixels = std::shared_ptr<uint8_t>(texBuffer.mBuffer, std::default_delete<uint8_t[]>());
+	texBuffer.mBuffer = nullptr;
+	output.width = texBuffer.mWidth;
+	output.height = texBuffer.mHeight;
+	output.scaleFlags = input.scaleFlags;
+	output.hardwareTexture = input.hardwareTexture;
+	return output.pixels != nullptr;
+}
+
 VulkanRenderDevice::VulkanRenderDevice(void *hMonitor, bool fullscreen, std::shared_ptr<VulkanSurface> surface) :
 	Super(hMonitor, fullscreen) 
 {
@@ -147,10 +169,26 @@ VulkanRenderDevice::VulkanRenderDevice(void *hMonitor, bool fullscreen, std::sha
 	}
 	SupportedDevices = builder.FindDevices(surface->Instance);
 	device = builder.Create(surface->Instance);
+
+	if (gl_texture_thread)
+	{
+		unsigned int threadCount = std::max(1u, std::thread::hardware_concurrency());
+		threadCount = threadCount > 1 ? threadCount - 1 : 1;
+		threadCount = std::min(threadCount, (unsigned int)gl_texture_thread_workers);
+		bgTransferThreads.reserve(threadCount);
+		for (unsigned int i = 0; i < threadCount; i++)
+		{
+			auto worker = std::make_unique<VkTexLoadThread>(&primaryTexQueue, &secondaryTexQueue, &outputTexQueue);
+			worker->start();
+			bgTransferThreads.push_back(std::move(worker));
+		}
+		bgTransferEnabled = !bgTransferThreads.empty();
+	}
 }
 
 VulkanRenderDevice::~VulkanRenderDevice()
 {
+	StopBackgroundCache();
 	vkDeviceWaitIdle(device->device); // make sure the GPU is no longer using any objects before RAII tears them down
 
 	delete mVertexData;
@@ -386,6 +424,215 @@ void VulkanRenderDevice::PrecacheMaterial(FMaterial *mat, int translation)
 	}
 }
 
+void VulkanRenderDevice::PrequeueMaterial(FMaterial *mat, int translation)
+{
+	BackgroundCacheMaterial(mat, FTranslationID::fromInt(translation), false, true);
+}
+
+bool VulkanRenderDevice::BackgroundCacheTextureMaterial(FGameTexture *tex, FTranslationID translation, int scaleFlags, bool makeSPI)
+{
+	if (!bgTransferEnabled || tex == nullptr || !tex->isValid())
+	{
+		return false;
+	}
+
+	patchQueue.deleteSearch([&](QueuedPatch& queued)
+	{
+		return queued.tex == tex &&
+			queued.translation == translation.index() &&
+			queued.scaleFlags == scaleFlags;
+	});
+
+	QueuedPatch patch;
+	patch.tex = tex;
+	patch.translation = translation.index();
+	patch.scaleFlags = scaleFlags;
+	patch.secondary = false;
+	patchQueue.queue(std::move(patch));
+	return true;
+}
+
+bool VulkanRenderDevice::BackgroundCacheMaterial(FMaterial *mat, FTranslationID translation, bool makeSPI, bool secondary)
+{
+	if (!bgTransferEnabled || mat == nullptr || mat->Source()->GetUseType() == ETextureType::SWCanvas)
+	{
+		return false;
+	}
+
+	MaterialLayerInfo* layer = nullptr;
+	auto baseLayer = static_cast<VkHardwareTexture*>(mat->GetLayer(0, translation.index(), &layer));
+	if (layer != nullptr && layer->layerTexture != nullptr)
+	{
+		if (!secondary && baseLayer->GetState() == IHardwareTexture::CACHING)
+		{
+			VkTexLoadIn input;
+			if (secondaryTexQueue.dequeueSearch(input, [&](VkTexLoadIn& queued)
+			{
+				return queued.hardwareTexture == baseLayer;
+			}))
+			{
+				baseLayer->SetHardwareState(IHardwareTexture::LOADING);
+				primaryTexQueue.queue(std::move(input));
+				for (auto& thread : bgTransferThreads) thread->wake();
+			}
+		}
+		else if (baseLayer->GetState() == IHardwareTexture::NONE)
+		{
+			baseLayer->SetHardwareState(secondary ? IHardwareTexture::CACHING : IHardwareTexture::LOADING);
+			VkTexLoadIn input;
+			input.texture = layer->layerTexture;
+			input.translation = translation.index();
+			input.scaleFlags = layer->scaleFlags;
+			input.hardwareTexture = baseLayer;
+			if (secondary) secondaryTexQueue.queue(std::move(input));
+			else primaryTexQueue.queue(std::move(input));
+			for (auto& thread : bgTransferThreads) thread->wake();
+		}
+	}
+
+	for (int i = 1; i < mat->NumLayers(); i++)
+	{
+		auto extraLayer = static_cast<VkHardwareTexture*>(mat->GetLayer(i, 0, &layer));
+		if (layer != nullptr && layer->layerTexture != nullptr)
+		{
+			if (!secondary && extraLayer->GetState() == IHardwareTexture::CACHING)
+			{
+				VkTexLoadIn input;
+				if (secondaryTexQueue.dequeueSearch(input, [&](VkTexLoadIn& queued)
+				{
+					return queued.hardwareTexture == extraLayer;
+				}))
+				{
+					extraLayer->SetHardwareState(IHardwareTexture::LOADING);
+					primaryTexQueue.queue(std::move(input));
+					for (auto& thread : bgTransferThreads) thread->wake();
+				}
+			}
+			else if (extraLayer->GetState() == IHardwareTexture::NONE)
+			{
+				extraLayer->SetHardwareState(secondary ? IHardwareTexture::CACHING : IHardwareTexture::LOADING);
+				VkTexLoadIn input;
+				input.texture = layer->layerTexture;
+				input.translation = 0;
+				input.scaleFlags = layer->scaleFlags;
+				input.hardwareTexture = extraLayer;
+				if (secondary) secondaryTexQueue.queue(std::move(input));
+				else primaryTexQueue.queue(std::move(input));
+				for (auto& thread : bgTransferThreads) thread->wake();
+			}
+		}
+	}
+
+	return true;
+}
+
+bool VulkanRenderDevice::CachingActive()
+{
+	if (!bgTransferEnabled)
+	{
+		return false;
+	}
+
+	if (primaryTexQueue.size() > 0 || secondaryTexQueue.size() > 0 || outputTexQueue.size() > 0 || patchQueue.size() > 0)
+	{
+		return true;
+	}
+
+	for (auto& thread : bgTransferThreads)
+	{
+		if (thread->isActive())
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+float VulkanRenderDevice::CacheProgress()
+{
+	return (float)(primaryTexQueue.size() + secondaryTexQueue.size() + patchQueue.size());
+}
+
+void VulkanRenderDevice::StopBackgroundCache()
+{
+	for (auto& thread : bgTransferThreads)
+	{
+		thread->stop();
+	}
+	bgTransferThreads.clear();
+	bgTransferEnabled = false;
+}
+
+void VulkanRenderDevice::FlushBackground()
+{
+	if (!bgTransferEnabled)
+	{
+		return;
+	}
+
+	UpdateBackgroundCache(true);
+	UploadLoadedTextures(true);
+}
+
+void VulkanRenderDevice::UploadLoadedTextures(bool flush)
+{
+	int uploadBudget = flush ? std::numeric_limits<int>::max() : std::max(1, (int)gl_background_flush_count);
+
+	VkTexLoadOut loaded;
+	while (uploadBudget > 0 && outputTexQueue.dequeue(loaded))
+	{
+		if (loaded.hardwareTexture != nullptr && loaded.pixels != nullptr)
+		{
+			const bool indexed = !!(loaded.scaleFlags & CTF_Indexed);
+			loaded.hardwareTexture->BackgroundCreateTexture(
+				mCommands.get(),
+				loaded.width,
+				loaded.height,
+				indexed ? 1 : 4,
+				indexed ? VK_FORMAT_R8_UNORM : VK_FORMAT_B8G8R8A8_UNORM,
+				loaded.pixels.get(),
+				indexed ? 0 : -1,
+				!indexed);
+			loaded.hardwareTexture->CheckFinalTransition(mCommands->GetTransferCommands(), true);
+			loaded.hardwareTexture->SetHardwareState(IHardwareTexture::READY);
+		}
+		uploadBudget--;
+	}
+}
+
+void VulkanRenderDevice::UpdateBackgroundCache(bool flush)
+{
+	if (!bgTransferEnabled)
+	{
+		return;
+	}
+
+	QueuedPatch patch;
+	while (patchQueue.dequeue(patch))
+	{
+		if (patch.tex != nullptr)
+		{
+			auto material = FMaterial::ValidateTexture(patch.tex, patch.scaleFlags, true);
+			if (material != nullptr)
+			{
+				BackgroundCacheMaterial(material, FTranslationID::fromInt(patch.translation), false, patch.secondary);
+			}
+		}
+	}
+
+	if (flush)
+	{
+		while (CachingActive())
+		{
+			UploadLoadedTextures(true);
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
+		return;
+	}
+
+	UploadLoadedTextures(false);
+}
+
 IHardwareTexture *VulkanRenderDevice::CreateHardwareTexture(int numchannels)
 {
 	return new VkHardwareTexture(this, numchannels);
@@ -606,6 +853,7 @@ void VulkanRenderDevice::BeginFrame()
 	}
 
 	mViewpoints->Clear();
+	UpdateBackgroundCache(false);
 	mCommands->BeginFrame();
 	mTextureManager->BeginFrame();
 	int eyeLayerCount = 1;
