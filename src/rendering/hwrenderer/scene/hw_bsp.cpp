@@ -33,6 +33,7 @@
 #include "po_man.h"
 #include "m_fixed.h"
 #include "ctpl.h"
+#include <future>
 #include "hwrenderer/scene/hw_fakeflat.h"
 #include "hwrenderer/scene/hw_clipper.h"
 #include "hwrenderer/scene/hw_drawstructs.h"
@@ -51,13 +52,20 @@
 #endif // ARCH_IA32
 
 CVAR(Bool, gl_multithread, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Int, gl_bsp_worker_threads, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL)
+{
+	if (self < 1) self = 1;
+	else if (self > 8) self = 8;
+
+	Printf("This won't take effect until " GAMENAME " is restarted.\n");
+}
 
 EXTERN_CVAR(Float, r_actorspriteshadowdist)
 EXTERN_CVAR(Bool, r_radarclipper)
 EXTERN_CVAR(Bool, r_dithertransparency)
 
 thread_local bool isWorkerThread;
-ctpl::thread_pool renderPool(1);
+ctpl::thread_pool renderPool(8);
 bool inited = false;
 
 const int MAXDITHERACTORS = 20; // Maximum number of enemies that can set dither-transparency flags
@@ -86,8 +94,27 @@ struct RenderJob
 	int type;
 	subsector_t *sub;
 	seg_t *seg;
+	sector_t *frontsector;
+	sector_t *backsector;
+	bool isculled;
 };
 
+struct WallWorkItem
+{
+	subsector_t *sub;
+	seg_t *seg;
+	sector_t *frontsector;
+	sector_t *backsector;
+	bool isculled;
+	bool terminate;
+};
+
+struct WallBatchJob
+{
+	int start;
+	int count;
+	bool terminate;
+};
 
 class RenderJobQueue
 {
@@ -95,18 +122,30 @@ class RenderJobQueue
 	std::atomic<int> readindex{};
 	std::atomic<int> writeindex{};
 public:
-	void AddJob(int type, subsector_t *sub, seg_t *seg = nullptr)
+	void AddJob(int type, subsector_t *sub, seg_t *seg = nullptr, sector_t *frontsector = nullptr, sector_t *backsector = nullptr, bool isculled = false)
 	{
 		// This does not check for array overflows. The pool should be large enough that it never hits the limit.
 
-		pool[writeindex] = { type, sub, seg };
+		pool[writeindex] = { type, sub, seg, frontsector, backsector, isculled };
 		writeindex++;	// update index only after the value has been written.
 	}
 
 	RenderJob *GetJob()
 	{
-		if (readindex < writeindex) return &pool[readindex++];
-		return nullptr;
+		while (true)
+		{
+			int current = readindex.load();
+			const int written = writeindex.load();
+			if (current >= written)
+			{
+				return nullptr;
+			}
+
+			if (readindex.compare_exchange_weak(current, current + 1))
+			{
+				return &pool[current];
+			}
+		}
 	}
 	
 	void ReleaseAll()
@@ -116,18 +155,146 @@ public:
 	}
 };
 
-static RenderJobQueue jobQueue;	// One static queue is sufficient here. This code will never be called recursively.
+class WallWorkQueue
+{
+	static constexpr int MaxWallItems = 300000;
+	static constexpr int MaxWallBatches = 100000;
+	static constexpr int WallBatchSize = 64;
 
-void HWDrawInfo::WorkerThread()
+	WallWorkItem items[MaxWallItems];
+	WallBatchJob batches[MaxWallBatches];
+	std::atomic<int> readindex{};
+	std::atomic<int> writeindex{};
+	int itemwrite = 0;
+	int pendingstart = 0;
+	int pendingcount = 0;
+public:
+	void AddJob(subsector_t *sub, seg_t *seg, sector_t *frontsector, sector_t *backsector, bool isculled)
+	{
+		items[itemwrite++] = { sub, seg, frontsector, backsector, isculled, false };
+		pendingcount++;
+		if (pendingcount >= WallBatchSize)
+		{
+			FlushPending();
+		}
+	}
+
+	void FlushPending()
+	{
+		if (pendingcount <= 0)
+		{
+			pendingstart = itemwrite;
+			return;
+		}
+
+		batches[writeindex] = { pendingstart, pendingcount, false };
+		writeindex++;
+		pendingstart = itemwrite;
+		pendingcount = 0;
+	}
+
+	void AddTerminate()
+	{
+		FlushPending();
+		batches[writeindex] = { 0, 0, true };
+		writeindex++;
+	}
+
+	WallBatchJob *GetJob()
+	{
+		while (true)
+		{
+			int current = readindex.load();
+			const int written = writeindex.load();
+			if (current >= written)
+			{
+				return nullptr;
+			}
+
+			if (readindex.compare_exchange_weak(current, current + 1))
+			{
+				return &batches[current];
+			}
+		}
+	}
+
+	WallWorkItem *GetItems(int start)
+	{
+		return &items[start];
+	}
+
+	void ReleaseAll()
+	{
+		readindex = 0;
+		writeindex = 0;
+		itemwrite = 0;
+		pendingstart = 0;
+		pendingcount = 0;
+	}
+};
+
+static RenderJobQueue sceneJobQueue;
+static WallWorkQueue wallJobQueue;
+static std::vector<HWMeshHelper> wallWorkerMeshes;
+
+void HWDrawInfo::WorkerThread(HWMeshHelper* helper)
 {
 	sector_t *front, *back;
-	HWWallDispatcher disp(this);
+	HWWallDispatcher disp = helper != nullptr
+		? HWWallDispatcher(Level, helper, lightmode)
+		: HWWallDispatcher(this);
 
-	WTTotal.Clock();
+	if (helper == nullptr)
+	{
+		WTTotal.Clock();
+		SceneWorkerElapsed.Clock();
+	}
 	isWorkerThread = true;	// for adding asserts in GL API code. The worker thread may never call any GL API.
 	while (true)
 	{
-		auto job = jobQueue.GetJob();
+		if (helper != nullptr)
+		{
+			auto batchJob = wallJobQueue.GetJob();
+			if (batchJob == nullptr)
+			{
+#ifdef ARCH_IA32
+				_mm_pause();
+				_mm_pause();
+				_mm_pause();
+				_mm_pause();
+				_mm_pause();
+				_mm_pause();
+				_mm_pause();
+				_mm_pause();
+				_mm_pause();
+				_mm_pause();
+#endif // ARCH_IA32
+				continue;
+			}
+
+			if (batchJob->terminate)
+			{
+				return;
+			}
+
+			auto batchItems = wallJobQueue.GetItems(batchJob->start);
+			helper->batchCount++;
+			for (int i = 0; i < batchJob->count; i++)
+			{
+				auto &wallJob = batchItems[i];
+				HWWall wall;
+				const int64_t wallCycleStart = rdtsc();
+				wall.sub = wallJob.sub;
+				front = wallJob.frontsector;
+				back = wallJob.backsector;
+				wall.Process(&disp, wallJob.seg, front, back, wallJob.isculled);
+				helper->wallCount++;
+				helper->wallCycles += rdtsc() - wallCycleStart;
+			}
+			continue;
+		}
+
+		auto job = sceneJobQueue.GetJob();
 		if (job == nullptr)
 		{
 #ifdef ARCH_IA32
@@ -151,45 +318,21 @@ void HWDrawInfo::WorkerThread()
 		{
 		case RenderJob::TerminateJob:
 			WTTotal.Unclock();
+			SceneWorkerElapsed.Unclock();
 			return;
 
 		case RenderJob::WallJob:
 		{
-			Clocker wallJobTimer(WTWallJobs);
 			HWWall wall;
+			WTWallJobs.Clock();
 			SetupWall.Clock();
 			wall.sub = job->sub;
-
-			front = hw_FakeFlat(job->sub->sector, in_area, false);
-			auto seg = job->seg;
-			auto backsector = seg->backsector;
-			if (!backsector && seg->linedef != nullptr && seg->linedef->isVisualPortal() && seg->sidedef == seg->linedef->sidedef[0]) // For one-sided portals use the portal's destination sector as backsector.
-			{
-				auto portal = seg->linedef->getPortal();
-				backsector = portal->mDestination->frontsector;
-				back = hw_FakeFlat(backsector, in_area, true);
-				if (front->floorplane.isSlope() || front->ceilingplane.isSlope() || back->floorplane.isSlope() || back->ceilingplane.isSlope())
-				{
-					// Having a one-sided portal like this with slopes is too messy so let's ignore that case.
-					back = nullptr;
-				}
-			}
-			else if (backsector)
-			{
-				if (front->sectornum == backsector->sectornum || (seg->sidedef->Flags & WALLF_POLYOBJ))
-				{
-					back = front;
-				}
-				else
-				{
-					back = hw_FakeFlat(backsector, in_area, true);
-				}
-			}
-			else back = nullptr;
-
-			wall.Process(&disp, job->seg, front, back);
+			front = job->frontsector;
+			back = job->backsector;
+			wall.Process(&disp, job->seg, front, back, job->isculled);
 			rendered_lines++;
 			SetupWall.Unclock();
+			WTWallJobs.Unclock();
 			break;
 		}
 
@@ -236,6 +379,7 @@ void HWDrawInfo::WorkerThread()
 
 
 EXTERN_CVAR(Bool, gl_render_segs)
+EXTERN_CVAR(Bool, gl_seamless)
 
 CVAR(Bool, gl_render_things, true, 0)
 CVAR(Bool, gl_render_walls, true, 0)
@@ -283,6 +427,59 @@ bool IsDistanceCulled(seg_t *line)
 	if ((dist1 > dist3) && (dist2 > dist3))
 		return true;
 	return false;
+}
+
+static bool SectorNeedsMainThreadWallPath(sector_t* sector)
+{
+	if (sector == nullptr)
+		return false;
+
+	if (sector->GetTexture(sector_t::ceiling) == skyflatnum || sector->GetTexture(sector_t::floor) == skyflatnum)
+		return true;
+
+	if (sector->ValidatePortal(sector_t::ceiling) != nullptr || sector->ValidatePortal(sector_t::floor) != nullptr)
+		return true;
+
+	if (sector->GetReflect(sector_t::ceiling) > 0 || sector->GetReflect(sector_t::floor) > 0)
+		return true;
+
+	return false;
+}
+
+static bool NeedsMainThreadWallPath(seg_t* seg, sector_t* frontsector, sector_t* backsector)
+{
+	if (seg == nullptr || seg->linedef == nullptr)
+		return false;
+
+	if (seg->linedef->special == Line_Horizon)
+		return true;
+
+	if (seg->linedef->isVisualPortal() || seg->linedef->GetTransferredPortal() != nullptr)
+		return true;
+
+	if (SectorNeedsMainThreadWallPath(frontsector) || SectorNeedsMainThreadWallPath(backsector))
+		return true;
+
+	return false;
+}
+
+static inline void PrepareSeamlessVertex(HWDrawInfo* di, vertex_t* v)
+{
+	if (v == nullptr || !v->dirty)
+		return;
+
+	const int index = v->Index();
+	if (index < 0 || (unsigned)index >= di->seamless_vertex_processed.Size())
+	{
+		v->RecalcVertexHeights();
+		return;
+	}
+
+	if (!di->seamless_vertex_processed[index])
+	{
+		v->RecalcVertexHeights();
+		di->seamless_vertex_processed[index] = 1;
+	}
 }
 
 void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
@@ -397,7 +594,14 @@ void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
 	{
 		if (multithread)
 		{
-			jobQueue.AddJob(RenderJob::WallJob, currentsubsector, seg);
+			if (experimentalMultiWallWorkers && !NeedsMainThreadWallPath(seg, seg->frontsector, seg->backsector))
+			{
+				wallJobQueue.AddJob(currentsubsector, seg, seg->frontsector, seg->backsector, true);
+			}
+			else
+			{
+				sceneJobQueue.AddJob(RenderJob::WallJob, currentsubsector, seg, seg->frontsector, seg->backsector, true);
+			}
 		}
 		else
 		{
@@ -469,7 +673,21 @@ void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
 		{
 			if (multithread)
 			{
-				jobQueue.AddJob(RenderJob::WallJob, seg->Subsector, seg);
+				if (experimentalMultiWallWorkers && gl_seamless && !(seg->sidedef->Flags & WALLF_POLYOBJ))
+				{
+					auto lv1 = seg->linedef ? seg->linedef->v1 : nullptr;
+					auto lv2 = seg->linedef ? seg->linedef->v2 : nullptr;
+					PrepareSeamlessVertex(this, lv1);
+					PrepareSeamlessVertex(this, lv2);
+				}
+				if (experimentalMultiWallWorkers && !NeedsMainThreadWallPath(seg, currentsector, backsector))
+				{
+					wallJobQueue.AddJob(seg->Subsector, seg, currentsector, backsector, false);
+				}
+				else
+				{
+					sceneJobQueue.AddJob(RenderJob::WallJob, seg->Subsector, seg, currentsector, backsector, false);
+				}
 			}
 			else
 			{
@@ -768,7 +986,7 @@ void HWDrawInfo::ProcessVisibleSubsector(subsector_t* sub, sector_t* sector, sec
 	{
 		if (multithread)
 		{
-			jobQueue.AddJob(RenderJob::ParticleJob, sub, nullptr);
+			sceneJobQueue.AddJob(RenderJob::ParticleJob, sub, nullptr);
 		}
 		else
 		{
@@ -794,7 +1012,7 @@ void HWDrawInfo::ProcessVisibleSubsector(subsector_t* sub, sector_t* sector, sec
 		{
 			if (multithread)
 			{
-				jobQueue.AddJob(RenderJob::SpriteJob, sub, nullptr);
+				sceneJobQueue.AddJob(RenderJob::SpriteJob, sub, nullptr);
 			}
 			else
 			{
@@ -845,7 +1063,7 @@ void HWDrawInfo::ProcessVisibleSubsector(subsector_t* sub, sector_t* sector, sec
 
 					if (multithread)
 					{
-						jobQueue.AddJob(RenderJob::FlatJob, sub);
+						sceneJobQueue.AddJob(RenderJob::FlatJob, sub);
 					}
 					else
 					{
@@ -876,7 +1094,7 @@ void HWDrawInfo::ProcessVisibleSubsector(subsector_t* sub, sector_t* sector, sec
 				{
 					if (multithread)
 					{
-						jobQueue.AddJob(RenderJob::PortalJob, sub, (seg_t*)portal);
+						sceneJobQueue.AddJob(RenderJob::PortalJob, sub, (seg_t*)portal);
 					}
 					else
 					{
@@ -889,7 +1107,7 @@ void HWDrawInfo::ProcessVisibleSubsector(subsector_t* sub, sector_t* sector, sec
 				{
 					if (multithread)
 					{
-						jobQueue.AddJob(RenderJob::PortalJob, sub, (seg_t*)portal);
+						sceneJobQueue.AddJob(RenderJob::PortalJob, sub, (seg_t*)portal);
 					}
 					else
 					{
@@ -1156,20 +1374,107 @@ void HWDrawInfo::RenderBSP(void *node, bool drawpsprites)
 
 	const bool allowVRMultithread = IsVRScene && vr_scene_multithread;
 	multithread = gl_multithread && (!IsVRScene || allowVRMultithread);
+	experimentalMultiWallWorkers = multithread && gl_bsp_worker_threads > 1;
 	if (multithread)
 	{
-		jobQueue.ReleaseAll();
-		auto future = renderPool.push([&](int id) {
+		sceneJobQueue.ReleaseAll();
+		wallJobQueue.ReleaseAll();
+		auto sceneFuture = renderPool.push([&](int id) {
 			WorkerThread();
 		});
-		if (Viewpoint.IsOrtho() && ((Level->flags3 & LEVEL3_NOFOGOFWAR) || !r_radarclipper)) RenderOrthoNoFog();
-		else RenderBSPNode(node);
+		if (experimentalMultiWallWorkers)
+		{
+			const int workerCount = gl_bsp_worker_threads;
+			if ((int)wallWorkerMeshes.size() < workerCount)
+			{
+				wallWorkerMeshes.resize(workerCount);
+			}
+			for (int i = 0; i < workerCount; i++)
+			{
+				auto& mesh = wallWorkerMeshes[i];
+				mesh.list.Clear();
+				mesh.translucent.Clear();
+				mesh.portals.Clear();
+				mesh.lower.Clear();
+				mesh.upper.Clear();
+				mesh.wallCount = 0;
+				mesh.batchCount = 0;
+				mesh.totalCycles = 0;
+				mesh.wallCycles = 0;
+			}
+			std::vector<std::future<void>> futures;
+			futures.reserve(workerCount);
+			for (int i = 0; i < workerCount; i++)
+			{
+				futures.push_back(renderPool.push([&, i](int id) {
+					const int64_t workerStart = rdtsc();
+					WorkerThread(&wallWorkerMeshes[i]);
+					wallWorkerMeshes[i].totalCycles = rdtsc() - workerStart;
+				}));
+			}
 
-		jobQueue.AddJob(RenderJob::TerminateJob, nullptr, nullptr);
-		Bsp.Unclock();
-		MTWait.Clock();
-		future.wait();
-		MTWait.Unclock();
+			if (Viewpoint.IsOrtho() && ((Level->flags3 & LEVEL3_NOFOGOFWAR) || !r_radarclipper)) RenderOrthoNoFog();
+			else RenderBSPNode(node);
+
+			sceneJobQueue.AddJob(RenderJob::TerminateJob, nullptr, nullptr);
+			for (int i = 0; i < workerCount; i++)
+			{
+				wallJobQueue.AddTerminate();
+			}
+			Bsp.Unclock();
+			MTWait.Clock();
+			sceneFuture.wait();
+			for (auto& future : futures)
+			{
+				future.wait();
+			}
+
+			HWWallDispatcher mergeDispatcher(this);
+			WallMerge.Clock();
+			for (int i = 0; i < workerCount; i++)
+			{
+				auto& mesh = wallWorkerMeshes[i];
+				WallWorkersCpuSumCycles += mesh.totalCycles;
+				WallWorkersWallCpuSumCycles += mesh.wallCycles;
+				if (mesh.totalCycles > WallWorkersElapsedCycles) WallWorkersElapsedCycles = mesh.totalCycles;
+				WallBatchCount += mesh.batchCount;
+				WallItemsProcessed += mesh.wallCount;
+				rendered_lines += mesh.wallCount;
+				for (auto& wall : mesh.list)
+				{
+					wall.PutWall(&mergeDispatcher, false);
+				}
+				for (auto& wall : mesh.translucent)
+				{
+					wall.PutWall(&mergeDispatcher, true);
+				}
+				for (auto& wall : mesh.portals)
+				{
+					wall.PutPortal(&mergeDispatcher, wall.portaltype, wall.portalplane);
+				}
+				for (auto& missing : mesh.upper)
+				{
+					AddUpperMissingTexture(missing.side, missing.sub, (float)missing.plane);
+				}
+				for (auto& missing : mesh.lower)
+				{
+					AddLowerMissingTexture(missing.side, missing.sub, (float)missing.plane);
+				}
+			}
+			WallMerge.Unclock();
+			MTWait.Unclock();
+		}
+		else
+		{
+			if (Viewpoint.IsOrtho() && ((Level->flags3 & LEVEL3_NOFOGOFWAR) || !r_radarclipper)) RenderOrthoNoFog();
+			else RenderBSPNode(node);
+
+			sceneJobQueue.AddJob(RenderJob::TerminateJob, nullptr, nullptr);
+			Bsp.Unclock();
+			MTWait.Clock();
+			sceneFuture.wait();
+			MTWait.Unclock();
+		}
 	}
 	else
 	{
@@ -1177,6 +1482,7 @@ void HWDrawInfo::RenderBSP(void *node, bool drawpsprites)
 		else RenderBSPNode(node);
 		Bsp.Unclock();
 	}
+	experimentalMultiWallWorkers = false;
 
 	// Make rendered targets set dither transparency flags on level geometry for next pass
 	// Can't do this inside DoSubsector() because both Trace() and P_CheckSight() affect 'validcount' global variable

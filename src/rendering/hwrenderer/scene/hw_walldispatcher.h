@@ -14,6 +14,10 @@ struct HWMeshHelper
 	TArray<HWWall> portals;
 	TArray<HWMissing> lower;
 	TArray<HWMissing> upper;
+	int wallCount = 0;
+	int batchCount = 0;
+	int64_t totalCycles = 0;
+	int64_t wallCycles = 0;
 };
 
 

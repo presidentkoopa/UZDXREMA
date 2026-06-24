@@ -19,6 +19,7 @@ vec3_t positionDeltaThisFrame;
 bool weaponStabilised;
 bool vrApplyingHmdYaw;
 bool resetDoomYaw;
+bool resetPreviousHmdYaw;
 bool resetPreviousPitch;
 // bool shutdown;
 bool ready_teleport;

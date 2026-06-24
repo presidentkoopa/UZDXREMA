@@ -163,6 +163,11 @@ void HWFlat::SetupLights(HWDrawInfo *di, FLightNode * node, FDynLightData &light
 		dynlightindex = -1;
 		return;	// no lights on additively blended surfaces.
 	}
+	if (node == nullptr)
+	{
+		dynlightindex = -1;
+		return;
+	}
 	while (node && (!gl_light_flat_max_lights || lightsFlatPerEye < gl_light_flat_max_lights))
 	{
 		FDynamicLight * light = node->lightsource;
@@ -172,7 +177,6 @@ void HWFlat::SetupLights(HWDrawInfo *di, FLightNode * node, FDynLightData &light
 			node = node->nextLight;
 			continue;
 		}
-		lightsFlatPerEye++;
 		iter_dlightf++;
 
 		// we must do the side check here because gl_GetLight needs the correct plane orientation
@@ -185,7 +189,15 @@ void HWFlat::SetupLights(HWDrawInfo *di, FLightNode * node, FDynLightData &light
 		}
 
 		p.Set(plane.plane.Normal(), plane.plane.fD());
-		draw_dlightf += GetLight(lightdata, portalgroup, p, light, false);
+		DVector3 posrel = light->PosRelative(portalgroup);
+		float radius = light->GetRadius();
+		float dist = fabsf(p.DistToPoint((float)posrel.X, (float)posrel.Z, (float)posrel.Y));
+		if (radius > 0.f && dist <= radius)
+		{
+			lightsFlatPerEye++;
+			draw_dlightf += 1;
+			AddLightToList(lightdata, portalgroup, light, false);
+		}
 		node = node->nextLight;
 	}
 

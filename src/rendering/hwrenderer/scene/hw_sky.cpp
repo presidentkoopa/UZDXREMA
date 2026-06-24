@@ -196,8 +196,7 @@ void HWWall::SkyPlane(HWWallDispatcher *di, sector_t *sector, int plane, bool al
 		}
 		ptype = PORTALTYPE_PLANEMIRROR;
 	}
-	if (ptype != -1
-	&& (ptype > PORTALTYPE_SKYBOX || (gl_skydome && !gl_global_fade))) 
+	if (ptype != -1)
 	{
 		PutPortal(di, ptype, plane);
 	}

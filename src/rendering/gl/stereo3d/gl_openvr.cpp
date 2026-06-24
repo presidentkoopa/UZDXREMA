@@ -193,6 +193,7 @@ extern float positional_movementForward;
 extern bool ready_teleport;
 extern bool trigger_teleport;
 extern bool resetDoomYaw;
+extern bool resetPreviousHmdYaw;
 extern bool resetPreviousPitch;
 extern bool cinemamode;
 extern float cinemamodeYaw;
@@ -2071,9 +2072,10 @@ namespace s3d
 			// Set HMD angle game state parameters for NEXT frame
 			static double previousHmdYaw = 0;
 			static bool havePreviousYaw = false;
-			if (!havePreviousYaw) {
+			if (!havePreviousYaw || resetPreviousHmdYaw) {
 				previousHmdYaw = hmdYaw;
 				havePreviousYaw = true;
+				resetPreviousHmdYaw = false;
 			}
 			hmdYawDeltaDegrees = hmdYaw - previousHmdYaw;
 			vrApplyingHmdYaw = true;
@@ -3180,6 +3182,7 @@ namespace s3d
 			{
 				doomYaw = (float)r_viewpoint.camera->Angles.Yaw.Degrees();
 				resetDoomYaw = false;
+				resetPreviousHmdYaw = true;
 			}
 			else if (gamestate != GS_LEVEL || menuactive != MENU_Off 
 			|| ConsoleState == c_down || ConsoleState == c_falling 
@@ -3189,6 +3192,7 @@ namespace s3d
 			)
 			{
 				resetDoomYaw = true;
+				resetPreviousHmdYaw = true;
 			}
 
 			if (gamestate == GS_LEVEL && menuactive == MENU_Off)

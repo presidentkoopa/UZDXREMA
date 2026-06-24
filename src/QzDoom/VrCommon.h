@@ -32,6 +32,7 @@ extern float cinemamodePitch;
 extern float playerYaw;
 extern bool vrApplyingHmdYaw;
 extern bool resetDoomYaw;
+extern bool resetPreviousHmdYaw;
 extern float doomYaw;
 extern bool resetPreviousPitch;
 extern float previousPitch;
