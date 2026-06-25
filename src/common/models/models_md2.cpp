@@ -176,9 +176,19 @@ bool FDMDModel::Load(const char * path, int lumpnum, const char * buffer, int le
 
 void FDMDModel::LoadGeometry()
 {
-	static int axis[3] = { VX, VY, VZ };
+	if (framevtx != NULL)
+	{
+		return;
+	}
+
 	auto lumpdata = fileSystem.ReadFile(mLumpNum);
-	auto buffer = lumpdata.string();
+	LoadGeometry(&lumpdata);
+}
+
+void FDMDModel::LoadGeometry(FileSys::FileData* lumpData)
+{
+	static int axis[3] = { VX, VY, VZ };
+	auto buffer = lumpData->string();
 	texCoords = new FTexCoord[info.numTexCoords];
 	memcpy(texCoords, buffer + info.offsetTexCoords, info.numTexCoords * sizeof(FTexCoord));
 
@@ -499,10 +509,20 @@ bool FMD2Model::Load(const char * path, int lumpnum, const char * buffer, int le
 
 void FMD2Model::LoadGeometry()
 {
+	if (framevtx != NULL)
+	{
+		return;
+	}
+
+	auto lumpdata = fileSystem.ReadFile(mLumpNum);
+	LoadGeometry(&lumpdata);
+}
+
+void FMD2Model::LoadGeometry(FileSys::FileData* lumpData)
+{
 	static int axis[3] = { VX, VY, VZ };
 	uint8_t   *md2_frames;
-	auto lumpdata = fileSystem.ReadFile(mLumpNum);
-	auto buffer = lumpdata.string();
+	auto buffer = lumpData->string();
 
 	texCoords = new FTexCoord[info.numTexCoords];
 	memcpy(texCoords, (uint8_t*)buffer + info.offsetTexCoords, info.numTexCoords * sizeof(FTexCoord));

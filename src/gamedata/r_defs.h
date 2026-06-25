@@ -107,6 +107,8 @@ struct vertex_t
 	int vertexnum;
 	angle_t viewangle;	// precalculated angle for clipping
 	int angletime;		// recalculation time for view angle
+	angle_t radarviewangle;	// precalculated angle for radar clipping
+	int radarangletime;		// recalculation time for radar view angle
 	bool dirty;			// something has changed and needs to be recalculated
 	int numheights;
 	int numsectors;
@@ -164,6 +166,8 @@ struct vertex_t
 		p = { 0,0 };
 		angletime = 0;
 		viewangle = 0;
+		radarangletime = 0;
+		radarviewangle = 0;
 		dirty = true;
 		numheights = numsectors = 0;
 		sectors = NULL;

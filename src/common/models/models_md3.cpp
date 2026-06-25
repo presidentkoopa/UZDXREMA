@@ -189,8 +189,18 @@ bool FMD3Model::Load(const char * path, int lumpnum, const char * buffer, int le
 
 void FMD3Model::LoadGeometry()
 {
+	if (Surfaces.Size() > 0 && Surfaces[0].Vertices.Size() > 0)
+	{
+		return;
+	}
+
 	auto lumpdata = fileSystem.ReadFile(mLumpNum);
-	auto buffer = lumpdata.string();
+	LoadGeometry(&lumpdata);
+}
+
+void FMD3Model::LoadGeometry(FileSys::FileData* lumpData)
+{
+	auto buffer = lumpData->string();
 	md3_header_t * hdr = (md3_header_t *)buffer;
 	md3_surface_t * surf = (md3_surface_t*)(buffer + LittleLong(hdr->Ofs_Surfaces));
 

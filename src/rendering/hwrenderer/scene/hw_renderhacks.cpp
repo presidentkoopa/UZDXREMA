@@ -129,11 +129,14 @@ int HWDrawInfo::SetupLightsForOtherPlane(subsector_t * sub, FDynLightData &light
 				node = node->nextLight;
 				continue;
 			}
-			lightsFlatPerEye++;
 			iter_dlightf++;
 
 			p.Set(plane->Normal(), plane->fD());
-			draw_dlightf += GetLight(lightdata, sub->sector->PortalGroup, p, light, true);
+			if (GetLight(lightdata, sub->sector->PortalGroup, p, light, true))
+			{
+				lightsFlatPerEye++;
+				draw_dlightf += 1;
+			}
 			node = node->nextLight;
 		}
 

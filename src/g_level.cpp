@@ -73,6 +73,7 @@
 #include "d_netinf.h"
 #include "doommenu.h"
 #include "a_sharedglobal.h"
+#include "a_dynlight.h"
 #include "r_utility.h"
 #include "p_spec.h"
 #include "serializer_doom.h"
@@ -80,7 +81,6 @@
 #include "events.h"
 #include "i_music.h"
 #include "hw_vrmodes.h"
-#include "a_dynlight.h"
 #include "p_conversation.h"
 #include "p_effect.h"
 #include "stringtable.h"
@@ -107,6 +107,8 @@ void STAT_ChangeLevel(const char *newl, FLevelLocals *Level);
 FString STAT_EpisodeName();
 
 EXTERN_CVAR(Bool, gl_lite_shader)
+
+static void RelinkDynamicLightsForLevel(FLevelLocals* level);
 EXTERN_CVAR(Bool, save_formatted)
 EXTERN_CVAR (Float, sv_gravity)
 EXTERN_CVAR (Float, sv_aircontrol)
@@ -1534,6 +1536,7 @@ void FLevelLocals::DoLoadLevel(const FString &nextmapname, int position, bool au
 	//      regular world load (savegames are handled internally)
 	localEventManager->WorldLoaded();
 	DoDeferedScripts ();	// [RH] Do script actions that were triggered on another map.
+	RelinkDynamicLightsForLevel(this);
 	
 
 	// [RH] Always save the game when entering a new 
@@ -2508,3 +2511,15 @@ DEFINE_ACTION_FUNCTION(FLevelLocals, GetEpisodeName)
 	ACTION_RETURN_STRING(GStrings.localize(STAT_EpisodeName().GetChars()));
 }
 
+static void RelinkDynamicLightsForLevel(FLevelLocals* level)
+{
+	for (auto light = level->lights; light != nullptr; light = light->next)
+	{
+		if (!light->IsActive())
+			continue;
+
+		light->UnlinkLight();
+		light->radius = -1.0f;
+		light->UpdateLocation();
+	}
+}

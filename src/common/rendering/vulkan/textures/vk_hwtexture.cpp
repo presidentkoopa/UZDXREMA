@@ -45,6 +45,8 @@ VkHardwareTexture::VkHardwareTexture(VulkanRenderDevice* fb, int numchannels) : 
 
 VkHardwareTexture::~VkHardwareTexture()
 {
+	SetHardwareState(NONE);
+
 	if (fb)
 		fb->GetTextureManager()->RemoveTexture(this);
 }
@@ -60,15 +62,42 @@ void VkHardwareTexture::Reset()
 		}
 
 		mImage.Reset(fb);
+		mLoadedImage.Reset(fb);
 		mDepthStencil.Reset(fb);
+		SetHardwareState(NONE);
 	}
+}
+
+void VkHardwareTexture::SwapToLoadedImage()
+{
+	if (!mLoadedImage.Image)
+	{
+		return;
+	}
+
+	if (mappedSWFB)
+	{
+		mImage.Image->Unmap();
+		mappedSWFB = nullptr;
+	}
+
+	mImage.Reset(fb);
+	mDepthStencil.Reset(fb);
+	std::swap(mImage, mLoadedImage);
 }
 
 VkTextureImage *VkHardwareTexture::GetImage(FTexture *tex, int translation, int flags)
 {
 	if (!mImage.Image)
 	{
-		CreateImage(tex, translation, flags);
+		if (mLoadedImage.Image && GetState() == READY)
+		{
+			SwapToLoadedImage();
+		}
+		else
+		{
+			CreateImage(tex, translation, flags);
+		}
 	}
 	return &mImage;
 }
@@ -133,14 +162,64 @@ void VkHardwareTexture::CreateImage(FTexture *tex, int translation, int flags)
 			.AddImage(&mImage, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, true)
 			.Execute(fb->GetCommands()->GetTransferCommands());
 	}
+
+	SetHardwareState(READY);
 }
 
 void VkHardwareTexture::CreateTexture(int w, int h, int pixelsize, VkFormat format, const void *pixels, bool mipmap)
 {
+	CreateTexture(fb->GetCommands(), &mImage, w, h, pixelsize, format, pixels, mipmap ? -1 : 0);
+	SetHardwareState(READY);
+}
+
+void VkHardwareTexture::CheckFinalTransition(VulkanCommandBuffer *cmd, bool background)
+{
+	VkTextureImage* img = background ? &mLoadedImage : &mImage;
+	if (img->Image && img->Layout != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+	{
+		VkImageTransition()
+			.AddImage(img, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, img->Layout == VK_IMAGE_LAYOUT_UNDEFINED, 0, img->Image->mipLevels)
+			.Execute(cmd);
+	}
+}
+
+void VkHardwareTexture::ReleaseLoadedFromQueue(VulkanCommandBuffer* cmd, int fromQueueFamily, int toQueueFamily)
+{
+	if (!mLoadedImage.Image)
+	{
+		return;
+	}
+
+	PipelineBarrier()
+		.AddQueueTransfer(fromQueueFamily, toQueueFamily, mLoadedImage.Image.get(), mLoadedImage.Layout, VK_IMAGE_ASPECT_COLOR_BIT, 0, mLoadedImage.Image->mipLevels)
+		.Execute(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+}
+
+void VkHardwareTexture::AcquireLoadedFromQueue(VulkanCommandBuffer* cmd, int fromQueueFamily, int toQueueFamily)
+{
+	if (!mLoadedImage.Image)
+	{
+		return;
+	}
+
+	PipelineBarrier()
+		.AddQueueTransfer(fromQueueFamily, toQueueFamily, mLoadedImage.Image.get(), mLoadedImage.Layout, VK_IMAGE_ASPECT_COLOR_BIT, 0, mLoadedImage.Image->mipLevels)
+		.Execute(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+}
+
+void VkHardwareTexture::BackgroundCreateTexture(VkCommandBufferManager* bufManager, int w, int h, int pixelsize, VkFormat format, const void *pixels, int numMipLevels, bool createMips, int totalSize)
+{
+	CreateTexture(bufManager, &mLoadedImage, w, h, pixelsize, format, pixels, numMipLevels, createMips, totalSize);
+}
+
+void VkHardwareTexture::CreateTexture(VkCommandBufferManager *bufManager, VkTextureImage *img, int w, int h, int pixelsize, VkFormat format, const void *pixels, int mipmap, bool generateMipmaps, int totalSize)
+{
 	if (w <= 0 || h <= 0)
 		throw CVulkanError("Trying to create zero size texture");
 
-	int totalSize = w * h * pixelsize;
+	if (totalSize < 0) totalSize = w * h * pixelsize;
+	if (mipmap == -1) mipmap = GetMipLevels(w, h);
+	int mipLevels = mipmap <= 0 ? 1 : mipmap;
 
 	auto stagingBuffer = BufferBuilder()
 		.Size(totalSize)
@@ -152,22 +231,22 @@ void VkHardwareTexture::CreateTexture(int w, int h, int pixelsize, VkFormat form
 	memcpy(data, pixels, totalSize);
 	stagingBuffer->Unmap();
 
-	mImage.Image = ImageBuilder()
+	img->Image = ImageBuilder()
 		.Format(format)
-		.Size(w, h, !mipmap ? 1 : GetMipLevels(w, h))
+		.Size(w, h, mipLevels)
 		.Usage(VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)
 		.DebugName("VkHardwareTexture.mImage")
 		.Create(fb->device.get());
 
-	mImage.View = ImageViewBuilder()
-		.Image(mImage.Image.get(), format)
+	img->View = ImageViewBuilder()
+		.Image(img->Image.get(), format)
 		.DebugName("VkHardwareTexture.mImageView")
 		.Create(fb->device.get());
 
-	auto cmdbuffer = fb->GetCommands()->GetTransferCommands();
+	auto cmdbuffer = bufManager->GetTransferCommands();
 
 	VkImageTransition()
-		.AddImage(&mImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, true)
+		.AddImage(img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, true)
 		.Execute(cmdbuffer);
 
 	VkBufferImageCopy region = {};
@@ -176,14 +255,14 @@ void VkHardwareTexture::CreateTexture(int w, int h, int pixelsize, VkFormat form
 	region.imageExtent.depth = 1;
 	region.imageExtent.width = w;
 	region.imageExtent.height = h;
-	cmdbuffer->copyBufferToImage(stagingBuffer->buffer, mImage.Image->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+	cmdbuffer->copyBufferToImage(stagingBuffer->buffer, img->Image->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-	if (mipmap) mImage.GenerateMipmaps(cmdbuffer);
+	if (generateMipmaps && mipmap > 0) img->GenerateMipmaps(cmdbuffer);
 
 	// If we queued more than 64 MB of data already: wait until the uploads finish before continuing
-	fb->GetCommands()->TransferDeleteList->Add(std::move(stagingBuffer));
-	if (fb->GetCommands()->TransferDeleteList->TotalSize > 64 * 1024 * 1024)
-		fb->GetCommands()->WaitForCommands(false, true);
+	bufManager->TransferDeleteList->Add(std::move(stagingBuffer));
+	if (bufManager->TransferDeleteList->TotalSize > 64 * 1024 * 1024)
+		bufManager->WaitForCommands(false, true);
 }
 
 int VkHardwareTexture::GetMipLevels(int w, int h)

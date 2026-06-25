@@ -32,6 +32,7 @@
 
 #include "renderstyle.h"
 #include "palettecontainer.h"
+#include "common/utility/TSQueue.h"
 
 // Basic data types.
 // Needs fixed point, and BAM angles.
@@ -130,6 +131,8 @@ public:
 	bool firstTic;
 	int Tics;
 	FTranslationID Translation;
+	RingBuffer<int, 5> LastPatches;
+	FTextureID LastPatch;
 	int Flags;
 	FRenderStyle Renderstyle;
 

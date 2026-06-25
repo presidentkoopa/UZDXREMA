@@ -23,6 +23,8 @@
 #include <zvulkan/vulkanobjects.h>
 
 #include <inttypes.h>
+#include <limits>
+#include <thread>
 
 #include "v_video.h"
 #include "r_videoscale.h"
@@ -66,6 +68,7 @@ extern bool cinemamode;
 #include "engineerrors.h"
 #include "c_dispatch.h"
 #include "common/rendering/stereo3d/openxr/oxr_loader.h"
+#include "model.h"
 
 FString JitCaptureStackTrace(int framesToSkip, bool includeNativeFrames, int maxFrames = -1);
 
@@ -73,6 +76,12 @@ EXTERN_CVAR(Int, gl_tonemap)
 EXTERN_CVAR(Int, screenblocks)
 EXTERN_CVAR(Bool, cl_capfps)
 EXTERN_CVAR(Int, vr_mode)
+EXTERN_CVAR(Bool, gl_texture_thread)
+EXTERN_CVAR(Bool, gl_texture_thread_models)
+EXTERN_CVAR(Bool, gl_texture_thread_upload)
+EXTERN_CVAR(Int, gl_texture_thread_workers)
+EXTERN_CVAR(Int, gl_background_flush_count)
+EXTERN_CVAR(Int, vk_max_transfer_threads)
 
 CVAR(Bool, vk_raytrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
@@ -123,6 +132,90 @@ void VulkanPrintLog(const char* typestr, const std::string& msg)
 	}
 }
 
+bool VkTexLoadThread::loadResource(VkTexLoadIn& input, VkTexLoadOut& output)
+{
+	if (input.texture == nullptr || input.hardwareTexture == nullptr)
+	{
+		return false;
+	}
+
+	auto texBuffer = input.texture->CreateTexBuffer(input.translation, input.scaleFlags | CTF_ProcessData);
+	output.pixels = std::shared_ptr<uint8_t>(texBuffer.mBuffer, std::default_delete<uint8_t[]>());
+	texBuffer.mBuffer = nullptr;
+	output.width = texBuffer.mWidth;
+	output.height = texBuffer.mHeight;
+	output.scaleFlags = input.scaleFlags;
+	output.hardwareTexture = input.hardwareTexture;
+
+	const bool indexed = !!(input.scaleFlags & CTF_Indexed);
+	const bool canUploadInThread = cmd != nullptr && uploadQueue.familySupportsGraphics;
+	if (canUploadInThread && output.pixels != nullptr)
+	{
+		output.hardwareTexture->BackgroundCreateTexture(
+			cmd,
+			output.width,
+			output.height,
+			indexed ? 1 : 4,
+			indexed ? VK_FORMAT_R8_UNORM : VK_FORMAT_B8G8R8A8_UNORM,
+			output.pixels.get(),
+			indexed ? 0 : -1,
+			!indexed);
+		output.hardwareTexture->CheckFinalTransition(cmd->GetTransferCommands(), true);
+		cmd->WaitForCommands(false, true);
+		output.uploadedInThread = true;
+		output.needsQueueOwnershipTransfer = uploadQueue.queueFamily >= 0 && uploadQueue.queueFamily != cmd->GetRenderDevice()->device->GraphicsFamily;
+		output.uploadQueueFamily = uploadQueue.queueFamily;
+
+		if (output.needsQueueOwnershipTransfer)
+		{
+			auto releaseCommands = cmd->CreateUnmanagedCommands();
+			output.hardwareTexture->ReleaseLoadedFromQueue(releaseCommands.get(), output.uploadQueueFamily, cmd->GetRenderDevice()->device->GraphicsFamily);
+			releaseCommands->end();
+
+			auto releaseFence = std::make_unique<VulkanFence>(cmd->GetRenderDevice()->device.get());
+			QueueSubmit releaseSubmit;
+			releaseSubmit.AddCommandBuffer(releaseCommands.get());
+			releaseSubmit.Execute(cmd->GetRenderDevice()->device.get(), uploadQueue.queue, releaseFence.get());
+
+			vkWaitForFences(cmd->GetRenderDevice()->device->device, 1, &releaseFence->fence, VK_TRUE, std::numeric_limits<uint64_t>::max());
+			vkResetFences(cmd->GetRenderDevice()->device->device, 1, &releaseFence->fence);
+		}
+
+		output.pixels.reset();
+	}
+
+	return output.pixels != nullptr || output.uploadedInThread;
+}
+
+bool VkModelLoadThread::loadResource(VkModelLoadIn& input, VkModelLoadOut& output)
+{
+	if (input.model == nullptr || input.lump < 0)
+	{
+		return false;
+	}
+
+	FileReader reader;
+	try
+	{
+		reader = fileSystem.OpenFileReader(input.lump, FileSys::EReaderType::READER_NEW, 0);
+	}
+	catch (...)
+	{
+		return false;
+	}
+
+	if (!reader.isOpen())
+	{
+		return false;
+	}
+
+	output.data = reader.Read();
+	reader.Close();
+	output.lump = input.lump;
+	output.model = input.model;
+	return true;
+}
+
 VulkanRenderDevice::VulkanRenderDevice(void *hMonitor, bool fullscreen, std::shared_ptr<VulkanSurface> surface) :
 	Super(hMonitor, fullscreen) 
 {
@@ -146,11 +239,62 @@ VulkanRenderDevice::VulkanRenderDevice(void *hMonitor, bool fullscreen, std::sha
 		}
 	}
 	SupportedDevices = builder.FindDevices(surface->Instance);
-	device = builder.Create(surface->Instance);
+	device = builder.Create(surface->Instance, gl_texture_thread ? vk_max_transfer_threads : 0, 0);
+
+	if (gl_texture_thread)
+	{
+		modelThread = std::make_unique<VkModelLoadThread>(&modelInQueue, &modelOutQueue);
+		unsigned int cpuThreadCount = std::max(1u, std::thread::hardware_concurrency());
+		cpuThreadCount = cpuThreadCount > 1 ? cpuThreadCount - 1 : 1;
+		cpuThreadCount = std::min(cpuThreadCount, (unsigned int)gl_texture_thread_workers);
+		unsigned int threadCount = cpuThreadCount;
+		const bool useUploadQueues = gl_texture_thread_upload && !device->uploadQueues.empty();
+
+		if (useUploadQueues)
+		{
+			threadCount = std::min<unsigned int>(threadCount, (unsigned int)device->uploadQueues.size());
+			bgTransferThreads.reserve(threadCount);
+			mBGTransferCommands.reserve(threadCount);
+			for (unsigned int i = 0; i < threadCount; i++)
+			{
+				const auto& slot = device->uploadQueues[i];
+				if (!slot.familySupportsGraphics)
+				{
+					break;
+				}
+
+				auto bgCommands = std::make_unique<VkCommandBufferManager>(this, &device->uploadQueues[i].queue, device->uploadQueues[i].queueFamily, true);
+				auto worker = std::make_unique<VkTexLoadThread>(bgCommands.get(), device.get(), (int)i, &primaryTexQueue, &secondaryTexQueue, &outputTexQueue);
+				worker->start();
+				mBGTransferCommands.push_back(std::move(bgCommands));
+				bgTransferThreads.push_back(std::move(worker));
+			}
+		}
+
+		if (bgTransferThreads.empty())
+		{
+			threadCount = std::max(1u, cpuThreadCount);
+			bgTransferThreads.reserve(threadCount);
+			for (unsigned int i = 0; i < threadCount; i++)
+			{
+				auto worker = std::make_unique<VkTexLoadThread>(nullptr, device.get(), -1, &primaryTexQueue, &secondaryTexQueue, &outputTexQueue);
+				worker->start();
+				bgTransferThreads.push_back(std::move(worker));
+			}
+		}
+		modelThread->start();
+		bgTransferEnabled = !bgTransferThreads.empty();
+
+		if (gl_texture_thread_upload && mBGTransferCommands.empty() && !device->uploadQueues.empty())
+		{
+			Printf("Asset streaming upload queues requested, but available upload queues do not support graphics. Falling back to load-only worker threads.\n");
+		}
+	}
 }
 
 VulkanRenderDevice::~VulkanRenderDevice()
 {
+	StopBackgroundCache();
 	vkDeviceWaitIdle(device->device); // make sure the GPU is no longer using any objects before RAII tears them down
 
 	delete mVertexData;
@@ -170,6 +314,10 @@ VulkanRenderDevice::~VulkanRenderDevice()
 		mShaderManager->Deinit();
 
 	mCommands->DeleteFrameObjects();
+	for (auto& bgCommands : mBGTransferCommands)
+	{
+		bgCommands->DeleteFrameObjects();
+	}
 }
 
 void VulkanRenderDevice::InitializeState()
@@ -195,7 +343,7 @@ void VulkanRenderDevice::InitializeState()
 	uniformblockalignment = (unsigned int)device->PhysicalDevice.Properties.Properties.limits.minUniformBufferOffsetAlignment;
 	maxuniformblock = device->PhysicalDevice.Properties.Properties.limits.maxUniformBufferRange;
 
-	mCommands.reset(new VkCommandBufferManager(this));
+	mCommands.reset(new VkCommandBufferManager(this, &device->GraphicsQueue, device->GraphicsFamily));
 
 	mSamplerManager.reset(new VkSamplerManager(this));
 	mTextureManager.reset(new VkTextureManager(this));
@@ -384,6 +532,303 @@ void VulkanRenderDevice::PrecacheMaterial(FMaterial *mat, int translation)
 		auto syslayer = static_cast<VkHardwareTexture*>(mat->GetLayer(i, 0, &layer));
 		syslayer->GetImage(layer->layerTexture, 0, layer->scaleFlags);
 	}
+}
+
+void VulkanRenderDevice::PrequeueMaterial(FMaterial *mat, int translation)
+{
+	BackgroundCacheMaterial(mat, FTranslationID::fromInt(translation), false, true);
+}
+
+bool VulkanRenderDevice::BackgroundCacheTextureMaterial(FGameTexture *tex, FTranslationID translation, int scaleFlags, bool makeSPI)
+{
+	if (!bgTransferEnabled || tex == nullptr || !tex->isValid())
+	{
+		return false;
+	}
+
+	patchQueue.deleteSearch([&](QueuedPatch& queued)
+	{
+		return queued.tex == tex &&
+			queued.translation == translation.index() &&
+			queued.scaleFlags == scaleFlags;
+	});
+
+	QueuedPatch patch;
+	patch.tex = tex;
+	patch.translation = translation.index();
+	patch.scaleFlags = scaleFlags;
+	patch.secondary = false;
+	patchQueue.queue(std::move(patch));
+	return true;
+}
+
+bool VulkanRenderDevice::BackgroundLoadModel(FModel* model)
+{
+	if (!bgTransferEnabled || !gl_texture_thread_models || model == nullptr || model->GetLumpNum() < 0)
+	{
+		return false;
+	}
+
+	if (model->GetLoadState() == FModel::READY)
+	{
+		return false;
+	}
+
+	if (model->GetLoadState() == FModel::LOADING)
+	{
+		return true;
+	}
+
+	model->SetLoadState(FModel::LOADING);
+
+	VkModelLoadIn input;
+	input.lump = model->GetLumpNum();
+	input.model = model;
+	modelInQueue.queue(std::move(input));
+	if (modelThread) modelThread->wake();
+	return true;
+}
+
+bool VulkanRenderDevice::BackgroundCacheMaterial(FMaterial *mat, FTranslationID translation, bool makeSPI, bool secondary)
+{
+	if (!bgTransferEnabled || mat == nullptr || mat->Source()->GetUseType() == ETextureType::SWCanvas)
+	{
+		return false;
+	}
+
+	MaterialLayerInfo* layer = nullptr;
+	auto baseLayer = static_cast<VkHardwareTexture*>(mat->GetLayer(0, translation.index(), &layer));
+	if (layer != nullptr && layer->layerTexture != nullptr)
+	{
+		if (!secondary && baseLayer->GetState() == IHardwareTexture::CACHING)
+		{
+			VkTexLoadIn input;
+			if (secondaryTexQueue.dequeueSearch(input, [&](VkTexLoadIn& queued)
+			{
+				return queued.hardwareTexture == baseLayer;
+			}))
+			{
+				baseLayer->SetHardwareState(IHardwareTexture::LOADING);
+				primaryTexQueue.queue(std::move(input));
+				for (auto& thread : bgTransferThreads) thread->wake();
+			}
+		}
+		else if (baseLayer->GetState() == IHardwareTexture::NONE)
+		{
+			baseLayer->SetHardwareState(secondary ? IHardwareTexture::CACHING : IHardwareTexture::LOADING);
+			VkTexLoadIn input;
+			input.texture = layer->layerTexture;
+			input.translation = translation.index();
+			input.scaleFlags = layer->scaleFlags;
+			input.hardwareTexture = baseLayer;
+			if (secondary) secondaryTexQueue.queue(std::move(input));
+			else primaryTexQueue.queue(std::move(input));
+			for (auto& thread : bgTransferThreads) thread->wake();
+		}
+	}
+
+	for (int i = 1; i < mat->NumLayers(); i++)
+	{
+		auto extraLayer = static_cast<VkHardwareTexture*>(mat->GetLayer(i, 0, &layer));
+		if (layer != nullptr && layer->layerTexture != nullptr)
+		{
+			if (!secondary && extraLayer->GetState() == IHardwareTexture::CACHING)
+			{
+				VkTexLoadIn input;
+				if (secondaryTexQueue.dequeueSearch(input, [&](VkTexLoadIn& queued)
+				{
+					return queued.hardwareTexture == extraLayer;
+				}))
+				{
+					extraLayer->SetHardwareState(IHardwareTexture::LOADING);
+					primaryTexQueue.queue(std::move(input));
+					for (auto& thread : bgTransferThreads) thread->wake();
+				}
+			}
+			else if (extraLayer->GetState() == IHardwareTexture::NONE)
+			{
+				extraLayer->SetHardwareState(secondary ? IHardwareTexture::CACHING : IHardwareTexture::LOADING);
+				VkTexLoadIn input;
+				input.texture = layer->layerTexture;
+				input.translation = 0;
+				input.scaleFlags = layer->scaleFlags;
+				input.hardwareTexture = extraLayer;
+				if (secondary) secondaryTexQueue.queue(std::move(input));
+				else primaryTexQueue.queue(std::move(input));
+				for (auto& thread : bgTransferThreads) thread->wake();
+			}
+		}
+	}
+
+	return true;
+}
+
+bool VulkanRenderDevice::CachingActive()
+{
+	if (!bgTransferEnabled)
+	{
+		return false;
+	}
+
+	if (primaryTexQueue.size() > 0 || secondaryTexQueue.size() > 0 || outputTexQueue.size() > 0 || patchQueue.size() > 0)
+	{
+		return true;
+	}
+
+	if (modelInQueue.size() > 0 || modelOutQueue.size() > 0)
+	{
+		return true;
+	}
+
+	for (auto& thread : bgTransferThreads)
+	{
+		if (thread->isActive())
+		{
+			return true;
+		}
+	}
+	if (modelThread && modelThread->isActive())
+	{
+		return true;
+	}
+	return false;
+}
+
+float VulkanRenderDevice::CacheProgress()
+{
+	return (float)(primaryTexQueue.size() + secondaryTexQueue.size() + patchQueue.size() + modelInQueue.size());
+}
+
+void VulkanRenderDevice::StopBackgroundCache()
+{
+	primaryTexQueue.clear();
+	secondaryTexQueue.clear();
+	patchQueue.clear();
+	modelInQueue.clear();
+
+	for (auto& thread : bgTransferThreads)
+	{
+		thread->stop();
+	}
+	bgTransferThreads.clear();
+	mBGTransferCommands.clear();
+	if (modelThread)
+	{
+		modelThread->stop();
+	}
+	modelOutQueue.clear();
+	outputTexQueue.clear();
+	bgTransferEnabled = false;
+}
+
+void VulkanRenderDevice::FlushBackground()
+{
+	if (!bgTransferEnabled)
+	{
+		return;
+	}
+
+	UpdateBackgroundCache(true);
+	UploadLoadedTextures(true);
+}
+
+void VulkanRenderDevice::UploadLoadedTextures(bool flush)
+{
+	int uploadBudget = flush ? std::numeric_limits<int>::max() : std::max(1, (int)gl_background_flush_count);
+
+	VkTexLoadOut loaded;
+	while (uploadBudget > 0 && outputTexQueue.dequeue(loaded))
+	{
+		if (loaded.hardwareTexture == nullptr)
+		{
+			uploadBudget--;
+			continue;
+		}
+
+		if (loaded.needsQueueOwnershipTransfer)
+		{
+			loaded.hardwareTexture->AcquireLoadedFromQueue(mCommands->GetTransferCommands(), loaded.uploadQueueFamily, device->GraphicsFamily);
+		}
+
+		if (loaded.uploadedInThread)
+		{
+			loaded.hardwareTexture->SetHardwareState(IHardwareTexture::READY);
+		}
+		else if (loaded.pixels != nullptr)
+		{
+			const bool indexed = !!(loaded.scaleFlags & CTF_Indexed);
+			loaded.hardwareTexture->BackgroundCreateTexture(
+				mCommands.get(),
+				loaded.width,
+				loaded.height,
+				indexed ? 1 : 4,
+				indexed ? VK_FORMAT_R8_UNORM : VK_FORMAT_B8G8R8A8_UNORM,
+				loaded.pixels.get(),
+				indexed ? 0 : -1,
+				!indexed);
+			loaded.hardwareTexture->CheckFinalTransition(mCommands->GetTransferCommands(), true);
+			loaded.hardwareTexture->SetHardwareState(IHardwareTexture::READY);
+		}
+		uploadBudget--;
+	}
+}
+
+void VulkanRenderDevice::UpdateBackgroundCache(bool flush)
+{
+	if (!bgTransferEnabled)
+	{
+		return;
+	}
+
+	auto processPendingWork = [&]()
+	{
+		QueuedPatch patch;
+		while (patchQueue.dequeue(patch))
+		{
+			if (patch.tex != nullptr)
+			{
+				auto material = FMaterial::ValidateTexture(patch.tex, patch.scaleFlags, true);
+				if (material != nullptr)
+				{
+					BackgroundCacheMaterial(material, FTranslationID::fromInt(patch.translation), false, patch.secondary);
+				}
+			}
+		}
+
+		VkModelLoadOut modelOut;
+		while (modelOutQueue.dequeue(modelOut))
+		{
+			if (modelOut.model == nullptr)
+			{
+				continue;
+			}
+
+			if (modelOut.model->GetLoadState() != FModel::LOADING)
+			{
+				modelOut.data.clear();
+				continue;
+			}
+
+			modelOut.model->LoadGeometry(&modelOut.data);
+			modelOut.model->SetLoadState(FModel::READY);
+			modelOut.data.clear();
+		}
+	};
+
+	processPendingWork();
+
+	if (flush)
+	{
+		while (CachingActive())
+		{
+			processPendingWork();
+			UploadLoadedTextures(true);
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
+		return;
+	}
+
+	UploadLoadedTextures(false);
 }
 
 IHardwareTexture *VulkanRenderDevice::CreateHardwareTexture(int numchannels)
@@ -606,6 +1051,7 @@ void VulkanRenderDevice::BeginFrame()
 	}
 
 	mViewpoints->Clear();
+	UpdateBackgroundCache(false);
 	mCommands->BeginFrame();
 	mTextureManager->BeginFrame();
 	int eyeLayerCount = 1;
@@ -696,6 +1142,10 @@ void VulkanRenderDevice::PrintStartupLog()
 	Printf("Max. texture size: %d\n", limits.maxImageDimension2D);
 	Printf("Max. uniform buffer range: %d\n", limits.maxUniformBufferRange);
 	Printf("Min. uniform buffer offset alignment: %" PRIu64 "\n", limits.minUniformBufferOffsetAlignment);
+	Printf("Graphics Queue Family: #%d\n", device->GraphicsFamily);
+	Printf("Present Queue Family: #%d\n", device->PresentFamily);
+	Printf("Upload Queue Family: #%d (%s)\n", device->UploadFamily, device->UploadFamilySupportsGraphics ? "graphics-capable" : "transfer-only");
+	Printf("Upload Queue Slots: %d\n", (int)device->uploadQueues.size());
 }
 
 void VulkanRenderDevice::SetLevelMesh(hwrenderer::LevelMesh* mesh)

@@ -8,6 +8,7 @@
 #include "TRS.h"
 #include "tarray.h"
 #include "name.h"
+#include "fs_files.h"
 
 #include "bonecomponents.h"
 
@@ -80,6 +81,12 @@ enum EFrameError
 class FModel
 {
 public:
+	enum LoadState
+	{
+		NONE = 0,
+		LOADING = 1,
+		READY = 2
+	};
 
 	FModel();
 	virtual ~FModel();
@@ -108,6 +115,10 @@ public:
 	void SetVertexBuffer(int type, IModelVertexBuffer *buffer) { mVBuf[type] = buffer; }
 	IModelVertexBuffer *GetVertexBuffer(int type) const { return mVBuf[type]; }
 	void DestroyVertexBuffer();
+	LoadState GetLoadState() const { return loadState; }
+	void SetLoadState(LoadState state) { loadState = state; }
+	virtual void LoadGeometry(FileSys::FileData* lumpData);
+	int GetLumpNum() const { return mLumpNum; }
 
 	bool hasSurfaces = false;
 
@@ -117,6 +128,9 @@ public:
 	FSpriteModelFrame *baseFrame;
 private:
 	IModelVertexBuffer *mVBuf[NumModelRendererTypes];
+	LoadState loadState = NONE;
+protected:
+	int mLumpNum = -1;
 };
 
 int ModelFrameHash(FSpriteModelFrame* smf);

@@ -272,8 +272,24 @@ void IQMModel::LoadGeometry()
 {
 	try
 	{
+		if (Vertices.Size() > 0)
+		{
+			return;
+		}
+
 		auto lumpdata = fileSystem.ReadFile(mLumpNum);
-		IQMFileReader reader(lumpdata.data(), (int)lumpdata.size());
+		LoadGeometry(&lumpdata);
+	}
+	catch (IQMReadErrorException)
+	{
+	}
+}
+
+void IQMModel::LoadGeometry(FileSys::FileData* lumpData)
+{
+	try
+	{
+		IQMFileReader reader(lumpData->data(), (int)lumpData->size());
 
 		Vertices.Resize(NumVertices);
 		for (IQMVertexArray& vertexArray : VertexArrays)
