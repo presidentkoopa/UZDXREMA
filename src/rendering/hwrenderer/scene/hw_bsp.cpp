@@ -61,11 +61,13 @@ CUSTOM_CVAR(Int, gl_bsp_worker_threads, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CV
 	Printf("This won't take effect until " GAMENAME " is restarted.\n");
 }
 CVAR(Bool, gl_bsp_worker_sky_mainthread, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CUSTOM_CVAR(Int, gl_bsp_wall_batch_size, 96, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL)
+CVAR(Int, gl_bsp_wall_batch_size, 96, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+static inline int GetWallBatchSize()
 {
-	if (self < 80) self = 64;
-	else if (self < 112) self = 96;
-	else self = 128;
+	if (gl_bsp_wall_batch_size < 80) return 64;
+	if (gl_bsp_wall_batch_size < 112) return 96;
+	return 128;
 }
 
 EXTERN_CVAR(Float, r_actorspriteshadowdist)
@@ -172,7 +174,7 @@ public:
 	{
 		items[itemwrite++] = { sub, seg, frontsector, backsector, isculled, false };
 		pendingcount++;
-		if (pendingcount >= gl_bsp_wall_batch_size)
+		if (pendingcount >= GetWallBatchSize())
 		{
 			FlushPending();
 		}
