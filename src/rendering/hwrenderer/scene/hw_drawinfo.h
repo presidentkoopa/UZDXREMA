@@ -184,8 +184,6 @@ struct HWDrawInfo
 	TArray<uint8_t> ss_renderflags;
 	TArray<uint8_t> no_renderflags;
 	TArray<uint8_t> seamless_vertex_processed;
-	TArray<uint8_t> sector_mainthread_wallflags;
-	TArray<uint8_t> line_mainthread_wallflags;
 
 	// This is needed by the BSP traverser.
 	BitArray CurrentMapSections;	// this cannot be a single number, because a group of portals with the same displacement may link different sections.

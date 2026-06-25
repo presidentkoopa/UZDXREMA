@@ -18,11 +18,6 @@ struct HWMeshHelper
 	int batchCount = 0;
 	int64_t totalCycles = 0;
 	int64_t wallCycles = 0;
-	unsigned int reserveList = 0;
-	unsigned int reserveTranslucent = 0;
-	unsigned int reservePortals = 0;
-	unsigned int reserveLower = 0;
-	unsigned int reserveUpper = 0;
 };
 
 

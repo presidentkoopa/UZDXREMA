@@ -239,11 +239,6 @@ static RenderJobQueue sceneJobQueue;
 static WallWorkQueue wallJobQueue;
 static std::vector<HWMeshHelper> wallWorkerMeshes;
 
-static inline unsigned int NextReserveHint(unsigned int size)
-{
-	return size > 0 ? size + size / 4 + 16 : 0;
-}
-
 static inline void RelaxWorkerSpin(unsigned int& idleSpins)
 {
 #if defined(ARCH_IA32) || defined(_M_X64) || defined(__x86_64__)
@@ -258,10 +253,6 @@ static inline void RelaxWorkerSpin(unsigned int& idleSpins)
 #endif
 
 	idleSpins++;
-	if ((idleSpins & 63u) == 0)
-	{
-		std::this_thread::yield();
-	}
 }
 
 void HWDrawInfo::WorkerThread(HWMeshHelper* helper)
@@ -461,16 +452,7 @@ static bool ComputeSectorMainThreadWallPath(sector_t* sector)
 
 static bool SectorNeedsMainThreadWallPath(HWDrawInfo* di, sector_t* sector)
 {
-	if (sector == nullptr)
-		return false;
-
-	const int index = sector->Index();
-	if (di == nullptr || index < 0 || (unsigned)index >= di->sector_mainthread_wallflags.Size())
-	{
-		return ComputeSectorMainThreadWallPath(sector);
-	}
-
-	return di->sector_mainthread_wallflags[index] != 0;
+	return ComputeSectorMainThreadWallPath(sector);
 }
 
 static bool ComputeLineMainThreadWallPath(line_t* line)
@@ -487,48 +469,9 @@ static bool ComputeLineMainThreadWallPath(line_t* line)
 	return false;
 }
 
-static void PrepareSectorMainThreadWallFlags(HWDrawInfo* di)
-{
-	if (di == nullptr || di->Level == nullptr)
-		return;
-
-	for (auto& sector : di->Level->sectors)
-	{
-		const int index = sector.Index();
-		if (index < 0 || (unsigned)index >= di->sector_mainthread_wallflags.Size())
-			continue;
-
-		di->sector_mainthread_wallflags[index] = ComputeSectorMainThreadWallPath(&sector) ? 1 : 0;
-	}
-}
-
 static bool LineNeedsMainThreadWallPath(HWDrawInfo* di, line_t* line)
 {
-	if (line == nullptr)
-		return false;
-
-	const int index = line->Index();
-	if (di == nullptr || index < 0 || (unsigned)index >= di->line_mainthread_wallflags.Size())
-	{
-		return ComputeLineMainThreadWallPath(line);
-	}
-
-	return di->line_mainthread_wallflags[index] != 0;
-}
-
-static void PrepareLineMainThreadWallFlags(HWDrawInfo* di)
-{
-	if (di == nullptr || di->Level == nullptr)
-		return;
-
-	for (auto& line : di->Level->lines)
-	{
-		const int index = line.Index();
-		if (index < 0 || (unsigned)index >= di->line_mainthread_wallflags.Size())
-			continue;
-
-		di->line_mainthread_wallflags[index] = ComputeLineMainThreadWallPath(&line) ? 1 : 0;
-	}
+	return ComputeLineMainThreadWallPath(line);
 }
 
 static bool NeedsMainThreadWallPath(HWDrawInfo* di, seg_t* seg, sector_t* frontsector, sector_t* backsector)
@@ -1486,15 +1429,6 @@ void HWDrawInfo::RenderBSP(void *node, bool drawpsprites)
 	{
 		sceneJobQueue.ReleaseAll();
 		wallJobQueue.ReleaseAll();
-		if (experimentalMultiWallWorkers)
-		{
-			PrepareSectorMainThreadWallFlags(this);
-			PrepareLineMainThreadWallFlags(this);
-		}
-		if (experimentalMultiWallWorkers && gl_seamless)
-		{
-			PrepareSeamlessVerticesForFrame(this);
-		}
 		auto sceneFuture = renderPool.push([&](int id) {
 			WorkerThread();
 		});
@@ -1513,11 +1447,6 @@ void HWDrawInfo::RenderBSP(void *node, bool drawpsprites)
 				mesh.portals.Clear();
 				mesh.lower.Clear();
 				mesh.upper.Clear();
-				if (mesh.reserveList > 0 && mesh.list.Max() < mesh.reserveList) mesh.list.Grow(mesh.reserveList);
-				if (mesh.reserveTranslucent > 0 && mesh.translucent.Max() < mesh.reserveTranslucent) mesh.translucent.Grow(mesh.reserveTranslucent);
-				if (mesh.reservePortals > 0 && mesh.portals.Max() < mesh.reservePortals) mesh.portals.Grow(mesh.reservePortals);
-				if (mesh.reserveLower > 0 && mesh.lower.Max() < mesh.reserveLower) mesh.lower.Grow(mesh.reserveLower);
-				if (mesh.reserveUpper > 0 && mesh.upper.Max() < mesh.reserveUpper) mesh.upper.Grow(mesh.reserveUpper);
 				mesh.wallCount = 0;
 				mesh.batchCount = 0;
 				mesh.totalCycles = 0;
@@ -1581,11 +1510,6 @@ void HWDrawInfo::RenderBSP(void *node, bool drawpsprites)
 				{
 					AddLowerMissingTexture(missing.side, missing.sub, (float)missing.plane);
 				}
-				mesh.reserveList = NextReserveHint(mesh.list.Size());
-				mesh.reserveTranslucent = NextReserveHint(mesh.translucent.Size());
-				mesh.reservePortals = NextReserveHint(mesh.portals.Size());
-				mesh.reserveLower = NextReserveHint(mesh.lower.Size());
-				mesh.reserveUpper = NextReserveHint(mesh.upper.Size());
 			}
 			WallMerge.Unclock();
 			MTWait.Unclock();
