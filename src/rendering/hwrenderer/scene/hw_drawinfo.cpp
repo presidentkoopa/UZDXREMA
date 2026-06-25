@@ -260,12 +260,18 @@ void HWDrawInfo::ClearBuffers()
 		ss_renderflags.Resize(Level->subsectors.Size());
 		no_renderflags.Resize(Level->subsectors.Size());
 		seamless_vertex_processed.Resize(Level->vertexes.Size());
+		sector_mainthread_wallflags.Resize(Level->sectors.Size());
+		line_mainthread_wallflags.Resize(Level->lines.Size());
 
 		memset(&section_renderflags[0], 0, Level->sections.allSections.Size() * sizeof(section_renderflags[0]));
 		memset(&ss_renderflags[0], 0, Level->subsectors.Size() * sizeof(ss_renderflags[0]));
 		memset(&no_renderflags[0], 0, Level->nodes.Size() * sizeof(no_renderflags[0]));
 		if (Level->vertexes.Size() > 0)
 			memset(&seamless_vertex_processed[0], 0, Level->vertexes.Size() * sizeof(seamless_vertex_processed[0]));
+		if (Level->sectors.Size() > 0)
+			memset(&sector_mainthread_wallflags[0], 0, Level->sectors.Size() * sizeof(sector_mainthread_wallflags[0]));
+		if (Level->lines.Size() > 0)
+			memset(&line_mainthread_wallflags[0], 0, Level->lines.Size() * sizeof(line_mainthread_wallflags[0]));
 	}
 
 	Decals[0].Clear();

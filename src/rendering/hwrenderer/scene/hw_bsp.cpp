@@ -46,10 +46,11 @@
 #include "hw_walldispatcher.h"
 
 #include "p_visualthinker.h"
+#include <thread>
 
-#ifdef ARCH_IA32
+#if defined(ARCH_IA32) || defined(_M_X64) || defined(__x86_64__)
 #include <immintrin.h>
-#endif // ARCH_IA32
+#endif
 
 CVAR(Bool, gl_multithread, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CUSTOM_CVAR(Int, gl_bsp_worker_threads, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL)
@@ -59,6 +60,7 @@ CUSTOM_CVAR(Int, gl_bsp_worker_threads, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CV
 
 	Printf("This won't take effect until " GAMENAME " is restarted.\n");
 }
+CVAR(Bool, gl_bsp_worker_sky_mainthread, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 EXTERN_CVAR(Float, r_actorspriteshadowdist)
 EXTERN_CVAR(Bool, r_radarclipper)
@@ -237,6 +239,31 @@ static RenderJobQueue sceneJobQueue;
 static WallWorkQueue wallJobQueue;
 static std::vector<HWMeshHelper> wallWorkerMeshes;
 
+static inline unsigned int NextReserveHint(unsigned int size)
+{
+	return size > 0 ? size + size / 4 + 16 : 0;
+}
+
+static inline void RelaxWorkerSpin(unsigned int& idleSpins)
+{
+#if defined(ARCH_IA32) || defined(_M_X64) || defined(__x86_64__)
+	_mm_pause();
+	_mm_pause();
+	_mm_pause();
+	_mm_pause();
+	_mm_pause();
+	_mm_pause();
+	_mm_pause();
+	_mm_pause();
+#endif
+
+	idleSpins++;
+	if ((idleSpins & 63u) == 0)
+	{
+		std::this_thread::yield();
+	}
+}
+
 void HWDrawInfo::WorkerThread(HWMeshHelper* helper)
 {
 	sector_t *front, *back;
@@ -249,6 +276,7 @@ void HWDrawInfo::WorkerThread(HWMeshHelper* helper)
 		WTTotal.Clock();
 		SceneWorkerElapsed.Clock();
 	}
+	unsigned int idleSpins = 0;
 	isWorkerThread = true;	// for adding asserts in GL API code. The worker thread may never call any GL API.
 	while (true)
 	{
@@ -257,20 +285,10 @@ void HWDrawInfo::WorkerThread(HWMeshHelper* helper)
 			auto batchJob = wallJobQueue.GetJob();
 			if (batchJob == nullptr)
 			{
-#ifdef ARCH_IA32
-				_mm_pause();
-				_mm_pause();
-				_mm_pause();
-				_mm_pause();
-				_mm_pause();
-				_mm_pause();
-				_mm_pause();
-				_mm_pause();
-				_mm_pause();
-				_mm_pause();
-#endif // ARCH_IA32
+				RelaxWorkerSpin(idleSpins);
 				continue;
 			}
+			idleSpins = 0;
 
 			if (batchJob->terminate)
 			{
@@ -297,20 +315,9 @@ void HWDrawInfo::WorkerThread(HWMeshHelper* helper)
 		auto job = sceneJobQueue.GetJob();
 		if (job == nullptr)
 		{
-#ifdef ARCH_IA32
-			// The queue is empty. But yielding would be too costly here and possibly cause further delays down the line if the thread is halted.
-			// So instead add a few pause instructions and retry immediately.
-			_mm_pause();
-			_mm_pause();
-			_mm_pause();
-			_mm_pause();
-			_mm_pause();
-			_mm_pause();
-			_mm_pause();
-			_mm_pause();
-			_mm_pause();
-			_mm_pause();
-#endif // ARCH_IA32
+			// The queue is empty. Relax the CPU briefly before retrying so extra BSP workers
+			// do not just busy-spin on 64-bit builds while the main thread is still producing work.
+			RelaxWorkerSpin(idleSpins);
 		}
 		// Note that the main thread MUST have prepared the fake sectors that get used below!
 		// This worker thread cannot prepare them itself without costly synchronization.
@@ -323,6 +330,7 @@ void HWDrawInfo::WorkerThread(HWMeshHelper* helper)
 
 		case RenderJob::WallJob:
 		{
+			idleSpins = 0;
 			HWWall wall;
 			WTWallJobs.Clock();
 			SetupWall.Clock();
@@ -338,6 +346,7 @@ void HWDrawInfo::WorkerThread(HWMeshHelper* helper)
 
 		case RenderJob::FlatJob:
 		{
+			idleSpins = 0;
 			Clocker flatJobTimer(WTFlatJobs);
 			HWFlat flat;
 			SetupFlat.Clock();
@@ -349,6 +358,7 @@ void HWDrawInfo::WorkerThread(HWMeshHelper* helper)
 		}
 
 		case RenderJob::SpriteJob:
+			idleSpins = 0;
 			WTThingJobs.Clock();
 			SetupSprite.Clock();
 			front = hw_FakeFlat(job->sub->sector, in_area, false);
@@ -358,6 +368,7 @@ void HWDrawInfo::WorkerThread(HWMeshHelper* helper)
 			break;
 
 		case RenderJob::ParticleJob:
+			idleSpins = 0;
 			WTThingJobs.Clock();
 			SetupSprite.Clock();
 			front = hw_FakeFlat(job->sub->sector, in_area, false);
@@ -367,6 +378,7 @@ void HWDrawInfo::WorkerThread(HWMeshHelper* helper)
 			break;
 
 		case RenderJob::PortalJob:
+			idleSpins = 0;
 			AddSubsectorToPortal((FSectorPortalGroup *)job->seg, job->sub);
 			break;
 		}
@@ -429,12 +441,13 @@ bool IsDistanceCulled(seg_t *line)
 	return false;
 }
 
-static bool SectorNeedsMainThreadWallPath(sector_t* sector)
+static bool ComputeSectorMainThreadWallPath(sector_t* sector)
 {
 	if (sector == nullptr)
 		return false;
 
-	if (sector->GetTexture(sector_t::ceiling) == skyflatnum || sector->GetTexture(sector_t::floor) == skyflatnum)
+	if (gl_bsp_worker_sky_mainthread &&
+		(sector->GetTexture(sector_t::ceiling) == skyflatnum || sector->GetTexture(sector_t::floor) == skyflatnum))
 		return true;
 
 	if (sector->ValidatePortal(sector_t::ceiling) != nullptr || sector->ValidatePortal(sector_t::floor) != nullptr)
@@ -446,18 +459,87 @@ static bool SectorNeedsMainThreadWallPath(sector_t* sector)
 	return false;
 }
 
-static bool NeedsMainThreadWallPath(seg_t* seg, sector_t* frontsector, sector_t* backsector)
+static bool SectorNeedsMainThreadWallPath(HWDrawInfo* di, sector_t* sector)
+{
+	if (sector == nullptr)
+		return false;
+
+	const int index = sector->Index();
+	if (di == nullptr || index < 0 || (unsigned)index >= di->sector_mainthread_wallflags.Size())
+	{
+		return ComputeSectorMainThreadWallPath(sector);
+	}
+
+	return di->sector_mainthread_wallflags[index] != 0;
+}
+
+static bool ComputeLineMainThreadWallPath(line_t* line)
+{
+	if (line == nullptr)
+		return false;
+
+	if (line->special == Line_Horizon)
+		return true;
+
+	if (line->isVisualPortal() || line->GetTransferredPortal() != nullptr)
+		return true;
+
+	return false;
+}
+
+static void PrepareSectorMainThreadWallFlags(HWDrawInfo* di)
+{
+	if (di == nullptr || di->Level == nullptr)
+		return;
+
+	for (auto& sector : di->Level->sectors)
+	{
+		const int index = sector.Index();
+		if (index < 0 || (unsigned)index >= di->sector_mainthread_wallflags.Size())
+			continue;
+
+		di->sector_mainthread_wallflags[index] = ComputeSectorMainThreadWallPath(&sector) ? 1 : 0;
+	}
+}
+
+static bool LineNeedsMainThreadWallPath(HWDrawInfo* di, line_t* line)
+{
+	if (line == nullptr)
+		return false;
+
+	const int index = line->Index();
+	if (di == nullptr || index < 0 || (unsigned)index >= di->line_mainthread_wallflags.Size())
+	{
+		return ComputeLineMainThreadWallPath(line);
+	}
+
+	return di->line_mainthread_wallflags[index] != 0;
+}
+
+static void PrepareLineMainThreadWallFlags(HWDrawInfo* di)
+{
+	if (di == nullptr || di->Level == nullptr)
+		return;
+
+	for (auto& line : di->Level->lines)
+	{
+		const int index = line.Index();
+		if (index < 0 || (unsigned)index >= di->line_mainthread_wallflags.Size())
+			continue;
+
+		di->line_mainthread_wallflags[index] = ComputeLineMainThreadWallPath(&line) ? 1 : 0;
+	}
+}
+
+static bool NeedsMainThreadWallPath(HWDrawInfo* di, seg_t* seg, sector_t* frontsector, sector_t* backsector)
 {
 	if (seg == nullptr || seg->linedef == nullptr)
 		return false;
 
-	if (seg->linedef->special == Line_Horizon)
+	if (LineNeedsMainThreadWallPath(di, seg->linedef))
 		return true;
 
-	if (seg->linedef->isVisualPortal() || seg->linedef->GetTransferredPortal() != nullptr)
-		return true;
-
-	if (SectorNeedsMainThreadWallPath(frontsector) || SectorNeedsMainThreadWallPath(backsector))
+	if (SectorNeedsMainThreadWallPath(di, frontsector) || SectorNeedsMainThreadWallPath(di, backsector))
 		return true;
 
 	return false;
@@ -479,6 +561,24 @@ static inline void PrepareSeamlessVertex(HWDrawInfo* di, vertex_t* v)
 	{
 		v->RecalcVertexHeights();
 		di->seamless_vertex_processed[index] = 1;
+	}
+}
+
+static void PrepareSeamlessVerticesForFrame(HWDrawInfo* di)
+{
+	if (di == nullptr || di->Level == nullptr)
+		return;
+
+	for (auto& vertex : di->Level->vertexes)
+	{
+		if (!vertex.dirty)
+			continue;
+
+		const int index = vertex.Index();
+		if (index >= 0 && (unsigned)index < di->seamless_vertex_processed.Size() && di->seamless_vertex_processed[index])
+			continue;
+
+		PrepareSeamlessVertex(di, &vertex);
 	}
 }
 
@@ -519,7 +619,12 @@ void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
 
 	ScopedVRLineTimer vrLineTimer;
 	sector_t * backsector = nullptr;
+	bool cachedFakeBacksector = false;
+	bool cachedBacksectorClip = false;
+	bool hasCachedBacksectorClip = false;
 	const bool isVisualPortalLine = seg->linedef != nullptr && seg->linedef->isVisualPortal();
+	const bool allowOoB = Viewpoint.IsAllowedOoB();
+	const bool useRadarClip = allowOoB && r_radarclipper && !(Level->flags3 & LEVEL3_NOFOGOFWAR);
 
 	if (portalclip)
 	{
@@ -531,15 +636,15 @@ void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
 	auto &clipper = *mClipper;
 	angle_t startAngle = clipper.GetClipAngle(seg->v2);
 	angle_t endAngle = clipper.GetClipAngle(seg->v1);
-	auto &clipperr = *rClipper;
 	angle_t startAngleR = 0;
 	angle_t endAngleR = 0;
 	angle_t paddingR = 0x00200000; // Make radar clipping more aggressive (reveal less)
 
-	if(Viewpoint.IsAllowedOoB() && r_radarclipper && !(Level->flags3 & LEVEL3_NOFOGOFWAR))
+	if (useRadarClip)
 	{
-		startAngleR = clipperr.PointToPseudoAngle(seg->v2->fX(), seg->v2->fY());
-		endAngleR = clipperr.PointToPseudoAngle(seg->v1->fX(), seg->v1->fY());
+		auto &clipperr = *rClipper;
+		startAngleR = clipperr.GetRadarClipAngle(seg->v2);
+		endAngleR = clipperr.GetRadarClipAngle(seg->v1);
 
 		if (startAngleR - endAngleR >= ANGLE_180)
 		{
@@ -548,8 +653,10 @@ void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
 			{
 				if (in_area == area_default) in_area = hw_CheckViewArea(seg->v1, seg->v2, seg->frontsector, seg->backsector);
 				backsector = hw_FakeFlat(seg->backsector, in_area, true);
-				if (hw_CheckClip(seg->sidedef, currentsector, backsector)) clipperr.SafeAddClipRange(startAngleR - paddingR, endAngleR + paddingR);
-				backsector = nullptr;
+				cachedFakeBacksector = true;
+				cachedBacksectorClip = hw_CheckClip(seg->sidedef, currentsector, backsector);
+				hasCachedBacksectorClip = true;
+				if (cachedBacksectorClip) clipperr.SafeAddClipRange(startAngleR - paddingR, endAngleR + paddingR);
 			}
 		}
 	}
@@ -564,11 +671,11 @@ void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
 	{
 		if (!(currentsubsector->flags & SSECMF_DRAWN))
 		{
-			if (clipper.SafeCheckRange(startAngle, endAngle) && !Viewpoint.IsAllowedOoB())
+			if (clipper.SafeCheckRange(startAngle, endAngle) && !allowOoB)
 			{
 			  currentsubsector->flags |= SSECMF_DRAWN;
 			}
-			if (Viewpoint.IsAllowedOoB() && (r_radarclipper && !(Level->flags3 & LEVEL3_NOFOGOFWAR)) && clipperr.SafeCheckRange(startAngleR, endAngleR))
+			if (useRadarClip && rClipper->SafeCheckRange(startAngleR, endAngleR))
 			{
 			  currentsubsector->flags |= SSECMF_DRAWN;
 			}
@@ -581,7 +688,7 @@ void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
 		return;
 	}
 
-	if (!Viewpoint.IsAllowedOoB() || (!r_radarclipper || (Level->flags3 & LEVEL3_NOFOGOFWAR) || clipperr.SafeCheckRange(startAngleR, endAngleR)))
+	if (!allowOoB || !useRadarClip || rClipper->SafeCheckRange(startAngleR, endAngleR))
 		currentsubsector->flags |= SSECMF_DRAWN;
 	if (IsVRScene)
 	{
@@ -594,7 +701,7 @@ void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
 	{
 		if (multithread)
 		{
-			if (experimentalMultiWallWorkers && !NeedsMainThreadWallPath(seg, seg->frontsector, seg->backsector))
+			if (experimentalMultiWallWorkers && !NeedsMainThreadWallPath(this, seg, seg->frontsector, seg->backsector))
 			{
 				wallJobQueue.AddJob(currentsubsector, seg, seg->frontsector, seg->backsector, true);
 			}
@@ -616,7 +723,7 @@ void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
 
 	if (!seg->backsector)
 	{
-		if(!Viewpoint.IsAllowedOoB())
+		if(!allowOoB)
 			if (!(seg->sidedef->Flags & WALLF_DITHERTRANS_MID)) clipper.SafeAddClipRange(startAngle, endAngle);
 	}
 	else if (!ispoly)	// Two-sided polyobjects never obstruct the view
@@ -643,10 +750,14 @@ void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
 			// clipping checks are only needed when the backsector is not the same as the front sector
 			if (in_area == area_default) in_area = hw_CheckViewArea(seg->v1, seg->v2, seg->frontsector, seg->backsector);
 
-			backsector = hw_FakeFlat(seg->backsector, in_area, true);
-			if (hw_CheckClip(seg->sidedef, currentsector, backsector))
+			if (!cachedFakeBacksector)
 			{
-				if(!Viewpoint.IsAllowedOoB() && !(seg->sidedef->Flags & WALLF_DITHERTRANS_MID))
+				backsector = hw_FakeFlat(seg->backsector, in_area, true);
+			}
+			const bool clipBlocked = hasCachedBacksectorClip ? cachedBacksectorClip : hw_CheckClip(seg->sidedef, currentsector, backsector);
+			if (clipBlocked)
+			{
+				if(!allowOoB && !(seg->sidedef->Flags & WALLF_DITHERTRANS_MID))
 					clipper.SafeAddClipRange(startAngle, endAngle);
 			}
 		}
@@ -673,14 +784,7 @@ void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
 		{
 			if (multithread)
 			{
-				if (experimentalMultiWallWorkers && gl_seamless && !(seg->sidedef->Flags & WALLF_POLYOBJ))
-				{
-					auto lv1 = seg->linedef ? seg->linedef->v1 : nullptr;
-					auto lv2 = seg->linedef ? seg->linedef->v2 : nullptr;
-					PrepareSeamlessVertex(this, lv1);
-					PrepareSeamlessVertex(this, lv2);
-				}
-				if (experimentalMultiWallWorkers && !NeedsMainThreadWallPath(seg, currentsector, backsector))
+				if (experimentalMultiWallWorkers && !NeedsMainThreadWallPath(this, seg, currentsector, backsector))
 				{
 					wallJobQueue.AddJob(seg->Subsector, seg, currentsector, backsector, false);
 				}
@@ -1179,9 +1283,10 @@ void HWDrawInfo::DoSubsector(subsector_t * sub)
 		return;
 	}	// if we are inside a stacked sector portal which hasn't unclipped anything yet.
 
-	fakesector=hw_FakeFlat(sector, in_area, false);
+	const bool allowOoB = Viewpoint.IsAllowedOoB();
+	const bool useRadarClip = allowOoB && r_radarclipper && !(Level->flags3 & LEVEL3_NOFOGOFWAR);
 
-	if(Viewpoint.IsAllowedOoB() && sector->isSecret() && sector->wasSecret() && !r_radarclipper)
+	if(allowOoB && sector->isSecret() && sector->wasSecret() && !r_radarclipper)
 	{
 		if (IsVRScene) VRSubsectorCull.Unclock();
 		if (IsVRScene) VRSubsectors.Unclock();
@@ -1189,16 +1294,15 @@ void HWDrawInfo::DoSubsector(subsector_t * sub)
 	}
 
 	// cull everything if subsector outside all relevant clippers
-	if (Viewpoint.IsAllowedOoB() && (sub->polys == nullptr))
+	if (allowOoB && (sub->polys == nullptr))
 	{
 		auto &clipper = *mClipper;
 		auto &clipperv = *vClipper;
-		auto &clipperr = *rClipper;
 		int count = sub->numlines;
 		seg_t * seg = sub->firstline;
 		bool anglevisible = false;
-		bool pitchvisible = !(Viewpoint.IsAllowedOoB()); // No vertical clipping if viewpoint is not allowed out of bounds
-		bool radarvisible = !(Viewpoint.IsAllowedOoB()) || !r_radarclipper || (Level->flags3 & LEVEL3_NOFOGOFWAR) || ((sub->flags & SSECMF_DRAWN) && !deathmatch);
+		bool pitchvisible = !allowOoB; // No vertical clipping if viewpoint is not allowed out of bounds
+		bool radarvisible = !useRadarClip || ((sub->flags & SSECMF_DRAWN) && !deathmatch);
 		bool ceilreflect = (mCurrentPortal && strcmp(mCurrentPortal->GetName(), "Planemirror ceiling"));
 		bool floorreflect = (mCurrentPortal && strcmp(mCurrentPortal->GetName(), "Planemirror floor"));
 		double planez = (ceilreflect ? sector->ceilingplane.ZatPoint(Viewpoint.Pos) : sector->floorplane.ZatPoint(Viewpoint.Pos));
@@ -1218,8 +1322,9 @@ void HWDrawInfo::DoSubsector(subsector_t * sub)
 				}
 				if (!radarvisible)
 				{
-					angle_t startAngleR = clipperr.PointToPseudoAngle(seg->v2->fX(), seg->v2->fY());
-					angle_t endAngleR = clipperr.PointToPseudoAngle(seg->v1->fX(), seg->v1->fY());
+					auto &clipperr = *rClipper;
+					angle_t startAngleR = clipperr.GetRadarClipAngle(seg->v2);
+					angle_t endAngleR = clipperr.GetRadarClipAngle(seg->v1);
 					if (startAngleR-endAngleR >= ANGLE_180) radarvisible |= clipperr.SafeCheckRange(startAngleR, endAngleR);
 				}
 
@@ -1255,7 +1360,7 @@ void HWDrawInfo::DoSubsector(subsector_t * sub)
 			seg++;
 		}
 		// Skip subsector if outside vertical or horizontal clippers or is in unexplored territory (fog of war)
-		if(!pitchvisible || !anglevisible || (!radarvisible && r_radarclipper))
+		if(!pitchvisible || !anglevisible || (!radarvisible && useRadarClip))
 		{
 			if (IsVRScene) VRSubsectorCull.Unclock();
 			if (IsVRScene) VRSubsectors.Unclock();
@@ -1268,6 +1373,7 @@ void HWDrawInfo::DoSubsector(subsector_t * sub)
 		int clipres = mClipPortal->ClipSubsector(sub);
 		if (clipres == PClip_InFront)
 		{
+			fakesector = hw_FakeFlat(sector, in_area, false);
 			auto line = mClipPortal->ClipLine();
 			// The subsector is out of range, but we still have to check lines that lie directly on the boundary and may expose their upper or lower parts.
 			if (line) AddSpecialPortalLines(sub, fakesector, line);
@@ -1276,6 +1382,7 @@ void HWDrawInfo::DoSubsector(subsector_t * sub)
 			return;
 		}
 	}
+	fakesector=hw_FakeFlat(sector, in_area, false);
 	if (IsVRScene) VRSubsectorCull.Unclock();
 	if (IsVRScene) VRSubsectorVisible.Clock();
 	ProcessVisibleSubsector(sub, sector, fakesector);
@@ -1379,6 +1486,15 @@ void HWDrawInfo::RenderBSP(void *node, bool drawpsprites)
 	{
 		sceneJobQueue.ReleaseAll();
 		wallJobQueue.ReleaseAll();
+		if (experimentalMultiWallWorkers)
+		{
+			PrepareSectorMainThreadWallFlags(this);
+			PrepareLineMainThreadWallFlags(this);
+		}
+		if (experimentalMultiWallWorkers && gl_seamless)
+		{
+			PrepareSeamlessVerticesForFrame(this);
+		}
 		auto sceneFuture = renderPool.push([&](int id) {
 			WorkerThread();
 		});
@@ -1397,6 +1513,11 @@ void HWDrawInfo::RenderBSP(void *node, bool drawpsprites)
 				mesh.portals.Clear();
 				mesh.lower.Clear();
 				mesh.upper.Clear();
+				if (mesh.reserveList > 0 && mesh.list.Max() < mesh.reserveList) mesh.list.Grow(mesh.reserveList);
+				if (mesh.reserveTranslucent > 0 && mesh.translucent.Max() < mesh.reserveTranslucent) mesh.translucent.Grow(mesh.reserveTranslucent);
+				if (mesh.reservePortals > 0 && mesh.portals.Max() < mesh.reservePortals) mesh.portals.Grow(mesh.reservePortals);
+				if (mesh.reserveLower > 0 && mesh.lower.Max() < mesh.reserveLower) mesh.lower.Grow(mesh.reserveLower);
+				if (mesh.reserveUpper > 0 && mesh.upper.Max() < mesh.reserveUpper) mesh.upper.Grow(mesh.reserveUpper);
 				mesh.wallCount = 0;
 				mesh.batchCount = 0;
 				mesh.totalCycles = 0;
@@ -1460,6 +1581,11 @@ void HWDrawInfo::RenderBSP(void *node, bool drawpsprites)
 				{
 					AddLowerMissingTexture(missing.side, missing.sub, (float)missing.plane);
 				}
+				mesh.reserveList = NextReserveHint(mesh.list.Size());
+				mesh.reserveTranslucent = NextReserveHint(mesh.translucent.Size());
+				mesh.reservePortals = NextReserveHint(mesh.portals.Size());
+				mesh.reserveLower = NextReserveHint(mesh.lower.Size());
+				mesh.reserveUpper = NextReserveHint(mesh.upper.Size());
 			}
 			WallMerge.Unclock();
 			MTWait.Unclock();

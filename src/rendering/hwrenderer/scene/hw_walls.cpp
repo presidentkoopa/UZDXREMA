@@ -440,6 +440,7 @@ void HWWall::SetupLights(HWDrawInfo*di, FDynLightData &lightdata)
 
 	auto normal = glseg.Normal();
 	p.Set(normal, -normal.X * glseg.x1 - normal.Z * glseg.y1);
+	const int portalGroup = seg->frontsector->PortalGroup;
 
 	FLightNode *node;
 	if (seg->sidedef == NULL)
@@ -470,7 +471,7 @@ void HWWall::SetupLights(HWDrawInfo*di, FDynLightData &lightdata)
 		{
 			iter_dlight++;
 
-			DVector3 posrel = node->lightsource->PosRelative(seg->frontsector->PortalGroup);
+			DVector3 posrel = node->lightsource->PosRelative(portalGroup);
 			float x = posrel.X;
 			float y = posrel.Y;
 			float z = posrel.Z;
@@ -516,7 +517,7 @@ void HWWall::SetupLights(HWDrawInfo*di, FDynLightData &lightdata)
 					{
 						lightsWallPerEye++;
 						draw_dlight += 1;
-						AddLightToList(lightdata, seg->frontsector->PortalGroup, light, false);
+						AddLightToList(lightdata, portalGroup, light, false);
 					}
 				}
 			}
