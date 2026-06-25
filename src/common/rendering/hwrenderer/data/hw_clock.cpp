@@ -135,6 +135,8 @@ static void AppendRenderTimes(FString &str)
 	}
 	double wallWorkersCpuSum = WallWorkersCpuSumCycles * PerfToMillisec;
 	double wallWorkersWallCpuSum = WallWorkersWallCpuSumCycles * PerfToMillisec;
+	const double wallWorkerParallelism = wallWorkersElapsed > 0.0 ? wallWorkersCpuSum / wallWorkersElapsed : 0.0;
+	const double wallWorkerBusyParallelism = wallWorkersElapsed > 0.0 ? wallWorkersWallCpuSum / wallWorkersElapsed : 0.0;
 
 	str.AppendFormat("BSP = %2.3f, Clip=%2.3f\n"
 		"W: Render=%2.3f, Setup=%2.3f\n"
@@ -149,6 +151,7 @@ static void AppendRenderTimes(FString &str)
 		"VR: EyeComposite=%2.3f FinalizeEye=%2.3f Submit=%2.3f\n"
 		"Scene worker elapsed=%2.3f, Scene worker wait=%2.3f\n"
 		"Wall workers elapsed=%2.3f, Wall workers CPU-sum=%2.3f, Wall setup CPU-sum=%2.3f\n"
+		"Wall worker parallelism=%2.2f busy=%2.2f\n"
 		"Wall merge=%2.3f, Wall batches=%d, Wall items=%d\n"
 		"All=%2.3f, Render=%2.3f, Setup=%2.3f, Portal=%2.3f, Drawcalls=%2.3f, Postprocess=%2.3f, Finish=%2.3f\n",
 		bsp, clipwall,
@@ -164,6 +167,7 @@ static void AppendRenderTimes(FString &str)
 		VREyeComposite.TimeMS(), VRFinalizeEye.TimeMS(), VRSubmit.TimeMS(),
 		SceneWorkerElapsed.TimeMS(), MTWait.TimeMS(),
 		wallWorkersElapsed, wallWorkersCpuSum, wallWorkersWallCpuSum,
+		wallWorkerParallelism, wallWorkerBusyParallelism,
 		WallMerge.TimeMS(), WallBatchCount, WallItemsProcessed,
 		All.TimeMS() + Finish.TimeMS(), RenderAll.TimeMS(),	ProcessAll.TimeMS(), PortalAll.TimeMS(), drawcalls.TimeMS(), PostProcess.TimeMS(), Finish.TimeMS());
 }
@@ -271,6 +275,12 @@ CCMD(bench)
 		switchfps = false;
 	}
 	C_HideConsole ();
+}
+
+CCMD(togglefps)
+{
+	vid_fps = !vid_fps;
+	Printf("FPS counter %s\n", vid_fps ? "enabled" : "disabled");
 }
 
 bool glcycle_t::active = false;

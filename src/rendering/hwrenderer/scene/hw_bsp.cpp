@@ -61,6 +61,12 @@ CUSTOM_CVAR(Int, gl_bsp_worker_threads, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CV
 	Printf("This won't take effect until " GAMENAME " is restarted.\n");
 }
 CVAR(Bool, gl_bsp_worker_sky_mainthread, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CUSTOM_CVAR(Int, gl_bsp_wall_batch_size, 96, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL)
+{
+	if (self < 80) self = 64;
+	else if (self < 112) self = 96;
+	else self = 128;
+}
 
 EXTERN_CVAR(Float, r_actorspriteshadowdist)
 EXTERN_CVAR(Bool, r_radarclipper)
@@ -121,7 +127,7 @@ struct WallBatchJob
 class RenderJobQueue
 {
 	RenderJob pool[300000];	// Way more than ever needed. The largest ever seen on a single viewpoint is around 40000.
-	std::atomic<int> readindex{};
+	int readindex = 0;
 	std::atomic<int> writeindex{};
 public:
 	void AddJob(int type, subsector_t *sub, seg_t *seg = nullptr, sector_t *frontsector = nullptr, sector_t *backsector = nullptr, bool isculled = false)
@@ -134,20 +140,12 @@ public:
 
 	RenderJob *GetJob()
 	{
-		while (true)
+		if (readindex >= writeindex.load())
 		{
-			int current = readindex.load();
-			const int written = writeindex.load();
-			if (current >= written)
-			{
-				return nullptr;
-			}
-
-			if (readindex.compare_exchange_weak(current, current + 1))
-			{
-				return &pool[current];
-			}
+			return nullptr;
 		}
+
+		return &pool[readindex++];
 	}
 	
 	void ReleaseAll()
@@ -161,7 +159,6 @@ class WallWorkQueue
 {
 	static constexpr int MaxWallItems = 300000;
 	static constexpr int MaxWallBatches = 100000;
-	static constexpr int WallBatchSize = 64;
 
 	WallWorkItem items[MaxWallItems];
 	WallBatchJob batches[MaxWallBatches];
@@ -175,7 +172,7 @@ public:
 	{
 		items[itemwrite++] = { sub, seg, frontsector, backsector, isculled, false };
 		pendingcount++;
-		if (pendingcount >= WallBatchSize)
+		if (pendingcount >= gl_bsp_wall_batch_size)
 		{
 			FlushPending();
 		}
@@ -238,6 +235,8 @@ public:
 static RenderJobQueue sceneJobQueue;
 static WallWorkQueue wallJobQueue;
 static std::vector<HWMeshHelper> wallWorkerMeshes;
+static std::vector<std::future<void>> wallWorkerFutures;
+static bool wallWorkersStarted = false;
 
 static inline void RelaxWorkerSpin(unsigned int& idleSpins)
 {
@@ -377,6 +376,25 @@ void HWDrawInfo::WorkerThread(HWMeshHelper* helper)
 	}
 }
 
+void HWDrawInfo::StartWallWorkersIfNeeded()
+{
+	if (!experimentalMultiWallWorkers || wallWorkersStarted)
+		return;
+
+	const int workerCount = gl_bsp_worker_threads;
+	wallWorkersStarted = true;
+	wallWorkerFutures.clear();
+	wallWorkerFutures.reserve(workerCount);
+	for (int i = 0; i < workerCount; i++)
+	{
+		wallWorkerFutures.push_back(renderPool.push([&, i](int id) {
+			const int64_t workerStart = rdtsc();
+			WorkerThread(&wallWorkerMeshes[i]);
+			wallWorkerMeshes[i].totalCycles = rdtsc() - workerStart;
+		}));
+	}
+}
+
 
 
 
@@ -444,9 +462,6 @@ static bool ComputeSectorMainThreadWallPath(sector_t* sector)
 	if (sector->ValidatePortal(sector_t::ceiling) != nullptr || sector->ValidatePortal(sector_t::floor) != nullptr)
 		return true;
 
-	if (sector->GetReflect(sector_t::ceiling) > 0 || sector->GetReflect(sector_t::floor) > 0)
-		return true;
-
 	return false;
 }
 
@@ -486,43 +501,6 @@ static bool NeedsMainThreadWallPath(HWDrawInfo* di, seg_t* seg, sector_t* fronts
 		return true;
 
 	return false;
-}
-
-static inline void PrepareSeamlessVertex(HWDrawInfo* di, vertex_t* v)
-{
-	if (v == nullptr || !v->dirty)
-		return;
-
-	const int index = v->Index();
-	if (index < 0 || (unsigned)index >= di->seamless_vertex_processed.Size())
-	{
-		v->RecalcVertexHeights();
-		return;
-	}
-
-	if (!di->seamless_vertex_processed[index])
-	{
-		v->RecalcVertexHeights();
-		di->seamless_vertex_processed[index] = 1;
-	}
-}
-
-static void PrepareSeamlessVerticesForFrame(HWDrawInfo* di)
-{
-	if (di == nullptr || di->Level == nullptr)
-		return;
-
-	for (auto& vertex : di->Level->vertexes)
-	{
-		if (!vertex.dirty)
-			continue;
-
-		const int index = vertex.Index();
-		if (index >= 0 && (unsigned)index < di->seamless_vertex_processed.Size() && di->seamless_vertex_processed[index])
-			continue;
-
-		PrepareSeamlessVertex(di, &vertex);
-	}
 }
 
 void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
@@ -647,6 +625,7 @@ void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
 			if (experimentalMultiWallWorkers && !NeedsMainThreadWallPath(this, seg, seg->frontsector, seg->backsector))
 			{
 				wallJobQueue.AddJob(currentsubsector, seg, seg->frontsector, seg->backsector, true);
+				StartWallWorkersIfNeeded();
 			}
 			else
 			{
@@ -730,6 +709,7 @@ void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
 				if (experimentalMultiWallWorkers && !NeedsMainThreadWallPath(this, seg, currentsector, backsector))
 				{
 					wallJobQueue.AddJob(seg->Subsector, seg, currentsector, backsector, false);
+					StartWallWorkersIfNeeded();
 				}
 				else
 				{
@@ -1429,6 +1409,8 @@ void HWDrawInfo::RenderBSP(void *node, bool drawpsprites)
 	{
 		sceneJobQueue.ReleaseAll();
 		wallJobQueue.ReleaseAll();
+		wallWorkersStarted = false;
+		wallWorkerFutures.clear();
 		auto sceneFuture = renderPool.push([&](int id) {
 			WorkerThread();
 		});
@@ -1452,29 +1434,22 @@ void HWDrawInfo::RenderBSP(void *node, bool drawpsprites)
 				mesh.totalCycles = 0;
 				mesh.wallCycles = 0;
 			}
-			std::vector<std::future<void>> futures;
-			futures.reserve(workerCount);
-			for (int i = 0; i < workerCount; i++)
-			{
-				futures.push_back(renderPool.push([&, i](int id) {
-					const int64_t workerStart = rdtsc();
-					WorkerThread(&wallWorkerMeshes[i]);
-					wallWorkerMeshes[i].totalCycles = rdtsc() - workerStart;
-				}));
-			}
 
 			if (Viewpoint.IsOrtho() && ((Level->flags3 & LEVEL3_NOFOGOFWAR) || !r_radarclipper)) RenderOrthoNoFog();
 			else RenderBSPNode(node);
 
 			sceneJobQueue.AddJob(RenderJob::TerminateJob, nullptr, nullptr);
-			for (int i = 0; i < workerCount; i++)
+			if (wallWorkersStarted)
 			{
-				wallJobQueue.AddTerminate();
+				for (int i = 0; i < workerCount; i++)
+				{
+					wallJobQueue.AddTerminate();
+				}
 			}
 			Bsp.Unclock();
 			MTWait.Clock();
 			sceneFuture.wait();
-			for (auto& future : futures)
+			for (auto& future : wallWorkerFutures)
 			{
 				future.wait();
 			}

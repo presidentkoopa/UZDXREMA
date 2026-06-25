@@ -183,7 +183,6 @@ struct HWDrawInfo
 	TArray<uint8_t> section_renderflags;
 	TArray<uint8_t> ss_renderflags;
 	TArray<uint8_t> no_renderflags;
-	TArray<uint8_t> seamless_vertex_processed;
 
 	// This is needed by the BSP traverser.
 	BitArray CurrentMapSections;	// this cannot be a single number, because a group of portals with the same displacement may link different sections.
@@ -203,6 +202,7 @@ private:
 	sector_t *currentsector;
 
 	void WorkerThread(HWMeshHelper* helper = nullptr);
+	void StartWallWorkersIfNeeded();
 
 	void UnclipSubsector(subsector_t *sub);
 	
