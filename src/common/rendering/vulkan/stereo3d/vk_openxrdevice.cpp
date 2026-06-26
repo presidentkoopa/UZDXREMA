@@ -203,6 +203,11 @@ static bool IsGameplaySceneActive()
 	return gamestate == GS_LEVEL && menuactive == MENU_Off && !paused && ConsoleState == c_up;
 }
 
+static bool IsLevelSceneState()
+{
+	return gamestate == GS_LEVEL || gamestate == GS_TITLELEVEL;
+}
+
 static bool HasOpenXRExtension(const char* extensionName)
 {
 	const auto& extensions = GetOpenXRExtensions();
@@ -4489,8 +4494,10 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 	}
 	xrVirtualScreenWasVisibleLastFrame = true;
 
-	const bool forceOverlay = gamestate != GS_LEVEL || menuactive != MENU_Off || cinemamode || ConsoleState != c_up || vr_overlayscreen_always;
-	const bool allowBlankOverlay = vr_overlayscreen_always || cinemamode || gamestate != GS_LEVEL;
+	// Treat titlemap/titlelevel like an in-level scene for composition purposes.
+	// It still uses virtual-screen mode, but should not inherit the blank overlay
+	const bool forceOverlay = !IsLevelSceneState() || menuactive != MENU_Off || cinemamode || ConsoleState != c_up || vr_overlayscreen_always;
+	const bool allowBlankOverlay = vr_overlayscreen_always || cinemamode || !IsLevelSceneState();
 	xrMenuPointerBeamImageIndex = -1;
 	if (twod == nullptr || (twod->DrawCount() == 0 && !allowBlankOverlay && !forceOverlay))
 	{
@@ -4560,7 +4567,7 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 
 	xrVirtualScreenImageIndex = (int)imageIndex;
 	auto& target = xrVirtualScreenTextures[imageIndex];
-	const bool useSceneBackdrop = gamestate == GS_LEVEL;
+	const bool useSceneBackdrop = IsLevelSceneState();
 	if (useSceneBackdrop)
 	{
 		vkfb->GetPostprocess()->BlitCurrentToImage(&target, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -4770,7 +4777,7 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 		.Execute(vkfb->GetCommands()->GetDrawCommands());
 
 	const XrVector3f backdropColor =
-		(cinemamode || vr_overlayscreen_always || gamestate == GS_LEVEL)
+		(cinemamode || vr_overlayscreen_always || IsLevelSceneState())
 		? GetVirtualScreenBackdropColor()
 		: XrVector3f{ 0.0f, 0.0f, 0.0f };
 	VkClearColorValue backdropColorValue = {};
