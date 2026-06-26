@@ -3304,9 +3304,8 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		}
 		PostRemappedControllerKeyTransition(xrLastThumbClickState[hand], handInput[hand].thumbClick, modifierOld, modifierNew, thumbBaseKey, thumbAltKey);
 		const int thumbClickKey = (hand == 1) ? KEY_PAD_RTHUMB : KEY_PAD_LTHUMB;
-		// The combo layer already emits the mapped thumb-click action, so keep the
-		// raw button from leaking through while the dominant grip is acting as a modifier.
-		if (!(*vr_secondary_button_mappings && dominantGripModifierNew))
+		// Keep the physical key only while waiting for a bind capture.
+		if (menuactive == MENU_WaitKey)
 		{
 			PostControllerKeyTransition(xrLastThumbClickState[hand], handInput[hand].thumbClick, thumbClickKey);
 		}
