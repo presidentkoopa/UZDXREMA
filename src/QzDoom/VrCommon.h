@@ -55,6 +55,7 @@ float VR_ApplyAnalogSmoothTurn(float turnAxis, float maxTurnRateDegPerSec, float
 //Called from engine code
 void QzDoom_setUseScreenLayer(bool use);
 bool VR_UseScreenLayer();
+bool VR_UseCinematicScreenLayer();
 void QzDoom_Restart();
 
 

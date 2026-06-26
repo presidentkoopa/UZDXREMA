@@ -100,6 +100,7 @@ double normalizeAngle(double angle);
 void QzDoom_setUseScreenLayer(bool use);
 
 bool VR_UseScreenLayer();
+bool VR_UseCinematicScreenLayer();
 void VR_GetMove( float *joy_forward, float *joy_side, float *hmd_forward, float *hmd_side, float *up, float *yaw, float *pitch, float *roll );
 void VR_SetHMDOrientation(float pitch, float yaw, float roll );
 void VR_SetHMDPosition(float x, float y, float z );
@@ -327,7 +328,7 @@ static float getDoomPlayerHeightWithoutCrouch(const player_t* player)
 
 static float getViewpointYaw()
 {
-	if (VR_UseScreenLayer())
+	if (VR_UseCinematicScreenLayer())
 	{
 		return r_viewpoint.Angles.Yaw.Degrees();
 	}
@@ -1946,11 +1947,11 @@ namespace s3d
 
 				mat->scale(1, 1 / pixelstretch, 1);
 
-				if (VR_UseScreenLayer())
-				{
-					mat->rotate(-90 + r_viewpoint.Angles.Yaw.Degrees()  + (weaponangles[YAW]- playerYaw), 0, 1, 0);
-					mat->rotate(-weaponangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees(), 1, 0, 0);
-				} else {
+                if (VR_UseCinematicScreenLayer())
+                {
+                    mat->rotate(-90 + r_viewpoint.Angles.Yaw.Degrees()  + (weaponangles[YAW] - hmdorientation[YAW]), 0, 1, 0);
+                    mat->rotate(-weaponangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees(), 1, 0, 0);
+                } else {
 					mat->rotate(-90 + doomYaw + (weaponangles[YAW]- hmdorientation[YAW]), 0, 1, 0);
 					mat->rotate(-weaponangles[PITCH], 1, 0, 0);
 				}
@@ -1962,11 +1963,11 @@ namespace s3d
 
 				mat->scale(1, 1 / pixelstretch, 1);
 
-				if (VR_UseScreenLayer())
-				{
-					mat->rotate(-90 + r_viewpoint.Angles.Yaw.Degrees()  + (offhandangles[YAW]- playerYaw), 0, 1, 0);
-					mat->rotate(-offhandangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees(), 1, 0, 0);
-				} else {
+                if (VR_UseCinematicScreenLayer())
+                {
+                    mat->rotate(-90 + r_viewpoint.Angles.Yaw.Degrees()  + (offhandangles[YAW] - hmdorientation[YAW]), 0, 1, 0);
+                    mat->rotate(-offhandangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees(), 1, 0, 0);
+                } else {
 					mat->rotate(-90 + doomYaw + (offhandangles[YAW]- hmdorientation[YAW]), 0, 1, 0);
 					mat->rotate(-offhandangles[PITCH], 1, 0, 0);
 				}
@@ -2078,6 +2079,7 @@ namespace s3d
 				resetPreviousHmdYaw = false;
 			}
 			hmdYawDeltaDegrees = hmdYaw - previousHmdYaw;
+
 			vrApplyingHmdYaw = true;
 			G_AddViewAngle(mAngleFromRadians(DEG2RAD(-hmdYawDeltaDegrees)));
 			vrApplyingHmdYaw = false;
@@ -2352,7 +2354,7 @@ namespace s3d
 
 		//In cinema mode, right-stick controls mouse
 		const float mouseSpeed = 3.0f;
-		if (VR_UseScreenLayer() && !dominantGripPushedNew)
+		if (VR_UseCinematicScreenLayer() && !dominantGripPushedNew)
 		{
 			float yaw = -I_OpenVRGetYaw();
 			if (fabs(yaw) > 0.1f) {
@@ -2377,19 +2379,11 @@ namespace s3d
 								powf(offhandControllerPose.m[2][3] -
 										dominantControllerPose.m[2][3], 2));
 
-			//Turn on weapon stabilisation?
-			if (vr_two_handed_weapons &&
-				(pOffTrackedRemoteNew->ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Grip)) !=
-				(pOffTrackedRemoteOld->ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Grip)))
-			{
-				if (pOffTrackedRemoteNew->ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Grip)) {
-					if (distance < 0.50f) {
-						weaponStabilised = true;
-					}
-				} else {
-					weaponStabilised = false;
-				}
-			}
+			const bool offhandGripHeld =
+				(pOffTrackedRemoteNew->ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Grip)) != 0;
+			const bool dominantPoseValid = pDominantTracking->active && pDominantTracking->pose.bPoseIsValid;
+			const bool offhandPoseValid = pOffTracking->active && pOffTracking->pose.bPoseIsValid;
+			weaponStabilised = vr_two_handed_weapons && offhandGripHeld && dominantPoseValid && offhandPoseValid && distance < 0.50f;
 
 			//dominant hand stuff first
 			{
@@ -2412,9 +2406,14 @@ namespace s3d
 							dominantControllerPose.m[1][3];
 					float zxDist = length(x, z);
 
-					if (zxDist != 0.0f && z != 0.0f) {
+					// If the hands become nearly vertically stacked, the stabilised solve can
+					// snap the weapon pitch toward straight up/down. Fall back to the tracked
+					// dominant-hand orientation for that frame instead of preserving a bad latch.
+					if (zxDist > 0.05f && distance > 0.05f) {
 						VectorSet(weaponangles, -RAD2DEG(atanf(y / zxDist)), -RAD2DEG(atan2f(x, -z)),
 								weaponangles[ROLL]);
+					} else {
+						weaponStabilised = false;
 					}
 				}
 			}
@@ -2491,7 +2490,7 @@ namespace s3d
 				}
 			}
 
-			if (!VR_UseScreenLayer() && !dominantGripPushedNew)
+			if (!VR_UseCinematicScreenLayer() && !dominantGripPushedNew)
 			{
 				static int increaseSnap = true;
 				static int decreaseSnap = true;
@@ -2571,7 +2570,7 @@ namespace s3d
 				const bool suppressSelectAsKey = openvrMenuSuppressSelectAsKey;
 
 				//if in cinema mode, then the dominant joystick is used differently
-				if (!VR_UseScreenLayer() && axisJoystick != -1) 
+				if (!VR_UseCinematicScreenLayer() && axisJoystick != -1) 
 				{
 				//Default this is Weapon Chooser - This _could_ be remapped
 				Joy_GenerateButtonEvents(
@@ -3222,10 +3221,10 @@ namespace s3d
 
 						getMainHandAngles();
 
-						player->mo->AttackPitch = DAngle::fromDeg(VR_UseScreenLayer() ? 
+						player->mo->AttackPitch = DAngle::fromDeg(VR_UseCinematicScreenLayer() ? 
 							-weaponangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees() :
 							-weaponangles[PITCH]);
-						player->mo->AttackAngle = DAngle::fromDeg(-90 + getViewpointYaw() + (weaponangles[YAW]- playerYaw));
+						player->mo->AttackAngle = DAngle::fromDeg(-90 + getViewpointYaw() + (weaponangles[YAW] - hmdorientation[YAW]));
 						player->mo->AttackRoll = DAngle::fromDeg(weaponangles[ROLL]);
 					}
 
@@ -3238,10 +3237,10 @@ namespace s3d
 
 						getOffHandAngles();
 
-						player->mo->OffhandPitch = DAngle::fromDeg(VR_UseScreenLayer() ? 
-							-offhandangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees() : 
+						player->mo->OffhandPitch = DAngle::fromDeg(VR_UseCinematicScreenLayer() ? 
+							-offhandangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees() :
 							-offhandangles[PITCH]);
-						player->mo->OffhandAngle = DAngle::fromDeg(-90 + getViewpointYaw() + (offhandangles[YAW]- playerYaw));
+						player->mo->OffhandAngle = DAngle::fromDeg(-90 + getViewpointYaw() + (offhandangles[YAW] - hmdorientation[YAW]));
 						player->mo->OffhandRoll = DAngle::fromDeg(offhandangles[ROLL]);
 					}
 

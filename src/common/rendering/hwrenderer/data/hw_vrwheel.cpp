@@ -291,6 +291,11 @@ namespace
 		up.MakeUnit();
 	}
 
+	static bool UseCinemaWheelOverride()
+	{
+		return VR_UseCinematicScreenLayer();
+	}
+
 	static bool GetControllerAnchoredCenter(player_t* player, int abstractHand, DVector3& center)
 	{
 		DVector3 handPos;
@@ -1145,7 +1150,7 @@ namespace
 			return;
 		}
 
-		if (vr_wheel_selection_type == 0)
+		if (!UseCinemaWheelOverride() && vr_wheel_selection_type == 0)
 		{
 			DVector3 center;
 			DVector3 wheelRight;
@@ -1334,7 +1339,7 @@ void VRWheel_Draw(HWDrawInfo* di, FRenderState& state)
 
 	InvalidateWheelIfOwnerChanged(player);
 
-	if (menuactive != MENU_Off || ConsoleState != c_up || VR_UseScreenLayer())
+	if (menuactive != MENU_Off || ConsoleState != c_up || (VR_UseScreenLayer() && !UseCinemaWheelOverride()))
 	{
 		return;
 	}
@@ -1382,7 +1387,7 @@ void VRWheel_Draw(HWDrawInfo* di, FRenderState& state)
 		GPART(vr_wheel_icon_disable_color),
 		BPART(vr_wheel_icon_disable_color)));
 
-	if (vr_wheel_selection_type == 0)
+	if (!UseCinemaWheelOverride() && vr_wheel_selection_type == 0)
 	{
 		DVector3 touchPoint;
 		if (GetTouchPoint(player, touchPoint))

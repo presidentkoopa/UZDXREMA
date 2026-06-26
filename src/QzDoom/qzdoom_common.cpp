@@ -82,6 +82,11 @@ bool VR_UseScreenLayer()
 	return vr_overlayscreen && (useVirtualScreen || cinemamode || vr_overlayscreen_always);
 }
 
+bool VR_UseCinematicScreenLayer()
+{
+	return vr_overlayscreen && (cinemamode || vr_overlayscreen_always);
+}
+
 void VR_SetHMDOrientation(float pitch, float yaw, float roll)
 {
 	VectorSet(hmdorientation, pitch, yaw, roll);

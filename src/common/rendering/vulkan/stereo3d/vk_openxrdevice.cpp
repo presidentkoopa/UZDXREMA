@@ -67,6 +67,7 @@ extern bool trigger_teleport;
 extern bool automapactive;
 extern bool cinemamode;
 bool VR_UseScreenLayer();
+bool VR_UseCinematicScreenLayer();
 void VR_SetHMDOrientation(float pitch, float yaw, float roll);
 void VR_SetHMDPosition(float x, float y, float z);
 double P_XYMovement(AActor* mo, DVector2 scroll);
@@ -516,7 +517,7 @@ static float GetDoomPlayerHeightWithoutCrouch(const player_t* player)
 static float GetViewpointYaw()
 {
 	if (cinemamode)
-		return (float)r_viewpoint.Angles.Yaw.Degrees();
+		return cinemamodeYaw;
 	return doomYaw;
 }
 
@@ -2885,6 +2886,10 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 	hmdorientation[2] = -r;
 	VR_SetHMDPosition(hmdPosition[0], hmdPosition[1], hmdPosition[2]);
 	VR_SetHMDOrientation(hmdorientation[0], hmdorientation[1], hmdorientation[2]);
+	if (VR_UseCinematicScreenLayer())
+	{
+		cinemamodePitch = hmdorientation[0];
+	}
 	positional_movementSideways = 0.0f;
 	positional_movementForward = 0.0f;
 
@@ -2911,6 +2916,8 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 
 	static float previousHmdYaw = 0;
 	static bool havePreviousYaw = false;
+	static float previousCinemaSnapTurn = 0.0f;
+	static bool wasLockedToScreenLayerLastFrame = false;
 	const float currentHmdYaw = hmdorientation[1] + snapTurn;
 	const bool lockGameplayViewToScreenLayer = ShouldUseScreenLayerForCurrentFrame();
 	if (!havePreviousYaw)
@@ -2920,19 +2927,52 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 		havePreviousYaw = true;
 	}
 	float hmdYawDeltaDegrees = currentHmdYaw - previousHmdYaw;
+	float cinemaTurnDeltaDegrees = 0.0f;
+	if (lockGameplayViewToScreenLayer)
+	{
+		if (!wasLockedToScreenLayerLastFrame)
+		{
+			previousCinemaSnapTurn = snapTurn;
+			cinemamodeYaw = (float)r_viewpoint.Angles.Yaw.Degrees();
+		}
+		cinemaTurnDeltaDegrees = ShortestAngleDeltaDeg(snapTurn, previousCinemaSnapTurn);
+		previousCinemaSnapTurn = snapTurn;
+		wasLockedToScreenLayerLastFrame = true;
+	}
+	else
+	{
+		wasLockedToScreenLayerLastFrame = false;
+	}
 	if (!lockGameplayViewToScreenLayer)
 	{
 		vrApplyingHmdYaw = true;
 		G_AddViewAngle(mAngleFromRadians((float)DEG2RAD(-hmdYawDeltaDegrees)));
 		vrApplyingHmdYaw = false;
 	}
+	else if (cinemaTurnDeltaDegrees != 0.0f)
+	{
+		vrApplyingHmdYaw = true;
+		G_AddViewAngle(mAngleFromRadians((float)DEG2RAD(-cinemaTurnDeltaDegrees)));
+		vrApplyingHmdYaw = false;
+	}
 	previousHmdYaw = currentHmdYaw;
 
-	if (!lockGameplayViewToScreenLayer && gamestate == GS_LEVEL && menuactive == MENU_Off)
+	if (gamestate == GS_LEVEL && menuactive == MENU_Off)
 	{
-		doomYaw += hmdYawDeltaDegrees;
-		vp.HWAngles.Roll = FAngle::fromDeg(-r);
-		vp.HWAngles.Pitch = FAngle::fromDeg(-p);
+		if (!lockGameplayViewToScreenLayer)
+		{
+			doomYaw += hmdYawDeltaDegrees;
+			vp.HWAngles.Roll = FAngle::fromDeg(-r);
+			vp.HWAngles.Pitch = FAngle::fromDeg(-p);
+		}
+		else
+		{
+			doomYaw += cinemaTurnDeltaDegrees;
+			cinemamodeYaw = doomYaw;
+			vp.HWAngles.Roll = FAngle::fromDeg(0.0f);
+			vp.HWAngles.Pitch = FAngle::fromDeg(hmdorientation[0]);
+		}
+
 		double viewYaw = GetViewpointYaw();
 		while (viewYaw <= -180.0) viewYaw += 360.0;
 		while (viewYaw > 180.0) viewYaw -= 360.0;
@@ -3019,6 +3059,9 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 	const bool dominantGripModifierOld = *vr_secondary_button_mappings && xrLastGripState[mainHand];
 	static float analogTurnRateDegPerSec = 0.0f;
 	static uint64_t lastAnalogTurnTime = 0;
+	const XrVector2f rightTurnState = useTrackpad
+		? handInput[turnHand].trackpad
+		: handInput[turnHand].thumbstick;
 
 		if (gameplayMode)
 		{
@@ -3034,9 +3077,6 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			}
 			else
 			{
-				const XrVector2f rightTurnState = useTrackpad
-					? handInput[turnHand].trackpad
-					: handInput[turnHand].thumbstick;
 				const float turnX = rightTurnState.x;
 				const uint64_t currentTime = I_msTime();
 				if (lastAnalogTurnTime == 0)
@@ -3153,17 +3193,7 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		const float dz = xrHandPoses[mainHand].position.z - xrHandPoses[offHand].position.z;
 		const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
 		const bool offhandGrip = handInput[offHand].grip;
-		if (vr_two_handed_weapons)
-		{
-			if (offhandGrip && distance < 0.50f)
-				weaponStabilised = true;
-			else if (!offhandGrip)
-				weaponStabilised = false;
-		}
-		else
-		{
-			weaponStabilised = false;
-		}
+		weaponStabilised = vr_two_handed_weapons && offhandGrip && distance < 0.50f;
 
 		if (weaponStabilised)
 		{
@@ -3171,10 +3201,16 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			const float x = xrHandPoses[offHand].position.x - xrHandPoses[mainHand].position.x;
 			const float y = xrHandPoses[offHand].position.y - xrHandPoses[mainHand].position.y;
 			const float zxDist = std::sqrt(x * x + z * z);
-			if (zxDist != 0.0f && z != 0.0f)
+			// Avoid near-vertical hand stacking from forcing the stabilised aim
+			// almost straight up/down for a frame.
+			if (zxDist > 0.05f && distance > 0.05f)
 			{
 				weaponangles[0] = -(float)(atanf(y / zxDist) * (180.0 / M_PI));
 				weaponangles[1] = -(float)(atan2f(x, -z) * (180.0 / M_PI));
+			}
+			else
+			{
+				weaponStabilised = false;
 			}
 		}
 	}
@@ -3612,10 +3648,10 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 				player->mo->AttackPos.X = mat[3][0];
 				player->mo->AttackPos.Y = mat[3][2];
 				player->mo->AttackPos.Z = mat[3][1];
-				player->mo->AttackPitch = DAngle::fromDeg(ShouldUseScreenLayerForCurrentFrame()
+				player->mo->AttackPitch = DAngle::fromDeg(VR_UseCinematicScreenLayer()
 					? -weaponangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees()
 					: -weaponangles[PITCH]);
-				player->mo->AttackAngle = DAngle::fromDeg(-90 + GetViewpointYaw() + (weaponangles[YAW] - playerYaw));
+				player->mo->AttackAngle = DAngle::fromDeg(-90 + GetViewpointYaw() + (weaponangles[YAW] - hmdorientation[YAW]));
 				player->mo->AttackRoll = DAngle::fromDeg(weaponangles[ROLL]);
 			}
 
@@ -3625,10 +3661,10 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 				player->mo->OffhandPos.X = matOffhand[3][0];
 				player->mo->OffhandPos.Y = matOffhand[3][2];
 				player->mo->OffhandPos.Z = matOffhand[3][1];
-				player->mo->OffhandPitch = DAngle::fromDeg(ShouldUseScreenLayerForCurrentFrame()
+				player->mo->OffhandPitch = DAngle::fromDeg(VR_UseCinematicScreenLayer()
 					? -offhandangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees()
 					: -offhandangles[PITCH]);
-				player->mo->OffhandAngle = DAngle::fromDeg(-90 + GetViewpointYaw() + (offhandangles[YAW] - playerYaw));
+				player->mo->OffhandAngle = DAngle::fromDeg(-90 + GetViewpointYaw() + (offhandangles[YAW] - hmdorientation[YAW]));
 				player->mo->OffhandRoll = DAngle::fromDeg(offhandangles[ROLL]);
 			}
 
@@ -5111,11 +5147,11 @@ bool VKOpenXRDeviceMode::GetHandTransform(int hand, VSMatrix* mat) const
 		mat->translate(-offset[0], (hmdPosition[1] + offset[1] + (float)vr_height_adjust) / (float)pixelstretch, offset[2]);
 		mat->scale(1, 1 / (float)pixelstretch, 1);
 
-		if (ShouldUseScreenLayerForCurrentFrame())
-		{
-			mat->rotate(-90 + r_viewpoint.Angles.Yaw.Degrees() + (angles[1] - playerYaw), 0, 1, 0);
-			mat->rotate(-angles[0] - r_viewpoint.Angles.Pitch.Degrees(), 1, 0, 0);
-		}
+        if (VR_UseCinematicScreenLayer())
+        {
+            mat->rotate(-90 + r_viewpoint.Angles.Yaw.Degrees() + (angles[1] - hmdorientation[1]), 0, 1, 0);
+            mat->rotate(-angles[0] - r_viewpoint.Angles.Pitch.Degrees(), 1, 0, 0);
+        }
 		else
 		{
 			mat->rotate(-90 + doomYaw + (angles[1] - hmdorientation[1]), 0, 1, 0);
