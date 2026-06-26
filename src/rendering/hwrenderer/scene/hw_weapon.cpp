@@ -315,8 +315,10 @@ void HWDrawInfo::DrawHudQuad(FRenderState& state, FGameTexture* texture, float w
 	state.ResetFadeColor();
 	state.EnableTextureMatrix(false);
 	state.EnableBrightmap(false);
-	state.EnableDepthTest(false);
-	state.SetDepthMask(false);
+	// Mounted HUD is a world-space quad. Keep the portable-HUD premultiplied alpha fix but preserve
+	// depth behavior so it does not turn into an unconditional fullscreen-style overlay in OpenVR.
+	state.EnableDepthTest(true);
+	state.SetDepthMask(depthMask);
 	state.SetMaterial(texture, UF_Sprite, CTF_Expand, CLAMP_XY_NOMIP, 0, -1);
 
 	screen->mVertexData->Map();

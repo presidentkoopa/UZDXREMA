@@ -330,7 +330,7 @@ static float getViewpointYaw()
 {
 	if (VR_UseCinematicScreenLayer())
 	{
-		return r_viewpoint.Angles.Yaw.Degrees();
+		return cinemamodeYaw;
 	}
 
 	return doomYaw;
@@ -2067,22 +2067,55 @@ namespace s3d
 
 		// the yaw returned contains snapTurn input value
 		VR_GetMove(&dummy, &dummy, &dummy, &dummy, &dummy, &hmdYaw, &hmdpitch, &hmdroll);
+		if (VR_UseCinematicScreenLayer())
+		{
+			cinemamodePitch = hmdorientation[PITCH];
+		}
 
 		double hmdYawDeltaDegrees = 0;
 		if (doTrackHmdYaw) {
 			// Set HMD angle game state parameters for NEXT frame
 			static double previousHmdYaw = 0;
 			static bool havePreviousYaw = false;
+			static float previousCinemaSnapTurn = 0.0f;
+			static bool wasLockedToScreenLayerLastFrame = false;
 			if (!havePreviousYaw || resetPreviousHmdYaw) {
 				previousHmdYaw = hmdYaw;
 				havePreviousYaw = true;
 				resetPreviousHmdYaw = false;
 			}
 			hmdYawDeltaDegrees = hmdYaw - previousHmdYaw;
+			double cinemaTurnDeltaDegrees = 0.0;
+			if (VR_UseScreenLayer())
+			{
+				if (!wasLockedToScreenLayerLastFrame)
+				{
+					previousCinemaSnapTurn = snapTurn;
+					cinemamodeYaw = r_viewpoint.Angles.Yaw.Degrees();
+				}
+				cinemaTurnDeltaDegrees = ShortestAngleDeltaDeg(snapTurn, previousCinemaSnapTurn);
+				previousCinemaSnapTurn = snapTurn;
+				wasLockedToScreenLayerLastFrame = true;
+			}
+			else
+			{
+				wasLockedToScreenLayerLastFrame = false;
+			}
 
-			vrApplyingHmdYaw = true;
-			G_AddViewAngle(mAngleFromRadians(DEG2RAD(-hmdYawDeltaDegrees)));
-			vrApplyingHmdYaw = false;
+			if (!VR_UseScreenLayer())
+			{
+				vrApplyingHmdYaw = true;
+				G_AddViewAngle(mAngleFromRadians(DEG2RAD(-hmdYawDeltaDegrees)));
+				vrApplyingHmdYaw = false;
+			}
+			else if (cinemaTurnDeltaDegrees != 0.0)
+			{
+				vrApplyingHmdYaw = true;
+				G_AddViewAngle(mAngleFromRadians(DEG2RAD(-cinemaTurnDeltaDegrees)));
+				vrApplyingHmdYaw = false;
+				doomYaw += cinemaTurnDeltaDegrees;
+				cinemamodeYaw = doomYaw;
+			}
 			previousHmdYaw = hmdYaw;
 		}
 
@@ -2106,9 +2139,9 @@ namespace s3d
 			previousPitch = -hmdpitch;
 		}
 
-		if (!VR_UseScreenLayer())
+		if (gamestate == GS_LEVEL && menuactive == MENU_Off)
 		{
-			if (gamestate == GS_LEVEL && menuactive == MENU_Off)
+			if (!VR_UseScreenLayer())
 			{
 				doomYaw += hmdYawDeltaDegrees;
 
@@ -2122,11 +2155,16 @@ namespace s3d
 					vp.HWAngles.Pitch = FAngle::fromDeg(-hmdpitch);
 				}
 			}
+			else
+			{
+				vp.HWAngles.Roll = FAngle::fromDeg(0.0f);
+				vp.HWAngles.Pitch = FAngle::fromDeg(-hmdorientation[PITCH]);
+			}
 
 			// Late-schedule update to renderer angles directly, too
 			if (doTrackHmdYaw && doTrackHmdAngles && doLateScheduledRotationTracking)
 			{
-				double viewYaw = doomYaw;
+				double viewYaw = getViewpointYaw();
 				while (viewYaw <= -180.0)
 					viewYaw += 360.0;
 				while (viewYaw > 180.0)
@@ -2352,20 +2390,6 @@ namespace s3d
 			secondaryButton2 = offButton2;
 		}
 
-		//In cinema mode, right-stick controls mouse
-		const float mouseSpeed = 3.0f;
-		if (VR_UseCinematicScreenLayer() && !dominantGripPushedNew)
-		{
-			float yaw = -I_OpenVRGetYaw();
-			if (fabs(yaw) > 0.1f) {
-				cinemamodeYaw -= mouseSpeed * yaw;
-			}
-			float pitch = I_OpenVRGetPitch();
-			if (fabs(pitch) > 0.1f) {
-				cinemamodePitch += mouseSpeed * pitch;
-			}
-		}
-
 		// Only do the following if we are definitely not in the menu
 		if (gamestate == GS_LEVEL && menuactive == MENU_Off && !paused)
 		{
@@ -2490,7 +2514,7 @@ namespace s3d
 				}
 			}
 
-			if (!VR_UseCinematicScreenLayer() && !dominantGripPushedNew)
+			if (!dominantGripPushedNew)
 			{
 				static int increaseSnap = true;
 				static int decreaseSnap = true;
@@ -2524,7 +2548,6 @@ namespace s3d
 
 				// Turning logic
 				if (joy > 0.6f && increaseSnap) {
-					resetDoomYaw = true;
 					snapTurn -= vr_snapTurn;
 					if (vr_snapTurn > 10.0f) {
 						increaseSnap = false;
@@ -2534,7 +2557,6 @@ namespace s3d
 				}
 
 				if (joy < -0.6f && decreaseSnap) {
-					resetDoomYaw = true;
 					snapTurn += vr_snapTurn;
 					if (vr_snapTurn > 10.0f) {
 						decreaseSnap = false;
