@@ -846,27 +846,30 @@ ADD_STAT(fps)
 	return FStringf("%2llu ms (%3llu fps)", (unsigned long long)LastMSCount , (unsigned long long)LastFPS);
 }
 
+static void DrawFPSCounter()
+{
+	if (!vid_fps)
+	{
+		return;
+	}
+
+	CalcFps();
+	char fpsbuff[40];
+	int rate_x;
+	int textScale = active_con_scale(twod);
+
+	mysnprintf(fpsbuff, countof(fpsbuff), "%2llu ms (%3llu fps)", (unsigned long long)LastMSCount, (unsigned long long)LastFPS);
+	rate_x = screen->GetWidth() / textScale - NewConsoleFont->StringWidth(&fpsbuff[0]);
+	ClearRect(twod, rate_x * textScale, 0, screen->GetWidth(), NewConsoleFont->GetHeight() * textScale, GPalette.BlackIndex, 0);
+	DrawText(twod, NewConsoleFont, CR_WHITE, rate_x, 0, (char*)&fpsbuff[0],
+		DTA_VirtualWidth, screen->GetWidth() / textScale,
+		DTA_VirtualHeight, screen->GetHeight() / textScale,
+		DTA_KeepRatio, true, TAG_DONE);
+}
+
 static void DrawRateStuff()
 {
 	static uint64_t LastMS = 0, LastSec = 0, FrameCount = 0, LastTic = 0;
-
-	// Draws frame time and cumulative fps
-	if (vid_fps)
-	{
-		CalcFps();
-		char fpsbuff[40];
-		int chars;
-		int rate_x;
-		int textScale = active_con_scale(twod);
-
-		chars = mysnprintf(fpsbuff, countof(fpsbuff), "%2llu ms (%3llu fps)", (unsigned long long)LastMSCount, (unsigned long long)LastFPS);
-		rate_x = screen->GetWidth() / textScale - NewConsoleFont->StringWidth(&fpsbuff[0]);
-		ClearRect(twod, rate_x * textScale, 0, screen->GetWidth(), NewConsoleFont->GetHeight() * textScale, GPalette.BlackIndex, 0);
-		DrawText(twod, NewConsoleFont, CR_WHITE, rate_x, 0, (char*)&fpsbuff[0],
-			DTA_VirtualWidth, screen->GetWidth() / textScale,
-			DTA_VirtualHeight, screen->GetHeight() / textScale,
-			DTA_KeepRatio, true, TAG_DONE);
-	}
 
 	int Height = screen->GetHeight();
 
@@ -933,7 +936,15 @@ static void DrawOverlays()
 		C_DrawConsole ();
 	}
 	M_Drawer ();
-	DrawRateStuff();
+	if (VR_UsePortableHud() || vr_hud_mount || vr_automap_mount)
+	{
+		DrawRateStuff();
+	}
+	else
+	{
+		DrawFPSCounter();
+		DrawRateStuff();
+	}
 	DrawVersionString();
 	if (!hud_toggled)
 		FStat::PrintStat (twod);
@@ -1164,6 +1175,8 @@ static void DrawHudToSurface(const FRenderViewpoint& vp)
 
 	// Restore original scaling
 	StatusBar->CallScreenSizeChanged();
+
+	DrawFPSCounter();
 
 	twod->End();
 	twod = savedtwod;
