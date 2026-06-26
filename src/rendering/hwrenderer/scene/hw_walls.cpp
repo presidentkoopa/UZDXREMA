@@ -746,6 +746,7 @@ void HWWall::PutPortal(HWWallDispatcher *di, int ptype, int plane)
 			portal->AddLine(this);
 			break;
 		}
+		}
 		vertcount = 0;
 
 		if (plane != -1 && portal)

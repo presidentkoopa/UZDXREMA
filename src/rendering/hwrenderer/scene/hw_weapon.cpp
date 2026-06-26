@@ -48,6 +48,7 @@
 #include "flatvertices.h"
 #include "hw_lightbuffer.h"
 #include "hw_renderstate.h"
+#include "textures.h"
 #include "menu.h"
 #include <algorithm>
 #include <cmath>
@@ -285,12 +286,34 @@ void HWDrawInfo::DrawHudQuad(FRenderState& state, FGameTexture* texture, float w
 
 	texture->SetTranslucent(true);
 
+	FRenderStyle hudQuadStyle = LegacyRenderStyles[STYLE_Translucent];
+	if (texture->isHardwareCanvas())
+	{
+		auto* canvasTex = static_cast<FCanvasTexture*>(texture->GetTexture());
+		if (canvasTex != nullptr && canvasTex->bTranslucentCanvas)
+		{
+			// The portable HUD surface is rendered into transparent black first,
+			// so its RGB is effectively premultiplied by alpha. Compose it with
+			// premultiplied blending here to match the regular camera HUD.
+			hudQuadStyle.SrcAlpha = STYLEALPHA_One;
+			hudQuadStyle.DestAlpha = STYLEALPHA_InvSrc;
+		}
+	}
+
 	state.SetLightIndex(-1);
-	state.SetRenderStyle(STYLE_Translucent);
+	state.SetRenderStyle(hudQuadStyle);
 	state.AlphaFunc(Alpha_Greater, 0.0f);
 	state.SetTextureMode(TM_NORMAL);
+	state.ResetColor();
 	state.SetObjectColor(0xffffffff);
 	state.SetAddColor(0);
+	state.SetDynLight(0, 0, 0);
+	state.SetNoSoftLightLevel();
+	state.SetLightParms(1.f, 0.f);
+	state.EnableFog(false);
+	state.SetFog(0, 0);
+	state.ResetFadeColor();
+	state.EnableTextureMatrix(false);
 	state.EnableBrightmap(false);
 	state.EnableDepthTest(true);
 	state.SetDepthMask(depthMask);
