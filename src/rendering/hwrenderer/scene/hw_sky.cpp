@@ -143,13 +143,20 @@ void HWWall::SkyPlane(HWWallDispatcher *di, sector_t *sector, int plane, bool al
 	if ((sportal == nullptr && sector->GetTexture(plane) == skyflatnum) || (gl_noskyboxes && sportal != nullptr && sportal->mType == PORTS_SKYVIEWPOINT))
 	{
 		HWSkyInfo skyinfo;
+		ptype = PORTALTYPE_SKY;
 		if (di->di)
 		{
 			skyinfo.init(di->di, sector, plane, sector->skytransfer, Colormap.FadeColor);
-			ptype = PORTALTYPE_SKY;
 			sky = &skyinfo;
 		}
-		//PutPortal(di, ptype, plane);
+		else
+		{
+			sky = nullptr;
+			deferredSkySector = sector;
+			deferredSkyPlane = plane;
+			deferredSkyTransfer = sector->skytransfer;
+			deferredSkyFadeColor = Colormap.FadeColor;
+		}
 	}
 	else if (sportal != nullptr)
 	{
@@ -225,9 +232,20 @@ void HWWall::SkyLine(HWWallDispatcher *di, sector_t *fs, line_t *line)
 	}
 	else
 	{
-		if (di->di) skyinfo.init(di->di, fs, sector_t::ceiling, fs->skytransfer, Colormap.FadeColor);
 		ptype = PORTALTYPE_SKY;
-		sky = &skyinfo;
+		if (di->di)
+		{
+			skyinfo.init(di->di, fs, sector_t::ceiling, fs->skytransfer, Colormap.FadeColor);
+			sky = &skyinfo;
+		}
+		else
+		{
+			sky = nullptr;
+			deferredSkySector = fs;
+			deferredSkyPlane = sector_t::ceiling;
+			deferredSkyTransfer = fs->skytransfer;
+			deferredSkyFadeColor = Colormap.FadeColor;
+		}
 	}
 	ztop[0] = zceil[0];
 	ztop[1] = zceil[1];

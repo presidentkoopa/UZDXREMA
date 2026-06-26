@@ -197,6 +197,10 @@ public:
 	};
 	int portaltype = -1;				// for deferred portal submission in worker-built walls.
 	int portalplane = -1;
+	sector_t* deferredSkySector = nullptr;
+	int deferredSkyPlane = -1;
+	int deferredSkyTransfer = 0;
+	PalEntry deferredSkyFadeColor = 0;
 
 
 

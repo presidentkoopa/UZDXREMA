@@ -725,6 +725,17 @@ void HWWall::PutPortal(HWWallDispatcher *di, int ptype, int plane)
 			break;
 
 		case PORTALTYPE_SKY:
+		{
+			HWSkyInfo deferredSkyInfo;
+			if (sky == nullptr && deferredSkySector != nullptr)
+			{
+				deferredSkyInfo.init(ddi, deferredSkySector, deferredSkyPlane, deferredSkyTransfer, deferredSkyFadeColor);
+				sky = &deferredSkyInfo;
+			}
+			if (sky == nullptr)
+			{
+				return;
+			}
 			sky = portalState.UniqueSkies.Get(sky);
 			portal = ddi->FindPortal(sky);
 			if (!portal)
