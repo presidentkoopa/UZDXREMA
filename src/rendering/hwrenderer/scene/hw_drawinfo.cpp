@@ -520,6 +520,25 @@ void HWDrawInfo::ApplyMultiviewViewpoints(FRenderState &state, const HWViewpoint
 	}
 }
 
+void HWDrawInfo::RemoveMultiviewPositionParallax()
+{
+	if (!HasMultiviewViewpoints)
+		return;
+
+	FLOATTYPE leftView[16];
+	FLOATTYPE rightView[16];
+	MultiviewVPUniforms[0].mViewMatrix.copy(leftView);
+	MultiviewVPUniforms[1].mViewMatrix.copy(rightView);
+
+	rightView[12] = leftView[12];
+	rightView[13] = leftView[13];
+	rightView[14] = leftView[14];
+	MultiviewVPUniforms[1].mViewMatrix.loadMatrix(rightView);
+	MultiviewVPUniforms[1].mCameraPos = MultiviewVPUniforms[0].mCameraPos;
+	MultiviewVPUniforms[1].CalcDependencies();
+	VPUniforms = MultiviewVPUniforms[0];
+}
+
 void HWDrawInfo::TranslateViewpointMatrices(double x, double y, double z)
 {
 	VPUniforms.mViewMatrix.translate(x, y, z);

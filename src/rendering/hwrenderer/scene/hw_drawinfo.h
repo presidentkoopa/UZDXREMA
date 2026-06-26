@@ -263,6 +263,7 @@ public:
 	void RenderScene(FRenderState &state);
 	void ApplyViewpoint(FRenderState &state);
 	void ApplyMultiviewViewpoints(FRenderState &state, const HWViewpointUniforms *viewpoints, int count = 2);
+	void RemoveMultiviewPositionParallax();
 	void TranslateViewpointMatrices(double x, double y, double z);
 	void InheritMultiviewState(const HWDrawInfo& other);
 	void RenderTranslucent(FRenderState &state);

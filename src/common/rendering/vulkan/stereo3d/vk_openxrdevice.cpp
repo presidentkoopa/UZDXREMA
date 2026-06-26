@@ -1365,7 +1365,7 @@ DVector3 VKOpenXRDeviceEyePose::GetViewShift(FRenderViewpoint& vp) const
 void VKOpenXRDeviceEyePose::AdjustViewpointUniforms(HWViewpointUniforms& uniforms) const
 {
 	auto& mode = const_cast<VKOpenXRDeviceMode&>((const VKOpenXRDeviceMode&)VKOpenXRDeviceMode::getInstance());
-	if (eye <= 0 || (size_t)eye >= mode.xrViews.size() || mode.xrViews.empty())
+	if (eye < 0 || (size_t)eye >= mode.xrViews.size() || mode.xrViews.empty())
 	{
 		uniforms.CalcDependencies();
 		return;
@@ -1607,7 +1607,7 @@ VSMatrix VKOpenXRDeviceEyePose::GetHUDProjection() const
 		const auto& mode = const_cast<VKOpenXRDeviceMode&>((const VKOpenXRDeviceMode&)VKOpenXRDeviceMode::getInstance());
 		if ((size_t)eye < mode.xrViews.size())
 		{
-			const XrQuaternionf headOrientation = mode.xrViews[0].pose.orientation;
+			const XrQuaternionf headOrientation = GetCenteredViewOrientation(mode.xrViews);
 			const XrVector3f eyeOffsetMeters = {
 				currentEyePose.position.x - hmdPosition[0],
 				currentEyePose.position.y - hmdPosition[1],
@@ -2873,7 +2873,7 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 	hmdPosition[2] = pos.z;
 
 	float p, y, r;
-	QuaternionToEuler(xrViews[0].pose.orientation, p, y, r);
+	QuaternionToEuler(GetCenteredViewOrientation(xrViews), p, y, r);
 
 	hmdorientation[0] = -p;
 	hmdorientation[1] = -y;
@@ -4295,7 +4295,7 @@ void VKOpenXRDeviceMode::updateVirtualScreenLayer() const
 	center.z /= xrViewCount;
 	const int effectiveOverlayMode = (vr_overlayscreen == 0) ? 2 : vr_overlayscreen;
 
-	const XrQuaternionf headOrientation = xrViews[0].pose.orientation;
+	const XrQuaternionf headOrientation = GetCenteredViewOrientation(xrViews);
 	const XrVector3f headForward = RotateVector(headOrientation, { 0.0f, 0.0f, -1.0f });
 	const XrVector3f headUp = RotateVector(headOrientation, { 0.0f, 1.0f, 0.0f });
 	const float headYawDeg = YawDegFromForward(headForward);
