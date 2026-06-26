@@ -1202,8 +1202,6 @@ void HWDrawInfo::DrawScene(int drawmode)
 	if (drawmode == DM_MAINVIEW && vrmode->RenderPlayerSpritesInScene())
 	{
 		DrawPlayerSprites(IsHUDModelForPlayerAvailable(players[consoleplayer].camera->player), RenderState);
-		vrmode->DrawMountedHud(this, RenderState);
-		VRWheel_Draw(this, RenderState);
 	}
 
 	if (applySSAO && RenderState.GetPassType() == GBUFFER_PASS)
@@ -1222,6 +1220,8 @@ void HWDrawInfo::DrawScene(int drawmode)
 	{
 		DrawHitscanTracers(RenderState);
 		DrawLaserSightWorld(RenderState);
+		vrmode->DrawMountedHud(this, RenderState);
+		VRWheel_Draw(this, RenderState);
 	}
 }
 

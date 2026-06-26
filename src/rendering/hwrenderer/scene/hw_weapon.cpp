@@ -315,8 +315,8 @@ void HWDrawInfo::DrawHudQuad(FRenderState& state, FGameTexture* texture, float w
 	state.ResetFadeColor();
 	state.EnableTextureMatrix(false);
 	state.EnableBrightmap(false);
-	state.EnableDepthTest(true);
-	state.SetDepthMask(depthMask);
+	state.EnableDepthTest(false);
+	state.SetDepthMask(false);
 	state.SetMaterial(texture, UF_Sprite, CTF_Expand, CLAMP_XY_NOMIP, 0, -1);
 
 	screen->mVertexData->Map();
@@ -489,9 +489,16 @@ static void DrawLaserBeamGeometry(FRenderState& state, const DVector3& beamStart
 	state.EnableModelMatrix(false);
 	state.SetLightIndex(-1);
 	state.AlphaFunc(Alpha_Greater, 0.0f);
+	state.ResetColor();
 	state.SetObjectColor(0xffffffff);
 	state.SetAddColor(0);
 	state.SetDynLight(0, 0, 0);
+	state.SetNoSoftLightLevel();
+	state.SetLightParms(1.f, 0.f);
+	state.EnableFog(false);
+	state.SetFog(0, 0);
+	state.ResetFadeColor();
+	state.EnableTextureMatrix(false);
 	state.EnableBrightmap(false);
 	state.EnableTexture(false);
 	state.EnableDepthTest(true);
@@ -658,9 +665,16 @@ static void DrawHitscanTracerGeometry(FRenderState& state, const DVector3& trace
 	state.EnableModelMatrix(false);
 	state.SetLightIndex(-1);
 	state.AlphaFunc(Alpha_Greater, 0.0f);
+	state.ResetColor();
 	state.SetObjectColor(0xffffffff);
 	state.SetAddColor(0);
 	state.SetDynLight(0, 0, 0);
+	state.SetNoSoftLightLevel();
+	state.SetLightParms(1.f, 0.f);
+	state.EnableFog(false);
+	state.SetFog(0, 0);
+	state.ResetFadeColor();
+	state.EnableTextureMatrix(false);
 	state.EnableBrightmap(false);
 	state.EnableTexture(false);
 	state.EnableDepthTest(true);
