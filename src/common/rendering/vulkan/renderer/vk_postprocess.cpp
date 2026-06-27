@@ -36,6 +36,7 @@
 #include "vulkan/textures/vk_texture.h"
 #include "vulkan/textures/vk_framebuffer.h"
 #include "hw_cvars.h"
+#include "hw_clock.h"
 #include "hwrenderer/postprocessing/hw_postprocess.h"
 #include "hwrenderer/postprocessing/hw_postprocess_cvars.h"
 #include "hw_vrmodes.h"
@@ -83,6 +84,7 @@ void VkPostprocess::SetActiveRenderTarget()
 
 void VkPostprocess::PostProcessScene(int fixedcm, float flash, const std::function<void()> &afterBloomDrawEndScene2D)
 {
+	Clocker postprocessTimer(VRPostProcessScene);
 	int sceneWidth = fb->GetBuffers()->GetSceneWidth();
 	int sceneHeight = fb->GetBuffers()->GetSceneHeight();
 
@@ -96,6 +98,8 @@ void VkPostprocess::PostProcessScene(int fixedcm, float flash, const std::functi
 
 void VkPostprocess::BlitSceneToPostprocess()
 {
+	Clocker transferTimer(VRSceneTransfer);
+	VRSceneTransferOps++;
 	fb->GetRenderState()->EndRenderPass();
 
 	auto buffers = fb->GetBuffers();

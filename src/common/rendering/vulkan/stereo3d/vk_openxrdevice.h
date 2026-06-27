@@ -82,6 +82,7 @@ public:
 	virtual bool RenderPlayerSpritesInScene() const { return true; }
 	virtual bool GetTeleportLocation(DVector3 &out) const override;
 	virtual void Vibrate(float duration, int channel, float intensity) const override;
+	virtual bool GetBenchmarkInfo(VRBenchmarkInfo& out) const override;
 
     // Vulkan specific multiview setup
     void InitializeMultiview() const;

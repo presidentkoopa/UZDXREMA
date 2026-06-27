@@ -441,7 +441,16 @@ void VulkanRenderDevice::Update()
 
 	Flush3D.Unclock();
 
-	mCommands->WaitForCommands(true);
+	const bool trackXrSyncWait = vrmode != nullptr && vrmode->IsVR() && mXRFrameBeganThisFrame;
+	if (trackXrSyncWait)
+	{
+		Clocker renderSyncTimer(VRRenderSyncWait);
+		mCommands->WaitForCommands(true);
+	}
+	else
+	{
+		mCommands->WaitForCommands(true);
+	}
 	mCommands->UpdateGpuStats();
 
 	if (vrmode != nullptr && vrmode->IsVR() && mXRFrameBeganThisFrame)
