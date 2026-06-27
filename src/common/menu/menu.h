@@ -131,6 +131,8 @@ public:
 	bool mDontBlur;
 	bool mAnimatedTransition;
 	bool mAnimated;
+	bool mAutoScroll;
+	int mAutoScrollSpeed;
 	FFont *mFont;
 
 	void CalcIndent();

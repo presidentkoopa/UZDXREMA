@@ -109,6 +109,7 @@ static MenuTransition transition;
 extern PClass *DefaultListMenuClass;
 extern PClass *DefaultOptionMenuClass;
 void InitMenuDelegate();
+void M_CreateGameMenus();
 
 
 #define KEY_REPEAT_DELAY	(GameTicRate*5/12)
@@ -178,6 +179,8 @@ void DOptionMenuDescriptor::Reset()
 	mScrollTop = 0;
 	mIndent = 0;
 	mDontDim = 0;
+	mAutoScroll = 0;
+	mAutoScrollSpeed = 1;
 	mFont = BigUpper;
 }
 
@@ -446,6 +449,7 @@ void M_StartControlPanel (bool makesound, bool scaleoverride)
 		DeinitMenus();
 		InitMenuDelegate();
 		M_Init();
+		M_CreateGameMenus();
 	}
 
 	if (sysCallbacks.OnMenuOpen) sysCallbacks.OnMenuOpen(makesound);
@@ -1138,6 +1142,8 @@ DEFINE_FIELD(DOptionMenuDescriptor, mDontDim)
 DEFINE_FIELD(DOptionMenuDescriptor, mDontBlur)
 DEFINE_FIELD(DOptionMenuDescriptor, mAnimatedTransition)
 DEFINE_FIELD(DOptionMenuDescriptor, mAnimated)
+DEFINE_FIELD(DOptionMenuDescriptor, mAutoScroll)
+DEFINE_FIELD(DOptionMenuDescriptor, mAutoScrollSpeed)
 DEFINE_FIELD(DOptionMenuDescriptor, mFont)
 
 DEFINE_FIELD(FOptionMenuSettings, mTitleColor)

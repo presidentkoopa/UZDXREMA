@@ -19,6 +19,7 @@ vec3_t positionDeltaThisFrame;
 bool weaponStabilised;
 bool vrApplyingHmdYaw;
 bool resetDoomYaw;
+bool resetPreviousHmdYaw;
 bool resetPreviousPitch;
 // bool shutdown;
 bool ready_teleport;
@@ -79,6 +80,11 @@ void QzDoom_setUseScreenLayer(bool use)
 bool VR_UseScreenLayer()
 {
 	return vr_overlayscreen && (useVirtualScreen || cinemamode || vr_overlayscreen_always);
+}
+
+bool VR_UseCinematicScreenLayer()
+{
+	return vr_overlayscreen && (cinemamode || vr_overlayscreen_always);
 }
 
 void VR_SetHMDOrientation(float pitch, float yaw, float roll)

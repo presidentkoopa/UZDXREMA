@@ -51,6 +51,9 @@
 #include "actorinlines.h"
 #include "g_levellocals.h"
 
+void DrawLaserSightWorld(FRenderState& state);
+void DrawHitscanTracers(FRenderState& state);
+
 EXTERN_CVAR(Float, r_visibility)
 EXTERN_CVAR(Int, gl_max_portals);
 CVAR(Bool, gl_bandedswlight, false, CVAR_ARCHIVE)
@@ -515,6 +518,25 @@ void HWDrawInfo::ApplyMultiviewViewpoints(FRenderState &state, const HWViewpoint
 		VPUniforms.CalcDependencies();
 		vpIndex = screen->mViewpoints->SetViewpoint(state, &VPUniforms);
 	}
+}
+
+void HWDrawInfo::RemoveMultiviewPositionParallax()
+{
+	if (!HasMultiviewViewpoints)
+		return;
+
+	FLOATTYPE leftView[16];
+	FLOATTYPE rightView[16];
+	MultiviewVPUniforms[0].mViewMatrix.copy(leftView);
+	MultiviewVPUniforms[1].mViewMatrix.copy(rightView);
+
+	rightView[12] = leftView[12];
+	rightView[13] = leftView[13];
+	rightView[14] = leftView[14];
+	MultiviewVPUniforms[1].mViewMatrix.loadMatrix(rightView);
+	MultiviewVPUniforms[1].mCameraPos = MultiviewVPUniforms[0].mCameraPos;
+	MultiviewVPUniforms[1].CalcDependencies();
+	VPUniforms = MultiviewVPUniforms[0];
 }
 
 void HWDrawInfo::TranslateViewpointMatrices(double x, double y, double z)
@@ -1180,8 +1202,6 @@ void HWDrawInfo::DrawScene(int drawmode)
 	if (drawmode == DM_MAINVIEW && vrmode->RenderPlayerSpritesInScene())
 	{
 		DrawPlayerSprites(IsHUDModelForPlayerAvailable(players[consoleplayer].camera->player), RenderState);
-		vrmode->DrawMountedHud(this, RenderState);
-		VRWheel_Draw(this, RenderState);
 	}
 
 	if (applySSAO && RenderState.GetPassType() == GBUFFER_PASS)
@@ -1196,6 +1216,16 @@ void HWDrawInfo::DrawScene(int drawmode)
 	portalState.EndFrame(this, RenderState);
 	recursion--;
 	RenderTranslucent(RenderState);
+	if (drawmode == DM_MAINVIEW)
+	{
+		if (vrmode->RenderPlayerSpritesInScene())
+		{
+			vrmode->DrawMountedHud(this, RenderState);
+		}
+		DrawHitscanTracers(RenderState);
+		DrawLaserSightWorld(RenderState);
+		VRWheel_Draw(this, RenderState);
+	}
 }
 
 

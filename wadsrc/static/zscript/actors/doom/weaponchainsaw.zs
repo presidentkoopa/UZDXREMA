@@ -68,11 +68,12 @@ extend class StateProvider
 			range = MeleeRange + MELEEDELTA + (1. / 65536.); // MBF21 SAWRANGE;
 		}
 
-		int alflags = invoker == player.OffhandWeapon ? ALF_ISOFFHAND : 0;
+		Weapon weap = invoker == player.OffhandWeapon ? player.OffhandWeapon : player.ReadyWeapon;
+		int hand = weap != null && weap.bOffhandWeapon ? 1 : 0;
+		int alflags = hand ? ALF_ISOFFHAND : 0;
 		double ang = angle + spread_xy * (Random2[Saw]() / 255.);
 		double slope = AimLineAttack (ang, range, t, flags: alflags) + spread_z * (Random2[Saw]() / 255.);
 
-		Weapon weap = invoker == player.OffhandWeapon ? player.OffhandWeapon : player.ReadyWeapon;
 		if (weap != null && !(flags & SF_NOUSEAMMO) && !(!t.linetarget && (flags & SF_NOUSEAMMOMISS)) && !weap.bDehAmmo &&
 			invoker == weap && stateinfo != null && stateinfo.mStateType == STATE_Psprite)
 		{
@@ -81,7 +82,7 @@ extend class StateProvider
 		}
 
 		int puffFlags = (flags & SF_NORANDOMPUFFZ) ? LAF_NORANDOMPUFFZ : 0;
-		puffFlags |= invoker == player.OffhandWeapon ? LAF_ISOFFHAND : 0;
+		puffFlags |= hand ? LAF_ISOFFHAND : 0;
 
 		Actor puff;
 		int actualdamage;

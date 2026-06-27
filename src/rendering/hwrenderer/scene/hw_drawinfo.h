@@ -36,6 +36,7 @@ class FFlatVertexBuffer;
 class IRenderQueue;
 class HWScenePortalBase;
 class FRenderState;
+struct HWMeshHelper;
 
 //==========================================================================
 //
@@ -189,6 +190,7 @@ struct HWDrawInfo
 	fixed_t viewx, viewy;	// since the nodes are still fixed point, keeping the view position  also fixed point for node traversal is faster.
 	bool multithread;
 	bool IsVRScene = false;
+	bool experimentalMultiWallWorkers = false;
 
 private:
     // For ProcessLowerMiniseg
@@ -199,7 +201,8 @@ private:
 	subsector_t *currentsubsector;	// used by the line processing code.
 	sector_t *currentsector;
 
-	void WorkerThread();
+	void WorkerThread(HWMeshHelper* helper = nullptr);
+	void StartWallWorkersIfNeeded();
 
 	void UnclipSubsector(subsector_t *sub);
 	
@@ -260,6 +263,7 @@ public:
 	void RenderScene(FRenderState &state);
 	void ApplyViewpoint(FRenderState &state);
 	void ApplyMultiviewViewpoints(FRenderState &state, const HWViewpointUniforms *viewpoints, int count = 2);
+	void RemoveMultiviewPositionParallax();
 	void TranslateViewpointMatrices(double x, double y, double z);
 	void InheritMultiviewState(const HWDrawInfo& other);
 	void RenderTranslucent(FRenderState &state);

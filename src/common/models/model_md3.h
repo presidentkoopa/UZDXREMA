@@ -57,7 +57,6 @@ class FMD3Model : public FModel
 	};
 
 	int numTags;
-	int mLumpNum;
 
 	TArray<MD3Frame> Frames;
 	TArray<MD3Surface> Surfaces;
@@ -69,6 +68,7 @@ public:
 	virtual int FindFrame(const char* name, bool nodefault) override;
 	virtual void RenderFrame(FModelRenderer *renderer, FGameTexture * skin, int frame, int frame2, double inter, FTranslationID translation, const FTextureID* surfaceskinids, int boneStartPosition) override;
 	void LoadGeometry();
+	void LoadGeometry(FileSys::FileData* lumpData) override;
 	void BuildVertexBuffer(FModelRenderer *renderer);
 	virtual void AddSkins(uint8_t *hitlist, const FTextureID* surfaceskinids) override;
 };

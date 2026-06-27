@@ -129,6 +129,7 @@ public:
 
 private:
 	void LoadGeometry();
+	void LoadGeometry(FileSys::FileData* lumpData) override;
 	void UnloadGeometry();
 
 	void LoadPosition(IQMFileReader& reader, const IQMVertexArray& vertexArray);
@@ -136,8 +137,6 @@ private:
 	void LoadNormal(IQMFileReader& reader, const IQMVertexArray& vertexArray);
 	void LoadBlendIndexes(IQMFileReader& reader, const IQMVertexArray& vertexArray);
 	void LoadBlendWeights(IQMFileReader& reader, const IQMVertexArray& vertexArray);
-
-	int mLumpNum = -1;
 
 	TMap<FName, int> NamedAnimations;
 

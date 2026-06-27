@@ -172,7 +172,6 @@ protected:
 	mutable bool xrLastMenuReturnState = false;
 	mutable bool xrLastMenuBackState = false;
 	mutable bool xrLastMenuBackspaceState = false;
-	mutable bool xrLoggedWeaponState = false;
 	mutable XrAction xrHapticAction = XR_NULL_HANDLE;
 	mutable double xrHapticDuration[2] = { 0.0, 0.0 };
 	mutable float xrHapticIntensity[2] = { 0.0f, 0.0f };
@@ -245,7 +244,6 @@ protected:
 	mutable int xrMenuPointerLastY = 0;
 	mutable bool xrMenuPointerLastLeftDown = false;
 	mutable bool xrMenuPointerLastRightDown = false;
-	mutable bool xrLoggedDesktopViewportMismatch = false;
 #ifdef XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME
 	mutable bool xrHasDisplayRefreshRate = false;
 	mutable bool xrLoggedDisplayRefreshRates = false;

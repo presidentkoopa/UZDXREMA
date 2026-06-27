@@ -13,6 +13,7 @@ typedef vec_t vec3_t[3];
 #define VectorSet(v, x, y, z) ((v)[0]=(x),(v)[1]=(y),(v)[2]=(z))
 
 EXTERN_CVAR(Int, vr_control_scheme)
+EXTERN_CVAR(Int, vr_joy_mode)
 EXTERN_CVAR(Bool, vr_move_use_offhand)
 EXTERN_CVAR(Float, vr_weaponRotate);
 EXTERN_CVAR(Float, vr_snapTurn);
@@ -31,6 +32,7 @@ extern float cinemamodePitch;
 extern float playerYaw;
 extern bool vrApplyingHmdYaw;
 extern bool resetDoomYaw;
+extern bool resetPreviousHmdYaw;
 extern float doomYaw;
 extern bool resetPreviousPitch;
 extern float previousPitch;
@@ -53,6 +55,7 @@ float VR_ApplyAnalogSmoothTurn(float turnAxis, float maxTurnRateDegPerSec, float
 //Called from engine code
 void QzDoom_setUseScreenLayer(bool use);
 bool VR_UseScreenLayer();
+bool VR_UseCinematicScreenLayer();
 void QzDoom_Restart();
 
 

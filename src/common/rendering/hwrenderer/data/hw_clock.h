@@ -15,6 +15,10 @@ extern glcycle_t Dirty;
 extern glcycle_t drawcalls, twoD, Flush3D;
 extern glcycle_t MTWait, WTTotal;
 extern glcycle_t WTWallJobs, WTFlatJobs, WTThingJobs;
+extern glcycle_t WallWorkersElapsed, WallMerge, SceneWorkerElapsed;
+extern int64_t WallWorkersCpuSumCycles, WallWorkersWallCpuSumCycles;
+extern int64_t WallWorkersElapsedCycles;
+extern int WallBatchCount, WallItemsProcessed;
 
 extern int iter_dlightf, iter_dlight, draw_dlight, draw_dlightf;
 extern int rendered_lines,rendered_flats,rendered_sprites,rendered_decals,render_vertexsplit,render_texsplit;

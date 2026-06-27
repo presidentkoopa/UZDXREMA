@@ -48,13 +48,49 @@
 #include "flatvertices.h"
 #include "hw_lightbuffer.h"
 #include "hw_renderstate.h"
+#include "textures.h"
+#include "menu.h"
+#include <algorithm>
+#include <cmath>
+#include "playsim/p_local.h"
+#include "playsim/p_hitscantracer.h"
+#include "playsim/p_linetracedata.h"
+#include "playsim/p_trace.h"
 
 #include "vm.h"
 
 EXTERN_CVAR(Float, transsouls)
 EXTERN_CVAR(Int, gl_fuzztype)
+EXTERN_CVAR(Bool, gl_texture_thread)
 EXTERN_CVAR(Bool, r_drawplayersprites)
 EXTERN_CVAR(Bool, r_deathcamera)
+EXTERN_CVAR(Bool, vr_laser_sight)
+EXTERN_CVAR(Bool, vr_laser_show_melee)
+EXTERN_CVAR(Bool, vr_laser_hide_on_wheel)
+EXTERN_CVAR(Bool, vr_laser_beam)
+EXTERN_CVAR(Color, vr_laser_color)
+EXTERN_CVAR(Float, vr_laser_beam_alpha)
+EXTERN_CVAR(Float, vr_laser_beam_width)
+EXTERN_CVAR(Float, vr_laser_pointer_scale)
+EXTERN_CVAR(Float, vr_laser_pointer_alpha)
+EXTERN_CVAR(Int, vr_laser_pointer_glow)
+EXTERN_CVAR(Float, vr_laser_pointer_glow_scale)
+EXTERN_CVAR(Float, vr_laser_pointer_glow_intensity)
+EXTERN_CVAR(Int, vr_laser_beam_length)
+EXTERN_CVAR(Int, vr_laser_fixed_length)
+EXTERN_CVAR(Float, vr_laser_source_offset_x)
+EXTERN_CVAR(Float, vr_laser_source_offset_y)
+EXTERN_CVAR(Float, vr_laser_source_offset_z)
+EXTERN_CVAR(Color, vr_hitscan_tracer_color)
+EXTERN_CVAR(Float, vr_hitscan_tracer_alpha)
+EXTERN_CVAR(Float, vr_hitscan_tracer_length)
+EXTERN_CVAR(Float, vr_hitscan_tracer_width)
+EXTERN_CVAR(Float, vr_hitscan_tracer_speed)
+
+extern float hmdorientation[3];
+extern float weaponangles[3];
+extern float offhandangles[3];
+extern float doomYaw;
 //To force translucency for weapon sprites, tex->GetTranslucency returns false result for 32 bit PNG
 CVAR(Bool, r_transparentPlayerSprites, true, CVAR_ARCHIVE)
 
@@ -250,13 +286,37 @@ void HWDrawInfo::DrawHudQuad(FRenderState& state, FGameTexture* texture, float w
 
 	texture->SetTranslucent(true);
 
+	FRenderStyle hudQuadStyle = LegacyRenderStyles[STYLE_Translucent];
+	if (texture->isHardwareCanvas())
+	{
+		auto* canvasTex = static_cast<FCanvasTexture*>(texture->GetTexture());
+		if (canvasTex != nullptr && canvasTex->bTranslucentCanvas)
+		{
+			// The portable HUD surface is rendered into transparent black first,
+			// so its RGB is effectively premultiplied by alpha. Compose it with
+			// premultiplied blending here to match the regular camera HUD.
+			hudQuadStyle.SrcAlpha = STYLEALPHA_One;
+			hudQuadStyle.DestAlpha = STYLEALPHA_InvSrc;
+		}
+	}
+
 	state.SetLightIndex(-1);
-	state.SetRenderStyle(STYLE_Translucent);
+	state.SetRenderStyle(hudQuadStyle);
 	state.AlphaFunc(Alpha_Greater, 0.0f);
 	state.SetTextureMode(TM_NORMAL);
+	state.ResetColor();
 	state.SetObjectColor(0xffffffff);
 	state.SetAddColor(0);
+	state.SetDynLight(0, 0, 0);
+	state.SetNoSoftLightLevel();
+	state.SetLightParms(1.f, 0.f);
+	state.EnableFog(false);
+	state.SetFog(0, 0);
+	state.ResetFadeColor();
+	state.EnableTextureMatrix(false);
 	state.EnableBrightmap(false);
+	// Mounted HUD is a world-space quad. Keep the portable-HUD premultiplied alpha fix but preserve
+	// depth behavior so it does not turn into an unconditional fullscreen-style overlay in OpenVR.
 	state.EnableDepthTest(true);
 	state.SetDepthMask(depthMask);
 	state.SetMaterial(texture, UF_Sprite, CTF_Expand, CLAMP_XY_NOMIP, 0, -1);
@@ -310,6 +370,501 @@ void HWDrawInfo::DrawVRHudBorder(FRenderState& state, float width, float height,
 	state.EnableTexture(true);
 	state.SetDepthMask(true);
 	state.EnableDepthTest(true);
+}
+
+struct FLaserBeamPoints
+{
+	DVector3 Start;
+	DVector3 HitEnd;
+	DVector3 BeamEnd;
+};
+
+static DVector3 GetWeaponLaserBeamOffset(AActor* weapon)
+{
+	if (weapon == nullptr)
+	{
+		return DVector3(0.0, 0.0, 0.0);
+	}
+
+	auto* offset = (DVector3*)weapon->ScriptVar(NAME_LaserBeamOffset, nullptr);
+	return offset != nullptr ? *offset : DVector3(0.0, 0.0, 0.0);
+}
+
+static DVector3 LaserAngleToVector(DAngle yaw, DAngle pitch)
+{
+	const double pc = pitch.Cos();
+	return DVector3(pc * yaw.Cos(), pc * yaw.Sin(), -pitch.Sin());
+}
+
+static DVector3 GetLaserBeamControllerDirection(bool offhand)
+{
+	const float* controllerAngles = offhand ? offhandangles : weaponangles;
+	const DAngle yaw = DAngle::fromDeg(doomYaw + controllerAngles[1] - hmdorientation[1]);
+	return LaserAngleToVector(yaw, DAngle::fromDeg(controllerAngles[0]));
+}
+
+static bool GetLaserBeamEndpoints(player_t* player, AActor* weapon, bool offhand, FLaserBeamPoints& points)
+{
+	if (player == nullptr || player->mo == nullptr || !player->mo->OverrideAttackPosDir)
+	{
+		return false;
+	}
+
+	auto* mo = player->mo;
+	const DVector3 direction = GetLaserBeamControllerDirection(offhand);
+	const DVector3 base = offhand ? mo->OffhandPos : mo->AttackPos;
+	const DVector3 weaponOffset = GetWeaponLaserBeamOffset(weapon);
+	const DVector3 forward = direction;
+	DVector3 side = DVector3(0.0, 0.0, 1.0) ^ forward;
+	if (side.LengthSquared() < 1e-8)
+	{
+		side = DVector3(0.0, 1.0, 0.0);
+	}
+	side.MakeUnit();
+	DVector3 up = forward ^ side;
+	if (up.LengthSquared() < 1e-8)
+	{
+		up = DVector3(0.0, 0.0, 1.0);
+	}
+	up.MakeUnit();
+
+	const DVector3 totalOffset = DVector3(
+		(double)vr_laser_source_offset_y + weaponOffset.Y,
+		(double)vr_laser_source_offset_x + weaponOffset.X,
+		(double)vr_laser_source_offset_z + weaponOffset.Z);
+
+	points.Start = base +
+		forward * totalOffset.X +
+		side * totalOffset.Y +
+		up * totalOffset.Z;
+
+	const double maxDistance = 8192.0;
+	FTraceResults trace{};
+	const bool hit = Trace(points.Start, mo->Sector, direction, maxDistance, MF_SHOOTABLE,
+		ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN | ML_BLOCKUSE, mo, trace, TRACE_NoSky);
+	points.HitEnd = hit ? trace.HitPos : (points.Start + forward * maxDistance);
+	DVector3 beamVector = points.HitEnd - points.Start;
+	double beamDistance = beamVector.Length();
+	double visibleDistance = beamDistance;
+	switch (vr_laser_beam_length)
+	{
+	case 1:
+		visibleDistance *= 0.5;
+		break;
+	case 2:
+		visibleDistance = std::min((double)vr_laser_fixed_length, beamDistance);
+		break;
+	default:
+		break;
+	}
+
+	if (beamDistance <= 0.01)
+	{
+		points.BeamEnd = points.Start;
+		return true;
+	}
+
+	beamVector.MakeUnit();
+	points.BeamEnd = points.Start + beamVector * visibleDistance;
+	return true;
+}
+
+static void DrawLaserBeamGeometry(FRenderState& state, const DVector3& beamStart, const DVector3& beamEnd, const DVector3& hitEnd, bool drawBeam, bool drawPointer)
+{
+	if (!drawBeam && !drawPointer)
+	{
+		return;
+	}
+
+	DVector3 pointerCenter = hitEnd;
+	if (drawPointer)
+	{
+		DVector3 pointerBackDir = hitEnd - beamStart;
+		if (pointerBackDir.LengthSquared() > 1e-8)
+		{
+			pointerBackDir.MakeUnit();
+			pointerCenter -= pointerBackDir * 4.0;
+		}
+	}
+
+	const int beamColor = (int)vr_laser_color;
+	state.EnableModelMatrix(false);
+	state.SetLightIndex(-1);
+	state.AlphaFunc(Alpha_Greater, 0.0f);
+	state.ResetColor();
+	state.SetObjectColor(0xffffffff);
+	state.SetAddColor(0);
+	state.SetDynLight(0, 0, 0);
+	state.SetNoSoftLightLevel();
+	state.SetLightParms(1.f, 0.f);
+	state.EnableFog(false);
+	state.SetFog(0, 0);
+	state.ResetFadeColor();
+	state.EnableTextureMatrix(false);
+	state.EnableBrightmap(false);
+	state.EnableTexture(false);
+	state.EnableDepthTest(true);
+	state.SetDepthMask(false);
+	const float beamAlpha = std::clamp<float>(vr_laser_beam_alpha, 0.0f, 1.0f);
+	if (drawBeam && beamAlpha > 0.0f)
+	{
+		const bool beamOpaque = beamAlpha >= 0.999f;
+
+		const DVector3 beamTarget = drawPointer ? pointerCenter : beamEnd;
+		DVector3 beamVec = beamTarget - beamStart;
+		const double beamLength = beamVec.Length();
+		if (beamLength > 0.01)
+		{
+			beamVec.MakeUnit();
+
+			DVector3 beamRight, beamUp;
+			beamVec.GetRightUp(beamRight, beamUp);
+
+			const float beamRadius = 0.25f * std::max(0.05f, (float)vr_laser_beam_width);
+			constexpr int beamSegments = 8;
+			const int vertexCount = (beamSegments + 1) * 2;
+
+			state.SetRenderStyle(beamOpaque ? STYLE_Source : STYLE_Add);
+			state.SetColor(RPART(beamColor) / 255.0f, GPART(beamColor) / 255.0f, BPART(beamColor) / 255.0f, beamAlpha);
+
+			screen->mVertexData->Map();
+			auto verts = screen->mVertexData->AllocVertices(vertexCount);
+			auto vp = verts.first;
+			for (int i = 0; i <= beamSegments; ++i)
+			{
+				const double t = (double)i / (double)beamSegments;
+				const double ang = t * 6.28318530717958647692;
+				const double cs = std::cos(ang);
+				const double sn = std::sin(ang);
+				const DVector3 ringOffset = (beamRight * cs + beamUp * sn) * beamRadius;
+				const DVector3 startPos = beamStart + ringOffset;
+				const DVector3 endPos = beamTarget + ringOffset;
+				vp[i * 2 + 0].Set((float)startPos.X, (float)startPos.Z, (float)startPos.Y, 0.0f, 0.0f);
+				vp[i * 2 + 1].Set((float)endPos.X, (float)endPos.Z, (float)endPos.Y, 0.0f, 1.0f);
+			}
+			screen->mVertexData->Unmap();
+
+			state.Draw(DT_TriangleStrip, verts.second, vertexCount, true);
+		}
+	}
+
+	if (drawPointer)
+	{
+		const DVector3 camForward = r_viewpoint.ViewVector3D;
+		DVector3 camUp(0.0, 0.0, 1.0);
+		DVector3 camRight = camUp ^ camForward;
+		if (camRight.LengthSquared() < 1e-8)
+		{
+			camUp = DVector3(0.0, 1.0, 0.0);
+			camRight = camUp ^ camForward;
+		}
+		camRight.MakeUnit();
+		camUp = camForward ^ camRight;
+		camUp.MakeUnit();
+
+		const double pointerDistance = (hitEnd - r_viewpoint.Pos).Length();
+		const double fovScale = std::tan(r_viewpoint.GetFieldOfView().Radians() * 0.5);
+		const double pointerScale = std::max(0.25, (double)vr_laser_pointer_scale);
+		const float pointerRadius = (float)std::max(0.006, pointerDistance * fovScale * 0.01 * pointerScale);
+		const int pointerSegments = 16;
+		const int pointerVertexCount = pointerSegments + 2;
+		screen->mVertexData->Map();
+		auto pointerVerts = screen->mVertexData->AllocVertices(pointerVertexCount);
+		auto pv = pointerVerts.first;
+		pv[0].Set((float)pointerCenter.X, (float)pointerCenter.Z, (float)pointerCenter.Y, 0.5f, 0.5f);
+		for (int i = 0; i <= pointerSegments; ++i)
+		{
+			const double t = (double)i / (double)pointerSegments;
+			const double ang = t * 6.28318530717958647692;
+			const double cs = std::cos(ang);
+			const double sn = std::sin(ang);
+			const DVector3 ringOffset = (camRight * cs + camUp * sn) * pointerRadius;
+			const DVector3 pos = pointerCenter + ringOffset;
+			pv[i + 1].Set((float)pos.X, (float)pos.Z, (float)pos.Y, 0.0f, 0.0f);
+		}
+		screen->mVertexData->Unmap();
+
+		const float pointerAlpha = std::clamp<float>(vr_laser_pointer_alpha, 0.0f, 1.0f);
+		const bool pointerOpaque = pointerAlpha >= 0.999f;
+		state.SetColor(RPART(beamColor) / 255.0f, GPART(beamColor) / 255.0f, BPART(beamColor) / 255.0f, pointerAlpha);
+		state.SetRenderStyle(pointerOpaque ? STYLE_Source : STYLE_Add);
+		state.Draw(DT_TriangleFan, pointerVerts.second, pointerVertexCount, true);
+
+		if (vr_laser_pointer_glow != 0)
+		{
+			const float glowScale = std::max(1.1f, (float)vr_laser_pointer_glow_scale);
+			const float glowIntensity = std::max(0.1f, (float)vr_laser_pointer_glow_intensity);
+			const bool dynamicGlow = vr_laser_pointer_glow == 2;
+			state.SetRenderStyle(STYLE_Add);
+			const int glowPasses = dynamicGlow ? 4 : 3;
+			for (int pass = 0; pass < glowPasses; ++pass)
+			{
+				const float passScale = dynamicGlow
+					? glowScale * (1.8f + pass * 0.9f)
+					: glowScale * (1.0f + pass * 0.5f);
+				const float passAlpha = pointerAlpha * glowIntensity * (dynamicGlow
+					? (0.20f / (pass + 1))
+					: (pass == 0 ? 0.45f : pass == 1 ? 0.22f : 0.10f));
+				screen->mVertexData->Map();
+				auto glowVerts = screen->mVertexData->AllocVertices(pointerVertexCount);
+				auto gv = glowVerts.first;
+				gv[0].Set((float)pointerCenter.X, (float)pointerCenter.Z, (float)pointerCenter.Y, 0.5f, 0.5f);
+				for (int i = 0; i <= pointerSegments; ++i)
+				{
+					const double t = (double)i / (double)pointerSegments;
+					const double ang = t * 6.28318530717958647692;
+					const double cs = std::cos(ang);
+					const double sn = std::sin(ang);
+					const DVector3 ringOffset = (camRight * cs + camUp * sn) * (pointerRadius * passScale);
+					const DVector3 pos = pointerCenter + ringOffset;
+					gv[i + 1].Set((float)pos.X, (float)pos.Z, (float)pos.Y, 0.0f, 0.0f);
+				}
+				screen->mVertexData->Unmap();
+				state.SetColor(RPART(beamColor) / 255.0f, GPART(beamColor) / 255.0f, BPART(beamColor) / 255.0f, passAlpha);
+				state.Draw(DT_TriangleFan, glowVerts.second, pointerVertexCount, true);
+			}
+		}
+	}
+
+	state.EnableTexture(true);
+	state.SetDepthMask(true);
+	state.SetRenderStyle(DefaultRenderStyle());
+	state.SetTextureMode(TM_NORMAL);
+	state.SetColor(1.f, 1.f, 1.f, 1.f);
+	state.SetObjectColor(0xffffffff);
+	state.SetAddColor(0);
+	state.SetDynLight(0, 0, 0);
+	state.EnableBrightmap(false);
+	state.EnableModelMatrix(false);
+	state.ResetColor();
+}
+
+static void DrawHitscanTracerGeometry(FRenderState& state, const DVector3& tracerStart, const DVector3& tracerEnd)
+{
+	DVector3 tracerVec = tracerEnd - tracerStart;
+	const double tracerLength = tracerVec.Length();
+	if (tracerLength <= 0.01)
+	{
+		return;
+	}
+
+	tracerVec.MakeUnit();
+
+	DVector3 tracerRight, tracerUp;
+	tracerVec.GetRightUp(tracerRight, tracerUp);
+
+	const int tracerColor = (int)vr_hitscan_tracer_color;
+	const float tracerAlpha = std::clamp<float>(vr_hitscan_tracer_alpha, 0.0f, 1.0f);
+	if (tracerAlpha <= 0.0f)
+	{
+		return;
+	}
+
+	const float tracerRadius = 0.5f * std::max(0.01f, (float)vr_hitscan_tracer_width);
+	constexpr int tracerSegments = 8;
+	const int vertexCount = (tracerSegments + 1) * 2;
+
+	state.EnableModelMatrix(false);
+	state.SetLightIndex(-1);
+	state.AlphaFunc(Alpha_Greater, 0.0f);
+	state.ResetColor();
+	state.SetObjectColor(0xffffffff);
+	state.SetAddColor(0);
+	state.SetDynLight(0, 0, 0);
+	state.SetNoSoftLightLevel();
+	state.SetLightParms(1.f, 0.f);
+	state.EnableFog(false);
+	state.SetFog(0, 0);
+	state.ResetFadeColor();
+	state.EnableTextureMatrix(false);
+	state.EnableBrightmap(false);
+	state.EnableTexture(false);
+	state.EnableDepthTest(true);
+	state.SetDepthMask(false);
+	state.SetRenderStyle(tracerAlpha >= 0.999f ? STYLE_Source : STYLE_Add);
+	state.SetColor(RPART(tracerColor) / 255.0f, GPART(tracerColor) / 255.0f, BPART(tracerColor) / 255.0f, tracerAlpha);
+
+	screen->mVertexData->Map();
+	auto verts = screen->mVertexData->AllocVertices(vertexCount);
+	auto vp = verts.first;
+	for (int i = 0; i <= tracerSegments; ++i)
+	{
+		const double t = (double)i / (double)tracerSegments;
+		const double ang = t * 6.28318530717958647692;
+		const double cs = std::cos(ang);
+		const double sn = std::sin(ang);
+		const DVector3 ringOffset = (tracerRight * cs + tracerUp * sn) * tracerRadius;
+		const DVector3 startPos = tracerStart + ringOffset;
+		const DVector3 endPos = tracerEnd + ringOffset;
+		vp[i * 2 + 0].Set((float)startPos.X, (float)startPos.Z, (float)startPos.Y, 0.0f, 0.0f);
+		vp[i * 2 + 1].Set((float)endPos.X, (float)endPos.Z, (float)endPos.Y, 0.0f, 1.0f);
+	}
+	screen->mVertexData->Unmap();
+
+	state.Draw(DT_TriangleStrip, verts.second, vertexCount, true);
+
+	state.EnableTexture(true);
+	state.SetDepthMask(true);
+	state.SetRenderStyle(DefaultRenderStyle());
+	state.SetTextureMode(TM_NORMAL);
+	state.SetColor(1.f, 1.f, 1.f, 1.f);
+	state.SetObjectColor(0xffffffff);
+	state.SetAddColor(0);
+	state.SetDynLight(0, 0, 0);
+	state.EnableBrightmap(false);
+	state.EnableModelMatrix(false);
+	state.ResetColor();
+}
+
+static bool IsPointInView(const DVector3& point)
+{
+	DVector3 toPoint = point - r_viewpoint.Pos;
+	const double distance = toPoint.Length();
+	if (distance <= 0.01)
+	{
+		return true;
+	}
+
+	toPoint /= distance;
+	if (toPoint.dot(r_viewpoint.ViewVector3D) <= 0.0)
+	{
+		return false;
+	}
+
+	DVector3 right, up;
+	r_viewpoint.ViewVector3D.GetRightUp(right, up);
+	if (right.LengthSquared() < 1e-8)
+	{
+		right = DVector3(0.0, 1.0, 0.0);
+	}
+	if (up.LengthSquared() < 1e-8)
+	{
+		up = DVector3(0.0, 0.0, 1.0);
+	}
+	right.MakeUnit();
+	up.MakeUnit();
+
+	const double tanHalfFov = std::tan(r_viewpoint.GetFieldOfView().Radians() * 0.5);
+	const double forward = toPoint.dot(r_viewpoint.ViewVector3D);
+	const double rightOffset = std::abs(toPoint.dot(right));
+	const double upOffset = std::abs(toPoint.dot(up));
+	const double limit = forward * tanHalfFov * 1.05;
+	return rightOffset <= limit && upOffset <= limit;
+}
+
+void DrawHitscanTracers(FRenderState& state)
+{
+	if (menuactive != MENU_Off || VRWheel_IsActive())
+	{
+		return;
+	}
+
+	auto& tracers = P_GetHitscanTracers();
+	if (tracers.empty())
+	{
+		return;
+	}
+
+	if (primaryLevel == nullptr)
+	{
+		return;
+	}
+
+	const double now = (double)primaryLevel->maptime + r_viewpoint.TicFrac;
+	const double speed = std::max(1.0, (double)vr_hitscan_tracer_speed * 100.0 / (double)TICRATE);
+	const double tracerLength = std::max(0.0, (double)vr_hitscan_tracer_length);
+
+	tracers.erase(std::remove_if(tracers.begin(), tracers.end(), [now, speed](const FHitscanTracer& tracer)
+	{
+		if (now < tracer.SpawnTime)
+		{
+			return true;
+		}
+
+		const double age = now - tracer.SpawnTime;
+		if (tracer.Lifetime > 0.0 && age >= tracer.Lifetime)
+		{
+			return true;
+		}
+
+		return (age * speed * tracer.SpeedScale) >= tracer.Distance;
+	}), tracers.end());
+
+	for (const auto& tracer : tracers)
+	{
+		const double age = now - tracer.SpawnTime;
+		if (age < 0.0)
+		{
+			continue;
+		}
+
+		if (tracer.bRicochet && !IsPointInView(tracer.Start))
+		{
+			continue;
+		}
+
+		const double frontDistance = std::min(tracer.Distance, age * speed * tracer.SpeedScale);
+		if (frontDistance <= 0.01 || frontDistance >= tracer.Distance)
+		{
+			continue;
+		}
+
+		const double backDistance = std::max(0.0, frontDistance - tracerLength);
+		const DVector3 tracerStart = tracer.Start + tracer.Direction * backDistance;
+		const DVector3 tracerEnd = tracer.Start + tracer.Direction * frontDistance;
+		DrawHitscanTracerGeometry(state, tracerStart, tracerEnd);
+	}
+}
+
+void DrawLaserSightWorld(FRenderState& state)
+{
+	if (!vr_laser_sight && !vr_laser_beam)
+	{
+		return;
+	}
+
+	if (menuactive != MENU_Off)
+	{
+		return;
+	}
+
+	if (vr_laser_hide_on_wheel && VRWheel_IsActive())
+	{
+		return;
+	}
+
+	player_t* player = &players[consoleplayer];
+	if (player == nullptr || player->mo == nullptr || !player->mo->OverrideAttackPosDir)
+	{
+		return;
+	}
+
+	auto drawHand = [&state, player](bool offhand)
+	{
+		AActor* weapon = offhand ? player->OffhandWeapon : player->ReadyWeapon;
+		if (weapon == nullptr)
+		{
+			if (!vr_laser_show_melee)
+			{
+				return;
+			}
+		}
+		else if (!vr_laser_show_melee && (weapon->IntVar(NAME_WeaponFlags) & WIF_MELEEWEAPON))
+		{
+			return;
+		}
+
+		FLaserBeamPoints points;
+		if (GetLaserBeamEndpoints(player, weapon, offhand, points))
+		{
+			const bool drawBeam = vr_laser_beam || (weapon != nullptr && (weapon->IntVar(NAME_WeaponFlags) & WIF_HASLASERBEAM));
+			const bool drawPointer = vr_laser_sight;
+			DrawLaserBeamGeometry(state, points.Start, points.BeamEnd, points.HitEnd, drawBeam, drawPointer);
+		}
+	};
+
+	drawHand(false);
+	drawHand(true);
 }
 
 //==========================================================================
@@ -760,6 +1315,94 @@ bool HUDSprite::GetWeaponRect(HWDrawInfo *di, DPSprite *psp, float sx, float sy,
 
 	auto tex = TexMan.GetGameTexture(lump, false);
 	if (!tex || !tex->isValid()) return false;
+
+	FTextureID lastPatch = psp->LastPatch;
+	if (gametic - primaryLevel->starttime > 2 &&
+		lump != lastPatch &&
+		gl_texture_thread &&
+		screen->SupportsBackgroundCache())
+	{
+		int scaleflags = CTF_Expand;
+		if (shouldUpscale(tex, UF_Sprite)) scaleflags |= CTF_Upscale;
+
+		FState* nextState = psp->GetState();
+		for (int i = 0; i < 5; i++)
+		{
+			if (nextState == nullptr) break;
+
+			FState* renderState = nextState->GetNextState();
+			for (int skip = 0; skip < 8 && renderState != nullptr && renderState->GetTics() <= 0; skip++)
+			{
+				renderState = renderState->GetNextState();
+			}
+			nextState = renderState;
+
+			if (renderState != nullptr && renderState->GetTics() > 0)
+			{
+				FTextureID lump2 = sprites[psp->GetSprite()].GetSpriteFrame(renderState->GetFrame(), 0, nullAngle, nullptr);
+				if (lump2.isValid())
+				{
+					auto tex2 = TexMan.GetGameTexture(lump2, false);
+					if (tex2 && tex2->isValid())
+					{
+						int scaleflags2 = CTF_Expand;
+						if (shouldUpscale(tex2, UF_Sprite)) scaleflags2 |= CTF_Upscale;
+						screen->BackgroundCacheTextureMaterial(tex2, psp->Translation, scaleflags2, true);
+					}
+				}
+			}
+		}
+
+		FMaterial* gltex = FMaterial::ValidateTexture(tex, scaleflags, false);
+		MaterialLayerInfo* layer = nullptr;
+		IHardwareTexture* hwtex = gltex != nullptr ? gltex->GetLayer(0, psp->Translation.index(), &layer) : nullptr;
+		if (gltex == nullptr || hwtex == nullptr || !hwtex->IsValid())
+		{
+			if (gltex)
+			{
+				screen->BackgroundCacheMaterial(gltex, psp->Translation, true);
+			}
+			else
+			{
+				screen->BackgroundCacheTextureMaterial(tex, psp->Translation, scaleflags, true);
+			}
+
+			bool foundNewer = false;
+			for (int i = 0; i < min((long)psp->LastPatches.length, psp->LastPatches.pos); i++)
+			{
+				if (psp->LastPatches[i] == 0) continue;
+
+				FTextureID lump2;
+				lump2.SetIndex(psp->LastPatches[i]);
+				if (!lump2.isValid()) continue;
+
+				auto tex2 = TexMan.GetGameTexture(lump2, false);
+				FMaterial* gltex2 = FMaterial::ValidateTexture(tex2, scaleflags, false);
+				MaterialLayerInfo* layer2 = nullptr;
+				IHardwareTexture* hwtex2 = gltex2 != nullptr ? gltex2->GetLayer(0, psp->Translation.index(), &layer2) : nullptr;
+				if (gltex2 != nullptr && hwtex2 != nullptr && hwtex2->IsValid())
+				{
+					lump = lump2;
+					tex = tex2;
+					foundNewer = true;
+					break;
+				}
+			}
+
+			if (!foundNewer && lastPatch.isValid())
+			{
+				lump = lastPatch;
+				tex = TexMan.GetGameTexture(lump, false);
+				if (!tex || !tex->isValid()) return false;
+			}
+			else if (!foundNewer)
+			{
+				return false;
+			}
+		}
+	}
+
+	psp->LastPatch = lump;
 	auto& spi = tex->GetSpritePositioning(1);
 
 	float vw = (float)viewwidth;

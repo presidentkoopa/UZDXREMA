@@ -2,6 +2,9 @@
 
 #include "gl_sysfb.h"
 #include "engineerrors.h"
+#include "TSQueue.h"
+#include "textures.h"
+#include "fs_files.h"
 #include <zvulkan/vulkandevice.h>
 #include <zvulkan/vulkanobjects.h>
 
@@ -24,6 +27,72 @@ class VkPostprocess;
 class VkTextureImage;
 class SWSceneDrawer;
 enum class PPTextureType;
+class FModel;
+
+struct VkTexLoadIn
+{
+	FTexture* texture = nullptr;
+	int translation = 0;
+	int scaleFlags = 0;
+	VkHardwareTexture* hardwareTexture = nullptr;
+};
+
+struct VkTexLoadOut
+{
+	std::shared_ptr<uint8_t> pixels;
+	int width = 0;
+	int height = 0;
+	int scaleFlags = 0;
+	VkHardwareTexture* hardwareTexture = nullptr;
+	bool uploadedInThread = false;
+	bool needsQueueOwnershipTransfer = false;
+	int uploadQueueFamily = -1;
+};
+
+struct VkModelLoadIn
+{
+	int lump = -1;
+	FModel* model = nullptr;
+};
+
+struct VkModelLoadOut
+{
+	int lump = -1;
+	FileSys::FileData data;
+	FModel* model = nullptr;
+};
+
+class VkTexLoadThread : public ResourceLoader2<VkTexLoadIn, VkTexLoadOut>
+{
+public:
+	VkTexLoadThread(VkCommandBufferManager* bgCmd, VulkanDevice* device, int uploadQueueIndex, TSQueue<VkTexLoadIn>* inQueue, TSQueue<VkTexLoadIn>* secondaryQueue, TSQueue<VkTexLoadOut>* outQueue)
+		: ResourceLoader2<VkTexLoadIn, VkTexLoadOut>(inQueue, secondaryQueue, outQueue)
+	{
+		cmd = bgCmd;
+		if (device != nullptr && uploadQueueIndex >= 0 && uploadQueueIndex < (int)device->uploadQueues.size())
+		{
+			uploadQueue = device->uploadQueues[uploadQueueIndex];
+		}
+	}
+
+protected:
+	VkCommandBufferManager* cmd = nullptr;
+	VulkanUploadSlot uploadQueue = {};
+
+	bool loadResource(VkTexLoadIn& input, VkTexLoadOut& output) override;
+};
+
+class VkModelLoadThread : public ResourceLoader2<VkModelLoadIn, VkModelLoadOut>
+{
+public:
+	VkModelLoadThread(TSQueue<VkModelLoadIn>* inQueue, TSQueue<VkModelLoadOut>* outQueue)
+		: ResourceLoader2<VkModelLoadIn, VkModelLoadOut>(inQueue, nullptr, outQueue)
+	{
+	}
+
+protected:
+	bool loadResource(VkModelLoadIn& input, VkModelLoadOut& output) override;
+};
 
 class VulkanRenderDevice : public SystemBaseFrameBuffer
 {
@@ -60,6 +129,16 @@ public:
 	void InitializeState() override;
 	bool CompileNextShader() override;
 	void PrecacheMaterial(FMaterial *mat, int translation) override;
+	void PrequeueMaterial(FMaterial *mat, int translation) override;
+	bool BackgroundCacheMaterial(FMaterial *mat, FTranslationID translation, bool makeSPI = false, bool secondary = false) override;
+	bool BackgroundCacheTextureMaterial(FGameTexture *tex, FTranslationID translation, int scaleFlags, bool makeSPI = false) override;
+	bool BackgroundLoadModel(FModel* model) override;
+	bool CachingActive() override;
+	bool SupportsBackgroundCache() override { return bgTransferEnabled; }
+	void StopBackgroundCache() override;
+	void FlushBackground() override;
+	float CacheProgress() override;
+	void UpdateBackgroundCache(bool flush = false) override;
 	void UpdatePalette() override;
 	const char* DeviceName() const override;
 	int Backend() override { return 1; }
@@ -105,8 +184,18 @@ private:
 	void RenderTextureView(FCanvasTexture* tex, std::function<void(IntRect &)> renderFunc) override;
 	void PrintStartupLog();
 	void CopyScreenToBuffer(int w, int h, uint8_t *data) override;
+	void UploadLoadedTextures(bool flush = false);
+
+	struct QueuedPatch
+	{
+		FGameTexture *tex = nullptr;
+		int translation = 0;
+		int scaleFlags = 0;
+		bool secondary = false;
+	};
 
 	std::unique_ptr<VkCommandBufferManager> mCommands;
+	std::vector<std::unique_ptr<VkCommandBufferManager>> mBGTransferCommands;
 	std::unique_ptr<VkBufferManager> mBufferManager;
 	std::unique_ptr<VkSamplerManager> mSamplerManager;
 	std::unique_ptr<VkTextureManager> mTextureManager;
@@ -126,6 +215,15 @@ private:
 	bool mXRFrameBeganThisFrame = false;
 	int mCurrentEyeIndex = 0;
 	int mEyeFinalPipelineImage[2] = { 0, 2 };
+	TSQueue<VkTexLoadIn> primaryTexQueue;
+	TSQueue<VkTexLoadIn> secondaryTexQueue;
+	TSQueue<VkTexLoadOut> outputTexQueue;
+	TSQueue<QueuedPatch> patchQueue;
+	TSQueue<VkModelLoadIn> modelInQueue;
+	TSQueue<VkModelLoadOut> modelOutQueue;
+	std::unique_ptr<VkModelLoadThread> modelThread;
+	std::vector<std::unique_ptr<VkTexLoadThread>> bgTransferThreads;
+	bool bgTransferEnabled = false;
 };
 
 class CVulkanError : public CEngineError

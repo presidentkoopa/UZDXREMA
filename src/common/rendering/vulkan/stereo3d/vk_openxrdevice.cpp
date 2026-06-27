@@ -39,6 +39,8 @@
 #include <chrono>
 #include <vector>
 
+EXTERN_CVAR(Int, developer);
+
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
@@ -65,6 +67,7 @@ extern bool trigger_teleport;
 extern bool automapactive;
 extern bool cinemamode;
 bool VR_UseScreenLayer();
+bool VR_UseCinematicScreenLayer();
 void VR_SetHMDOrientation(float pitch, float yaw, float roll);
 void VR_SetHMDPosition(float x, float y, float z);
 double P_XYMovement(AActor* mo, DVector2 scroll);
@@ -76,10 +79,6 @@ EXTERN_CVAR(Float, vr_height_adjust);
 EXTERN_CVAR(Float, vr_openxr_fov_adjust_deg);
 EXTERN_CVAR(Float, vr_openxr_eye_shift_scale);
 EXTERN_CVAR(Float, vr_openxr_render_scale);
-EXTERN_CVAR(Bool, vr_debug_projection_compare);
-EXTERN_CVAR(Bool, vr_openxr_debug_sizes);
-EXTERN_CVAR(Bool, vr_openxr_debug_present);
-EXTERN_CVAR(Bool, vr_openxr_debug_weapon);
 EXTERN_CVAR(Int, vr_openxr_debug_submit_mode);
 EXTERN_CVAR(Bool, vr_openxr_multiview);
 EXTERN_CVAR(Bool, vr_desktop_view_openxr_render);
@@ -203,6 +202,11 @@ static const std::vector<XrExtensionProperties>& GetOpenXRExtensions()
 static bool IsGameplaySceneActive()
 {
 	return gamestate == GS_LEVEL && menuactive == MENU_Off && !paused && ConsoleState == c_up;
+}
+
+static bool IsLevelSceneState()
+{
+	return gamestate == GS_LEVEL || gamestate == GS_TITLELEVEL;
 }
 
 static bool HasOpenXRExtension(const char* extensionName)
@@ -513,7 +517,7 @@ static float GetDoomPlayerHeightWithoutCrouch(const player_t* player)
 static float GetViewpointYaw()
 {
 	if (cinemamode)
-		return (float)r_viewpoint.Angles.Yaw.Degrees();
+		return cinemamodeYaw;
 	return doomYaw;
 }
 
@@ -1166,14 +1170,16 @@ static void LogBoundSourcesForAction(XrInstance instance, XrSession session, XrA
 	uint32_t sourceCount = 0;
 	if (XR_FAILED(xrEnumerateBoundSourcesForAction(session, &enumerateInfo, 0, &sourceCount, nullptr)) || sourceCount == 0)
 	{
-		Printf("OpenXR: bound sources [%s] unavailable.\n", label);
+		if (developer > 0)
+			Printf("OpenXR: bound sources [%s] unavailable.\n", label);
 		return;
 	}
 
 	std::vector<XrPath> sources(sourceCount, XR_NULL_PATH);
 	if (XR_FAILED(xrEnumerateBoundSourcesForAction(session, &enumerateInfo, sourceCount, &sourceCount, sources.data())))
 	{
-		Printf("OpenXR: bound sources [%s] query failed.\n", label);
+		if (developer > 0)
+			Printf("OpenXR: bound sources [%s] query failed.\n", label);
 		return;
 	}
 
@@ -1186,7 +1192,8 @@ static void LogBoundSourcesForAction(XrInstance instance, XrSession session, XrA
 		list += source.GetChars();
 	}
 
-	Printf("OpenXR: bound sources [%s] = %s\n", label, list.GetChars());
+	if (developer > 0)
+		Printf("OpenXR: bound sources [%s] = %s\n", label, list.GetChars());
 }
 
 static void SuggestBindingsForProfile(XrInstance instance, XrPath profilePath, const char* profileName, const std::vector<XrActionSuggestedBinding>& bindings)
@@ -1199,15 +1206,14 @@ static void SuggestBindingsForProfile(XrInstance instance, XrPath profilePath, c
 	suggested.suggestedBindings = bindings.data();
 	suggested.countSuggestedBindings = (uint32_t)bindings.size();
 	const XrResult result = xrSuggestInteractionProfileBindings(instance, &suggested);
-	Printf("OpenXR: profile %s suggestion count=%u result=%d\n",
-		profileName != nullptr ? profileName : "<unknown>",
-		(unsigned)bindings.size(),
-		(int)result);
 	if (XR_FAILED(result))
 	{
-		Printf("OpenXR: xrSuggestInteractionProfileBindings failed for profile %s result=%d\n",
-			profileName != nullptr ? profileName : "<unknown>",
-			(int)result);
+		if (developer > 0)
+		{
+			Printf("OpenXR: xrSuggestInteractionProfileBindings failed for profile %s result=%d\n",
+				profileName != nullptr ? profileName : "<unknown>",
+				(int)result);
+		}
 	}
 }
 
@@ -1359,27 +1365,13 @@ DVector3 VKOpenXRDeviceEyePose::GetViewShift(FRenderViewpoint& vp) const
 		shift.Y += sin(yaw) * stereoShift;
 	}
 
-	if (vr_debug_projection_compare)
-	{
-		static bool loggedShift[2] = { false, false };
-		if (eye >= 0 && eye < 2 && !loggedShift[eye])
-		{
-			Printf("VR_PROJ OpenXR eye=%d shift=(%.3f, %.3f, %.3f) eyePos=(%.4f, %.4f, %.4f) hmdPos=(%.4f, %.4f, %.4f) hmdHeight=%.3f playerHeight=%.3f stage=%d\n",
-				eye, (double)shift.X, (double)shift.Y, (double)shift.Z,
-				(double)currentEyePose.position.x, (double)currentEyePose.position.y, (double)currentEyePose.position.z,
-				(double)hmdPosition[0], (double)hmdPosition[1], (double)hmdPosition[2],
-				hmdHeight, playerHeight, mode.xrUsingStageSpace ? 1 : 0);
-			loggedShift[eye] = true;
-		}
-	}
-
 	return shift;
 }
 
 void VKOpenXRDeviceEyePose::AdjustViewpointUniforms(HWViewpointUniforms& uniforms) const
 {
 	auto& mode = const_cast<VKOpenXRDeviceMode&>((const VKOpenXRDeviceMode&)VKOpenXRDeviceMode::getInstance());
-	if (eye <= 0 || (size_t)eye >= mode.xrViews.size() || mode.xrViews.empty())
+	if (eye < 0 || (size_t)eye >= mode.xrViews.size() || mode.xrViews.empty())
 	{
 		uniforms.CalcDependencies();
 		return;
@@ -1401,20 +1393,6 @@ void VKOpenXRDeviceEyePose::AdjustViewpointUniforms(HWViewpointUniforms& uniform
 	uniforms.mViewMatrix = rotation;
 	uniforms.CalcDependencies();
 
-	if (vr_debug_projection_compare)
-	{
-		static bool loggedEyeOrientationDelta[2] = { false, false };
-		if (eye < 2 && !loggedEyeOrientationDelta[eye])
-		{
-			float pitch = 0.0f;
-			float yaw = 0.0f;
-			float roll = 0.0f;
-			QuaternionToEuler(relativeOrientation, pitch, yaw, roll);
-			Printf("VR_PROJ OpenXR eye=%d relativeOrientation pitch=%.4f yaw=%.4f roll=%.4f\n",
-				eye, pitch, yaw, roll);
-			loggedEyeOrientationDelta[eye] = true;
-		}
-	}
 }
 
 void VKOpenXRDeviceEyePose::SetUp() const
@@ -1443,32 +1421,6 @@ void VKOpenXRDeviceEyePose::SetUp() const
 		currentFov = mode.xrViews[(size_t)eye].fov;
 		projection = BuildOpenXREyeProjection(currentFov, (float)screen->GetZNear(), (float)screen->GetZFar(), eye);
 
-		static bool loggedEye[2] = { false, false };
-		if (vr_debug_projection_compare && eye >= 0 && eye < 2 && !loggedEye[eye])
-		{
-			const float tanLeft = std::tan(currentFov.angleLeft);
-			const float tanRight = std::tan(currentFov.angleRight);
-			const float tanUp = std::tan(currentFov.angleUp);
-			const float tanDown = std::tan(currentFov.angleDown);
-			const float horizontalFovDeg = (float)((currentFov.angleRight - currentFov.angleLeft) * (180.0 / M_PI));
-			const float verticalFovDeg = (float)((currentFov.angleUp - currentFov.angleDown) * (180.0 / M_PI));
-			Printf("VR_PROJ OpenXR eye=%d fovL=%.3f fovR=%.3f fovU=%.3f fovD=%.3f hFov=%.3f vFov=%.3f\n",
-				eye,
-				currentFov.angleLeft * (180.0f / (float)M_PI),
-				currentFov.angleRight * (180.0f / (float)M_PI),
-				currentFov.angleUp * (180.0f / (float)M_PI),
-				currentFov.angleDown * (180.0f / (float)M_PI),
-				horizontalFovDeg,
-				verticalFovDeg);
-			Printf("VR_PROJ OpenXR eye=%d tan=[%.6f %.6f %.6f %.6f] proj=[%.6f %.6f %.6f %.6f | %.6f %.6f %.6f %.6f | %.6f %.6f %.6f %.6f]\n",
-				eye,
-				tanLeft, tanRight, tanUp, tanDown,
-				projection.get()[0], projection.get()[1], projection.get()[2], projection.get()[3],
-				projection.get()[4], projection.get()[5], projection.get()[6], projection.get()[7],
-				projection.get()[8], projection.get()[9], projection.get()[10], projection.get()[11],
-				projection.get()[12], projection.get()[13], projection.get()[14], projection.get()[15]);
-			loggedEye[eye] = true;
-		}
 	}
 
 	VREyeInfo::SetUp();
@@ -1477,7 +1429,6 @@ void VKOpenXRDeviceEyePose::SetUp() const
 
 void VKOpenXRDeviceEyePose::TearDown() const
 {
-	Printf("OpenXR: TearDown called for eye=%d\n", eye);
 	VREyeInfo::TearDown();
 	if (eye == 1)
 	{
@@ -1499,22 +1450,8 @@ void VKOpenXRDeviceEyePose::AdjustHud() const
 	if (r_viewpoint.ViewLevel == nullptr)
 		return;
 	if (VR_ShouldDrawMountedHud())
-	{
-		static bool loggedMountedHudBypass = false;
-		if (!loggedMountedHudBypass && (vr_openxr_debug_present || vr_debug_projection_compare))
-		{
-			Printf("OpenXR HUD: skipping camera HUD projection because mounted HUD path is active.\n");
-			loggedMountedHudBypass = true;
-		}
 		return;
-	}
 	VSMatrix hudProj = GetHUDProjection();
-	static bool loggedCameraHudPath = false;
-	if (!loggedCameraHudPath && (vr_openxr_debug_present || vr_debug_projection_compare))
-	{
-		Printf("OpenXR HUD: using camera-mounted HUD projection path (mounted HUD inactive).\n");
-		loggedCameraHudPath = true;
-	}
 
 	auto* di = HWDrawInfo::StartDrawInfo(r_viewpoint.ViewLevel, nullptr, r_viewpoint, nullptr);
 	if (di)
@@ -1676,7 +1613,7 @@ VSMatrix VKOpenXRDeviceEyePose::GetHUDProjection() const
 		const auto& mode = const_cast<VKOpenXRDeviceMode&>((const VKOpenXRDeviceMode&)VKOpenXRDeviceMode::getInstance());
 		if ((size_t)eye < mode.xrViews.size())
 		{
-			const XrQuaternionf headOrientation = mode.xrViews[0].pose.orientation;
+			const XrQuaternionf headOrientation = GetCenteredViewOrientation(mode.xrViews);
 			const XrVector3f eyeOffsetMeters = {
 				currentEyePose.position.x - hmdPosition[0],
 				currentEyePose.position.y - hmdPosition[1],
@@ -1713,23 +1650,6 @@ VSMatrix VKOpenXRDeviceEyePose::GetHUDProjection() const
 	// transform so the HUD is camera-anchored in front of the user.
 	VSMatrix finalProjection(projection);
 	finalProjection.multMatrix(hudProjection);
-
-	if (vr_openxr_debug_present || vr_debug_projection_compare)
-	{
-		static bool loggedHudProjection[2] = { false, false };
-		if (eye >= 0 && eye < 2 && !loggedHudProjection[eye])
-		{
-			const FLOATTYPE* m = finalProjection.get();
-			Printf("OpenXR HUD eye=%d stereo=%.3f dist=%.3f scale=%.3f projRow0=[%.5f %.5f %.5f %.5f] projRow1=[%.5f %.5f %.5f %.5f]\n",
-				eye,
-				(double)hudStereo,
-				(double)getHUDValue<FFloatCVarRef>(vr_automap_distance, vr_hud_distance),
-				(double)getHUDValue<FFloatCVarRef>(vr_automap_scale, vr_hud_scale),
-				(double)m[0], (double)m[4], (double)m[8], (double)m[12],
-				(double)m[1], (double)m[5], (double)m[9], (double)m[13]);
-			loggedHudProjection[eye] = true;
-		}
-	}
 
 	return finalProjection;
 }
@@ -1962,7 +1882,8 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 				const XrColorSpaceFB requestedColorSpace = SelectPreferredColorSpace(supportedColorSpaces);
 				if (XR_SUCCEEDED(xrSetColorSpaceFB(xrSession, requestedColorSpace)))
 				{
-					Printf("OpenXR: requested FB color space %d from %u supported modes.\n", (int)requestedColorSpace, colorSpaceCount);
+					if (developer > 0)
+						Printf("OpenXR: requested FB color space %d from %u supported modes.\n", (int)requestedColorSpace, colorSpaceCount);
 				}
 			}
 		}
@@ -1977,7 +1898,6 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	if (XR_SUCCEEDED(xrCreateReferenceSpace(xrSession, &spaceInfo, &xrSpace)))
 	{
 		xrUsingStageSpace = true;
-		Printf("OpenXR: using STAGE reference space.\n");
 	}
 	else
 	{
@@ -1986,7 +1906,6 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 		{
 			return fail();
 		}
-		Printf("OpenXR: using LOCAL reference space fallback.\n");
 	}
 
 	if (xrSpace == XR_NULL_HANDLE)
@@ -2223,14 +2142,18 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	{
 		for (uint32_t i = 0; i < viewCount; ++i)
 		{
-			Printf("OpenXR: view %u recommended extent=%ux%u sampleCount=%u.\n",
-				i,
-				xrViewConfigs[i].recommendedImageRectWidth,
-				xrViewConfigs[i].recommendedImageRectHeight,
-				xrViewConfigs[i].recommendedSwapchainSampleCount);
+			if (developer > 0)
+			{
+				Printf("OpenXR: view %u recommended extent=%ux%u sampleCount=%u.\n",
+					i,
+					xrViewConfigs[i].recommendedImageRectWidth,
+					xrViewConfigs[i].recommendedImageRectHeight,
+					xrViewConfigs[i].recommendedSwapchainSampleCount);
+			}
 		}
-		Printf("OpenXR: using shared stereo extent=%ux%u for array swapchains.\n",
-			sceneWidth, sceneHeight);
+		if (developer > 0)
+			Printf("OpenXR: using shared stereo extent=%ux%u for array swapchains.\n",
+				sceneWidth, sceneHeight);
 	}
 	InitializeMultiview();
 
@@ -2263,15 +2186,6 @@ bool VKOpenXRDeviceMode::CreateSwapchain() const
 	}
 	xrSwapchainFormat = SelectSwapchainFormat(runtimeFormats, preferredFormat);
 	xrVirtualScreenSwapchainFormat = SelectFlatSwapchainFormat(runtimeFormats, preferredFormat);
-	Printf("OpenXR: preferred scene swapchain format=%d selected=%d srgb=%d runtimeFormats=%u.\n",
-		(int)preferredFormat,
-		(int)xrSwapchainFormat,
-		IsSRGBSwapchainFormat((VkFormat)xrSwapchainFormat) ? 1 : 0,
-		formatCount);
-	Printf("OpenXR: preferred flat swapchain format=%d selected=%d srgb=%d.\n",
-		(int)preferredFormat,
-		(int)xrVirtualScreenSwapchainFormat,
-		IsSRGBSwapchainFormat((VkFormat)xrVirtualScreenSwapchainFormat) ? 1 : 0);
 
 	XrSwapchainCreateInfo swapchainInfo{ XR_TYPE_SWAPCHAIN_CREATE_INFO };
 	swapchainInfo.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
@@ -2486,7 +2400,8 @@ bool VKOpenXRDeviceMode::CreateVirtualScreenSwapchain(uint32_t width, uint32_t h
 
 	xrVirtualScreenWidth = width;
 	xrVirtualScreenHeight = height;
-	Printf("OpenXR: created virtual screen swapchain %ux%u with %u images.\n", width, height, imageCount);
+	if (developer > 0)
+		Printf("OpenXR: created virtual screen swapchain %ux%u with %u images.\n", width, height, imageCount);
 	return true;
 }
 
@@ -2767,7 +2682,6 @@ void VKOpenXRDeviceMode::DestroyOpenXR() const
 	xrLastMenuReturnState = false;
 	xrLastMenuBackState = false;
 	xrLastMenuBackspaceState = false;
-	xrLoggedWeaponState = false;
 	StopHaptics();
 	xrHapticAction = XR_NULL_HANDLE;
 	xrHapticDuration[0] = xrHapticDuration[1] = 0.0;
@@ -2793,7 +2707,6 @@ void VKOpenXRDeviceMode::DestroyOpenXR() const
 	xrFrameState = { XR_TYPE_FRAME_STATE };
 	sceneWidth = 0;
 	sceneHeight = 0;
-	xrLoggedDesktopViewportMismatch = false;
 	xrVkSubmitFence.reset();
 	xrVkCommandBuffer.reset();
 	xrVkCommandPool.reset();
@@ -2966,13 +2879,17 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 	hmdPosition[2] = pos.z;
 
 	float p, y, r;
-	QuaternionToEuler(xrViews[0].pose.orientation, p, y, r);
+	QuaternionToEuler(GetCenteredViewOrientation(xrViews), p, y, r);
 
 	hmdorientation[0] = -p;
 	hmdorientation[1] = -y;
 	hmdorientation[2] = -r;
 	VR_SetHMDPosition(hmdPosition[0], hmdPosition[1], hmdPosition[2]);
 	VR_SetHMDOrientation(hmdorientation[0], hmdorientation[1], hmdorientation[2]);
+	if (VR_UseCinematicScreenLayer())
+	{
+		cinemamodePitch = hmdorientation[0];
+	}
 	positional_movementSideways = 0.0f;
 	positional_movementForward = 0.0f;
 
@@ -2997,22 +2914,10 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 	if (gamestate != GS_LEVEL || menuactive != MENU_Off || r_viewpoint.camera == nullptr || r_viewpoint.ViewLevel == nullptr)
 		return;
 
-	if (vr_debug_projection_compare)
-	{
-		const float pixelstretch = r_viewpoint.ViewLevel ? (float)r_viewpoint.ViewLevel->pixelstretch : 1.2f;
-		const player_t* player = &players[consoleplayer];
-		const double playerHeight = player ? GetDoomPlayerHeightWithoutCrouch(player) : 0.0;
-		const double rawHeight = GetRawHmdHeightInMapUnit();
-		const double adjustedHeight = GetHmdAdjustedHeightInMapUnit(xrUsingStageSpace ? false : xrHasLocalHeightAnchor, xrLocalHeightAnchor);
-		Printf("VR_PROJ OpenXR pose: hmdY=%.3f rawHmd=%.3f adjHmd=%.3f anchor=%.3f playerHeight=%.3f vupm=%.3f eyeShiftScale=%.3f pixelstretch=%.3f vpPos=(%.3f, %.3f, %.3f) yaw=%.3f pitch=%.3f roll=%.3f stage=%d\n",
-			hmdPosition[1], rawHeight, adjustedHeight, (double)xrLocalHeightAnchor, playerHeight, (double)vr_vunits_per_meter, (double)vr_openxr_eye_shift_scale, pixelstretch,
-			vp.Pos.X, vp.Pos.Y, vp.Pos.Z,
-			vp.Angles.Yaw.Degrees(), vp.HWAngles.Pitch.Degrees(), vp.HWAngles.Roll.Degrees(),
-			xrUsingStageSpace ? 1 : 0);
-	}
-
 	static float previousHmdYaw = 0;
 	static bool havePreviousYaw = false;
+	static float previousCinemaSnapTurn = 0.0f;
+	static bool wasLockedToScreenLayerLastFrame = false;
 	const float currentHmdYaw = hmdorientation[1] + snapTurn;
 	const bool lockGameplayViewToScreenLayer = ShouldUseScreenLayerForCurrentFrame();
 	if (!havePreviousYaw)
@@ -3022,19 +2927,52 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 		havePreviousYaw = true;
 	}
 	float hmdYawDeltaDegrees = currentHmdYaw - previousHmdYaw;
+	float cinemaTurnDeltaDegrees = 0.0f;
+	if (lockGameplayViewToScreenLayer)
+	{
+		if (!wasLockedToScreenLayerLastFrame)
+		{
+			previousCinemaSnapTurn = snapTurn;
+			cinemamodeYaw = (float)r_viewpoint.Angles.Yaw.Degrees();
+		}
+		cinemaTurnDeltaDegrees = ShortestAngleDeltaDeg(snapTurn, previousCinemaSnapTurn);
+		previousCinemaSnapTurn = snapTurn;
+		wasLockedToScreenLayerLastFrame = true;
+	}
+	else
+	{
+		wasLockedToScreenLayerLastFrame = false;
+	}
 	if (!lockGameplayViewToScreenLayer)
 	{
 		vrApplyingHmdYaw = true;
 		G_AddViewAngle(mAngleFromRadians((float)DEG2RAD(-hmdYawDeltaDegrees)));
 		vrApplyingHmdYaw = false;
 	}
+	else if (cinemaTurnDeltaDegrees != 0.0f)
+	{
+		vrApplyingHmdYaw = true;
+		G_AddViewAngle(mAngleFromRadians((float)DEG2RAD(-cinemaTurnDeltaDegrees)));
+		vrApplyingHmdYaw = false;
+	}
 	previousHmdYaw = currentHmdYaw;
 
-	if (!lockGameplayViewToScreenLayer && gamestate == GS_LEVEL && menuactive == MENU_Off)
+	if (gamestate == GS_LEVEL && menuactive == MENU_Off)
 	{
-		doomYaw += hmdYawDeltaDegrees;
-		vp.HWAngles.Roll = FAngle::fromDeg(-r);
-		vp.HWAngles.Pitch = FAngle::fromDeg(-p);
+		if (!lockGameplayViewToScreenLayer)
+		{
+			doomYaw += hmdYawDeltaDegrees;
+			vp.HWAngles.Roll = FAngle::fromDeg(-r);
+			vp.HWAngles.Pitch = FAngle::fromDeg(-p);
+		}
+		else
+		{
+			doomYaw += cinemaTurnDeltaDegrees;
+			cinemamodeYaw = doomYaw;
+			vp.HWAngles.Roll = FAngle::fromDeg(0.0f);
+			vp.HWAngles.Pitch = FAngle::fromDeg(hmdorientation[0]);
+		}
+
 		double viewYaw = GetViewpointYaw();
 		while (viewYaw <= -180.0) viewYaw += 360.0;
 		while (viewYaw > 180.0) viewYaw -= 360.0;
@@ -3071,14 +3009,6 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 	const int movementHand = *vr_switch_sticks ? mainHand : offHand;
 	const int turnHand = *vr_switch_sticks ? offHand : mainHand;
 	const bool useTrackpad = IsCurrentInteractionProfile(xrInstance, xrSession, xrRightHandPath, "vive_controller");
-	static bool loggedProfile = false;
-	if (!loggedProfile)
-	{
-		Printf("OpenXR: controller profile %s, locomotion=%s\n",
-			useTrackpad ? "vive/trackpad" : "thumbstick",
-			"left-move/right-turn");
-		loggedProfile = true;
-	}
 
 	OpenXRHandInputState handInput[2];
 	for (int hand = 0; hand < 2; ++hand)
@@ -3129,6 +3059,9 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 	const bool dominantGripModifierOld = *vr_secondary_button_mappings && xrLastGripState[mainHand];
 	static float analogTurnRateDegPerSec = 0.0f;
 	static uint64_t lastAnalogTurnTime = 0;
+	const XrVector2f rightTurnState = useTrackpad
+		? handInput[turnHand].trackpad
+		: handInput[turnHand].thumbstick;
 
 		if (gameplayMode)
 		{
@@ -3144,9 +3077,6 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			}
 			else
 			{
-				const XrVector2f rightTurnState = useTrackpad
-					? handInput[turnHand].trackpad
-					: handInput[turnHand].thumbstick;
 				const float turnX = rightTurnState.x;
 				const uint64_t currentTime = I_msTime();
 				if (lastAnalogTurnTime == 0)
@@ -3263,17 +3193,7 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		const float dz = xrHandPoses[mainHand].position.z - xrHandPoses[offHand].position.z;
 		const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
 		const bool offhandGrip = handInput[offHand].grip;
-		if (vr_two_handed_weapons)
-		{
-			if (offhandGrip && distance < 0.50f)
-				weaponStabilised = true;
-			else if (!offhandGrip)
-				weaponStabilised = false;
-		}
-		else
-		{
-			weaponStabilised = false;
-		}
+		weaponStabilised = vr_two_handed_weapons && offhandGrip && distance < 0.50f;
 
 		if (weaponStabilised)
 		{
@@ -3281,39 +3201,22 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			const float x = xrHandPoses[offHand].position.x - xrHandPoses[mainHand].position.x;
 			const float y = xrHandPoses[offHand].position.y - xrHandPoses[mainHand].position.y;
 			const float zxDist = std::sqrt(x * x + z * z);
-			if (zxDist != 0.0f && z != 0.0f)
+			// Avoid near-vertical hand stacking from forcing the stabilised aim
+			// almost straight up/down for a frame.
+			if (zxDist > 0.05f && distance > 0.05f)
 			{
 				weaponangles[0] = -(float)(atanf(y / zxDist) * (180.0 / M_PI));
 				weaponangles[1] = -(float)(atan2f(x, -z) * (180.0 / M_PI));
+			}
+			else
+			{
+				weaponStabilised = false;
 			}
 		}
 	}
 	else
 	{
 		weaponStabilised = false;
-	}
-
-	if (vr_openxr_debug_weapon)
-	{
-		static bool lastLoggedWeaponStabilised = false;
-		static bool haveLastLoggedWeaponStabilised = false;
-		const float dx = xrHandPoses[mainHand].position.x - xrHandPoses[offHand].position.x;
-		const float dy = xrHandPoses[mainHand].position.y - xrHandPoses[offHand].position.y;
-		const float dz = xrHandPoses[mainHand].position.z - xrHandPoses[offHand].position.z;
-		const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
-		if (!haveLastLoggedWeaponStabilised || lastLoggedWeaponStabilised != weaponStabilised)
-		{
-			Printf("VR_WEAPON OpenXR stab=%d dist=%.3f main=%d off=%d grip=%d valid=%d/%d\n",
-				weaponStabilised ? 1 : 0,
-				distance,
-				mainHand,
-				offHand,
-				handInput[offHand].grip ? 1 : 0,
-				mainHandValid ? 1 : 0,
-				offHandValid ? 1 : 0);
-			lastLoggedWeaponStabilised = weaponStabilised;
-			haveLastLoggedWeaponStabilised = true;
-		}
 	}
 
 	if (menuModeChanged)
@@ -3354,12 +3257,6 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			moveX = playerMoving ? moveX : 0.0f;
 			moveY = playerMoving ? moveY : 0.0f;
 
-			// Keep OpenXR locomotion in line with the OpenVR path's effective speed.
-			// OpenVR movement is accumulated through both joystick axes and VR_GetMove.
-			// OpenXR currently feeds VR_GetMove only.
-			constexpr float kOpenXrLocomotionCompatScale = 2.0f;
-			moveX *= kOpenXrLocomotionCompatScale;
-			moveY *= kOpenXrLocomotionCompatScale;
 			remote_movementSideways = moveX;
 			remote_movementForward = moveY;
 
@@ -3443,9 +3340,8 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		}
 		PostRemappedControllerKeyTransition(xrLastThumbClickState[hand], handInput[hand].thumbClick, modifierOld, modifierNew, thumbBaseKey, thumbAltKey);
 		const int thumbClickKey = (hand == 1) ? KEY_PAD_RTHUMB : KEY_PAD_LTHUMB;
-		// The combo layer already emits the mapped thumb-click action, so keep the
-		// raw button from leaking through while the dominant grip is acting as a modifier.
-		if (!(*vr_secondary_button_mappings && dominantGripModifierNew))
+		// Keep the physical key only while waiting for a bind capture.
+		if (menuactive == MENU_WaitKey)
 		{
 			PostControllerKeyTransition(xrLastThumbClickState[hand], handInput[hand].thumbClick, thumbClickKey);
 		}
@@ -3465,7 +3361,9 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			PostControllerKeyTransition(face2Old, face2Pressed, face2BaseKey);
 		}
 
-		if (emitAxes)
+		// Match the OpenVR control-mode split: mode 1 keeps the extra joystick
+		// remapping layer, while mode 0 stays on the leaner controller mapping.
+		if (emitAxes && vr_joy_mode == 1)
 		{
 			const XrVector2f& lastAxisState = useTrackpad ? xrLastTrackpadState[hand] : xrLastThumbstickState[hand];
 			const XrVector2f& newAxisState = useTrackpad ? handInput[hand].trackpad : handInput[hand].thumbstick;
@@ -3604,28 +3502,6 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			float v = clamp<float>(mappedV, 0.0f, 1.0f);
 			const int mouseX = clamp<int>((int)std::lround(u * (float)(xrVirtualScreenWidth - 1)), 0, (int)xrVirtualScreenWidth - 1);
 			const int mouseY = clamp<int>((int)std::lround(v * (float)(xrVirtualScreenHeight - 1)), 0, (int)xrVirtualScreenHeight - 1);
-			if (vr_openxr_debug_sizes)
-			{
-				static int pointerDebugTicker = 0;
-				if ((pointerDebugTicker++ % 35) == 0)
-				{
-					const int guiW = screen ? screen->GetWidth() : 0;
-					const int guiH = screen ? screen->GetHeight() : 0;
-					Printf("XR_MENU_PTR axis=%d t=%.3f local=(%.3f,%.3f) half=(%.3f,%.3f) uvRaw=(%.3f,%.3f) uvMap=(%.3f,%.3f) ovf=%.3f virt=%ux%u vis=(%d,%d) gui=%dx%d guiPos=(%d,%d)\n",
-						0,
-						bestHit.t,
-						bestHit.localX, bestHit.localY,
-						screenWidth * 0.5f, screenHeight * 0.5f,
-						bestHit.unclampedU, bestHit.unclampedV,
-						u, v,
-						bestHit.overflow,
-						xrVirtualScreenWidth, xrVirtualScreenHeight,
-						mouseX, mouseY,
-						guiW, guiH,
-						mouseX, mouseY);
-				}
-			}
-
 			// Build a world-space quad layer representing a laser beam from
 			// controller pose to the virtual-screen hit point.
 			const XrVector3f beamStart = rayOrigin;
@@ -3693,6 +3569,7 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 
 		// Allow scrolling long menus with right-thumbstick vertical movement,
 		// even if the current ray cast misses the panel.
+		if (vr_joy_mode == 1)
 		{
 			constexpr float wheelDeadZone = 0.55f;
 			static int wheelRepeatCooldown = 0;
@@ -3771,10 +3648,10 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 				player->mo->AttackPos.X = mat[3][0];
 				player->mo->AttackPos.Y = mat[3][2];
 				player->mo->AttackPos.Z = mat[3][1];
-				player->mo->AttackPitch = DAngle::fromDeg(ShouldUseScreenLayerForCurrentFrame()
+				player->mo->AttackPitch = DAngle::fromDeg(VR_UseCinematicScreenLayer()
 					? -weaponangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees()
 					: -weaponangles[PITCH]);
-				player->mo->AttackAngle = DAngle::fromDeg(-90 + GetViewpointYaw() + (weaponangles[YAW] - playerYaw));
+				player->mo->AttackAngle = DAngle::fromDeg(-90 + GetViewpointYaw() + (weaponangles[YAW] - hmdorientation[YAW]));
 				player->mo->AttackRoll = DAngle::fromDeg(weaponangles[ROLL]);
 			}
 
@@ -3784,10 +3661,10 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 				player->mo->OffhandPos.X = matOffhand[3][0];
 				player->mo->OffhandPos.Y = matOffhand[3][2];
 				player->mo->OffhandPos.Z = matOffhand[3][1];
-				player->mo->OffhandPitch = DAngle::fromDeg(ShouldUseScreenLayerForCurrentFrame()
+				player->mo->OffhandPitch = DAngle::fromDeg(VR_UseCinematicScreenLayer()
 					? -offhandangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees()
 					: -offhandangles[PITCH]);
-				player->mo->OffhandAngle = DAngle::fromDeg(-90 + GetViewpointYaw() + (offhandangles[YAW] - playerYaw));
+				player->mo->OffhandAngle = DAngle::fromDeg(-90 + GetViewpointYaw() + (offhandangles[YAW] - hmdorientation[YAW]));
 				player->mo->OffhandRoll = DAngle::fromDeg(offhandangles[ROLL]);
 			}
 
@@ -3863,52 +3740,9 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			}
 			player->mo->Vel = vel;
 
-			if (vr_openxr_debug_weapon && !xrLoggedWeaponState)
-			{
-				Printf("VR_WEAPON OpenXR handedness=%s main=%d off=%d weapon=(%.3f,%.3f,%.3f|%.1f,%.1f,%.1f) offhand=(%.3f,%.3f,%.3f|%.1f,%.1f,%.1f) stab=%d teleport=%d target=%d\n",
-					IsRightHandedVrControls() ? "right" : "left",
-					GetMainHandIndex(), GetOffHandIndex(),
-					weaponoffset[0], weaponoffset[1], weaponoffset[2],
-					weaponangles[0], weaponangles[1], weaponangles[2],
-					offhandoffset[0], offhandoffset[1], offhandoffset[2],
-					offhandangles[0], offhandangles[1], offhandangles[2],
-					weaponStabilised ? 1 : 0,
-					ready_teleport ? 1 : 0,
-					m_TeleportTarget);
-				xrLoggedWeaponState = true;
-			}
 		}
 	}
-	static bool loggedBoundSources = false;
 	ProcessHaptics();
-	if (!loggedBoundSources)
-	{
-		auto getCurrentProfile = [&](XrPath handPath)
-		{
-			XrInteractionProfileState profileState{ XR_TYPE_INTERACTION_PROFILE_STATE };
-			if (XR_FAILED(xrGetCurrentInteractionProfile(xrSession, handPath, &profileState)) || profileState.interactionProfile == XR_NULL_PATH)
-				return FString("<unbound>");
-			return PathToString(xrInstance, profileState.interactionProfile);
-		};
-
-		const FString leftProfile = getCurrentProfile(xrLeftHandPath);
-		const FString rightProfile = getCurrentProfile(xrRightHandPath);
-		if (!strcmp(leftProfile.GetChars(), "<unbound>") && !strcmp(rightProfile.GetChars(), "<unbound>"))
-			return;
-
-		loggedBoundSources = true;
-		Printf("OpenXR: active interaction profiles left=%s right=%s\n",
-			leftProfile.GetChars(),
-			rightProfile.GetChars());
-		LogBoundSourcesForAction(xrInstance, xrSession, xrSelectAction, "select");
-		LogBoundSourcesForAction(xrInstance, xrSession, xrGripAction, "grip");
-		LogBoundSourcesForAction(xrInstance, xrSession, xrHapticAction, "haptic");
-		LogBoundSourcesForAction(xrInstance, xrSession, xrMenuAction, "menu");
-		LogBoundSourcesForAction(xrInstance, xrSession, xrAAction, "A");
-		LogBoundSourcesForAction(xrInstance, xrSession, xrBAction, "B");
-		LogBoundSourcesForAction(xrInstance, xrSession, xrXAction, "X");
-		LogBoundSourcesForAction(xrInstance, xrSession, xrYAction, "Y");
-	}
 }
 
 void VKOpenXRDeviceMode::TearDown() const
@@ -3957,7 +3791,8 @@ void VKOpenXRDeviceMode::ApplyRefreshRate() const
 				rateList += ", ";
 			rateList.AppendFormat("%.0f", (double)rates[i]);
 		}
-		Printf("OpenXR: supported display refresh rates: %s Hz\n", rateList.GetChars());
+		if (developer > 0)
+			Printf("OpenXR: supported display refresh rates: %s Hz\n", rateList.GetChars());
 		xrLoggedDisplayRefreshRates = true;
 	}
 
@@ -3981,14 +3816,18 @@ void VKOpenXRDeviceMode::ApplyRefreshRate() const
 			xrCurrentDisplayRefreshRate = selectedRate;
 		}
 
-		Printf("OpenXR: requested display refresh rate %.0f Hz (menu=%d, current=%.0f Hz)\n",
-			(double)selectedRate,
-			(int)vid_refreshrate,
-			(double)(xrCurrentDisplayRefreshRate > 0.0f ? xrCurrentDisplayRefreshRate : selectedRate));
+		if (developer > 0)
+		{
+			Printf("OpenXR: requested display refresh rate %.0f Hz (menu=%d, current=%.0f Hz)\n",
+				(double)selectedRate,
+				(int)vid_refreshrate,
+				(double)(xrCurrentDisplayRefreshRate > 0.0f ? xrCurrentDisplayRefreshRate : selectedRate));
+		}
 	}
 	else
 	{
-		Printf("OpenXR: failed to request display refresh rate %d Hz.\n", (int)vid_refreshrate);
+		if (developer > 0)
+			Printf("OpenXR: failed to request display refresh rate %d Hz.\n", (int)vid_refreshrate);
 	}
 #endif
 }
@@ -4108,22 +3947,12 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 
 	if (!shouldSubmitProjectionLayer || !sessionVisibleOrFocused)
 	{
-		if (!sessionVisibleOrFocused)
-			Printf("OpenXR frame %llu: submission skipped - session state=%d.\n", (unsigned long long)xrFrameCounter, (int)xrSessionState);
 		XrFrameEndInfo endInfo{ XR_TYPE_FRAME_END_INFO };
 		endInfo.displayTime = xrFrameState.predictedDisplayTime;
 		endInfo.environmentBlendMode = environmentBlendMode;
 		endInfo.layerCount = 0;
 		endInfo.layers = nullptr;
-		Printf("OpenXR frame %llu: Before xrEndFrame (empty layer).\n", (unsigned long long)xrFrameCounter);
 		XrResult endResult = xrEndFrame(xrSession, &endInfo);
-		Printf("OpenXR frame %llu: After xrEndFrame (%d).\n", (unsigned long long)xrFrameCounter, (int)endResult);
-		Printf("OpenXR frame %llu: shouldRender=%d presentImageIndex=%d gamestate=%d xrEndFrame=%d.\n",
-			(unsigned long long)xrFrameCounter,
-			xrFrameState.shouldRender ? 1 : 0,
-			framebufferManager ? framebufferManager->PresentImageIndex : -999,
-			(int)gamestate,
-			(int)endResult);
 		xrFrameInProgress = false;
 		return XR_SUCCEEDED(endResult);
 	}
@@ -4138,9 +3967,7 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		endInfo.environmentBlendMode = environmentBlendMode;
 		endInfo.layerCount = 0;
 		endInfo.layers = nullptr;
-		Printf("OpenXR frame %llu: Before xrEndFrame (acquire failed).\n", (unsigned long long)xrFrameCounter);
 		XrResult endResult = xrEndFrame(xrSession, &endInfo);
-		Printf("OpenXR frame %llu: After xrEndFrame (%d).\n", (unsigned long long)xrFrameCounter, (int)endResult);
 		xrFrameInProgress = false;
 		return false;
 	}
@@ -4158,9 +3985,7 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		endInfo.environmentBlendMode = environmentBlendMode;
 		endInfo.layerCount = 0;
 		endInfo.layers = nullptr;
-		Printf("OpenXR frame %llu: Before xrEndFrame (wait timeout).\n", (unsigned long long)xrFrameCounter);
 		XrResult endResult = xrEndFrame(xrSession, &endInfo);
-		Printf("OpenXR frame %llu: After xrEndFrame (%d).\n", (unsigned long long)xrFrameCounter, (int)endResult);
 		xrFrameInProgress = false;
 		return XR_SUCCEEDED(endResult);
 	}
@@ -4174,9 +3999,7 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		endInfo.environmentBlendMode = environmentBlendMode;
 		endInfo.layerCount = 0;
 		endInfo.layers = nullptr;
-		Printf("OpenXR frame %llu: Before xrEndFrame (wait failed).\n", (unsigned long long)xrFrameCounter);
 		XrResult endResult = xrEndFrame(xrSession, &endInfo);
-		Printf("OpenXR frame %llu: After xrEndFrame (%d).\n", (unsigned long long)xrFrameCounter, (int)endResult);
 		xrFrameInProgress = false;
 		return false;
 	}
@@ -4184,7 +4007,6 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 	auto* buffers = vkfb->GetBuffers();
 	if (buffers == nullptr || postprocess == nullptr)
 	{
-		Printf("OpenXR frame %llu: blit SKIPPED reason: missing postprocess source.\n", (unsigned long long)xrFrameCounter);
 		XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
 		xrReleaseSwapchainImage(xrSwapchain, &releaseInfo);
 
@@ -4193,9 +4015,7 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		endInfo.environmentBlendMode = environmentBlendMode;
 		endInfo.layerCount = 0;
 		endInfo.layers = nullptr;
-		Printf("OpenXR frame %llu: Before xrEndFrame (missing source buffer).\n", (unsigned long long)xrFrameCounter);
 		XrResult endResult = xrEndFrame(xrSession, &endInfo);
-		Printf("OpenXR frame %llu: After xrEndFrame (%d).\n", (unsigned long long)xrFrameCounter, (int)endResult);
 		return XR_SUCCEEDED(endResult);
 	}
 
@@ -4205,8 +4025,6 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 	const uint32_t dstH = xrPresentHeight != 0 ? xrPresentHeight : recommendedH;
 	if (dstW == 0 || dstH == 0)
 	{
-		Printf("OpenXR frame %llu: blit skipped - invalid XR destination dimensions present=%ux%u recommended=%ux%u.\n",
-			(unsigned long long)xrFrameCounter, dstW, dstH, recommendedW, recommendedH);
 		XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
 		xrReleaseSwapchainImage(xrSwapchain, &releaseInfo);
 
@@ -4215,44 +4033,9 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		endInfo.environmentBlendMode = environmentBlendMode;
 		endInfo.layerCount = 0;
 		endInfo.layers = nullptr;
-		Printf("OpenXR frame %llu: Before xrEndFrame (invalid XR destination dimensions).\n", (unsigned long long)xrFrameCounter);
 		XrResult endResult = xrEndFrame(xrSession, &endInfo);
-		Printf("OpenXR frame %llu: After xrEndFrame (%d).\n", (unsigned long long)xrFrameCounter, (int)endResult);
 		xrFrameInProgress = false;
 		return XR_SUCCEEDED(endResult);
-	}
-
-	if (vr_openxr_debug_sizes)
-	{
-		Printf("XR_SIZES frame=%llu desktopVP=%dx%d screenVP=%dx%d sceneVP=%dx%d fb=%dx%d present=%ux%u recommended=%ux%u\n",
-			(unsigned long long)xrFrameCounter,
-			vkfb->mOutputLetterbox.width, vkfb->mOutputLetterbox.height,
-			vkfb->mScreenViewport.width, vkfb->mScreenViewport.height,
-			vkfb->mSceneViewport.width, vkfb->mSceneViewport.height,
-			buffers->GetWidth(), buffers->GetHeight(),
-			dstW, dstH,
-			recommendedW, recommendedH);
-	}
-
-	if (!xrLoggedDesktopViewportMismatch)
-	{
-		const bool desktopDiffers = (vkfb->mOutputLetterbox.width != (int)dstW) || (vkfb->mOutputLetterbox.height != (int)dstH);
-		const bool screenDiffers = (vkfb->mScreenViewport.width != (int)dstW) || (vkfb->mScreenViewport.height != (int)dstH);
-		if (desktopDiffers || screenDiffers)
-		{
-			Printf("OpenXR: desktop viewport differs from XR sizing desktopVP=%dx%d screenVP=%dx%d sceneVP=%dx%d present=%ux%u recommended=%ux%u (XR blits stay on XR sizes)\n",
-				vkfb->mOutputLetterbox.width, vkfb->mOutputLetterbox.height,
-				vkfb->mScreenViewport.width, vkfb->mScreenViewport.height,
-				vkfb->mSceneViewport.width, vkfb->mSceneViewport.height,
-				dstW, dstH,
-				recommendedW, recommendedH);
-			xrLoggedDesktopViewportMismatch = true;
-		}
-	}
-	if (vr_openxr_debug_present || vr_openxr_debug_sizes)
-	{
-		Printf("OpenXR frame %llu: about to draw XR layers to swapchain image %u.\n",
-			(unsigned long long)xrFrameCounter, imageIndex);
 	}
 
 	ScopedCycleTimer cycle(VRSubmit);
@@ -4281,8 +4064,6 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		const uint32_t sourceEye = (vr_openxr_debug_submit_mode == 1 || vr_openxr_debug_submit_mode == 3) ? 0u : layer;
 		if (sourceEye >= xrPresentTextures.size() || xrPresentTextures[sourceEye].Image == nullptr)
 		{
-			Printf("OpenXR frame %llu: Skipping eye %u - missing prepared eye image %u\n",
-				(unsigned long long)xrFrameCounter, layer, sourceEye);
 			continue;
 		}
 
@@ -4292,15 +4073,7 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		const int32_t srcH = preparedEyeTexture ? preparedEyeTexture->height : 0;
 		if (srcW <= 0 || srcH <= 0)
 		{
-			Printf("OpenXR frame %llu: Skipping eye %u - invalid prepared eye image %u extent=%dx%d\n",
-				(unsigned long long)xrFrameCounter, layer, sourceEye, srcW, srcH);
 			continue;
-		}
-
-		if (vr_openxr_debug_present)
-		{
-			Printf("XR_PRESENT_MAP eye=%u sourceEye=%u srcExtent=%dx%d dstExtent=%ux%u\n",
-				layer, sourceEye, srcW, srcH, dstW, dstH);
 		}
 
 		VkImageTransition()
@@ -4352,21 +4125,15 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 	VkResult submitResult = vkQueueSubmit(xrVkDevice->GraphicsQueue, 1, &submitInfo, xrVkSubmitFence->fence);
 	if (submitResult != VK_SUCCESS)
 	{
-		Printf("OpenXR frame %llu: blit submit failed.\n", (unsigned long long)xrFrameCounter);
 		return false;
 	}
 	VkResult waitResult = vkWaitForFences(xrVkDevice->device, 1, &xrVkSubmitFence->fence, VK_TRUE, std::numeric_limits<uint64_t>::max());
 	if (waitResult != VK_SUCCESS)
 	{
-		Printf("OpenXR frame %llu: blit fence wait failed.\n", (unsigned long long)xrFrameCounter);
 		return false;
 	}
 	XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
 	xrResult = xrReleaseSwapchainImage(xrSwapchain, &releaseInfo);
-	if (vr_openxr_debug_present || vr_openxr_debug_sizes)
-	{
-		Printf("OpenXR frame %llu: xrReleaseSwapchainImage=%d.\n", (unsigned long long)xrFrameCounter, (int)xrResult);
-	}
 	if (XR_FAILED(xrResult))
 	{
 		XrFrameEndInfo endInfo{ XR_TYPE_FRAME_END_INFO };
@@ -4374,9 +4141,7 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		endInfo.environmentBlendMode = environmentBlendMode;
 		endInfo.layerCount = 0;
 		endInfo.layers = nullptr;
-		Printf("OpenXR frame %llu: Before xrEndFrame (release failed).\n", (unsigned long long)xrFrameCounter);
 		XrResult endResult = xrEndFrame(xrSession, &endInfo);
-		Printf("OpenXR frame %llu: After xrEndFrame (%d).\n", (unsigned long long)xrFrameCounter, (int)endResult);
 		xrFrameInProgress = false;
 		return false;
 	}
@@ -4397,12 +4162,6 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		xrProjectionViews[i].subImage.imageArrayIndex = arrayIndex;
 		xrProjectionViews[i].subImage.imageRect.offset = { 0, 0 };
 		xrProjectionViews[i].subImage.imageRect.extent = { (int32_t)dstW, (int32_t)dstH };
-	}
-
-	if (vr_openxr_debug_present && vr_openxr_debug_submit_mode != 0)
-	{
-		Printf("XR_PRESENT_MAP debug submit mode=%d (1=left image to both, 2=left pose/fov to both, 3=both)\n",
-			(int)vr_openxr_debug_submit_mode);
 	}
 
 	XrCompositionLayerQuad backdropLayer{ XR_TYPE_COMPOSITION_LAYER_QUAD };
@@ -4467,7 +4226,8 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 
 void VKOpenXRDeviceMode::Present() const
 {
-	Printf("OpenXR: Present called\n");
+	if (developer > 0)
+		Printf("OpenXR: Present called\n");
 }
 
 void VKOpenXRDeviceMode::AdjustViewport(DFrameBuffer* screen) const
@@ -4575,7 +4335,7 @@ void VKOpenXRDeviceMode::updateVirtualScreenLayer() const
 	center.z /= xrViewCount;
 	const int effectiveOverlayMode = (vr_overlayscreen == 0) ? 2 : vr_overlayscreen;
 
-	const XrQuaternionf headOrientation = xrViews[0].pose.orientation;
+	const XrQuaternionf headOrientation = GetCenteredViewOrientation(xrViews);
 	const XrVector3f headForward = RotateVector(headOrientation, { 0.0f, 0.0f, -1.0f });
 	const XrVector3f headUp = RotateVector(headOrientation, { 0.0f, 1.0f, 0.0f });
 	const float headYawDeg = YawDegFromForward(headForward);
@@ -4769,8 +4529,10 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 	}
 	xrVirtualScreenWasVisibleLastFrame = true;
 
-	const bool forceOverlay = gamestate != GS_LEVEL || menuactive != MENU_Off || cinemamode || ConsoleState != c_up || vr_overlayscreen_always;
-	const bool allowBlankOverlay = vr_overlayscreen_always || cinemamode || gamestate != GS_LEVEL;
+	// Treat titlemap/titlelevel like an in-level scene for composition purposes.
+	// It still uses virtual-screen mode, but should not inherit the blank overlay
+	const bool forceOverlay = !IsLevelSceneState() || menuactive != MENU_Off || cinemamode || ConsoleState != c_up || vr_overlayscreen_always;
+	const bool allowBlankOverlay = vr_overlayscreen_always || cinemamode || !IsLevelSceneState();
 	xrMenuPointerBeamImageIndex = -1;
 	if (twod == nullptr || (twod->DrawCount() == 0 && !allowBlankOverlay && !forceOverlay))
 	{
@@ -4840,16 +4602,7 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 
 	xrVirtualScreenImageIndex = (int)imageIndex;
 	auto& target = xrVirtualScreenTextures[imageIndex];
-	const bool useSceneBackdrop = gamestate == GS_LEVEL;
-	if (vr_openxr_debug_sizes)
-	{
-		Printf("XR_VSCREEN visible=%d swapchain=%ux%u draw=%ux%u backdrop=%d\n",
-			1,
-			xrVirtualScreenWidth, xrVirtualScreenHeight,
-			screenWidth, screenHeight,
-			useSceneBackdrop ? 1 : 0);
-	}
-
+	const bool useSceneBackdrop = IsLevelSceneState();
 	if (useSceneBackdrop)
 	{
 		vkfb->GetPostprocess()->BlitCurrentToImage(&target, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -5059,7 +4812,7 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 		.Execute(vkfb->GetCommands()->GetDrawCommands());
 
 	const XrVector3f backdropColor =
-		(cinemamode || vr_overlayscreen_always || gamestate == GS_LEVEL)
+		(cinemamode || vr_overlayscreen_always || IsLevelSceneState())
 		? GetVirtualScreenBackdropColor()
 		: XrVector3f{ 0.0f, 0.0f, 0.0f };
 	VkClearColorValue backdropColorValue = {};
@@ -5174,79 +4927,6 @@ void VKOpenXRDeviceMode::FinalizeEyeImage(VulkanRenderDevice* vkfb, int eyeIndex
 	ScopedCycleTimer cycle(VRFinalizeEye);
 	const int pipelineImageIndex = postprocess->GetCurrentPipelineImage();
 	const XrSafeSourceRect sourceRect = GetSafeXrSourceRect(vkfb);
-	static bool xrLoggedPresentFormat = false;
-	if (!xrLoggedPresentFormat)
-	{
-		Printf("OpenXR: finalize eye copy uses xrSwapchainFormat=%d srgb=%d presentTextureFormat=%d.\n",
-			(int)xrSwapchainFormat,
-			IsSRGBSwapchainFormat((VkFormat)xrSwapchainFormat) ? 1 : 0,
-			(int)xrSwapchainFormat);
-		xrLoggedPresentFormat = true;
-	}
-
-	if (vr_debug_projection_compare || vr_openxr_debug_present || vr_openxr_debug_sizes)
-	{
-		auto* buffers = vkfb->GetBuffers();
-		const auto* sourceTexture = (buffers && pipelineImageIndex >= 0 && pipelineImageIndex < VkRenderBuffers::NumPipelineImages)
-			? buffers->PipelineImage[pipelineImageIndex].Image.get()
-			: nullptr;
-		const auto* targetTexture = (eyeIndex >= 0 && eyeIndex < (int)xrPresentTextures.size())
-			? xrPresentTextures[eyeIndex].Image.get()
-			: nullptr;
-		const int sourceWidth = sourceTexture ? sourceTexture->width : -1;
-		const int sourceHeight = sourceTexture ? sourceTexture->height : -1;
-		const int targetWidth = targetTexture ? targetTexture->width : (int)xrPresentWidth;
-		const int targetHeight = targetTexture ? targetTexture->height : (int)xrPresentHeight;
-		Printf("XR_PRESENT_MAP finalize eye=%d sourceImage=%d srcExtent=%dx%d dstExtent=%ux%u fb=%dx%d present=%ux%u\n",
-			eyeIndex,
-			postprocess->GetCurrentPipelineImage(),
-			sourceWidth,
-			sourceHeight,
-			targetWidth,
-			targetHeight,
-			buffers ? buffers->GetWidth() : -1,
-			buffers ? buffers->GetHeight() : -1,
-			xrPresentWidth,
-			xrPresentHeight);
-
-		Printf("XR_PRESENT_MAP finalize eye=%d srcBuffer=%dx%d srcRect=%d,%d %dx%d scale=(%.4f,%.4f) offset=(%.4f,%.4f) dstEye=%dx%d fallback=%d clamped=%d\n",
-			eyeIndex,
-			buffers ? buffers->GetWidth() : -1,
-			buffers ? buffers->GetHeight() : -1,
-			sourceRect.rect.left,
-			sourceRect.rect.top,
-			sourceRect.rect.width,
-			sourceRect.rect.height,
-			(double)sourceRect.scaleX,
-			(double)sourceRect.scaleY,
-			(double)sourceRect.offsetX,
-			(double)sourceRect.offsetY,
-			targetWidth,
-			targetHeight,
-			sourceRect.usedFallback ? 1 : 0,
-			sourceRect.wasClamped ? 1 : 0);
-	}
-
-	static bool xrLoggedSourceRectAdjustment = false;
-	if (!xrLoggedSourceRectAdjustment && (sourceRect.usedFallback || sourceRect.wasClamped) && (vr_openxr_debug_present || vr_openxr_debug_sizes))
-	{
-		auto* buffers = vkfb->GetBuffers();
-		Printf("OpenXR: adjusted XR finalize source rect srcBuffer=%dx%d requested=%d,%d %dx%d chosen=%d,%d %dx%d fallback=%d clamped=%d\n",
-			buffers ? buffers->GetWidth() : -1,
-			buffers ? buffers->GetHeight() : -1,
-			vkfb->mSceneViewport.left,
-			vkfb->mSceneViewport.top,
-			vkfb->mSceneViewport.width,
-			vkfb->mSceneViewport.height,
-			sourceRect.rect.left,
-			sourceRect.rect.top,
-			sourceRect.rect.width,
-			sourceRect.rect.height,
-			sourceRect.usedFallback ? 1 : 0,
-			sourceRect.wasClamped ? 1 : 0);
-		xrLoggedSourceRectAdjustment = true;
-	}
-
 	postprocess->SetCurrentPipelineImage(pipelineImageIndex);
 
 	IntRect targetBox;
@@ -5467,11 +5147,11 @@ bool VKOpenXRDeviceMode::GetHandTransform(int hand, VSMatrix* mat) const
 		mat->translate(-offset[0], (hmdPosition[1] + offset[1] + (float)vr_height_adjust) / (float)pixelstretch, offset[2]);
 		mat->scale(1, 1 / (float)pixelstretch, 1);
 
-		if (ShouldUseScreenLayerForCurrentFrame())
-		{
-			mat->rotate(-90 + r_viewpoint.Angles.Yaw.Degrees() + (angles[1] - playerYaw), 0, 1, 0);
-			mat->rotate(-angles[0] - r_viewpoint.Angles.Pitch.Degrees(), 1, 0, 0);
-		}
+        if (VR_UseCinematicScreenLayer())
+        {
+            mat->rotate(-90 + r_viewpoint.Angles.Yaw.Degrees() + (angles[1] - hmdorientation[1]), 0, 1, 0);
+            mat->rotate(-angles[0] - r_viewpoint.Angles.Pitch.Degrees(), 1, 0, 0);
+        }
 		else
 		{
 			mat->rotate(-90 + doomYaw + (angles[1] - hmdorientation[1]), 0, 1, 0);
@@ -5647,7 +5327,6 @@ void VKOpenXRDeviceMode::InitializeMultiview() const
 
 	if (!xrVkDevice || xrVkDevice->Instance == nullptr)
 	{
-		Printf("OpenXR multiview probe: skipped, Vulkan device is unavailable.\n");
 		return;
 	}
 
@@ -5669,40 +5348,6 @@ void VKOpenXRDeviceMode::InitializeMultiview() const
 		runtimeStereoViews &&
 		xrMultiviewMaxViewCount >= xrViewCount;
 
-	Printf("OpenXR multiview probe: api=%u.%u core=%d ext=%d feature=%d runtimeViews=%u maxViews=%u maxInstanceIndex=%u requested=%d eligible=%d\n",
-		VK_VERSION_MAJOR(apiVersion),
-		VK_VERSION_MINOR(apiVersion),
-		multiviewIsCore ? 1 : 0,
-		hasMultiviewExtension ? 1 : 0,
-		multiviewFeature ? 1 : 0,
-		xrViewCount,
-		xrMultiviewMaxViewCount,
-		xrMultiviewMaxInstanceIndex,
-		vr_openxr_multiview ? 1 : 0,
-		xrMultiviewSupported ? 1 : 0);
-
-	if (!xrMultiviewSupported)
-	{
-		if (!hasMultiviewApiPath)
-		{
-			Printf("OpenXR multiview probe: not eligible because Vulkan 1.1+ is unavailable and %s is not exposed.\n",
-				VK_KHR_MULTIVIEW_EXTENSION_NAME);
-		}
-		else if (!multiviewFeature)
-		{
-			Printf("OpenXR multiview probe: not eligible because the device does not expose the multiview feature bit.\n");
-		}
-		else if (!runtimeStereoViews)
-		{
-			Printf("OpenXR multiview probe: not eligible because the runtime reported only %u XR view(s).\n",
-				xrViewCount);
-		}
-		else if (xrMultiviewMaxViewCount < xrViewCount)
-		{
-			Printf("OpenXR multiview probe: not eligible because maxMultiviewViewCount=%u is smaller than xrViewCount=%u.\n",
-				xrMultiviewMaxViewCount, xrViewCount);
-		}
-	}
 }
 
 bool VKOpenXRDeviceMode::ShouldUseMultiviewThisFrame() const
@@ -5711,34 +5356,6 @@ bool VKOpenXRDeviceMode::ShouldUseMultiviewThisFrame() const
 		xrMultiviewSupported &&
 		mFrameRenderMode == FrameRenderMode::GameplayEyes &&
 		xrViewCount > 1;
-
-	static bool loggedOnce = false;
-	static bool lastRequested = false;
-	static bool lastSupported = false;
-	static FrameRenderMode lastFrameMode = FrameRenderMode::VirtualScreen;
-	static uint32_t lastViewCount = UINT32_MAX;
-	static bool lastShouldUse = false;
-	if (!loggedOnce ||
-		lastRequested != !!vr_openxr_multiview ||
-		lastSupported != xrMultiviewSupported ||
-		lastFrameMode != mFrameRenderMode ||
-		lastViewCount != xrViewCount ||
-		lastShouldUse != shouldUse)
-	{
-		Printf("OpenXR multiview status: requested=%d supported=%d frameMode=%s xrViews=%u shouldUse=%d\n",
-			vr_openxr_multiview ? 1 : 0,
-			xrMultiviewSupported ? 1 : 0,
-			FrameRenderModeName(mFrameRenderMode),
-			xrViewCount,
-			shouldUse ? 1 : 0);
-		loggedOnce = true;
-		lastRequested = !!vr_openxr_multiview;
-		lastSupported = xrMultiviewSupported;
-		lastFrameMode = mFrameRenderMode;
-		lastViewCount = xrViewCount;
-		lastShouldUse = shouldUse;
-	}
-
 	return shouldUse;
 }
 

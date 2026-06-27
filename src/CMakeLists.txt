@@ -947,6 +947,7 @@ set (PCH_SOURCES
 	playsim/p_destructible.cpp
 	playsim/p_effect.cpp
 	playsim/p_enemy.cpp
+	playsim/p_hitscantracer.cpp
 	playsim/p_interaction.cpp
 	playsim/p_lnspec.cpp
 	playsim/p_map.cpp

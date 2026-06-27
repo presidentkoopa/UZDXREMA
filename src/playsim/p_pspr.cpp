@@ -190,20 +190,21 @@ DPSprite::DPSprite(player_t *owner, AActor *caller, int id)
   Frame(0),
   ID(id),
   processPending(true)
-{
-	Caller = caller;
-	baseScale = {1.0, 1.2};
-	rotation = nullAngle;
-	scale = {1.0, 1.0};
+  {
+  	Caller = caller;
+  	baseScale = {1.0, 1.2};
+  	rotation = nullAngle;
+  	scale = {1.0, 1.0};
 	pivot = {0.0, 0.0};
 	for (int i = 0; i < 4; i++)
 	{
 		Coord[i] = DVector2(0, 0);
 		Prev.v[i] = Vert.v[i] = FVector2(0,0);
-	}
-	
-	alpha = 1;
-	Renderstyle = STYLE_Normal;
+  	}
+  	
+  	alpha = 1;
+	LastPatch.SetInvalid();
+  	Renderstyle = STYLE_Normal;
 
 	DPSprite *prev = nullptr;
 	DPSprite *next = Owner->psprites;
@@ -483,6 +484,11 @@ void DPSprite::NewTick()
 			{
 				pspr->processPending = true;
 				pspr->ResetInterpolation();
+				FTextureID lump = sprites[pspr->GetSprite()].GetSpriteFrame(pspr->GetFrame(), 0, nullAngle, nullptr);
+				if (lump.isValid() && lump.GetIndex() != 0 && (pspr->LastPatches.pos < 0 || lump.GetIndex() != pspr->LastPatches[0]))
+				{
+					pspr->LastPatches.add(lump.GetIndex());
+				}
 
 				pspr = pspr->Next;
 			}

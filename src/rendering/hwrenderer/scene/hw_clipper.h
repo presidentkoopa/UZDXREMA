@@ -167,6 +167,11 @@ public:
 		return unsigned(v->angletime) == starttime ? v->viewangle : (v->angletime = starttime, v->viewangle = PointToPseudoAngle(v->p.X, v->p.Y));
 	}
 
+	inline angle_t GetRadarClipAngle(vertex_t *v)
+	{
+		return unsigned(v->radarangletime) == starttime ? v->radarviewangle : (v->radarangletime = starttime, v->radarviewangle = PointToPseudoAngle(v->p.X, v->p.Y));
+	}
+
 };
 
 #endif

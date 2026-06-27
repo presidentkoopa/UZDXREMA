@@ -14,6 +14,10 @@ struct HWMeshHelper
 	TArray<HWWall> portals;
 	TArray<HWMissing> lower;
 	TArray<HWMissing> upper;
+	int wallCount = 0;
+	int batchCount = 0;
+	int64_t totalCycles = 0;
+	int64_t wallCycles = 0;
 };
 
 
@@ -68,13 +72,13 @@ struct HWWallDispatcher
 	void AddWall(HWWall* wal)
 	{
 		if (di) di->AddWall(wal);
-		else if (!(wal->flags & HWWall::HWF_TRANSLUCENT)) mh->list.Push(*wal);
-		else mh->translucent.Push(*wal);
+		else if (!(wal->flags & HWWall::HWF_TRANSLUCENT)) mh->list.Push(std::move(*wal));
+		else mh->translucent.Push(std::move(*wal));
 	}
 
 	void AddPortal(HWWall* wal)
 	{
-		mh->portals.Push(*wal);
+		mh->portals.Push(std::move(*wal));
 	}
 
 };

@@ -66,6 +66,8 @@
 
 #include "gl_openvr.h"
 // #include "openvr_include.h"
+
+EXTERN_CVAR(Int, developer);
 #include <QzDoom/VrCommon.h>
 
 using namespace openvr;
@@ -98,6 +100,7 @@ double normalizeAngle(double angle);
 void QzDoom_setUseScreenLayer(bool use);
 
 bool VR_UseScreenLayer();
+bool VR_UseCinematicScreenLayer();
 void VR_GetMove( float *joy_forward, float *joy_side, float *hmd_forward, float *hmd_side, float *up, float *yaw, float *pitch, float *roll );
 void VR_SetHMDOrientation(float pitch, float yaw, float roll );
 void VR_SetHMDPosition(float x, float y, float z );
@@ -191,6 +194,7 @@ extern float positional_movementForward;
 extern bool ready_teleport;
 extern bool trigger_teleport;
 extern bool resetDoomYaw;
+extern bool resetPreviousHmdYaw;
 extern bool resetPreviousPitch;
 extern bool cinemamode;
 extern float cinemamodeYaw;
@@ -225,14 +229,13 @@ EXTERN_CVAR(Color, vr_menu_pointer_color);
 CVAR(Float, vr_openvr_menu_pointer_pitch_bias, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR(Float, vr_openvr_menu_pointer_tip_offset, 0.035f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 
-EXTERN_CVAR(Bool, vr_use_alternate_mapping);
 EXTERN_CVAR(Bool, vr_secondary_button_mappings);
 EXTERN_CVAR(Bool, vr_teleport);
 EXTERN_CVAR(Bool, vr_switch_sticks);
 EXTERN_CVAR(Bool, vr_two_handed_weapons);
+EXTERN_CVAR(Int, vid_refreshrate);
 
 EXTERN_CVAR(Bool, vr_enable_haptics);
-EXTERN_CVAR(Float, vr_kill_momentum);
 EXTERN_CVAR(Bool, vr_crouch_use_button);
 EXTERN_CVAR(Float, vr_snapTurn);
 
@@ -325,9 +328,9 @@ static float getDoomPlayerHeightWithoutCrouch(const player_t* player)
 
 static float getViewpointYaw()
 {
-	if (VR_UseScreenLayer())
+	if (VR_UseCinematicScreenLayer())
 	{
-		return r_viewpoint.Angles.Yaw.Degrees();
+		return cinemamodeYaw;
 	}
 
 	return doomYaw;
@@ -1580,8 +1583,11 @@ namespace s3d
 		, hmdWasFound(false)
 		, sceneWidth(0), sceneHeight(0)
 		, vrCompositor(nullptr)
+		, vrOverlay(nullptr)
 		, vrRenderModels(nullptr)
+		, vrSettings(nullptr)
 		, vrToken(0)
+		, haptics(nullptr)
 		, crossHairDrawer(new F2DDrawer)
 	{
 		//eye_ptrs.Push(&leftEyeView); // initially default behavior to Mono non-stereo rendering
@@ -1631,12 +1637,16 @@ namespace s3d
 		const std::string model_key = std::string("FnTable:") + std::string(IVRRenderModels_Version);
 		vrRenderModels = (VR_IVRRenderModels_FnTable*)VR_GetGenericInterface(model_key.c_str(), &eError);
 
+		const std::string settings_key = std::string("FnTable:") + std::string(IVRSettings_Version);
+		vrSettings = (VR_IVRSettings_FnTable*)VR_GetGenericInterface(settings_key.c_str(), &eError);
+
 		//eye_ptrs.Push(&rightEyeView); // NOW we render to two eyes
 		hmdWasFound = true;
 
 		crossHairDrawer->Clear();
 
 		haptics = new OpenVRHaptics(vrSystem);
+		ApplyRefreshRate();
 	}
 
 	/* virtual */
@@ -1782,6 +1792,92 @@ namespace s3d
 		}
 	}
 
+	void OpenVRMode::ApplyRefreshRate() const
+	{
+		if (!hmdWasFound || vrSystem == nullptr)
+		{
+			if (developer > 0 && !refreshRateLoggedUnavailable)
+			{
+				Printf("OpenVR: refresh-rate control unavailable; HMD/runtime missing.\n");
+				refreshRateLoggedUnavailable = true;
+			}
+			return;
+		}
+
+		if (vrSettings == nullptr)
+		{
+			if (developer > 0 && !refreshRateLoggedUnavailable)
+			{
+				Printf("OpenVR: refresh-rate control unavailable; SteamVR settings interface missing.\n");
+				refreshRateLoggedUnavailable = true;
+			}
+			return;
+		}
+
+		auto readDisplayFrequency = [this]() -> float
+		{
+			ETrackedPropertyError propError = (ETrackedPropertyError)0;
+			const float rate = vrSystem->GetFloatTrackedDeviceProperty(
+				k_unTrackedDeviceIndex_Hmd,
+				(ETrackedDeviceProperty)2002,
+				&propError);
+			return propError == (ETrackedPropertyError)0 ? rate : 0.0f;
+		};
+
+		const int requestedRate = std::max(0, (int)vid_refreshrate);
+		if (refreshRateHasLastRequest && lastRefreshRateMenuValue == requestedRate)
+			return;
+
+		refreshRateHasLastRequest = true;
+		lastRefreshRateMenuValue = requestedRate;
+
+		const float currentRateBefore = readDisplayFrequency();
+		if (currentRateBefore > 0.0f)
+			lastObservedHmdRefreshRate = currentRateBefore;
+
+		if (developer > 0 && !refreshRateLoggedControlPath)
+		{
+			Printf("OpenVR: using SteamVR display refresh-rate control.\n");
+			refreshRateLoggedControlPath = true;
+		}
+
+		if (requestedRate <= 0)
+			return;
+
+		EVRSettingsError settingsError = (EVRSettingsError)0;
+		vrSettings->SetFloat(
+			const_cast<char*>(k_pch_SteamVR_Section),
+			const_cast<char*>(k_pch_SteamVR_PreferredRefreshRate),
+			(float)requestedRate,
+			&settingsError);
+		if (settingsError != (EVRSettingsError)0)
+		{
+			if (developer > 0)
+				Printf("OpenVR: failed to request display refresh rate %d Hz.\n", requestedRate);
+			return;
+		}
+
+		lastAppliedPreferredRefreshRate = (float)requestedRate;
+
+		const float currentRateAfter = readDisplayFrequency();
+		if (currentRateAfter > 0.0f)
+			lastObservedHmdRefreshRate = currentRateAfter;
+
+		if (currentRateAfter <= 0.0f)
+		{
+			if (developer > 0)
+				Printf("OpenVR: requested display refresh rate %d Hz.\n", requestedRate);
+			return;
+		}
+
+		if (developer > 0)
+		{
+			Printf("OpenVR: requested display refresh rate %d Hz (current=%.0f Hz).\n",
+				requestedRate,
+				(double)currentRateAfter);
+		}
+	}
+
 	// AdjustViewports() is called from within FLGRenderer::SetOutputViewport(...)
 	void OpenVRMode::AdjustViewport(DFrameBuffer* screen) const
 	{
@@ -1851,11 +1947,11 @@ namespace s3d
 
 				mat->scale(1, 1 / pixelstretch, 1);
 
-				if (VR_UseScreenLayer())
-				{
-					mat->rotate(-90 + r_viewpoint.Angles.Yaw.Degrees()  + (weaponangles[YAW]- playerYaw), 0, 1, 0);
-					mat->rotate(-weaponangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees(), 1, 0, 0);
-				} else {
+                if (VR_UseCinematicScreenLayer())
+                {
+                    mat->rotate(-90 + r_viewpoint.Angles.Yaw.Degrees()  + (weaponangles[YAW] - hmdorientation[YAW]), 0, 1, 0);
+                    mat->rotate(-weaponangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees(), 1, 0, 0);
+                } else {
 					mat->rotate(-90 + doomYaw + (weaponangles[YAW]- hmdorientation[YAW]), 0, 1, 0);
 					mat->rotate(-weaponangles[PITCH], 1, 0, 0);
 				}
@@ -1867,11 +1963,11 @@ namespace s3d
 
 				mat->scale(1, 1 / pixelstretch, 1);
 
-				if (VR_UseScreenLayer())
-				{
-					mat->rotate(-90 + r_viewpoint.Angles.Yaw.Degrees()  + (offhandangles[YAW]- playerYaw), 0, 1, 0);
-					mat->rotate(-offhandangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees(), 1, 0, 0);
-				} else {
+                if (VR_UseCinematicScreenLayer())
+                {
+                    mat->rotate(-90 + r_viewpoint.Angles.Yaw.Degrees()  + (offhandangles[YAW] - hmdorientation[YAW]), 0, 1, 0);
+                    mat->rotate(-offhandangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees(), 1, 0, 0);
+                } else {
 					mat->rotate(-90 + doomYaw + (offhandangles[YAW]- hmdorientation[YAW]), 0, 1, 0);
 					mat->rotate(-offhandangles[PITCH], 1, 0, 0);
 				}
@@ -1971,20 +2067,55 @@ namespace s3d
 
 		// the yaw returned contains snapTurn input value
 		VR_GetMove(&dummy, &dummy, &dummy, &dummy, &dummy, &hmdYaw, &hmdpitch, &hmdroll);
+		if (VR_UseCinematicScreenLayer())
+		{
+			cinemamodePitch = hmdorientation[PITCH];
+		}
 
 		double hmdYawDeltaDegrees = 0;
 		if (doTrackHmdYaw) {
 			// Set HMD angle game state parameters for NEXT frame
 			static double previousHmdYaw = 0;
 			static bool havePreviousYaw = false;
-			if (!havePreviousYaw) {
+			static float previousCinemaSnapTurn = 0.0f;
+			static bool wasLockedToScreenLayerLastFrame = false;
+			if (!havePreviousYaw || resetPreviousHmdYaw) {
 				previousHmdYaw = hmdYaw;
 				havePreviousYaw = true;
+				resetPreviousHmdYaw = false;
 			}
 			hmdYawDeltaDegrees = hmdYaw - previousHmdYaw;
-			vrApplyingHmdYaw = true;
-			G_AddViewAngle(mAngleFromRadians(DEG2RAD(-hmdYawDeltaDegrees)));
-			vrApplyingHmdYaw = false;
+			double cinemaTurnDeltaDegrees = 0.0;
+			if (VR_UseScreenLayer())
+			{
+				if (!wasLockedToScreenLayerLastFrame)
+				{
+					previousCinemaSnapTurn = snapTurn;
+					cinemamodeYaw = r_viewpoint.Angles.Yaw.Degrees();
+				}
+				cinemaTurnDeltaDegrees = ShortestAngleDeltaDeg(snapTurn, previousCinemaSnapTurn);
+				previousCinemaSnapTurn = snapTurn;
+				wasLockedToScreenLayerLastFrame = true;
+			}
+			else
+			{
+				wasLockedToScreenLayerLastFrame = false;
+			}
+
+			if (!VR_UseScreenLayer())
+			{
+				vrApplyingHmdYaw = true;
+				G_AddViewAngle(mAngleFromRadians(DEG2RAD(-hmdYawDeltaDegrees)));
+				vrApplyingHmdYaw = false;
+			}
+			else if (cinemaTurnDeltaDegrees != 0.0)
+			{
+				vrApplyingHmdYaw = true;
+				G_AddViewAngle(mAngleFromRadians(DEG2RAD(-cinemaTurnDeltaDegrees)));
+				vrApplyingHmdYaw = false;
+				doomYaw += cinemaTurnDeltaDegrees;
+				cinemamodeYaw = doomYaw;
+			}
 			previousHmdYaw = hmdYaw;
 		}
 
@@ -2008,9 +2139,9 @@ namespace s3d
 			previousPitch = -hmdpitch;
 		}
 
-		if (!VR_UseScreenLayer())
+		if (gamestate == GS_LEVEL && menuactive == MENU_Off)
 		{
-			if (gamestate == GS_LEVEL && menuactive == MENU_Off)
+			if (!VR_UseScreenLayer())
 			{
 				doomYaw += hmdYawDeltaDegrees;
 
@@ -2024,11 +2155,16 @@ namespace s3d
 					vp.HWAngles.Pitch = FAngle::fromDeg(-hmdpitch);
 				}
 			}
+			else
+			{
+				vp.HWAngles.Roll = FAngle::fromDeg(0.0f);
+				vp.HWAngles.Pitch = FAngle::fromDeg(-hmdorientation[PITCH]);
+			}
 
 			// Late-schedule update to renderer angles directly, too
 			if (doTrackHmdYaw && doTrackHmdAngles && doLateScheduledRotationTracking)
 			{
-				double viewYaw = doomYaw;
+				double viewYaw = getViewpointYaw();
 				while (viewYaw <= -180.0)
 					viewYaw += 360.0;
 				while (viewYaw > 180.0)
@@ -2254,20 +2390,6 @@ namespace s3d
 			secondaryButton2 = offButton2;
 		}
 
-		//In cinema mode, right-stick controls mouse
-		const float mouseSpeed = 3.0f;
-		if (VR_UseScreenLayer() && !dominantGripPushedNew)
-		{
-			float yaw = -I_OpenVRGetYaw();
-			if (fabs(yaw) > 0.1f) {
-				cinemamodeYaw -= mouseSpeed * yaw;
-			}
-			float pitch = I_OpenVRGetPitch();
-			if (fabs(pitch) > 0.1f) {
-				cinemamodePitch += mouseSpeed * pitch;
-			}
-		}
-
 		// Only do the following if we are definitely not in the menu
 		if (gamestate == GS_LEVEL && menuactive == MENU_Off && !paused)
 		{
@@ -2281,19 +2403,11 @@ namespace s3d
 								powf(offhandControllerPose.m[2][3] -
 										dominantControllerPose.m[2][3], 2));
 
-			//Turn on weapon stabilisation?
-			if (vr_two_handed_weapons &&
-				(pOffTrackedRemoteNew->ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Grip)) !=
-				(pOffTrackedRemoteOld->ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Grip)))
-			{
-				if (pOffTrackedRemoteNew->ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Grip)) {
-					if (distance < 0.50f) {
-						weaponStabilised = true;
-					}
-				} else {
-					weaponStabilised = false;
-				}
-			}
+			const bool offhandGripHeld =
+				(pOffTrackedRemoteNew->ulButtonPressed & ButtonMaskFromId(openvr::vr::k_EButton_Grip)) != 0;
+			const bool dominantPoseValid = pDominantTracking->active && pDominantTracking->pose.bPoseIsValid;
+			const bool offhandPoseValid = pOffTracking->active && pOffTracking->pose.bPoseIsValid;
+			weaponStabilised = vr_two_handed_weapons && offhandGripHeld && dominantPoseValid && offhandPoseValid && distance < 0.50f;
 
 			//dominant hand stuff first
 			{
@@ -2316,9 +2430,14 @@ namespace s3d
 							dominantControllerPose.m[1][3];
 					float zxDist = length(x, z);
 
-					if (zxDist != 0.0f && z != 0.0f) {
+					// If the hands become nearly vertically stacked, the stabilised solve can
+					// snap the weapon pitch toward straight up/down. Fall back to the tracked
+					// dominant-hand orientation for that frame instead of preserving a bad latch.
+					if (zxDist > 0.05f && distance > 0.05f) {
 						VectorSet(weaponangles, -RAD2DEG(atanf(y / zxDist)), -RAD2DEG(atan2f(x, -z)),
 								weaponangles[ROLL]);
+					} else {
+						weaponStabilised = false;
 					}
 				}
 			}
@@ -2395,7 +2514,7 @@ namespace s3d
 				}
 			}
 
-			if (!VR_UseScreenLayer() && !dominantGripPushedNew)
+			if (!dominantGripPushedNew)
 			{
 				static int increaseSnap = true;
 				static int decreaseSnap = true;
@@ -2429,7 +2548,6 @@ namespace s3d
 
 				// Turning logic
 				if (joy > 0.6f && increaseSnap) {
-					resetDoomYaw = true;
 					snapTurn -= vr_snapTurn;
 					if (vr_snapTurn > 10.0f) {
 						increaseSnap = false;
@@ -2439,7 +2557,6 @@ namespace s3d
 				}
 
 				if (joy < -0.6f && decreaseSnap) {
-					resetDoomYaw = true;
 					snapTurn += vr_snapTurn;
 					if (vr_snapTurn > 10.0f) {
 						decreaseSnap = false;
@@ -2475,7 +2592,7 @@ namespace s3d
 				const bool suppressSelectAsKey = openvrMenuSuppressSelectAsKey;
 
 				//if in cinema mode, then the dominant joystick is used differently
-				if (!VR_UseScreenLayer() && axisJoystick != -1) 
+				if (!VR_UseCinematicScreenLayer() && axisJoystick != -1) 
 				{
 				//Default this is Weapon Chooser - This _could_ be remapped
 				Joy_GenerateButtonEvents(
@@ -3073,20 +3190,6 @@ namespace s3d
 							}
 						}
 					}
-#if 0  // pcvr kill momentum and controller mapping
-					if (player && vr_kill_momentum)
-					{
-						if (role == (openvr_rightHanded ? 0 : 1))
-						{
-							if (JustStoppedMoving(controllers[role].lastState, newState, axisTrackpad)
-								|| JustStoppedMoving(controllers[role].lastState, newState, axisJoystick))
-							{
-								player->mo->Vel[0] = 0;
-								player->mo->Vel[1] = 0;
-							}
-						}
-					}
-#endif
 					static int joy_mode = vr_joy_mode;
 					if (joy_mode == 0)
 					{
@@ -3100,6 +3203,7 @@ namespace s3d
 			{
 				doomYaw = (float)r_viewpoint.camera->Angles.Yaw.Degrees();
 				resetDoomYaw = false;
+				resetPreviousHmdYaw = true;
 			}
 			else if (gamestate != GS_LEVEL || menuactive != MENU_Off 
 			|| ConsoleState == c_down || ConsoleState == c_falling 
@@ -3109,6 +3213,7 @@ namespace s3d
 			)
 			{
 				resetDoomYaw = true;
+				resetPreviousHmdYaw = true;
 			}
 
 			if (gamestate == GS_LEVEL && menuactive == MENU_Off)
@@ -3138,10 +3243,10 @@ namespace s3d
 
 						getMainHandAngles();
 
-						player->mo->AttackPitch = DAngle::fromDeg(VR_UseScreenLayer() ? 
+						player->mo->AttackPitch = DAngle::fromDeg(VR_UseCinematicScreenLayer() ? 
 							-weaponangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees() :
 							-weaponangles[PITCH]);
-						player->mo->AttackAngle = DAngle::fromDeg(-90 + getViewpointYaw() + (weaponangles[YAW]- playerYaw));
+						player->mo->AttackAngle = DAngle::fromDeg(-90 + getViewpointYaw() + (weaponangles[YAW] - hmdorientation[YAW]));
 						player->mo->AttackRoll = DAngle::fromDeg(weaponangles[ROLL]);
 					}
 
@@ -3154,10 +3259,10 @@ namespace s3d
 
 						getOffHandAngles();
 
-						player->mo->OffhandPitch = DAngle::fromDeg(VR_UseScreenLayer() ? 
-							-offhandangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees() : 
+						player->mo->OffhandPitch = DAngle::fromDeg(VR_UseCinematicScreenLayer() ? 
+							-offhandangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees() :
 							-offhandangles[PITCH]);
-						player->mo->OffhandAngle = DAngle::fromDeg(-90 + getViewpointYaw() + (offhandangles[YAW]- playerYaw));
+						player->mo->OffhandAngle = DAngle::fromDeg(-90 + getViewpointYaw() + (offhandangles[YAW] - hmdorientation[YAW]));
 						player->mo->OffhandRoll = DAngle::fromDeg(offhandangles[ROLL]);
 					}
 
@@ -3551,8 +3656,13 @@ namespace s3d
 			vrCompositor = nullptr;
 			vrOverlay = nullptr;
 			vrRenderModels = nullptr;
+			vrSettings = nullptr;
 			leftEyeView->dispose();
 			rightEyeView->dispose();
+		}
+		if (haptics != nullptr) {
+			delete haptics;
+			haptics = nullptr;
 		}
 		if (crossHairDrawer != nullptr) {
 			delete crossHairDrawer;

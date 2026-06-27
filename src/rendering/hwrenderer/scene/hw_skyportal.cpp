@@ -26,10 +26,13 @@
 #include "r_state.h"
 #include "r_utility.h"
 #include "g_levellocals.h"
+#include "hw_cvars.h"
 #include "hw_skydome.h"
 #include "hwrenderer/scene/hw_portal.h"
 #include "hw_renderstate.h"
 #include "skyboxtexture.h"
+
+std::pair<PalEntry, PalEntry>& R_GetSkyCapColor(FGameTexture* tex);
 
 //-----------------------------------------------------------------------------
 //
@@ -49,6 +52,18 @@ void HWSkyPortal::DrawContents(HWDrawInfo *di, FRenderState &state)
 		state.SetNoSoftLightLevel();
 	}
 
+	if (!gl_skydome)
+	{
+		FGameTexture* skytex = origin->texture[0] ? origin->texture[0] : origin->texture[1];
+		if (skytex != nullptr)
+		{
+			auto& col = R_GetSkyCapColor(skytex);
+			state.SetSceneColor(col.first);
+			state.InitSceneClearColor();
+		}
+		di->lightmode = oldlightmode;
+		return;
+	}
 
 	state.ResetColor();
 	state.EnableFog(false);
@@ -57,6 +72,8 @@ void HWSkyPortal::DrawContents(HWDrawInfo *di, FRenderState &state)
 	bool oldClamp = state.SetDepthClamp(true);
 
 	di->SetupView(state, 0, 0, 0, !!(mState->MirrorFlag & 1), !!(mState->PlaneMirrorFlag & 1));
+	di->RemoveMultiviewPositionParallax();
+	di->ApplyViewpoint(state);
 
 	state.SetVertexBuffer(vertexBuffer);
 	auto skybox = origin->texture[0] ? dynamic_cast<FSkyBox*>(origin->texture[0]->GetTexture()) : nullptr;

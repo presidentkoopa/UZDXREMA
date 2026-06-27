@@ -397,6 +397,10 @@ OptionMenu "OptionsMenu" protected
 	SafeCommand	"$OPTMNU_WRITEINI",		"writeini"
 	
 	Command "$OPTMNU_CONSOLE",			"menuconsole"
+	ifOption(Developer1, Developer2)
+	{
+		Submenu "$DEVOPTMNU_TITLE",		"DeveloperOptionsMenu"
+	}
 	//Command "$OPTMNU_OPENCONFIG",		"openconfig"
 	//Command "$OPTMNU_OPENSCREENSHOTS",	"openscreenshots"
 	//Command "$OPTMNU_OPENSAVES",		"opensaves"
@@ -630,6 +634,14 @@ OptionMenu "ActionDoubleControlsMenu" protected
 	Title "$CNTRLMNU_ACTION_TITLE"
 	ScrollTop 2
 	StaticTextSwitchable "$CNTRLMNU_SWITCHTEXT1", "$CNTRLMNU_SWITCHTEXT2", "ControlMessage"
+
+	ifOption(Developer1, Developer2)
+	{
+		StaticText "$DEVOPTMNU_TITLE", gold
+		DoubleControl    "$DEVOPTMNU_TOGGLE_FPS_COUNTER"   , "togglefps"
+		DoubleControl    "$DEVOPTMNU_RUN_BENCHMARK"        , "bench"
+		StaticText ""
+	}
 
 	StaticText ""
 	StaticText "$CNTRLMNU_DBLBINDTEXT_L1", brown
@@ -909,6 +921,14 @@ OptionMenu "OtherControlsMenu" protected
 	Title "$CNTRLMNU_OTHER_TITLE"
 	ScrollTop 2
 	StaticTextSwitchable "$CNTRLMNU_SWITCHTEXT1", "$CNTRLMNU_SWITCHTEXT2", "ControlMessage"
+
+	ifOption(Developer1, Developer2)
+	{
+		StaticText "$DEVOPTMNU_TITLE", gold
+		Control    "$DEVOPTMNU_TOGGLE_FPS_COUNTER"   , "togglefps"
+		Control    "$DEVOPTMNU_RUN_BENCHMARK"        , "bench"
+		StaticText ""
+	}
 
 	StaticText ""
 	Control    "Toggle Cinema Mode"        , "cinemamode"
@@ -1627,8 +1647,12 @@ OptionMenu "MiscOptions" protected
 	StaticText ""
 	Option "$VIDMNU_SHOWFPSONHUD",		        "vid_fps", "OnOff"
 	Option "Lock FrameRate (IF LOW PERF.)",         "cl_capfps", "OnOff"
+
 	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar k_mergekeys k_allowfullscreentoggle queryiwad nocheats allcheats disableautosave saveloadconfirmation autosavecount quicksaverotation quicksaverotationcount dehload enablescriptscreenshot setslotstrict nointerscrollabort gl_cachenodes gl_cachetime clearnodecache m_quickexit showendoom menu_hideextreme sv_alwaystally cl_capfps"
+	Option "$MISCMNU_DEVELOPERMODE",			"developer", "DevMessageLevels"
+
+	StaticText " "
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar k_mergekeys k_allowfullscreentoggle queryiwad nocheats allcheats disableautosave saveloadconfirmation autosavecount quicksaverotation quicksaverotationcount dehload enablescriptscreenshot setslotstrict nointerscrollabort gl_cachenodes gl_cachetime clearnodecache m_quickexit showendoom menu_hideextreme sv_alwaystally cl_capfps developer"
 }
 
 //-------------------------------------------------------------------------------------------
@@ -2833,6 +2857,13 @@ OptionValue "DesktopViewModes"
 	2, "$OPTVAL_VR_RIGHT_EYE"
 }
 
+OptionValue HitscanTracerMode
+{
+	0, "$OPTVAL_VR_DISABLED"
+	1, "$OPTVAL_VR_PLAYER_ONLY"
+	2, "$OPTVAL_VR_EVERYONE"
+}
+
 OptionMenu CinemaModeOptions protected
 {
 	Title "$VRCMODEMNU_TITLE"
@@ -2943,6 +2974,51 @@ OptionMenu VRWeaponOptions protected
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar r_PlayerSprites3DMode gl_fatItemWidth vr_2dweaponOffsetX vr_2dweaponOffsetY vr_2dweaponOffsetZ vr_2dweaponScale"
 }
 
+OptionValue "LaserBeamLength"
+{
+	0, "$VRLASERMNU_LENGTH_FULL"
+	1, "$VRLASERMNU_LENGTH_HALF"
+	2, "$VRLASERMNU_LENGTH_FIXED"
+}
+
+OptionValue "LaserPointerGlow"
+{
+	0, "$VRLASERMNU_POINTER_GLOW_OFF"
+	1, "$VRLASERMNU_POINTER_GLOW_POINT"
+	2, "$VRLASERMNU_POINTER_GLOW_DYNAMIC"
+}
+
+OptionMenu VRLaserSightOptions protected
+{
+	Title "$VRLASERMNU_TITLE"
+
+	StaticText ""
+	StaticText "$VRLASERMNU_LASER_OPTIONS", gold
+	Option "$VRLASERMNU_ENABLED",				"vr_laser_sight", "OnOff"
+	Option "$VRLASERMNU_MELEE",					"vr_laser_show_melee", "YesNo"
+	Option "$VRLASERMNU_HIDE_ON_WHEEL",			"vr_laser_hide_on_wheel", "YesNo"
+	ColorPicker "$VRLASERMNU_COLOR",			"vr_laser_color"
+	Slider "$VRLASERMNU_POINTER_SCALE",			"vr_laser_pointer_scale", 0.1, 1.0, 0.05, 2
+	Slider "$VRLASERMNU_POINTER_ALPHA",			"vr_laser_pointer_alpha", 0.0, 1.0, 0.05, 2
+	Option "$VRLASERMNU_POINTER_GLOW",			"vr_laser_pointer_glow", "LaserPointerGlow"
+	Slider "$VRLASERMNU_POINTER_GLOW_SCALE",	"vr_laser_pointer_glow_scale", 1.1, 4.0, 0.05, 2
+	Slider "$VRLASERMNU_POINTER_GLOW_INTENSITY", "vr_laser_pointer_glow_intensity", 0.1, 4.0, 0.05, 2
+
+	StaticText ""
+	StaticText "$VRLASERMNU_BEAM_OPTIONS", gold
+	Option "$VRLASERMNU_BEAM_ENABLED",			"vr_laser_beam", "OnOff"
+	Slider "$VRLASERMNU_BEAM_ALPHA",			"vr_laser_beam_alpha", 0.0, 1.0, 0.05, 2
+	Slider "$VRLASERMNU_BEAM_WIDTH",			"vr_laser_beam_width", 0.1, 2.0, 0.05, 2
+	Option "$VRLASERMNU_BEAM_LENGTH",			"vr_laser_beam_length", "LaserBeamLength"
+	Slider "$VRLASERMNU_SHORT_LENGTH",			"vr_laser_fixed_length", 60, 1000, 10, 0
+	Slider "$VRLASERMNU_SOURCE_OFFSET_X",		"vr_laser_source_offset_x", -64, 64, 1, 0
+	Slider "$VRLASERMNU_SOURCE_OFFSET_Y",		"vr_laser_source_offset_y", -64, 64, 1, 0
+	Slider "$VRLASERMNU_SOURCE_OFFSET_Z",		"vr_laser_source_offset_z", -64, 64, 1, 0
+	StaticText " "
+
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_laser_sight vr_laser_show_melee vr_laser_hide_on_wheel vr_laser_beam vr_laser_color vr_laser_beam_alpha vr_laser_beam_width vr_laser_pointer_scale vr_laser_pointer_alpha vr_laser_pointer_glow vr_laser_pointer_glow_scale vr_laser_pointer_glow_intensity vr_laser_beam_length vr_laser_fixed_length vr_laser_source_offset_x vr_laser_source_offset_y vr_laser_source_offset_z"
+}
+
 OptionValue "WheelListOption"
 {
 	0, "$OPTVAL_VR_ONLY_AVAILABLE"
@@ -3009,6 +3085,28 @@ OptionMenu VRWeaponWheelOptions protected
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_wheel_icon_bg_color vr_wheel_icon_select_color vr_wheel_icon_scale vr_wheel_radius vr_wheel_distance vr_wheel_xoffset vr_wheel_yoffset vr_wheel_time_slow vr_wheel_weapon_all vr_wheel_switch_hands vr_wheel_selection_type vr_wheel_select_angle vr_wheel_deadzone vr_wheel_sound vr_wheel_hide_hand_weapon vr_wheel_icon_load_model vr_wheel_icon_model_scale vr_wheel_icon_model_yaw vr_wheel_icon_model_xoffset vr_wheel_icon_model_zoffset"
 }
 
+OptionMenu VRHitscanTracerOptions protected
+{
+	Title "$VRTRACERMNU_TITLE"
+
+	StaticText ""
+	StaticText "$VRTRACERMNU_TRACE_OPTIONS", gold
+	Option "$VRTRACERMNU_ENABLED",			"vr_hitscan_tracer", "HitscanTracerMode"
+	ColorPicker "$VRTRACERMNU_COLOR",		"vr_hitscan_tracer_color"
+	Slider "$VRTRACERMNU_OPACITY",			"vr_hitscan_tracer_alpha", 0.0, 1.0, 0.05, 2
+	Slider "$VRTRACERMNU_LENGTH",			"vr_hitscan_tracer_length", 1.0, 64.0, 1.0, 0
+	Slider "$VRTRACERMNU_WIDTH",			"vr_hitscan_tracer_width", 0.01, 2.0, 0.01, 2
+	Slider "$VRTRACERMNU_SPEED",			"vr_hitscan_tracer_speed", 0.0, 40.0, 0.1, 1
+	Slider "$VRTRACERMNU_OFFSET",			"vr_hitscan_tracer_offset", 0.0, 64.0, 1.0, 0
+	StaticText ""
+	StaticText "$VRTRACERMNU_RICOCHET_OPTIONS", gold
+	Option "$VRTRACERMNU_RICOCHET_ENABLED",	"vr_hitscan_ricochet", "YesNo"
+	Slider "$VRTRACERMNU_RICOCHET_CHANCE",	"vr_hitscan_ricochet_chance", 0.0, 100.0, 1.0, 0
+	StaticText ""
+
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_hitscan_tracer vr_hitscan_ricochet vr_hitscan_ricochet_chance vr_hitscan_tracer_color vr_hitscan_tracer_alpha vr_hitscan_tracer_length vr_hitscan_tracer_width vr_hitscan_tracer_speed vr_hitscan_tracer_offset"
+}
+
 OptionMenu VROptionsMenu protected
 {
 	Title "$VRPREFMNU_TITLE"
@@ -3018,9 +3116,11 @@ OptionMenu VROptionsMenu protected
 	{
 		Submenu "$VRCMODEMNU_TITLE",        "CinemaModeOptions"
 	}
-	Submenu "$VRHUDMNU_HUDAUTOMAPOPTIONS",   "VRHUDOptions"
-	Submenu "$VRWEAPONMNU_TITLE",        "VRWeaponOptions"
-	Submenu "$VRWHEELMNU_TITLE",  "VRWeaponWheelOptions"
+	Submenu "$VRHUDMNU_HUDAUTOMAPOPTIONS",  "VRHUDOptions"
+	Submenu "$VRWEAPONMNU_TITLE",			"VRWeaponOptions"
+	Submenu "$VRLASERMNU_TITLE",			"VRLaserSightOptions"
+	Submenu "$VRTRACERMNU_TITLE",			"VRHitscanTracerOptions"
+	Submenu "$VRWHEELMNU_TITLE",			"VRWeaponWheelOptions"
 	StaticText ""
 	StaticText "$VRPREFMNU_MISC", gold
 	ifOption(OpenXR)
@@ -3037,6 +3137,8 @@ OptionMenu VROptionsMenu protected
 	{
 		StaticText ""
 		StaticText "$VRPREFMNU_PERFORMANCE", gold
+		Option "$VRPREFMNU_BSP_MULTITHREAD", "gl_multithread", "OnOff"
+		StaticText "$VRPREFMNU_BSP_MULTITHREAD_HELP", "Brown"
 		Option "$VRPREFMNU_SCENE_MULTITHREAD", "vr_scene_multithread", "OnOff"
 		StaticText "$VRPREFMNU_SCENE_MULTITHREAD_HELP", "Brown"
 	}
@@ -3044,6 +3146,8 @@ OptionMenu VROptionsMenu protected
 	{
 		Option "$VRPREFMNU_MULTIVIEW", "vr_openxr_multiview", "OnOff"
 		StaticText "$VRPREFMNU_MULTIVIEW_HELP", "Brown"
+		Option "$VRPREFMNU_TEXTURE_THREAD", "gl_texture_thread", "OnOff"
+		StaticText "$VRPREFMNU_TEXTURE_THREAD_HELP", "Brown"
 		
 		StaticText ""
 		StaticText "$VRPREFMNU_DISPLAY_ADJUST", gold
@@ -3092,6 +3196,55 @@ OptionMenu VROptionsMenu protected
 	Slider "$VRPREFMNU_EXTERNAL_HAPTICS_INTENSITY",	"ext_haptic_level_global_intensity", 0.0, 2.0, 0.1, 2
 	StaticText " "
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_pickup_haptic_level vr_quake_haptic_level ext_haptic_level_global_intensity"
+}
+
+OptionValue "OpenXRDebugSubmitMode"
+{
+	0, "$DEVOPTMNU_SUBMIT_MODE_DEFAULT"
+	1, "$DEVOPTMNU_SUBMIT_MODE_LEFT_IMAGE"
+	2, "$DEVOPTMNU_SUBMIT_MODE_LEFT_POSE"
+	3, "$DEVOPTMNU_SUBMIT_MODE_BOTH"
+}
+
+OptionValue "WallBatchSizes"
+{
+	64, "64"
+	96, "96"
+	128, "128"
+}
+
+OptionMenu DeveloperOptionsMenu protected
+{
+	Title "$DEVOPTMNU_TITLE"
+
+	Option "$DEVOPTMNU_DISABLE_SSBO", "gl_no_ssbo", "YesNo"
+	ifOption(OpenXR)
+	{
+	Slider "$DEVOPTMNU_RENDER_SCALE", "vr_openxr_render_scale", 0.25, 4.0, 0.05, 2
+	Option "$DEVOPTMNU_DEBUG_SUBMIT_MODE", "vr_openxr_debug_submit_mode", "OpenXRDebugSubmitMode"
+	Slider "$DEVOPTMNU_FOV_ADJUST", "vr_openxr_fov_adjust_deg", -30.0, 30.0, 0.5, 1
+	Slider "$DEVOPTMNU_EYE_SHIFT_SCALE", "vr_openxr_eye_shift_scale", 0.1, 3.0, 0.05, 2
+	Option "$DEVOPTMNU_FORCE_RECOMMENDED_VIEWPORT", "vr_openxr_force_recommended_viewport", "OnOff"
+	Option "$DEVOPTMNU_USE_SCREEN_VIEWPORT_FOR_SUBMIT", "vr_openxr_use_screen_viewport_for_submit", "YesNo"
+	Option "$DEVOPTMNU_MODEL_ASSET_PRELOADING", "gl_texture_thread_models", "OnOff"
+	Option "$DEVOPTMNU_ASSET_BG_UPLOAD_QUEUES", "gl_texture_thread_upload", "OnOff"
+	Slider "$DEVOPTMNU_ASSET_STREAM_WORKERS", "gl_texture_thread_workers", 1, 8, 1
+	Slider "$DEVOPTMNU_ASSET_TRANSFER_THREADS", "vk_max_transfer_threads", 0, 8, 1
+	Slider "$DEVOPTMNU_ASSET_STREAM_FLUSH_BUDGET", "gl_background_flush_count", 1, 1000, 1
+	Slider "$DEVOPTMNU_BSP_WORKER_THREADS", "gl_bsp_worker_threads", 1, 8, 1
+	Option "$DEVOPTMNU_BSP_WALL_BATCH_SIZE", "gl_bsp_wall_batch_size", "WallBatchSizes"
+	Option "$DEVOPTMNU_BSP_SKY_SECTORS_ON_MAIN_THREAD", "gl_bsp_worker_sky_mainthread", "OnOff"
+	}
+	ifOption(OpenVR)
+	{
+		Slider "$DEVOPTMNU_MENU_POINTER_PITCH_BIAS", "vr_openvr_menu_pointer_pitch_bias", -45.0, 45.0, 1.0, 1
+		Slider "$DEVOPTMNU_MENU_POINTER_TIP_OFFSET", "vr_openvr_menu_pointer_tip_offset", 0.0, 0.15, 0.005, 3
+	}
+	Option "$DEVOPTMNU_HUD_DEBUG_BORDER", "vr_hud_debug_border", "OnOff"
+	StaticText " "
+	StaticText "Options Marked With * Requires a Restart Of The Game", "Brown"
+	StaticText " "
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar gl_no_ssbo gl_multithread gl_bsp_worker_threads gl_bsp_wall_batch_size gl_bsp_worker_sky_mainthread gl_texture_thread_models gl_texture_thread_upload gl_texture_thread_workers vk_max_transfer_threads gl_background_flush_count gl_light_distance_cull gl_light_wall_max_lights gl_light_flat_max_lights gl_line_distance_cull vr_openxr_debug_submit_mode vr_openxr_render_scale vr_openxr_fov_adjust_deg vr_openxr_eye_shift_scale vr_openxr_force_recommended_viewport vr_openxr_use_screen_viewport_for_submit vr_openvr_menu_pointer_pitch_bias vr_openvr_menu_pointer_tip_offset vr_hud_debug_border"
 }
 
 
@@ -3677,9 +3830,12 @@ OptionMenu QuickMenu protected
 	Option "$GLPREFMNU_CUSTOMPOST", gl_custompost, "OnOff"
 	StaticText "This option on can prevent some mods from running.", "Brown"
 	StaticText "Recommended to keep it on.", "Brown"
-
+	
 	ifOption(OpenVR, OpenXR)
 	{
+		StaticText " "
+		Option "$VRPREFMNU_BSP_MULTITHREAD", "gl_multithread", "OnOff"
+		StaticText "$VRPREFMNU_BSP_MULTITHREAD_QUICKHELP", "Brown"
 		StaticText " "
 		Option "$VRPREFMNU_SCENE_MULTITHREAD", "vr_scene_multithread", "OnOff"
 		StaticText "$VRPREFMNU_SCENE_MULTITHREAD_QUICKHELP", "Brown"
@@ -3689,20 +3845,23 @@ OptionMenu QuickMenu protected
 		StaticText " "
 		Option "$VRPREFMNU_MULTIVIEW", "vr_openxr_multiview", "OnOff"
 		StaticText "$VRPREFMNU_MULTIVIEW_QUICKHELP", "Brown"
+		StaticText " "
+		Option "$VRPREFMNU_TEXTURE_THREAD", "gl_texture_thread", "OnOff"
+		StaticText "$VRPREFMNU_TEXTURE_THREAD_QUICKHELP", "Brown"
 	}
 }
 
 /*=======================================
  *
- * QZD Info and credits
+ * DOOMXR Info and credits
  *
  *=======================================*/
 
 OptionMenu "InfoAndCreditsMenu"
 { 
 	Title "$INFOCREDMNU_TITLE"
-	StaticPatch 52, -20, "QZDOOM"
-	Position 120
+	StaticPatch 50, -10, "DOOMXR"
+	Position 270
 	Submenu		"$INFOCREDMNU_INSTRUCTIONS", "QuestZDoomInstructions", 0, 1
 	Submenu		"$INFOCREDMNU_CREDITS", "QuestZDoomCredits", 0, 1
 }
@@ -3710,8 +3869,9 @@ OptionMenu "InfoAndCreditsMenu"
 OptionMenu "QuestZDoomInstructions"
 { 
 	Title "$INFOCREDMNU_TITLE"
-	StaticPatch 52, -20, "QZDOOM"
-	Position 120
+	StaticPatch 50, -10, "DOOMXR"
+	Position 270
+	AutoScroll
 	StaticText	"$INFOCREDMNU_INSTRUCTIONS_HEADER"
 	StaticText	""
 	StaticText	"$INFOCREDMNU_LINE_1", "White"
@@ -3742,13 +3902,33 @@ OptionMenu "QuestZDoomInstructions"
 	StaticText	"$INFOCREDMNU_LINE_19"
 	StaticText	"$INFOCREDMNU_LINE_20"
 	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
 }
 
 OptionMenu "QuestZDoomCredits"
 { 
 	Title "$INFOCREDMNU_TITLE"
-	StaticPatch 52, -20, "QZDOOM"
-	Position 120
+	StaticPatch 50, -10, "DOOMXR"
+	Position 270
+	AutoScroll 2
 	StaticText	"$INFOCREDMNU_CREDITS_HEADER"
 	StaticText	""
 	StaticText	"DRBEEF"
@@ -3798,6 +3978,26 @@ OptionMenu "QuestZDoomCredits"
 	StaticText	""
 	StaticText	"$INFOCREDMNU_CREDITS_LINE_15"
 	StaticText	"$INFOCREDMNU_CREDITS_LINE_16"
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
+	StaticText	""
 }
 
 OptionValue "UseModes"

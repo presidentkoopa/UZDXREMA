@@ -82,6 +82,8 @@
 #include "c_console.h"
 #include "common/scripting/jit/jit.h"
 
+EXTERN_CVAR(Int, developer);
+
 using namespace OpenGLRenderer;
 
 extern thread_local bool isWorkerThread;
@@ -380,17 +382,11 @@ CVAR(Float, vr_overlayscreen_size, 1., CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_overlayscreen_dist, 0., CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_overlayscreen_vpos, 0., CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, vr_overlayscreen_bg, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Float, vr_kill_momentum, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-
 // default conversion between (vertical) DOOM units and meters
 CVAR(Float, vr_vunits_per_meter, 34.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // METERS
 CVAR(Float, vr_height_adjust, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // METERS
 CVAR(Float, vr_openxr_fov_adjust_deg, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // DEGREES PER SIDE
 CVAR(Float, vr_openxr_eye_shift_scale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, vr_debug_projection_compare, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, vr_openxr_debug_sizes, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, vr_openxr_debug_present, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, vr_openxr_debug_weapon, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, vr_openxr_debug_submit_mode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // Gate the layered OpenXR/Vulkan multiview path separately from the current per-eye render path
 CVARD(Bool, vr_openxr_multiview, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "Enable the experimental OpenXR Vulkan multiview path when available")
@@ -427,9 +423,44 @@ CVAR(Float, vr_2dweaponOffsetX, 0.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_2dweaponOffsetY, 0.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_2dweaponOffsetZ, 0.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_2dweaponScale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Bool, vr_laser_sight, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Color, vr_laser_color, 0xff0000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Bool, vr_laser_show_melee, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Bool, vr_laser_hide_on_wheel, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Bool, vr_laser_beam, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Float, vr_laser_beam_alpha, 0.3f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Float, vr_laser_beam_width, 0.15f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Float, vr_laser_pointer_scale, 0.1f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Float, vr_laser_pointer_alpha, 0.9f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Int, vr_laser_pointer_glow, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Float, vr_laser_pointer_glow_scale, 1.5f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Float, vr_laser_pointer_glow_intensity, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Int, vr_laser_beam_length, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Int, vr_laser_fixed_length, 100, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Float, vr_laser_source_offset_x, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Float, vr_laser_source_offset_y, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Float, vr_laser_source_offset_z, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CUSTOM_CVAR(Int, vr_hitscan_tracer, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0)
+	{
+		self = 0;
+	}
+	else if (self > 2)
+	{
+		self = 2;
+	}
+}
+CVAR(Color, vr_hitscan_tracer_color, 0xffc040, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Float, vr_hitscan_tracer_alpha, 0.75f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Float, vr_hitscan_tracer_length, 50.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Float, vr_hitscan_tracer_width, 0.25f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Float, vr_hitscan_tracer_speed, 26.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Float, vr_hitscan_tracer_offset, 8.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Bool, vr_hitscan_ricochet, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Float, vr_hitscan_ricochet_chance, 20.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR(Float, vr_snapTurn, 45.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_switch_sticks, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, vr_use_alternate_mapping, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_secondary_button_mappings, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_two_handed_weapons, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_momentum, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // Only used in player.zs
@@ -539,6 +570,30 @@ static float RAD2DEG(float rad)
 	return rad * float(180. / M_PI);
 }
 
+static const char* VRModeName(int mode)
+{
+	switch (mode)
+	{
+	case VR_MONO: return "mono";
+	case VR_GREENMAGENTA: return "greenmagenta";
+	case VR_REDCYAN: return "redcyan";
+	case VR_SIDEBYSIDEFULL: return "side-by-side-full";
+	case VR_SIDEBYSIDESQUISHED: return "side-by-side-squished";
+	case VR_LEFTEYEVIEW: return "left-eye";
+	case VR_RIGHTEYEVIEW: return "right-eye";
+	case VR_SIDEBYSIDELETTERBOX: return "side-by-side-letterbox";
+	case VR_TOPBOTTOM: return "top-bottom";
+	case VR_CHECKERINTERLEAVED: return "checker";
+#ifdef USE_OPENVR
+	case VR_OPENVR: return "openvr";
+#endif
+#ifdef USE_OPENXR
+	case VR_OPENXR_MOBILE: return "openxr";
+#endif
+	default: return "unknown";
+	}
+}
+
 const VRMode *VRMode::GetVRMode(bool toscreen)
 {
 	static VREyeInfo vrmi_mono_eyes[2] = { VREyeInfo(0.f, 1.f), VREyeInfo(0.f, 0.f) };
@@ -566,6 +621,20 @@ const VRMode *VRMode::GetVRMode(bool toscreen)
 #endif
 
 	int mode = !toscreen || (sysCallbacks.DisableTextureFilter && sysCallbacks.DisableTextureFilter()) ? 0 : vr_mode;
+	static int lastLoggedRequestedMode = -999999;
+	static int lastLoggedResolvedMode = -999999;
+	auto logModeSelect = [&](int requestedMode, int resolvedMode)
+	{
+		if (developer <= 0 || (requestedMode == lastLoggedRequestedMode && resolvedMode == lastLoggedResolvedMode))
+		{
+			return;
+		}
+		Printf("VRMode select: requested=%s(%d) resolved=%s(%d)\n",
+			VRModeName(requestedMode), requestedMode,
+			VRModeName(resolvedMode), resolvedMode);
+		lastLoggedRequestedMode = requestedMode;
+		lastLoggedResolvedMode = resolvedMode;
+	};
 
 	switch (mode)
 	{
@@ -602,10 +671,10 @@ const VRMode *VRMode::GetVRMode(bool toscreen)
 #ifdef USE_OPENVR
 	case VR_OPENVR:
 	{
-		// When calling a function of this class, ensure that you are using a pointer or reference to the derived class
-		Printf("VRMode select: choosing OpenVR mode 10.\n");
 		const VRMode &vrmode = s3d::OpenVRMode::getInstance();
-		return vrmode.IsInitialized() ? &vrmode : &vrmi_mono;
+		const bool initialized = vrmode.IsInitialized();
+		logModeSelect(mode, initialized ? mode : VR_MONO);
+		return initialized ? &vrmode : &vrmi_mono;
 		//return vrmi_openvr.IsInitialized() ? &vrmi_openvr : &vrmi_mono;
 	}
 #endif
@@ -613,11 +682,12 @@ const VRMode *VRMode::GetVRMode(bool toscreen)
 	case VR_OPENXR_MOBILE:
 		if (V_GetBackend() == 1)
 		{
-			Printf("VRMode select: choosing Vulkan/OpenXR mode 15.\n");
 			const VRMode& vrmode = s3d::VKOpenXRDeviceMode::getInstance();
-			return vrmode.IsInitialized() ? &vrmode : &vrmi_mono;
+			const bool initialized = vrmode.IsInitialized();
+			logModeSelect(mode, initialized ? mode : VR_MONO);
+			return initialized ? &vrmode : &vrmi_mono;
 		}
-		Printf("VRMode select: Vulkan/OpenXR requested but backend is not Vulkan.\n");
+		logModeSelect(mode, VR_MONO);
 		return &vrmi_mono;
 #endif
 	}

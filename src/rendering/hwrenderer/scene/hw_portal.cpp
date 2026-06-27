@@ -737,6 +737,8 @@ bool HWSkyboxPortal::Setup(HWDrawInfo *di, FRenderState &rstate, Clipper *clippe
 	vp.ViewActor = origin;
 
 	di->SetupView(rstate, vp.Pos.X, vp.Pos.Y, vp.Pos.Z, !!(state->MirrorFlag & 1), !!(state->PlaneMirrorFlag & 1));
+	di->RemoveMultiviewPositionParallax();
+	di->ApplyViewpoint(rstate);
 	di->SetViewArea();
 	ClearClipper(di, clipper);
 	di->UpdateCurrentMapSection();

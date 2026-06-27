@@ -194,12 +194,13 @@ public:
 		FSectorPortalGroup* portal;			// stacked sector portals
 		secplane_t* planemirror;	// for plane mirrors
 		FLinePortalSpan* lineportal;	// line-to-line portals
-		struct
-		{
-			int portaltype;				// for the mesh builder. Real portals can only be assigned when being rendered.
-			int portalplane;
-		};
 	};
+	int portaltype = -1;				// for deferred portal submission in worker-built walls.
+	int portalplane = -1;
+	sector_t* deferredSkySector = nullptr;
+	int deferredSkyPlane = -1;
+	int deferredSkyTransfer = 0;
+	PalEntry deferredSkyFadeColor = 0;
 
 
 

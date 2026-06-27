@@ -54,23 +54,23 @@ jobs:
           build_type: RelWithDebInfo
 
         - name: Linux GCC
-          os: ubuntu-latest
-          deps_cmdline: sudo apt-get update && sudo apt-get install libsdl2-dev libvpx-dev libwebp-dev waylandpp-dev libbz2-dev libomp-dev libopenal-dev
+          os: ubuntu-22.04
+          deps_cmdline: sudo apt-get update && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y libsdl2-dev libvpx-dev libwebp-dev waylandpp-dev libbz2-dev libomp-dev libopenal-dev
           build_type: RelWithDebInfo
 
         - name: Linux GCC
-          os: ubuntu-latest
-          deps_cmdline: sudo apt-get update && sudo apt-get install libsdl2-dev libvpx-dev libwebp-dev waylandpp-dev libbz2-dev libomp-dev libopenal-dev
+          os: ubuntu-22.04
+          deps_cmdline: sudo apt-get update && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y libsdl2-dev libvpx-dev libwebp-dev waylandpp-dev libbz2-dev libomp-dev libopenal-dev
           build_type: Release
 
         - name: Linux GCC Legacy
           os: ubuntu-22.04
-          deps_cmdline: sudo apt-get update && sudo apt-get install libsdl2-dev libvpx-dev libwebp-dev waylandpp-dev libbz2-dev libomp-dev libopenal-dev
+          deps_cmdline: sudo apt-get update && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y libsdl2-dev libvpx-dev libwebp-dev waylandpp-dev libbz2-dev libomp-dev libopenal-dev
           build_type: RelWithDebInfo
 
         - name: Linux GCC Legacy
           os: ubuntu-22.04
-          deps_cmdline: sudo apt-get update && sudo apt-get install libsdl2-dev libvpx-dev libwebp-dev waylandpp-dev libbz2-dev libomp-dev libopenal-dev
+          deps_cmdline: sudo apt-get update && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y libsdl2-dev libvpx-dev libwebp-dev waylandpp-dev libbz2-dev libomp-dev libopenal-dev
           build_type: Release
 
     steps:
@@ -115,24 +115,35 @@ jobs:
           eval ${{ matrix.config.deps_cmdline }}
         fi
         mkdir -p build
-        cd build
-        git clone https://github.com/emawind84/ZMusic.git
-        cd ZMusic
-        git checkout master
-        cd ..
-        cmake -B zmusic_build -DCMAKE_BUILD_TYPE=${{ matrix.config.build_type }} -DCMAKE_INSTALL_PREFIX=`pwd`/zmusic_install ZMusic
-        cmake --build zmusic_build --target install --parallel 3
+        echo ZMUSIC_PREFIX_PATH= >> $GITHUB_ENV
+        if [[ "${{ runner.os }}" == 'macOS' ]]; then
+          export ZMUSIC_PACKAGE=zmusic-1.1.14-macos-static.tar.xz
+        elif [[ "${{ runner.os }}" == 'Linux' ]]; then
+          export ZMUSIC_PACKAGE=zmusic-1.1.14-linux.tar.xz
+        fi
+        if [[ -n "${ZMUSIC_PACKAGE}" ]]; then
+          cd build
+          curl -LO "https://github.com/coelckers/gzdoom/releases/download/ci_deps/${ZMUSIC_PACKAGE}"
+          tar -xf "${ZMUSIC_PACKAGE}"
+          echo ZMUSIC_PREFIX_PATH="${PWD}/zmusic" >> $GITHUB_ENV
+        fi
 
     - name: Configure
       shell: bash
       run: |
-        cmake -B build -S . \
-          -DCMAKE_BUILD_TYPE=${{ matrix.config.build_type }} \
-          -DCMAKE_PREFIX_PATH=`pwd`/build/zmusic_install \
-          -DPK3_QUIET_ZIPDIR=ON \
-          -DOPENVR_SDK_PATH=`pwd`/build/${OPENVR_SDK} \
-          ${{ matrix.config.extra_options }} \
+        cmake_args=(
+          -B build
+          -S .
+          -DCMAKE_BUILD_TYPE=${{ matrix.config.build_type }}
+          -DPK3_QUIET_ZIPDIR=ON
+          -DOPENVR_SDK_PATH=`pwd`/build/${OPENVR_SDK}
+          ${{ matrix.config.extra_options }}
           -G Ninja
+        )
+        if [[ -n "${ZMUSIC_PREFIX_PATH}" ]]; then
+          cmake_args+=(-DCMAKE_PREFIX_PATH="${ZMUSIC_PREFIX_PATH}")
+        fi
+        cmake "${cmake_args[@]}"
 
     - name: Build
       shell: bash
@@ -190,7 +201,7 @@ jobs:
                 mv ${{ matrix.config.build_type }}/uzdoom.app uzdoom.app
             fi
             mv package/licenses.zip uzdoom.app/Contents/Resources
-            mv zmusic_install/lib/libzmusic.dylib libzmusic.1.dylib
+            mv "${{ env.ZMUSIC_PREFIX_PATH }}/lib/libzmusic.dylib" libzmusic.1.dylib
             cp *.pk3 uzdoom.app/Contents/MacOS
 
             if dsymutil uzdoom.app/Contents/MacOS/uzdoom; then
@@ -249,7 +260,7 @@ jobs:
             cp ../tools/AppImageEntrypoint.sh "$(realpath AppDir)/usr/bin/uzdoom.sh"
             chmod +x "$(realpath AppDir)/usr/bin/uzdoom.sh"
 
-            sudo apt-get install libfuse2 # renamed to libfuse2t64 in later releases
+            sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y libfuse2 || sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y libfuse2t64
 
             fetch appimage-builder \
                 4b4f99cae9291d78ba12dbdabca7c0a67c72aa61eb2e5d424089171a9485e96f \

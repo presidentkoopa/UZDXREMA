@@ -291,6 +291,11 @@ namespace
 		up.MakeUnit();
 	}
 
+	static bool UseCinemaWheelOverride()
+	{
+		return VR_UseCinematicScreenLayer();
+	}
+
 	static bool GetControllerAnchoredCenter(player_t* player, int abstractHand, DVector3& center)
 	{
 		DVector3 handPos;
@@ -857,13 +862,21 @@ namespace
 		state.SetRenderStyle(STYLE_Translucent);
 		state.AlphaFunc(Alpha_Greater, 0.0f);
 		state.SetTextureMode(TM_NORMAL);
+		state.ResetColor();
 		state.SetObjectColor(0xffffffff);
 		state.SetAddColor(0);
+		state.SetDynLight(0, 0, 0);
+		state.SetNoSoftLightLevel();
+		state.SetLightParms(1.f, 0.f);
+		state.EnableFog(false);
+		state.SetFog(0, 0);
+		state.ResetFadeColor();
+		state.EnableTextureMatrix(false);
 		state.mModelMatrix.loadIdentity();
 		state.EnableModelMatrix(false);
 		state.SetVertexBuffer(screen->mVertexData);
 		state.EnableBrightmap(false);
-		state.EnableDepthTest(true);
+		state.EnableDepthTest(false);
 		state.SetDepthMask(false);
 		state.EnableTexture(false);
 		state.SetColor(color);
@@ -904,13 +917,21 @@ namespace
 		state.SetRenderStyle(STYLE_Translucent);
 		state.AlphaFunc(Alpha_Greater, 0.0f);
 		state.SetTextureMode(TM_NORMAL);
+		state.ResetColor();
 		state.SetObjectColor(0xffffffff);
 		state.SetAddColor(0);
+		state.SetDynLight(0, 0, 0);
+		state.SetNoSoftLightLevel();
+		state.SetLightParms(1.f, 0.f);
+		state.EnableFog(false);
+		state.SetFog(0, 0);
+		state.ResetFadeColor();
+		state.EnableTextureMatrix(false);
 		state.mModelMatrix.loadIdentity();
 		state.EnableModelMatrix(false);
 		state.SetVertexBuffer(screen->mVertexData);
 		state.EnableBrightmap(false);
-		state.EnableDepthTest(true);
+		state.EnableDepthTest(false);
 		state.SetDepthMask(false);
 
 		if (textured && texture != nullptr)
@@ -982,6 +1003,13 @@ namespace
 		state.SetTextureMode(TM_NORMAL);
 		state.AlphaFunc(Alpha_GEqual, 0.5f);
 		state.SetColorAlpha(0xffffff, 1.0f, 0);
+		state.SetNoSoftLightLevel();
+		state.SetLightParms(1.f, 0.f);
+		state.EnableFog(false);
+		state.SetFog(0, 0);
+		state.SetDynLight(0, 0, 0);
+		state.ResetFadeColor();
+		state.EnableTextureMatrix(false);
 		state.EnableDepthTest(true);
 		state.SetDepthMask(true);
 		state.EnableBrightmap(true);
@@ -1122,7 +1150,7 @@ namespace
 			return;
 		}
 
-		if (vr_wheel_selection_type == 0)
+		if (!UseCinemaWheelOverride() && vr_wheel_selection_type == 0)
 		{
 			DVector3 center;
 			DVector3 wheelRight;
@@ -1311,7 +1339,7 @@ void VRWheel_Draw(HWDrawInfo* di, FRenderState& state)
 
 	InvalidateWheelIfOwnerChanged(player);
 
-	if (menuactive != MENU_Off || ConsoleState != c_up || VR_UseScreenLayer())
+	if (menuactive != MENU_Off || ConsoleState != c_up || (VR_UseScreenLayer() && !UseCinemaWheelOverride()))
 	{
 		return;
 	}
@@ -1359,7 +1387,7 @@ void VRWheel_Draw(HWDrawInfo* di, FRenderState& state)
 		GPART(vr_wheel_icon_disable_color),
 		BPART(vr_wheel_icon_disable_color)));
 
-	if (vr_wheel_selection_type == 0)
+	if (!UseCinemaWheelOverride() && vr_wheel_selection_type == 0)
 	{
 		DVector3 touchPoint;
 		if (GetTouchPoint(player, touchPoint))

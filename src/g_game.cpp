@@ -138,6 +138,7 @@ EXTERN_CVAR(Bool, vr_teleport);
 EXTERN_CVAR(Int, vr_move_speed);
 EXTERN_CVAR(Float, vr_run_multiplier);
 EXTERN_CVAR(Float, vr_walk_multiplier);
+EXTERN_CVAR(Bool, vr_laser_sight);
 
 //==========================================================================
 //
@@ -1164,6 +1165,12 @@ CCMD (spycancel)
 {
 	// allow spy mode changes even during the demo
 	ChangeSpy (SPY_CANCEL);
+}
+
+CCMD (toggle_laser_sight)
+{
+	vr_laser_sight = !vr_laser_sight;
+	Printf("Laser sight %s\n", vr_laser_sight ? "enabled" : "disabled");
 }
 
 //

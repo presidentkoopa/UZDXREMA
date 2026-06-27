@@ -81,8 +81,6 @@ protected:
 		FTriangle		* triangles;
 	};
 
-
-	int				mLumpNum;
 	DMDHeader	    header;
 	DMDInfo			info;
 	FTextureID *	skins;
@@ -98,7 +96,6 @@ protected:
 public:
 	FDMDModel() 
 	{ 
-		mLumpNum = -1;
 		frames = NULL;
 		skins = NULL;
 		for (int i = 0; i < MAX_LODS; i++)
@@ -115,6 +112,7 @@ public:
 	virtual int FindFrame(const char* name, bool nodefault) override;
 	virtual void RenderFrame(FModelRenderer *renderer, FGameTexture * skin, int frame, int frame2, double inter, FTranslationID translation, const FTextureID* surfaceskinids, int boneStartPosition) override;
 	virtual void LoadGeometry();
+	virtual void LoadGeometry(FileSys::FileData* lumpData) override;
 	virtual void AddSkins(uint8_t *hitlist, const FTextureID* surfaceskinids) override;
 
 	void UnloadGeometry();
@@ -131,6 +129,7 @@ public:
 
 	virtual bool Load(const char * fn, int lumpnum, const char * buffer, int length);
 	virtual void LoadGeometry();
+	virtual void LoadGeometry(FileSys::FileData* lumpData) override;
 
 };
 

@@ -143,7 +143,15 @@ VkRenderBuffers::~VkRenderBuffers()
 VkSampleCountFlagBits VkRenderBuffers::GetBestSampleCount()
 {
 	const auto &limits = fb->device->PhysicalDevice.Properties.Properties.limits;
-	VkSampleCountFlags deviceSampleCounts = limits.sampledImageColorSampleCounts & limits.sampledImageDepthSampleCounts & limits.sampledImageStencilSampleCounts;
+	// The scene color/depth targets are rendered multisampled and later resolved.
+	// Stencil sampling is not required here, and some runtimes report no sampled
+	// multisample stencil support even though color/depth MSAA is available.
+	VkSampleCountFlags deviceSampleCounts =
+		limits.framebufferColorSampleCounts &
+		limits.framebufferDepthSampleCounts &
+		limits.framebufferStencilSampleCounts &
+		limits.sampledImageColorSampleCounts &
+		limits.sampledImageDepthSampleCounts;
 
 	int requestedSamples = clamp((int)gl_multisample, 0, 64);
 

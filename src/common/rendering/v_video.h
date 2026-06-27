@@ -59,6 +59,7 @@ class FLightBuffer;
 struct HWDrawInfo;
 class FMaterial;
 class FGameTexture;
+class FModel;
 class FRenderState;
 class BoneBuffer;
 
@@ -228,6 +229,16 @@ public:
 	virtual void SetTextureFilterMode() {}
 	virtual IHardwareTexture *CreateHardwareTexture(int numchannels) { return nullptr; }
 	virtual void PrecacheMaterial(FMaterial *mat, int translation) {}
+	virtual void PrequeueMaterial(FMaterial *mat, int translation) { PrecacheMaterial(mat, translation); }
+	virtual bool BackgroundCacheMaterial(FMaterial *mat, FTranslationID translation, bool makeSPI = false, bool secondary = false) { PrecacheMaterial(mat, translation.index()); return true; }
+	virtual bool BackgroundCacheTextureMaterial(FGameTexture *tex, FTranslationID translation, int scaleFlags, bool makeSPI = false) { return false; }
+	virtual bool BackgroundLoadModel(FModel* model) { return false; }
+	virtual bool CachingActive() { return false; }
+	virtual float CacheProgress() { return 0; }
+	virtual bool SupportsBackgroundCache() { return false; }
+	virtual void UpdateBackgroundCache(bool flush = false) {}
+	virtual void StopBackgroundCache() {}
+	virtual void FlushBackground() {}
 	virtual FMaterial* CreateMaterial(FGameTexture* tex, int scaleflags);
 	virtual void BeginFrame() {}
 	virtual void SetWindowSize(int w, int h) {}
