@@ -82,6 +82,7 @@ EXTERN_CVAR(Float, vr_openxr_render_scale);
 EXTERN_CVAR(Int, vr_openxr_debug_submit_mode);
 EXTERN_CVAR(Bool, vr_openxr_multiview);
 EXTERN_CVAR(Bool, vr_desktop_view_openxr_render);
+EXTERN_CVAR(Bool, vr_openxr_multiview_mirror_reuse);
 EXTERN_CVAR(Int, vid_refreshrate);
 EXTERN_CVAR(Float, vr_snapTurn);
 EXTERN_CVAR(Bool, vr_move_use_offhand);
@@ -621,7 +622,7 @@ static float ShortestAngleDeltaDeg(float a, float b)
 
 static bool ShouldPrepareDesktopMirrorEye(int eyeIndex)
 {
-	if (vr_desktop_view_openxr_render || vr_desktop_view == -1)
+	if (vr_desktop_view == -1)
 		return false;
 
 	// Side-by-side mirror consumes both prepared eye textures. Single-eye mirror modes only
@@ -635,9 +636,25 @@ static bool ShouldPrepareDesktopMirrorEye(int eyeIndex)
 	return eyeIndex == mirroredEyeIndex;
 }
 
-static bool ShouldUseDedicatedDesktopMirrorTextures()
+static bool ShouldReuseSubmittedPresentForDesktopMirror(const VKOpenXRDeviceMode* mode)
 {
-	return !vr_desktop_view_openxr_render && vr_desktop_view != -1;
+	if (vr_desktop_view == -1)
+		return false;
+
+	if (vr_desktop_view_openxr_render)
+		return true;
+
+	// Favor the already-prepared XR present images in multiview mode by default.
+	// That keeps the old unbiased mirror path available as an opt-out, but avoids
+	// paying for an extra fullscreen pass when we're optimizing the XR path.
+	return mode != nullptr &&
+		vr_openxr_multiview_mirror_reuse &&
+		mode->ShouldUseMultiviewThisFrame();
+}
+
+static bool ShouldUseDedicatedDesktopMirrorTextures(const VKOpenXRDeviceMode* mode)
+{
+	return vr_desktop_view != -1 && !ShouldReuseSubmittedPresentForDesktopMirror(mode);
 }
 
 } // namespace
@@ -654,7 +671,7 @@ bool VKOpenXRDeviceMode::GetBenchmarkInfo(VRBenchmarkInfo& out) const
 	out.PostprocessLayered = false;
 	out.FinalizeLayered = false;
 	out.DirectXrRender = false;
-	out.DedicatedMirrorTextures = ShouldUseDedicatedDesktopMirrorTextures();
+	out.DedicatedMirrorTextures = ShouldUseDedicatedDesktopMirrorTextures(this);
 	out.ViewCount = xrViewCount;
 	out.ViewMask = GetMultiviewViewMask();
 	out.RecommendedWidth = GetMaxRecommendedViewWidth(xrViewConfigs);
@@ -2285,7 +2302,7 @@ bool VKOpenXRDeviceMode::CreatePresentTextures(VulkanRenderDevice* vkfb) const
 	if (width == 0 || height == 0)
 		return false;
 
-	const bool wantsDedicatedMirrorTextures = ShouldUseDedicatedDesktopMirrorTextures();
+	const bool wantsDedicatedMirrorTextures = ShouldUseDedicatedDesktopMirrorTextures(this);
 	const bool hasPresentTextures = xrPresentTextures.size() == xrViewCount &&
 		std::all_of(xrPresentTextures.begin(), xrPresentTextures.end(),
 			[](const VkTextureImage& texture)
@@ -5030,7 +5047,7 @@ bool VKOpenXRDeviceMode::RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage
 	const bool sideBySide = vr_desktop_view != 1 && vr_desktop_view != 2;
 	const int leftSourceIndex = vr_swap_eyes ? 1 : 0;
 	const int rightSourceIndex = vr_swap_eyes ? 0 : 1;
-	const bool useDedicatedMirrorTextures = ShouldUseDedicatedDesktopMirrorTextures();
+	const bool useDedicatedMirrorTextures = ShouldUseDedicatedDesktopMirrorTextures(this);
 	auto& mirrorSources = useDedicatedMirrorTextures ? xrMirrorPresentTextures : xrPresentTextures;
 
 	if (mirrorSources.empty() ||
