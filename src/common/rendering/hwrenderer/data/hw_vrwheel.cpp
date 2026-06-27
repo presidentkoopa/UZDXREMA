@@ -1010,8 +1010,8 @@ namespace
 		state.SetDynLight(0, 0, 0);
 		state.ResetFadeColor();
 		state.EnableTextureMatrix(false);
-		state.EnableDepthTest(false);
-		state.SetDepthMask(false);
+		state.EnableDepthTest(true);
+		state.SetDepthMask(true);
 		state.EnableBrightmap(true);
 		state.SetCulling(Cull_None);
 		state.ClearDepthBias();
