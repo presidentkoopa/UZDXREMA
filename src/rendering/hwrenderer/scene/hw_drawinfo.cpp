@@ -1202,9 +1202,6 @@ void HWDrawInfo::DrawScene(int drawmode)
 	if (drawmode == DM_MAINVIEW && vrmode->RenderPlayerSpritesInScene())
 	{
 		DrawPlayerSprites(IsHUDModelForPlayerAvailable(players[consoleplayer].camera->player), RenderState);
-		// Keep the portable HUD on the same scene path as weapon sprites. Rendering it later as a "top-most" overlay
-		// regressed the OpenVR stereo composition and can leave a large monocular occluder in one eye.
-		vrmode->DrawMountedHud(this, RenderState);
 	}
 
 	if (applySSAO && RenderState.GetPassType() == GBUFFER_PASS)
@@ -1221,6 +1218,10 @@ void HWDrawInfo::DrawScene(int drawmode)
 	RenderTranslucent(RenderState);
 	if (drawmode == DM_MAINVIEW)
 	{
+		if (vrmode->RenderPlayerSpritesInScene())
+		{
+			vrmode->DrawMountedHud(this, RenderState);
+		}
 		DrawHitscanTracers(RenderState);
 		DrawLaserSightWorld(RenderState);
 		VRWheel_Draw(this, RenderState);
