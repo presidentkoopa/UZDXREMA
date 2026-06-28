@@ -285,6 +285,7 @@ public:
 	int m_lastUpdate;
 	int mShadowmapIndex;
 	unsigned int mDistanceCullViewId;
+	unsigned int mModelLightGatherId;
 	bool mDistanceCullResult;
 	bool m_active;
 	bool visibletoplayer;

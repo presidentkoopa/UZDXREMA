@@ -223,13 +223,23 @@ static thread_local TArray<FDynamicLight*> addedLightsArray;
 
 void hw_GetDynModelLight(AActor *self, FDynLightData &modellightdata)
 {
+	static thread_local unsigned int modelLightGatherId = 0;
 	modellightdata.Clear();
 
 	if (self)
 	{
 		auto &addedLights = addedLightsArray;	// avoid going through the thread local storage for each use.
+		unsigned int gatherId = 0;
 
 		addedLights.Clear();
+		if (gl_light_model_dedupe_cache)
+		{
+			gatherId = ++modelLightGatherId;
+			if (gatherId == 0)
+			{
+				gatherId = ++modelLightGatherId;
+			}
+		}
 
 		float x = (float)self->X();
 		float y = (float)self->Y();
@@ -265,11 +275,28 @@ void hw_GetDynModelLight(AActor *self, FDynLightData &modellightdata)
 					double distSquared = dx * dx + dy * dy + dz * dz;
 					if (distSquared < radius * radius) // Light and actor touches
 					{
-						if (std::find(addedLights.begin(), addedLights.end(), light) == addedLights.end()) // Check if we already added this light from a different subsector
+						bool alreadyAdded = false;
+						if (gl_light_model_dedupe_cache)
+						{
+							alreadyAdded = light->mModelLightGatherId == gatherId;
+						}
+						else
+						{
+							alreadyAdded = std::find(addedLights.begin(), addedLights.end(), light) != addedLights.end();
+						}
+
+						if (!alreadyAdded) // Check if we already added this light from a different subsector
 						{
 							AddLightToList(modellightdata, group, light, true);
 							dynlights_model_uploads++;
-							addedLights.Push(light);
+							if (gl_light_model_dedupe_cache)
+							{
+								light->mModelLightGatherId = gatherId;
+							}
+							else
+							{
+								addedLights.Push(light);
+							}
 						}
 						else dynlights_model_duplicates++;
 					}

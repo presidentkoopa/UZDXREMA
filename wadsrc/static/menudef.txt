@@ -3244,6 +3244,7 @@ OptionMenu DeveloperOptionsMenu protected
 	Option "Desktop Mirror Reuse Multiview Frames", "vr_openxr_multiview_mirror_reuse", "YesNo"
 	Option "Layered Multiview Postprocess", "vr_openxr_multiview_postprocess", "YesNo"
 	Option "DynLight Distance Cull Cache", "gl_light_distance_cull_cache", "OnOff"
+	Option "DynLight Model Dedupe Cache", "gl_light_model_dedupe_cache", "OnOff"
 	}
 	ifOption(OpenVR)
 	{
@@ -3254,7 +3255,7 @@ OptionMenu DeveloperOptionsMenu protected
 	StaticText " "
 	StaticText "Options Marked With * Requires a Restart Of The Game", "Brown"
 	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar gl_no_ssbo gl_multithread gl_bsp_worker_threads gl_bsp_wall_batch_size gl_bsp_worker_sky_mainthread gl_texture_thread_models gl_texture_thread_upload gl_texture_thread_workers vk_max_transfer_threads gl_background_flush_count gl_light_distance_cull gl_light_distance_cull_cache gl_light_wall_max_lights gl_light_flat_max_lights gl_line_distance_cull vr_openxr_multiview vr_desktop_view_openxr_render vr_openxr_multiview_mirror_reuse vr_openxr_multiview_postprocess vr_openxr_sync_mode vr_openxr_debug_submit_mode vr_openxr_render_scale vr_openxr_fov_adjust_deg vr_openxr_eye_shift_scale vr_openxr_force_recommended_viewport vr_openxr_use_screen_viewport_for_submit vr_openvr_menu_pointer_pitch_bias vr_openvr_menu_pointer_tip_offset vr_hud_debug_border"
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar gl_no_ssbo gl_multithread gl_bsp_worker_threads gl_bsp_wall_batch_size gl_bsp_worker_sky_mainthread gl_texture_thread_models gl_texture_thread_upload gl_texture_thread_workers vk_max_transfer_threads gl_background_flush_count gl_light_distance_cull gl_light_distance_cull_cache gl_light_model_dedupe_cache gl_light_wall_max_lights gl_light_flat_max_lights gl_line_distance_cull vr_openxr_multiview vr_desktop_view_openxr_render vr_openxr_multiview_mirror_reuse vr_openxr_multiview_postprocess vr_openxr_sync_mode vr_openxr_debug_submit_mode vr_openxr_render_scale vr_openxr_fov_adjust_deg vr_openxr_eye_shift_scale vr_openxr_force_recommended_viewport vr_openxr_use_screen_viewport_for_submit vr_openvr_menu_pointer_pitch_bias vr_openvr_menu_pointer_tip_offset vr_hud_debug_border"
 }
 
 
