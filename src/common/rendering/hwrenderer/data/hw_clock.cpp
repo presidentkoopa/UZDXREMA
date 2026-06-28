@@ -353,6 +353,10 @@ static void AppendBenchmarkHeader(FString& out)
 		(int)gl_light_flat_candidate_budget,
 		(int)gl_light_wall_candidate_budget,
 		(int)gl_light_range_limit);
+	out.AppendFormat("Scene Culling: sprite=%.1f decor_sprite=%.1f line=%.1f\n\n",
+		(double)gl_sprite_distance_cull,
+		(double)gl_sprite_decor_distance_cull,
+		(double)gl_line_distance_cull);
 }
 
 void CheckBench()

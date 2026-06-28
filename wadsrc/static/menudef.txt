@@ -3601,10 +3601,11 @@ OptionMenu "OpenGLOptions" protected
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar gl_lightmode gl_bandedswlight gl_fogmode gl_brightfog gl_weaponlight gl_plane_reflection gl_enhanced_nightvision gl_enhanced_nv_stealth gl_spriteclip gl_sprite_blend gl_fuzztype gl_billboard_mode gl_billboard_faces_camera gl_particles_style gl_render_precise gl_skydome gl_menu_blur gl_multisample gl_global_fade gl_global_fade_density gl_global_fade_gradient gl_global_fade_color"
 	StaticText " "
 	StaticText "Advanced Options", gold
+	ScaleSlider "Decorative Sprite Cull Distance",		gl_sprite_decor_distance_cull, 0.0, 8000.0, 100.0, "Culling disabled"
 	ScaleSlider "$DSPLYMNU_SPRITECULL",			gl_sprite_distance_cull, 0.0, 8000.0, 100.0, "Culling disabled"
 	ScaleSlider "$DSPLYMNU_LINECULL",			gl_line_distance_cull, 0.0, 16000.0, 100.0, "Culling disabled"
 	Command "$DSPLYMNU_DISABLERENDERCULL",		"disablerendercull"
-	SafeCommand "$DSPLYMNU_RESETRENDERCULL",	"resetcvar gl_sprite_distance_cull gl_line_distance_cull"
+	SafeCommand "$DSPLYMNU_RESETRENDERCULL",	"resetcvar gl_sprite_distance_cull gl_line_distance_cull gl_sprite_decor_distance_cull"
 	StaticText " "
 	ScaleSlider "Max rendered vertices",		gl_max_vertices, 0, 40000, 1000, "Limit disabled"
 	ScaleSlider "Max rendered portals",			gl_max_portals, -1, 20, 1, "Portals disabled", "Limit disabled"

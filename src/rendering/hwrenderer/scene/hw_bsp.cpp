@@ -36,6 +36,7 @@
 #include <future>
 #include "hwrenderer/scene/hw_fakeflat.h"
 #include "hwrenderer/scene/hw_clipper.h"
+#include "hwrenderer/data/hw_cvars.h"
 #include "hwrenderer/scene/hw_drawstructs.h"
 #include "hwrenderer/scene/hw_drawinfo.h"
 #include "hwrenderer/data/hw_vrmodes.h"
@@ -68,6 +69,24 @@ static inline int GetWallBatchSize()
 	if (gl_bsp_wall_batch_size < 80) return 64;
 	if (gl_bsp_wall_batch_size < 112) return 96;
 	return 128;
+}
+
+static inline bool IsGameplayRelevantThing(const AActor* thing)
+{
+	return thing->player != nullptr
+		|| !!(thing->flags & (MF_SPECIAL | MF_SHOOTABLE | MF_MISSILE))
+		|| !!(thing->flags3 & MF3_ISMONSTER);
+}
+
+static inline bool ShouldCullDecorRenderThing(const AActor* thing, double distSq)
+{
+	if (gl_sprite_decor_distance_cull <= 0.0 || IsGameplayRelevantThing(thing))
+	{
+		return false;
+	}
+
+	const double cullDistSq = gl_sprite_decor_distance_cull * gl_sprite_decor_distance_cull;
+	return distSq >= cullDistSq;
 }
 
 EXTERN_CVAR(Float, r_actorspriteshadowdist)
@@ -906,17 +925,26 @@ void HWDrawInfo::RenderThings(subsector_t * sub, sector_t * sector)
 		auto thing = p->m_thing;
 		if (thing->validcount == validcount) continue;
 		thing->validcount = validcount;
+		double distSq = -1.0;
 
 		if(Viewpoint.IsAllowedOoB() && thing->Sector->isSecret() && thing->Sector->wasSecret() && !r_radarclipper) continue; // This covers things that are touching non-secret sectors
 		FIntCVar *cvar = thing->GetInfo()->distancecheck;
 		if (cvar != nullptr && *cvar >= 0)
 		{
-			double dist = (thing->Pos() - vp.Pos).LengthSquared();
+			distSq = (thing->Pos() - vp.Pos).LengthSquared();
 			double check = (double)**cvar;
-			if (dist >= check * check)
+			if (distSq >= check * check)
 			{
 				continue;
 			}
+		}
+		if (distSq < 0.0)
+		{
+			distSq = (thing->Pos() - vp.Pos).LengthSquared();
+		}
+		if (ShouldCullDecorRenderThing(thing, distSq))
+		{
+			continue;
 		}
 		// If this thing is in a map section that's not in view it can't possibly be visible
 		if (CurrentMapSections[thing->subsector->mapsection])
@@ -926,9 +954,8 @@ void HWDrawInfo::RenderThings(subsector_t * sub, sector_t * sector)
 			// [Nash] draw sprite shadow
 			if (R_ShouldDrawSpriteShadow(thing))
 			{
-				double dist = (thing->Pos() - vp.Pos).LengthSquared();
 				double check = r_actorspriteshadowdist;
-				if (dist <= check * check)
+				if (distSq <= check * check)
 				{
 					sprite.Process(this, thing, sector, in_area, false, true);
 				}
@@ -941,15 +968,24 @@ void HWDrawInfo::RenderThings(subsector_t * sub, sector_t * sector)
 	for (msecnode_t *node = sec->sectorportal_thinglist; node; node = node->m_snext)
 	{
 		AActor *thing = node->m_thing;
+		double distSq = -1.0;
 		FIntCVar *cvar = thing->GetInfo()->distancecheck;
 		if (cvar != nullptr && *cvar >= 0)
 		{
-			double dist = (thing->Pos() - vp.Pos).LengthSquared();
+			distSq = (thing->Pos() - vp.Pos).LengthSquared();
 			double check = (double)**cvar;
-			if (dist >= check * check)
+			if (distSq >= check * check)
 			{
 				continue;
 			}
+		}
+		if (distSq < 0.0)
+		{
+			distSq = (thing->Pos() - vp.Pos).LengthSquared();
+		}
+		if (ShouldCullDecorRenderThing(thing, distSq))
+		{
+			continue;
 		}
 
 		HWSprite sprite;
@@ -957,9 +993,8 @@ void HWDrawInfo::RenderThings(subsector_t * sub, sector_t * sector)
 		// [Nash] draw sprite shadow
 		if (R_ShouldDrawSpriteShadow(thing))
 		{
-			double dist = (thing->Pos() - vp.Pos).LengthSquared();
 			double check = r_actorspriteshadowdist;
-			if (dist <= check * check)
+			if (distSq <= check * check)
 			{
 				sprite.Process(this, thing, sector, in_area, true, true);
 			}
