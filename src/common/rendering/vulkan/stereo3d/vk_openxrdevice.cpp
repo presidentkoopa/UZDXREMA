@@ -80,6 +80,7 @@ EXTERN_CVAR(Float, vr_openxr_fov_adjust_deg);
 EXTERN_CVAR(Float, vr_openxr_eye_shift_scale);
 EXTERN_CVAR(Float, vr_openxr_render_scale);
 EXTERN_CVAR(Int, vr_openxr_debug_submit_mode);
+EXTERN_CVAR(Int, vr_openxr_sync_mode);
 EXTERN_CVAR(Bool, vr_openxr_multiview);
 EXTERN_CVAR(Bool, vr_desktop_view_openxr_render);
 EXTERN_CVAR(Bool, vr_openxr_multiview_mirror_reuse);
@@ -681,6 +682,7 @@ bool VKOpenXRDeviceMode::GetBenchmarkInfo(VRBenchmarkInfo& out) const
 	out.PresentHeight = xrPresentHeight;
 	out.DesktopViewMode = vr_desktop_view;
 	out.RequestedRefreshRate = (int)vid_refreshrate;
+	out.SyncMode = vr_openxr_sync_mode;
 	out.RenderScale = (float)vr_openxr_render_scale;
 #ifdef XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME
 	out.RuntimeRefreshRate = xrCurrentDisplayRefreshRate > 0.0f ? xrCurrentDisplayRefreshRate : xrRequestedDisplayRefreshRate;

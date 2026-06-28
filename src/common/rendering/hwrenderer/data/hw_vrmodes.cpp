@@ -388,6 +388,7 @@ CVAR(Float, vr_height_adjust, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // METERS
 CVAR(Float, vr_openxr_fov_adjust_deg, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // DEGREES PER SIDE
 CVAR(Float, vr_openxr_eye_shift_scale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, vr_openxr_debug_submit_mode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, vr_openxr_sync_mode, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // Gate the layered OpenXR/Vulkan multiview path separately from the current per-eye render path
 CVARD(Bool, vr_openxr_multiview, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "Enable the experimental OpenXR Vulkan multiview path when available")
 // Experimental: render the OpenXR scene at runtime-recommended eye size

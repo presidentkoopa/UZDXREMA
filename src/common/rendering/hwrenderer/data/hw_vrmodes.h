@@ -59,6 +59,7 @@ struct VRBenchmarkInfo
 	int SceneSamples = 1;
 	int DesktopViewMode = 0;
 	int RequestedRefreshRate = 0;
+	int SyncMode = 0;
 	float RuntimeRefreshRate = 0.0f;
 	float RenderScale = 1.0f;
 };

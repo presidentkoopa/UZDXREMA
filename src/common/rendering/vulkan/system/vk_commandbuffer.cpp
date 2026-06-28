@@ -169,14 +169,15 @@ void VkCommandBufferManager::FlushCommands(bool finish, bool lastsubmit, bool up
 	}
 }
 
-void VkCommandBufferManager::WaitForCommands(bool finish, bool uploadOnly)
+void VkCommandBufferManager::WaitForCommands(bool finish, bool uploadOnly, bool acquireImageForPresent)
 {
 	if (finish)
 	{
 		Finish.Reset();
 		Finish.Clock();
 
-		fb->GetFramebufferManager()->AcquireImage();
+		if (acquireImageForPresent)
+			fb->GetFramebufferManager()->AcquireImage();
 
 	}
 

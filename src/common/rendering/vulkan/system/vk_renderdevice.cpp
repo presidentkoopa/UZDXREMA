@@ -60,6 +60,7 @@
 #include <zvulkan/vulkanswapchain.h>
 
 EXTERN_CVAR(Bool, vr_openxr_multiview_postprocess);
+EXTERN_CVAR(Int, vr_openxr_sync_mode);
 
 extern bool cinemamode;
 #include <zvulkan/vulkanbuilders.h>
@@ -451,10 +452,11 @@ void VulkanRenderDevice::Update()
 	Flush3D.Unclock();
 
 	const bool trackXrSyncWait = vrmode != nullptr && vrmode->IsVR() && mXRFrameBeganThisFrame;
+	const bool deferDesktopPresentForXr = trackXrSyncWait && vr_openxr_sync_mode == 1;
 	if (trackXrSyncWait)
 	{
 		Clocker renderSyncTimer(VRRenderSyncWait);
-		mCommands->WaitForCommands(true);
+		mCommands->WaitForCommands(!deferDesktopPresentForXr, false, !deferDesktopPresentForXr);
 	}
 	else
 	{
@@ -465,6 +467,11 @@ void VulkanRenderDevice::Update()
 	if (vrmode != nullptr && vrmode->IsVR() && mXRFrameBeganThisFrame)
 	{
 		vrmode->AcquireXRSwapchain();
+		if (deferDesktopPresentForXr)
+		{
+			mFramebufferManager->AcquireImage();
+			mCommands->WaitForCommands(true, false, false);
+		}
 	}
 	mXRFrameBeganThisFrame = false;
 

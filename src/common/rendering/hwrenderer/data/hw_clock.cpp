@@ -38,6 +38,17 @@
 #include "v_video.h"
 #include "hw_clock.h"
 #include "hw_vrmodes.h"
+
+static const char* GetOpenXrSyncModeName(int syncMode)
+{
+	switch (syncMode)
+	{
+	case 1:
+		return "defer_desktop_present";
+	default:
+		return "legacy";
+	}
+}
 #include "i_time.h"
 #include "i_interface.h"
 #include "printf.h"
@@ -300,7 +311,7 @@ static void AppendBenchmarkHeader(FString& out)
 		vrinfo.PostprocessLayered ? "yes" : "no",
 		vrinfo.FinalizeLayered ? "yes" : "no",
 		vrinfo.DirectXrRender ? "yes" : "no",
-		"legacy",
+		GetOpenXrSyncModeName(vrinfo.SyncMode),
 		"unsupported");
 }
 
