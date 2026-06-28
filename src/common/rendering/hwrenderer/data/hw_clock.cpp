@@ -333,7 +333,7 @@ static void AppendBenchmarkHeader(FString& out)
 		vrinfo.DirectXrRender ? "yes" : "no",
 		GetOpenXrSyncModeName(vrinfo.SyncMode),
 		"unsupported");
-	out.AppendFormat("DynLight Config: r_dynlights=%s gl_lights=%s sprites=%s particles=%s weapons=%s shadowmap=%s dist_cull_cache=%s model_dedupe_cache=%s\n",
+	out.AppendFormat("DynLight Config: r_dynlights=%s gl_lights=%s sprites=%s particles=%s weapons=%s shadowmap=%s dist_cull_cache=%s model_dedupe_cache=%s spot_cache=%s\n",
 		r_dynlights ? "on" : "off",
 		gl_lights ? "on" : "off",
 		gl_light_sprites ? "on" : "off",
@@ -341,7 +341,8 @@ static void AppendBenchmarkHeader(FString& out)
 		gl_light_weapons ? "on" : "off",
 		gl_light_shadowmap ? "on" : "off",
 		gl_light_distance_cull_cache ? "on" : "off",
-		gl_light_model_dedupe_cache ? "on" : "off");
+		gl_light_model_dedupe_cache ? "on" : "off",
+		gl_light_spot_cache ? "on" : "off");
 	out.AppendFormat("DynLight Limits: distance_cull=%.1f max_intensity=%.1f max_collected_ss=%d flat_max=%d wall_max=%d range_limit=%d\n\n",
 		(double)gl_light_distance_cull,
 		(double)gl_light_max_intensity,

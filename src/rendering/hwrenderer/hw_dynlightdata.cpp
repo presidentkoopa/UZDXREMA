@@ -48,6 +48,7 @@ CVAR (Bool, gl_light_particles, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR (Bool, gl_light_weapons, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR (Bool, gl_light_distance_cull_cache, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR (Bool, gl_light_model_dedupe_cache, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR (Bool, gl_light_spot_cache, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 
 
 //==========================================================================
@@ -78,6 +79,43 @@ bool GetLight(FDynLightData& dld, int group, Plane & p, FDynamicLight * light, b
 // Add one dynamic light to the light data list
 //
 //==========================================================================
+static inline void GetSpotlightShaderParams(FDynamicLight *light, float &spotInnerAngle, float &spotOuterAngle, float &spotDirX, float &spotDirY, float &spotDirZ)
+{
+	if (!gl_light_spot_cache)
+	{
+		spotInnerAngle = (float)light->pSpotInnerAngle->Cos();
+		spotOuterAngle = (float)light->pSpotOuterAngle->Cos();
+
+		DAngle negPitch = -*light->pPitch;
+		DAngle Angle = light->target->Angles.Yaw;
+		double xzLen = negPitch.Cos();
+		spotDirX = float(-Angle.Cos() * xzLen);
+		spotDirY = float(-negPitch.Sin());
+		spotDirZ = float(-Angle.Sin() * xzLen);
+		return;
+	}
+
+	if (light->mSpotCacheViewId != gl_dynlight_viewid)
+	{
+		light->mSpotInnerCos = (float)light->pSpotInnerAngle->Cos();
+		light->mSpotOuterCos = (float)light->pSpotOuterAngle->Cos();
+
+		DAngle negPitch = -*light->pPitch;
+		DAngle Angle = light->target->Angles.Yaw;
+		double xzLen = negPitch.Cos();
+		light->mSpotDirX = float(-Angle.Cos() * xzLen);
+		light->mSpotDirY = float(-negPitch.Sin());
+		light->mSpotDirZ = float(-Angle.Sin() * xzLen);
+		light->mSpotCacheViewId = gl_dynlight_viewid;
+	}
+
+	spotInnerAngle = light->mSpotInnerCos;
+	spotOuterAngle = light->mSpotOuterCos;
+	spotDirX = light->mSpotDirX;
+	spotDirY = light->mSpotDirY;
+	spotDirZ = light->mSpotDirZ;
+}
+
 void AddLightToList(FDynLightData &dld, int group, FDynamicLight * light, bool forceAttenuate)
 {
 	int i = 0;
@@ -132,15 +170,7 @@ void AddLightToList(FDynLightData &dld, int group, FDynamicLight * light, bool f
 	if (light->IsSpot())
 	{
 		lightType = 1.0f;
-		spotInnerAngle = (float)light->pSpotInnerAngle->Cos();
-		spotOuterAngle = (float)light->pSpotOuterAngle->Cos();
-
-		DAngle negPitch = -*light->pPitch;
-		DAngle Angle = light->target->Angles.Yaw;
-		double xzLen = negPitch.Cos();
-		spotDirX = float(-Angle.Cos() * xzLen);
-		spotDirY = float(-negPitch.Sin());
-		spotDirZ = float(-Angle.Sin() * xzLen);
+		GetSpotlightShaderParams(light, spotInnerAngle, spotOuterAngle, spotDirX, spotDirY, spotDirZ);
 	}
 
 	float *data = &dld.arrays[i][dld.arrays[i].Reserve(16)];

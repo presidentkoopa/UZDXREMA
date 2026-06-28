@@ -286,7 +286,13 @@ public:
 	int mShadowmapIndex;
 	unsigned int mDistanceCullViewId;
 	unsigned int mModelLightGatherId;
+	unsigned int mSpotCacheViewId;
 	bool mDistanceCullResult;
+	float mSpotInnerCos;
+	float mSpotOuterCos;
+	float mSpotDirX;
+	float mSpotDirY;
+	float mSpotDirZ;
 	bool m_active;
 	bool visibletoplayer;
 	bool shadowmapped;
