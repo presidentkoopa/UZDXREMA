@@ -149,6 +149,7 @@ sector_t* RenderViewpoint(FRenderViewpoint& mainvp, AActor* camera, IntRect* bou
 	screen->FirstEye();
 	for (int eye_ix = 0; eye_ix < eyeCount; ++eye_ix)
 	{
+		++gl_dynlight_viewid;
 		flatVerticesPerEye = wallVerticesPerEye = portalsPerEye = lightsFlatPerEye = lightsWallPerEye = 0;
 		const auto eye = vrmode->mEyes[eye_ix];
 		if (eye == nullptr)

@@ -284,6 +284,8 @@ public:
 	int m_tickCount;
 	int m_lastUpdate;
 	int mShadowmapIndex;
+	unsigned int mDistanceCullViewId;
+	bool mDistanceCullResult;
 	bool m_active;
 	bool visibletoplayer;
 	bool shadowmapped;

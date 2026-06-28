@@ -34,6 +34,7 @@
 
 // If we want to share the array to avoid constant allocations it needs to be thread local unless it'd be littered with expensive synchronization.
 thread_local FDynLightData lightdata;
+unsigned int gl_dynlight_viewid = 1;
 
 //==========================================================================
 //
@@ -45,6 +46,7 @@ thread_local FDynLightData lightdata;
 CVAR (Bool, gl_light_sprites, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR (Bool, gl_light_particles, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR (Bool, gl_light_weapons, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR (Bool, gl_light_distance_cull_cache, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 
 
 //==========================================================================
