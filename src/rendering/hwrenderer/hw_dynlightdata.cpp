@@ -49,6 +49,7 @@ CVAR (Bool, gl_light_weapons, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR (Bool, gl_light_distance_cull_cache, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR (Bool, gl_light_model_dedupe_cache, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR (Bool, gl_light_spot_cache, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR (Bool, gl_light_pos_relative_cache, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 
 
 //==========================================================================
@@ -58,7 +59,7 @@ CVAR (Bool, gl_light_spot_cache, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 //==========================================================================
 bool GetLight(FDynLightData& dld, int group, Plane & p, FDynamicLight * light, bool checkside)
 {
-	DVector3 pos = light->PosRelative(group);
+	DVector3 pos = gl_GetLightPosRelative(light, group);
 	float radius = (light->GetRadius());
 
 	auto dist = fabs(p.DistToPoint((float)pos.X, (float)pos.Z, (float)pos.Y));
@@ -120,7 +121,7 @@ void AddLightToList(FDynLightData &dld, int group, FDynamicLight * light, bool f
 {
 	int i = 0;
 
-	DVector3 pos = light->PosRelative(group);
+	DVector3 pos = gl_GetLightPosRelative(light, group);
 	float radius = light->GetRadius();
 
 	float cs;

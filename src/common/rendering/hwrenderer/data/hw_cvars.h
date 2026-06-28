@@ -18,6 +18,7 @@ EXTERN_CVAR (Bool, gl_light_weapons);
 EXTERN_CVAR (Bool, gl_light_distance_cull_cache);
 EXTERN_CVAR (Bool, gl_light_model_dedupe_cache);
 EXTERN_CVAR (Bool, gl_light_spot_cache);
+EXTERN_CVAR (Bool, gl_light_pos_relative_cache);
 EXTERN_CVAR (Bool, gl_light_shadowmap);
 EXTERN_CVAR (Int, gl_shadowmap_quality);
 EXTERN_CVAR (Int, gl_storage_buffer_type);

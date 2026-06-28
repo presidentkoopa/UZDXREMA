@@ -472,7 +472,7 @@ void HWWall::SetupLights(HWDrawInfo*di, FDynLightData &lightdata)
 		{
 			iter_dlight++;
 
-			DVector3 posrel = node->lightsource->PosRelative(portalGroup);
+			DVector3 posrel = gl_GetLightPosRelative(light, portalGroup);
 			float x = posrel.X;
 			float y = posrel.Y;
 			float z = posrel.Z;

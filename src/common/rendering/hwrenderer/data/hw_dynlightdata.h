@@ -60,6 +60,24 @@ struct FDynLightData
 
 extern unsigned int gl_dynlight_viewid;
 
+inline DVector3 gl_GetLightPosRelative(FDynamicLight *light, int portalgroup)
+{
+	if (!gl_light_pos_relative_cache)
+	{
+		return light->PosRelative(portalgroup);
+	}
+
+	if (light->mPosRelativeCacheViewId == gl_dynlight_viewid && light->mPosRelativeCacheGroup == portalgroup)
+	{
+		return light->mPosRelativeCache;
+	}
+
+	light->mPosRelativeCache = light->PosRelative(portalgroup);
+	light->mPosRelativeCacheViewId = gl_dynlight_viewid;
+	light->mPosRelativeCacheGroup = portalgroup;
+	return light->mPosRelativeCache;
+}
+
 inline bool gl_IsDistanceCulled(FDynamicLight *light)
 {
 	if (!gl_light_distance_cull_cache)

@@ -190,7 +190,7 @@ void HWFlat::SetupLights(HWDrawInfo *di, FLightNode * node, FDynLightData &light
 		}
 
 		p.Set(plane.plane.Normal(), plane.plane.fD());
-		DVector3 posrel = light->PosRelative(portalgroup);
+		DVector3 posrel = gl_GetLightPosRelative(light, portalgroup);
 		float radius = light->GetRadius();
 		float dist = fabsf(p.DistToPoint((float)posrel.X, (float)posrel.Z, (float)posrel.Y));
 		if (radius > 0.f && dist <= radius)

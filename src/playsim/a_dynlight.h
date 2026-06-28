@@ -287,12 +287,15 @@ public:
 	unsigned int mDistanceCullViewId;
 	unsigned int mModelLightGatherId;
 	unsigned int mSpotCacheViewId;
+	unsigned int mPosRelativeCacheViewId;
+	int mPosRelativeCacheGroup;
 	bool mDistanceCullResult;
 	float mSpotInnerCos;
 	float mSpotOuterCos;
 	float mSpotDirX;
 	float mSpotDirY;
 	float mSpotDirZ;
+	DVector3 mPosRelativeCache;
 	bool m_active;
 	bool visibletoplayer;
 	bool shadowmapped;
