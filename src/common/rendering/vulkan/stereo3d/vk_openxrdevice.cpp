@@ -83,6 +83,7 @@ EXTERN_CVAR(Int, vr_openxr_debug_submit_mode);
 EXTERN_CVAR(Bool, vr_openxr_multiview);
 EXTERN_CVAR(Bool, vr_desktop_view_openxr_render);
 EXTERN_CVAR(Bool, vr_openxr_multiview_mirror_reuse);
+EXTERN_CVAR(Bool, vr_openxr_multiview_postprocess);
 EXTERN_CVAR(Int, vid_refreshrate);
 EXTERN_CVAR(Float, vr_snapTurn);
 EXTERN_CVAR(Bool, vr_move_use_offhand);
@@ -668,7 +669,7 @@ bool VKOpenXRDeviceMode::GetBenchmarkInfo(VRBenchmarkInfo& out) const
 	out.MultiviewSupported = xrMultiviewSupported;
 	out.MultiviewActive = ShouldUseMultiviewThisFrame();
 	out.SceneLayered = out.MultiviewActive && xrViewCount > 1;
-	out.PostprocessLayered = false;
+	out.PostprocessLayered = out.MultiviewActive && xrViewCount > 1 && !!vr_openxr_multiview_postprocess;
 	out.FinalizeLayered = false;
 	out.DirectXrRender = false;
 	out.DedicatedMirrorTextures = ShouldUseDedicatedDesktopMirrorTextures(this);

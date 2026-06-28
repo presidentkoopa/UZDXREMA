@@ -59,6 +59,8 @@
 #include "vulkan/textures/vk_framebuffer.h"
 #include <zvulkan/vulkanswapchain.h>
 
+EXTERN_CVAR(Bool, vr_openxr_multiview_postprocess);
+
 extern bool cinemamode;
 #include <zvulkan/vulkanbuilders.h>
 #include <zvulkan/vulkansurface.h>
@@ -391,14 +393,21 @@ void VulkanRenderDevice::Update()
 			const int eyeCount = vrmode->mEyeCount > 0 ? vrmode->mEyeCount : 1;
 			const bool suppressSceneEye2D = vrmode->ShouldUseScreenLayerForCurrentFrame() || cinemamode;
 			const bool useGameplayEyeViewport = vrmode->ShouldUseRecommendedRenderSizeThisFrame() && !vrmode->IsRenderingVirtualScreen();
+			const bool useSharedMultiviewPostprocess =
+				mXRFrameBeganThisFrame &&
+				vrmode->ShouldUseMultiviewThisFrame() &&
+				vr_openxr_multiview_postprocess &&
+				GetBuffers()->GetPipelineLayers() > 1;
 			const IntRect savedScreenViewport = mScreenViewport;
 			VREyeComposite.Clock();
 			for (int eye_ix = 0; eye_ix < eyeCount; ++eye_ix)
 			{
 				mCurrentEyeIndex = eye_ix;
 				const auto eye = (eye_ix >= 0 && eye_ix < 2) ? vrmode->mEyes[eye_ix] : nullptr;
-				postprocess->SetPipelineImagePair((eye_ix % 2) * 2, 2);
-				postprocess->SetCurrentPipelineImage(mEyeFinalPipelineImage[eye_ix % 2]);
+				const int pipelinePairStart = useSharedMultiviewPostprocess ? 0 : (eye_ix % 2) * 2;
+				const int pipelineImageIndex = useSharedMultiviewPostprocess ? mEyeFinalPipelineImage[0] : mEyeFinalPipelineImage[eye_ix % 2];
+				postprocess->SetPipelineImagePair(pipelinePairStart, 2);
+				postprocess->SetCurrentPipelineImage(pipelineImageIndex);
 				if (useGameplayEyeViewport)
 				{
 					mScreenViewport = mSceneViewport;
@@ -504,7 +513,24 @@ void VulkanRenderDevice::PostProcessScene(bool swscene, int fixedcm, float flash
 {
 	if (!swscene) mPostprocess->BlitSceneToPostprocess(); // Copy the resulting scene to the current post process texture
 	mPostprocess->PostProcessScene(fixedcm, flash, afterBloomDrawEndScene2D);
-	mEyeFinalPipelineImage[mCurrentEyeIndex % 2] = mPostprocess->GetCurrentPipelineImage();
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	const bool useSharedMultiviewPostprocess =
+		vrmode != nullptr &&
+		vrmode->IsVR() &&
+		mXRFrameBeganThisFrame &&
+		vrmode->ShouldUseMultiviewThisFrame() &&
+		vr_openxr_multiview_postprocess &&
+		GetBuffers()->GetPipelineLayers() > 1;
+	if (useSharedMultiviewPostprocess)
+	{
+		const int finalPipelineImage = mPostprocess->GetCurrentPipelineImage();
+		mEyeFinalPipelineImage[0] = finalPipelineImage;
+		mEyeFinalPipelineImage[1] = finalPipelineImage;
+	}
+	else
+	{
+		mEyeFinalPipelineImage[mCurrentEyeIndex % 2] = mPostprocess->GetCurrentPipelineImage();
+	}
 }
 
 const char* VulkanRenderDevice::DeviceName() const
@@ -989,6 +1015,15 @@ void VulkanRenderDevice::NextEye(int eyecount)
 {
 	if (mPostprocess)
 	{
+		const auto vrmode = VRMode::GetVRModeCached(true);
+		const bool useSharedMultiviewPostprocess =
+			vrmode != nullptr &&
+			vrmode->IsVR() &&
+			mXRFrameBeganThisFrame &&
+			vrmode->ShouldUseMultiviewThisFrame() &&
+			vr_openxr_multiview_postprocess &&
+			GetBuffers()->GetPipelineLayers() > 1;
+
 		if (eyecount > 1)
 		{
 			mCurrentEyeIndex = (mCurrentEyeIndex + 1) % eyecount;
@@ -997,8 +1032,9 @@ void VulkanRenderDevice::NextEye(int eyecount)
 		{
 			mCurrentEyeIndex = 0;
 		}
-		mPostprocess->SetPipelineImagePair((mCurrentEyeIndex % 2) * 2, 2);
-		mPostprocess->SetCurrentPipelineImage((mCurrentEyeIndex % 2) * 2);
+		const int pipelinePairStart = useSharedMultiviewPostprocess ? 0 : (mCurrentEyeIndex % 2) * 2;
+		mPostprocess->SetPipelineImagePair(pipelinePairStart, 2);
+		mPostprocess->SetCurrentPipelineImage(pipelinePairStart);
 	}
 }
 

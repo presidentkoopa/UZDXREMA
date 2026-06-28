@@ -43,12 +43,14 @@
 #include "common/rendering/stereo3d/openxr/oxr_loader.h"
 #include "flatvertices.h"
 #include "r_videoscale.h"
+#include <algorithm>
 
 EXTERN_CVAR(Int, gl_dither_bpc)
 EXTERN_CVAR(Float, vr_openxr_present_gamma_bias)
 EXTERN_CVAR(Float, vr_openxr_present_contrast_bias)
 EXTERN_CVAR(Float, vr_openxr_present_brightness_bias)
 EXTERN_CVAR(Float, vr_openxr_present_saturation_bias)
+EXTERN_CVAR(Bool, vr_openxr_multiview_postprocess)
 
 VkPostprocess::VkPostprocess(VulkanRenderDevice* fb) : fb(fb)
 {
@@ -98,34 +100,49 @@ void VkPostprocess::PostProcessScene(int fixedcm, float flash, const std::functi
 
 void VkPostprocess::BlitSceneToPostprocess()
 {
+	auto buffers = fb->GetBuffers();
+	auto cmdbuffer = fb->GetCommands()->GetDrawCommands();
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	const bool useLayeredSceneTransfer =
+		vrmode != nullptr &&
+		vrmode->IsVR() &&
+		vrmode->ShouldUseMultiviewThisFrame() &&
+		vr_openxr_multiview_postprocess &&
+		buffers->GetSceneLayers() > 1 &&
+		buffers->GetPipelineLayers() > 1;
+
+	if (useLayeredSceneTransfer && fb->GetCurrentEyeLayer() > 0)
+	{
+		return;
+	}
+
 	Clocker transferTimer(VRSceneTransfer);
 	VRSceneTransferOps++;
 	fb->GetRenderState()->EndRenderPass();
-
-	auto buffers = fb->GetBuffers();
-	auto cmdbuffer = fb->GetCommands()->GetDrawCommands();
 
 	VkImageTransition()
 		.AddImage(&buffers->SceneColor, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
 		.AddImage(&buffers->PipelineImage[mCurrentPipelineImage], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, true)
 		.Execute(fb->GetCommands()->GetDrawCommands());
 
+	const uint32_t sceneLayer = useLayeredSceneTransfer ? 0u : (buffers->GetSceneLayers() > 1 ? (uint32_t)fb->GetCurrentEyeLayer() : 0u);
+	const uint32_t pipelineLayer = useLayeredSceneTransfer ? 0u : (buffers->GetPipelineLayers() > 1 ? (uint32_t)fb->GetCurrentEyeLayer() : 0u);
+	const uint32_t layerCount = useLayeredSceneTransfer ? (uint32_t)std::min(buffers->GetSceneLayers(), buffers->GetPipelineLayers()) : 1u;
+
 	if (buffers->GetSceneSamples() != VK_SAMPLE_COUNT_1_BIT)
 	{
 		auto sceneColor = buffers->SceneColor.Image.get();
-		const uint32_t sceneLayer = buffers->GetSceneLayers() > 1 ? (uint32_t)fb->GetCurrentEyeLayer() : 0u;
-		const uint32_t pipelineLayer = buffers->GetPipelineLayers() > 1 ? (uint32_t)fb->GetCurrentEyeLayer() : 0u;
 		VkImageResolve resolve = {};
 		resolve.srcOffset = { 0, 0, 0 };
 		resolve.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		resolve.srcSubresource.mipLevel = 0;
 		resolve.srcSubresource.baseArrayLayer = sceneLayer;
-		resolve.srcSubresource.layerCount = 1;
+		resolve.srcSubresource.layerCount = layerCount;
 		resolve.dstOffset = { 0, 0, 0 };
 		resolve.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		resolve.dstSubresource.mipLevel = 0;
 		resolve.dstSubresource.baseArrayLayer = pipelineLayer;
-		resolve.dstSubresource.layerCount = 1;
+		resolve.dstSubresource.layerCount = layerCount;
 		resolve.extent = { (uint32_t)sceneColor->width, (uint32_t)sceneColor->height, 1 };
 		cmdbuffer->resolveImage(
 			sceneColor->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -135,21 +152,19 @@ void VkPostprocess::BlitSceneToPostprocess()
 	else
 	{
 		auto sceneColor = buffers->SceneColor.Image.get();
-		const uint32_t sceneLayer = buffers->GetSceneLayers() > 1 ? (uint32_t)fb->GetCurrentEyeLayer() : 0u;
-		const uint32_t pipelineLayer = buffers->GetPipelineLayers() > 1 ? (uint32_t)fb->GetCurrentEyeLayer() : 0u;
 		VkImageBlit blit = {};
 		blit.srcOffsets[0] = { 0, 0, 0 };
 		blit.srcOffsets[1] = { sceneColor->width, sceneColor->height, 1 };
 		blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		blit.srcSubresource.mipLevel = 0;
 		blit.srcSubresource.baseArrayLayer = sceneLayer;
-		blit.srcSubresource.layerCount = 1;
+		blit.srcSubresource.layerCount = layerCount;
 		blit.dstOffsets[0] = { 0, 0, 0 };
 		blit.dstOffsets[1] = { sceneColor->width, sceneColor->height, 1 };
 		blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		blit.dstSubresource.mipLevel = 0;
 		blit.dstSubresource.baseArrayLayer = pipelineLayer;
-		blit.dstSubresource.layerCount = 1;
+		blit.dstSubresource.layerCount = layerCount;
 		cmdbuffer->blitImage(
 			sceneColor->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 			buffers->PipelineImage[mCurrentPipelineImage].Image->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
