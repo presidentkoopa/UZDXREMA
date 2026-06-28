@@ -1186,8 +1186,8 @@ static void DrawHudToSurface(const FRenderViewpoint& vp)
 static void End2DAndUpdate()
 {
 	twod->End();
-	CheckBench();
 	screen->Update();
+	CheckBench();
 	twod->OnFrameDone();
 }
 

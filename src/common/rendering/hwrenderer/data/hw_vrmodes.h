@@ -2,6 +2,7 @@
 
 #include "r_utility.h"
 #include "matrix.h"
+#include <cstdint>
 
 class DFrameBuffer;
 class FCanvasTexture;
@@ -36,6 +37,32 @@ enum
 
 struct HWDrawInfo;
 struct HWViewpointUniforms;
+
+struct VRBenchmarkInfo
+{
+	bool IsVR = false;
+	bool IsOpenXR = false;
+	bool MultiviewEnabled = false;
+	bool MultiviewSupported = false;
+	bool MultiviewActive = false;
+	bool SceneLayered = false;
+	bool PostprocessLayered = false;
+	bool FinalizeLayered = false;
+	bool DirectXrRender = false;
+	bool DedicatedMirrorTextures = false;
+	uint32_t ViewCount = 0;
+	uint32_t ViewMask = 0;
+	uint32_t RecommendedWidth = 0;
+	uint32_t RecommendedHeight = 0;
+	uint32_t PresentWidth = 0;
+	uint32_t PresentHeight = 0;
+	int SceneSamples = 1;
+	int DesktopViewMode = 0;
+	int RequestedRefreshRate = 0;
+	int SyncMode = 0;
+	float RuntimeRefreshRate = 0.0f;
+	float RenderScale = 1.0f;
+};
 
 struct VRHudSurface
 {
@@ -147,6 +174,7 @@ struct VRMode
 	virtual bool GetTeleportLocation(DVector3 &out) const { return false; }
 	virtual bool IsInitialized() const { return true; }
 	virtual void Vibrate(float duration, int channel, float intensity) const { }
+	virtual bool GetBenchmarkInfo(VRBenchmarkInfo& out) const { out.IsVR = IsVR(); return false; }
 };
 
 void VR_HapticEvent(const char* event, int position, int intensity, float angle, float yHeight );

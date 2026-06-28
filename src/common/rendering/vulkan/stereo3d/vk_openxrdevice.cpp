@@ -80,8 +80,11 @@ EXTERN_CVAR(Float, vr_openxr_fov_adjust_deg);
 EXTERN_CVAR(Float, vr_openxr_eye_shift_scale);
 EXTERN_CVAR(Float, vr_openxr_render_scale);
 EXTERN_CVAR(Int, vr_openxr_debug_submit_mode);
+EXTERN_CVAR(Int, vr_openxr_sync_mode);
 EXTERN_CVAR(Bool, vr_openxr_multiview);
 EXTERN_CVAR(Bool, vr_desktop_view_openxr_render);
+EXTERN_CVAR(Bool, vr_openxr_multiview_mirror_reuse);
+EXTERN_CVAR(Bool, vr_openxr_multiview_postprocess);
 EXTERN_CVAR(Int, vid_refreshrate);
 EXTERN_CVAR(Float, vr_snapTurn);
 EXTERN_CVAR(Bool, vr_move_use_offhand);
@@ -621,7 +624,7 @@ static float ShortestAngleDeltaDeg(float a, float b)
 
 static bool ShouldPrepareDesktopMirrorEye(int eyeIndex)
 {
-	if (vr_desktop_view_openxr_render || vr_desktop_view == -1)
+	if (vr_desktop_view == -1)
 		return false;
 
 	// Side-by-side mirror consumes both prepared eye textures. Single-eye mirror modes only
@@ -635,10 +638,66 @@ static bool ShouldPrepareDesktopMirrorEye(int eyeIndex)
 	return eyeIndex == mirroredEyeIndex;
 }
 
-static bool ShouldUseDedicatedDesktopMirrorTextures()
+static bool ShouldReuseSubmittedPresentForDesktopMirror(const VKOpenXRDeviceMode* mode)
 {
-	return !vr_desktop_view_openxr_render && vr_desktop_view != -1;
+	if (vr_desktop_view == -1)
+		return false;
+
+	if (vr_desktop_view_openxr_render)
+		return true;
+
+	// Favor the already-prepared XR present images in multiview mode by default.
+	// That keeps the old unbiased mirror path available as an opt-out, but avoids
+	// paying for an extra fullscreen pass when we're optimizing the XR path.
+	return mode != nullptr &&
+		vr_openxr_multiview_mirror_reuse &&
+		mode->ShouldUseMultiviewThisFrame();
 }
+
+static bool ShouldUseDedicatedDesktopMirrorTextures(const VKOpenXRDeviceMode* mode)
+{
+	return vr_desktop_view != -1 && !ShouldReuseSubmittedPresentForDesktopMirror(mode);
+}
+
+} // namespace
+
+bool VKOpenXRDeviceMode::GetBenchmarkInfo(VRBenchmarkInfo& out) const
+{
+	out = {};
+	out.IsVR = true;
+	out.IsOpenXR = true;
+	out.MultiviewEnabled = !!vr_openxr_multiview;
+	out.MultiviewSupported = xrMultiviewSupported;
+	out.MultiviewActive = ShouldUseMultiviewThisFrame();
+	out.SceneLayered = out.MultiviewActive && xrViewCount > 1;
+	out.PostprocessLayered = out.MultiviewActive && xrViewCount > 1 && !!vr_openxr_multiview_postprocess;
+	out.FinalizeLayered = false;
+	out.DirectXrRender = false;
+	out.DedicatedMirrorTextures = ShouldUseDedicatedDesktopMirrorTextures(this);
+	out.ViewCount = xrViewCount;
+	out.ViewMask = GetMultiviewViewMask();
+	out.RecommendedWidth = GetMaxRecommendedViewWidth(xrViewConfigs);
+	out.RecommendedHeight = GetMaxRecommendedViewHeight(xrViewConfigs);
+	out.PresentWidth = xrPresentWidth;
+	out.PresentHeight = xrPresentHeight;
+	out.DesktopViewMode = vr_desktop_view;
+	out.RequestedRefreshRate = (int)vid_refreshrate;
+	out.SyncMode = vr_openxr_sync_mode;
+	out.RenderScale = (float)vr_openxr_render_scale;
+#ifdef XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME
+	out.RuntimeRefreshRate = xrCurrentDisplayRefreshRate > 0.0f ? xrCurrentDisplayRefreshRate : xrRequestedDisplayRefreshRate;
+#endif
+
+	auto* vkfb = dynamic_cast<VulkanRenderDevice*>(screen);
+	if (vkfb != nullptr && vkfb->GetBuffers() != nullptr)
+	{
+		out.SceneSamples = (int)vkfb->GetBuffers()->GetSceneSamples();
+	}
+	return true;
+}
+
+namespace
+{
 
 static XrSafeSourceRect GetSafeXrSourceRect(VulkanRenderDevice* vkfb)
 {
@@ -2246,7 +2305,7 @@ bool VKOpenXRDeviceMode::CreatePresentTextures(VulkanRenderDevice* vkfb) const
 	if (width == 0 || height == 0)
 		return false;
 
-	const bool wantsDedicatedMirrorTextures = ShouldUseDedicatedDesktopMirrorTextures();
+	const bool wantsDedicatedMirrorTextures = ShouldUseDedicatedDesktopMirrorTextures(this);
 	const bool hasPresentTextures = xrPresentTextures.size() == xrViewCount &&
 		std::all_of(xrPresentTextures.begin(), xrPresentTextures.end(),
 			[](const VkTextureImage& texture)
@@ -3974,7 +4033,10 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 
 	XrSwapchainImageWaitInfo imageWaitInfo{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO };
 	imageWaitInfo.timeout = 20 * 1000 * 1000; // 20 ms
-	xrResult = xrWaitSwapchainImage(xrSwapchain, &imageWaitInfo);
+	{
+		Clocker submitWaitTimer(VRSubmitWait);
+		xrResult = xrWaitSwapchainImage(xrSwapchain, &imageWaitInfo);
+	}
 	if (xrResult == XR_TIMEOUT_EXPIRED)
 	{
 		XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
@@ -4059,43 +4121,47 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 		VK_PIPELINE_STAGE_TRANSFER_BIT,
 		0, 0, nullptr, 0, nullptr, 1, &dstBarrier);
 
-	for (uint32_t layer = 0; layer < xrViewCount; ++layer)
 	{
-		const uint32_t sourceEye = (vr_openxr_debug_submit_mode == 1 || vr_openxr_debug_submit_mode == 3) ? 0u : layer;
-		if (sourceEye >= xrPresentTextures.size() || xrPresentTextures[sourceEye].Image == nullptr)
+		Clocker submitCopyTimer(VRSubmitCopy);
+		for (uint32_t layer = 0; layer < xrViewCount; ++layer)
 		{
-			continue;
+			const uint32_t sourceEye = (vr_openxr_debug_submit_mode == 1 || vr_openxr_debug_submit_mode == 3) ? 0u : layer;
+			if (sourceEye >= xrPresentTextures.size() || xrPresentTextures[sourceEye].Image == nullptr)
+			{
+				continue;
+			}
+
+			auto& preparedEyeImage = xrPresentTextures[sourceEye];
+			const auto* preparedEyeTexture = preparedEyeImage.Image.get();
+			const int32_t srcW = preparedEyeTexture ? preparedEyeTexture->width : 0;
+			const int32_t srcH = preparedEyeTexture ? preparedEyeTexture->height : 0;
+			if (srcW <= 0 || srcH <= 0)
+			{
+				continue;
+			}
+
+			VkImageTransition()
+				.AddImage(&preparedEyeImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
+				.Execute(xrVkCommandBuffer.get());
+
+			VkImageBlit blitRegion{};
+			blitRegion.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+			blitRegion.srcOffsets[0] = { 0, 0, 0 };
+			blitRegion.srcOffsets[1] = { srcW, srcH, 1 };
+			blitRegion.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, layer, 1 };
+			blitRegion.dstOffsets[0] = { 0, 0, 0 };
+			blitRegion.dstOffsets[1] = { (int32_t)dstW, (int32_t)dstH, 1 };
+			vkCmdBlitImage(
+				xrVkCommandBuffer->buffer,
+				preparedEyeImage.Image->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+				dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+				1, &blitRegion, VK_FILTER_LINEAR);
+			VRSubmitLayerBlits++;
+
+			VkImageTransition()
+				.AddImage(&preparedEyeImage, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, false)
+				.Execute(xrVkCommandBuffer.get());
 		}
-
-		auto& preparedEyeImage = xrPresentTextures[sourceEye];
-		const auto* preparedEyeTexture = preparedEyeImage.Image.get();
-		const int32_t srcW = preparedEyeTexture ? preparedEyeTexture->width : 0;
-		const int32_t srcH = preparedEyeTexture ? preparedEyeTexture->height : 0;
-		if (srcW <= 0 || srcH <= 0)
-		{
-			continue;
-		}
-
-		VkImageTransition()
-			.AddImage(&preparedEyeImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false)
-			.Execute(xrVkCommandBuffer.get());
-
-		VkImageBlit blitRegion{};
-		blitRegion.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-		blitRegion.srcOffsets[0] = { 0, 0, 0 };
-		blitRegion.srcOffsets[1] = { srcW, srcH, 1 };
-		blitRegion.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, layer, 1 };
-		blitRegion.dstOffsets[0] = { 0, 0, 0 };
-		blitRegion.dstOffsets[1] = { (int32_t)dstW, (int32_t)dstH, 1 };
-		vkCmdBlitImage(
-			xrVkCommandBuffer->buffer,
-			preparedEyeImage.Image->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-			dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-			1, &blitRegion, VK_FILTER_LINEAR);
-
-		VkImageTransition()
-			.AddImage(&preparedEyeImage, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, false)
-			.Execute(xrVkCommandBuffer.get());
 	}
 
 	VkImageMemoryBarrier dstRestoreBarrier{};
@@ -4127,7 +4193,11 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 	{
 		return false;
 	}
-	VkResult waitResult = vkWaitForFences(xrVkDevice->device, 1, &xrVkSubmitFence->fence, VK_TRUE, std::numeric_limits<uint64_t>::max());
+	VkResult waitResult = VK_SUCCESS;
+	{
+		Clocker submitWaitTimer(VRSubmitWait);
+		waitResult = vkWaitForFences(xrVkDevice->device, 1, &xrVkSubmitFence->fence, VK_TRUE, std::numeric_limits<uint64_t>::max());
+	}
 	if (waitResult != VK_SUCCESS)
 	{
 		return false;
@@ -4938,6 +5008,8 @@ void VKOpenXRDeviceMode::FinalizeEyeImage(VulkanRenderDevice* vkfb, int eyeIndex
 	// 1) Unbiased image for desktop mirror parity.
 	if (ShouldPrepareDesktopMirrorEye(eyeIndex) && eyeIndex >= 0 && eyeIndex < (int)xrMirrorPresentTextures.size())
 	{
+		Clocker mirrorPrepareTimer(VRFinalPresent);
+		VRMirrorPreparePasses++;
 		postprocess->DrawPresentTextureToImage(
 			&xrMirrorPresentTextures[eyeIndex],
 			(VkFormat)xrSwapchainFormat,
@@ -4953,6 +5025,8 @@ void VKOpenXRDeviceMode::FinalizeEyeImage(VulkanRenderDevice* vkfb, int eyeIndex
 	}
 
 	// 2) XR-submitted image with OpenXR bias knobs applied.
+	Clocker finalPresentTimer(VRFinalPresent);
+	VRFinalPresentPasses++;
 	postprocess->DrawPresentTextureToImage(
 		&xrPresentTextures[eyeIndex],
 		(VkFormat)xrSwapchainFormat,
@@ -4976,7 +5050,7 @@ bool VKOpenXRDeviceMode::RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage
 	const bool sideBySide = vr_desktop_view != 1 && vr_desktop_view != 2;
 	const int leftSourceIndex = vr_swap_eyes ? 1 : 0;
 	const int rightSourceIndex = vr_swap_eyes ? 0 : 1;
-	const bool useDedicatedMirrorTextures = ShouldUseDedicatedDesktopMirrorTextures();
+	const bool useDedicatedMirrorTextures = ShouldUseDedicatedDesktopMirrorTextures(this);
 	auto& mirrorSources = useDedicatedMirrorTextures ? xrMirrorPresentTextures : xrPresentTextures;
 
 	if (mirrorSources.empty() ||

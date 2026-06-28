@@ -37,9 +37,23 @@
 #include "c_dispatch.h"
 #include "v_video.h"
 #include "hw_clock.h"
+#include "hw_vrmodes.h"
+
+static const char* GetOpenXrSyncModeName(int syncMode)
+{
+	switch (syncMode)
+	{
+	case 1:
+		return "defer_desktop_present";
+	default:
+		return "legacy";
+	}
+}
 #include "i_time.h"
 #include "i_interface.h"
 #include "printf.h"
+#include "version.h"
+#include "cmdlib.h"
 
 glcycle_t RenderWall,SetupWall,ClipWall;
 glcycle_t RenderFlat,SetupFlat;
@@ -47,6 +61,7 @@ glcycle_t RenderSprite,SetupSprite;
 glcycle_t All, Finish, PortalAll, Bsp;
 glcycle_t ProcessAll, PostProcess;
 glcycle_t VRSceneEyes, VRSceneBuild, VRSubsectors, VRSubsectorCull, VRSubsectorVisible, VRLineBuild, VRLineClip, VRLineDecide, VRThingBuild, VRFlatBuild, VRScenePostBSP, VRPlayerSprites, VRSceneDraw, VREyeComposite, VRFinalizeEye, VRSubmit;
+glcycle_t VRPostProcessScene, VRSceneTransfer, VRFinalPresent, VRSubmitCopy, VRSubmitWait, VRRenderSyncWait;
 glcycle_t RenderAll;
 glcycle_t Dirty;
 glcycle_t drawcalls;
@@ -57,6 +72,7 @@ glcycle_t WallWorkersElapsed, WallMerge, SceneWorkerElapsed;
 int64_t WallWorkersCpuSumCycles, WallWorkersWallCpuSumCycles;
 int64_t WallWorkersElapsedCycles;
 int WallBatchCount, WallItemsProcessed;
+int VRFinalPresentPasses, VRMirrorPreparePasses, VRSceneTransferOps, VRSubmitLayerBlits;
 int vertexcount, flatvertices, flatprimitives;
 
 int rendered_lines,rendered_flats,rendered_sprites,render_vertexsplit,render_texsplit,rendered_decals, rendered_portals, rendered_commandbuffers;
@@ -88,6 +104,12 @@ void ResetProfilingData()
 	VREyeComposite.Reset();
 	VRFinalizeEye.Reset();
 	VRSubmit.Reset();
+	VRPostProcessScene.Reset();
+	VRSceneTransfer.Reset();
+	VRFinalPresent.Reset();
+	VRSubmitCopy.Reset();
+	VRSubmitWait.Reset();
+	VRRenderSyncWait.Reset();
 	RenderWall.Reset();
 	SetupWall.Reset();
 	ClipWall.Reset();
@@ -109,6 +131,10 @@ void ResetProfilingData()
 	WallWorkersElapsedCycles = 0;
 	WallBatchCount = 0;
 	WallItemsProcessed = 0;
+	VRFinalPresentPasses = 0;
+	VRMirrorPreparePasses = 0;
+	VRSceneTransferOps = 0;
+	VRSubmitLayerBlits = 0;
 
 	flatvertices=flatprimitives=vertexcount=0;
 	render_texsplit=render_vertexsplit=rendered_lines=rendered_flats=rendered_sprites=rendered_decals=rendered_portals = 0;
@@ -137,6 +163,15 @@ static void AppendRenderTimes(FString &str)
 	double wallWorkersWallCpuSum = WallWorkersWallCpuSumCycles * PerfToMillisec;
 	const double wallWorkerParallelism = wallWorkersElapsed > 0.0 ? wallWorkersCpuSum / wallWorkersElapsed : 0.0;
 	const double wallWorkerBusyParallelism = wallWorkersElapsed > 0.0 ? wallWorkersWallCpuSum / wallWorkersElapsed : 0.0;
+	const double vrSceneBucket = VRSceneBuild.TimeMS() + VRSceneDraw.TimeMS() + VRScenePostBSP.TimeMS() + VRPlayerSprites.TimeMS();
+	const double vrPostprocessBucket = PostProcess.TimeMS();
+	const double vrFinalizeBucket = VRFinalizeEye.TimeMS() + VRFinalPresent.TimeMS();
+	const double vrSubmitBucket = VRSubmit.TimeMS();
+	const double vrCompositeBucket = VREyeComposite.TimeMS();
+	const double vrSyncWaitBucket = VRSubmitWait.TimeMS() + VRRenderSyncWait.TimeMS();
+
+	str.AppendFormat("VR Summary: Scene=%2.3f Post=%2.3f Finalize=%2.3f Submit=%2.3f Composite=%2.3f SyncWait=%2.3f\n",
+		vrSceneBucket, vrPostprocessBucket, vrFinalizeBucket, vrSubmitBucket, vrCompositeBucket, vrSyncWaitBucket);
 
 	str.AppendFormat("BSP = %2.3f, Clip=%2.3f\n"
 		"W: Render=%2.3f, Setup=%2.3f\n"
@@ -149,6 +184,8 @@ static void AppendRenderTimes(FString &str)
 		"VR: LineClip=%2.3f LineDecide=%2.3f\n"
 		"VR: PostBSP=%2.3f PlayerSprites=%2.3f\n"
 		"VR: EyeComposite=%2.3f FinalizeEye=%2.3f Submit=%2.3f\n"
+		"VR: PostScene=%2.3f SceneTransfer=%2.3f FinalPresent=%2.3f SubmitCopy=%2.3f SubmitWait=%2.3f RenderSync=%2.3f\n"
+		"VR: FinalPasses=%d MirrorPasses=%d SceneTransfers=%d SubmitLayerBlits=%d\n"
 		"Scene worker elapsed=%2.3f, Scene worker wait=%2.3f\n"
 		"Wall workers elapsed=%2.3f, Wall workers CPU-sum=%2.3f, Wall setup CPU-sum=%2.3f\n"
 		"Wall worker parallelism=%2.2f busy=%2.2f\n"
@@ -165,6 +202,8 @@ static void AppendRenderTimes(FString &str)
 		VRLineClip.TimeMS(), VRLineDecide.TimeMS(),
 		VRScenePostBSP.TimeMS(), VRPlayerSprites.TimeMS(),
 		VREyeComposite.TimeMS(), VRFinalizeEye.TimeMS(), VRSubmit.TimeMS(),
+		VRPostProcessScene.TimeMS(), VRSceneTransfer.TimeMS(), VRFinalPresent.TimeMS(), VRSubmitCopy.TimeMS(), VRSubmitWait.TimeMS(), VRRenderSyncWait.TimeMS(),
+		VRFinalPresentPasses, VRMirrorPreparePasses, VRSceneTransferOps, VRSubmitLayerBlits,
 		SceneWorkerElapsed.TimeMS(), MTWait.TimeMS(),
 		wallWorkersElapsed, wallWorkersCpuSum, wallWorkersWallCpuSum,
 		wallWorkerParallelism, wallWorkerBusyParallelism,
@@ -229,7 +268,52 @@ ADD_STAT(bufferstats)
 static int printstats;
 static bool switchfps;
 static uint64_t waitstart;
+static FString benchlabel;
 EXTERN_CVAR(Bool, vid_fps)
+EXTERN_CVAR(Int, vid_refreshrate)
+
+static void AppendBenchmarkHeader(FString& out)
+{
+	out.AppendFormat("Timestamp: %s", myasctime());
+	out.AppendFormat("%s version %s (%s)\n", GAMENAME, GetVersionString(), GetGitHash());
+	out.AppendFormat("Git describe: %s\n", GetGitDescription());
+	if (!benchlabel.IsEmpty())
+		out.AppendFormat("Bench label: %s\n", benchlabel.GetChars());
+
+	VRBenchmarkInfo vrinfo = {};
+	const auto vrmode = VRMode::GetVRModeCached(true);
+	if (vrmode != nullptr)
+	{
+		vrmode->GetBenchmarkInfo(vrinfo);
+	}
+
+	out.AppendFormat("XR: is_vr=%s is_openxr=%s multiview=%s supported=%s active=%s mirror_mode=%d render_scale=%.3f requested_refresh=%d runtime_refresh=%.2f\n",
+		vrinfo.IsVR ? "yes" : "no",
+		vrinfo.IsOpenXR ? "yes" : "no",
+		vrinfo.MultiviewEnabled ? "on" : "off",
+		vrinfo.MultiviewSupported ? "yes" : "no",
+		vrinfo.MultiviewActive ? "yes" : "no",
+		vrinfo.DesktopViewMode,
+		vrinfo.RenderScale,
+		vrinfo.RequestedRefreshRate > 0 ? vrinfo.RequestedRefreshRate : (int)vid_refreshrate,
+		vrinfo.RuntimeRefreshRate);
+
+	out.AppendFormat("XR Targets: recommended=%ux%u present=%ux%u samples=%d view_count=%u view_mask=0x%08x dedicated_mirror=%s\n",
+		vrinfo.RecommendedWidth, vrinfo.RecommendedHeight,
+		vrinfo.PresentWidth, vrinfo.PresentHeight,
+		vrinfo.SceneSamples,
+		vrinfo.ViewCount,
+		(unsigned int)vrinfo.ViewMask,
+		vrinfo.DedicatedMirrorTextures ? "yes" : "no");
+
+	out.AppendFormat("XR Flags: scene_layered=%s postprocess_layered=%s finalize_layered=%s direct_xr_render=%s vr_openxr_sync_mode=%s vr_openxr_foveation=%s\n\n",
+		vrinfo.SceneLayered ? "yes" : "no",
+		vrinfo.PostprocessLayered ? "yes" : "no",
+		vrinfo.FinalizeLayered ? "yes" : "no",
+		vrinfo.DirectXrRender ? "yes" : "no",
+		GetOpenXrSyncModeName(vrinfo.SyncMode),
+		"unsupported");
+}
 
 void CheckBench()
 {
@@ -240,8 +324,9 @@ void CheckBench()
 		if (waitstart > 0 && I_msTime() - waitstart < 5000) return;
 
 		FString compose;
+		AppendBenchmarkHeader(compose);
 
-		if (sysCallbacks.GetLocationDescription) compose = sysCallbacks.GetLocationDescription();
+		if (sysCallbacks.GetLocationDescription) compose << sysCallbacks.GetLocationDescription();
 
 		AppendRenderStats(compose);
 		AppendRenderTimes(compose);
@@ -257,11 +342,19 @@ void CheckBench()
 		Printf("Benchmark info saved\n");
 		if (switchfps) vid_fps = false;
 		printstats = false;
+		benchlabel = "";
 	}
 }
 
 CCMD(bench)
 {
+	benchlabel = "";
+	for (int i = 1; i < argv.argc(); ++i)
+	{
+		if (!benchlabel.IsEmpty())
+			benchlabel << ' ';
+		benchlabel << argv[i];
+	}
 	printstats = true;
 	if (vid_fps == 0) 
 	{

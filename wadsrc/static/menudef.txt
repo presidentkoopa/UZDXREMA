@@ -3206,6 +3206,12 @@ OptionValue "OpenXRDebugSubmitMode"
 	3, "$DEVOPTMNU_SUBMIT_MODE_BOTH"
 }
 
+OptionValue "OpenXRSyncMode"
+{
+	0, "Legacy"
+	1, "Defer Desktop Present"
+}
+
 OptionValue "WallBatchSizes"
 {
 	64, "64"
@@ -3222,6 +3228,7 @@ OptionMenu DeveloperOptionsMenu protected
 	{
 	Slider "$DEVOPTMNU_RENDER_SCALE", "vr_openxr_render_scale", 0.25, 4.0, 0.05, 2
 	Option "$DEVOPTMNU_DEBUG_SUBMIT_MODE", "vr_openxr_debug_submit_mode", "OpenXRDebugSubmitMode"
+	Option "OpenXR Sync Mode", "vr_openxr_sync_mode", "OpenXRSyncMode"
 	Slider "$DEVOPTMNU_FOV_ADJUST", "vr_openxr_fov_adjust_deg", -30.0, 30.0, 0.5, 1
 	Slider "$DEVOPTMNU_EYE_SHIFT_SCALE", "vr_openxr_eye_shift_scale", 0.1, 3.0, 0.05, 2
 	Option "$DEVOPTMNU_FORCE_RECOMMENDED_VIEWPORT", "vr_openxr_force_recommended_viewport", "OnOff"
@@ -3234,6 +3241,8 @@ OptionMenu DeveloperOptionsMenu protected
 	Slider "$DEVOPTMNU_BSP_WORKER_THREADS", "gl_bsp_worker_threads", 1, 8, 1
 	Option "$DEVOPTMNU_BSP_WALL_BATCH_SIZE", "gl_bsp_wall_batch_size", "WallBatchSizes"
 	Option "$DEVOPTMNU_BSP_SKY_SECTORS_ON_MAIN_THREAD", "gl_bsp_worker_sky_mainthread", "OnOff"
+	Option "Desktop Mirror Reuse Multiview Frames", "vr_openxr_multiview_mirror_reuse", "YesNo"
+	Option "Layered Multiview Postprocess", "vr_openxr_multiview_postprocess", "YesNo"
 	}
 	ifOption(OpenVR)
 	{
@@ -3244,7 +3253,7 @@ OptionMenu DeveloperOptionsMenu protected
 	StaticText " "
 	StaticText "Options Marked With * Requires a Restart Of The Game", "Brown"
 	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar gl_no_ssbo gl_multithread gl_bsp_worker_threads gl_bsp_wall_batch_size gl_bsp_worker_sky_mainthread gl_texture_thread_models gl_texture_thread_upload gl_texture_thread_workers vk_max_transfer_threads gl_background_flush_count gl_light_distance_cull gl_light_wall_max_lights gl_light_flat_max_lights gl_line_distance_cull vr_openxr_debug_submit_mode vr_openxr_render_scale vr_openxr_fov_adjust_deg vr_openxr_eye_shift_scale vr_openxr_force_recommended_viewport vr_openxr_use_screen_viewport_for_submit vr_openvr_menu_pointer_pitch_bias vr_openvr_menu_pointer_tip_offset vr_hud_debug_border"
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar gl_no_ssbo gl_multithread gl_bsp_worker_threads gl_bsp_wall_batch_size gl_bsp_worker_sky_mainthread gl_texture_thread_models gl_texture_thread_upload gl_texture_thread_workers vk_max_transfer_threads gl_background_flush_count gl_light_distance_cull gl_light_wall_max_lights gl_light_flat_max_lights gl_line_distance_cull vr_openxr_multiview vr_desktop_view_openxr_render vr_openxr_multiview_mirror_reuse vr_openxr_multiview_postprocess vr_openxr_sync_mode vr_openxr_debug_submit_mode vr_openxr_render_scale vr_openxr_fov_adjust_deg vr_openxr_eye_shift_scale vr_openxr_force_recommended_viewport vr_openxr_use_screen_viewport_for_submit vr_openvr_menu_pointer_pitch_bias vr_openvr_menu_pointer_tip_offset vr_hud_debug_border"
 }
 
 

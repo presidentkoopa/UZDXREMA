@@ -20,8 +20,9 @@ public:
 
 	void FlushCommands(bool finish, bool lastsubmit = false, bool uploadOnly = false);
 
-	void WaitForCommands(bool finish) { WaitForCommands(finish, false); }
-	void WaitForCommands(bool finish, bool uploadOnly);
+	void WaitForCommands(bool finish) { WaitForCommands(finish, false, true); }
+	void WaitForCommands(bool finish, bool uploadOnly) { WaitForCommands(finish, uploadOnly, true); }
+	void WaitForCommands(bool finish, bool uploadOnly, bool acquireImageForPresent);
 
 	void PushGroup(const FString& name);
 	void PopGroup();

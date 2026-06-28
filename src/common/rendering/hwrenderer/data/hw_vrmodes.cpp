@@ -388,6 +388,7 @@ CVAR(Float, vr_height_adjust, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // METERS
 CVAR(Float, vr_openxr_fov_adjust_deg, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // DEGREES PER SIDE
 CVAR(Float, vr_openxr_eye_shift_scale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, vr_openxr_debug_submit_mode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, vr_openxr_sync_mode, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // Gate the layered OpenXR/Vulkan multiview path separately from the current per-eye render path
 CVARD(Bool, vr_openxr_multiview, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "Enable the experimental OpenXR Vulkan multiview path when available")
 // Experimental: render the OpenXR scene at runtime-recommended eye size
@@ -400,6 +401,8 @@ CVAR(Float, vr_openxr_render_scale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // aspect-stretch upscaling artifacts compared to mSceneViewport.
 CVAR(Bool, vr_openxr_use_screen_viewport_for_submit, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVARD(Bool, vr_desktop_view_openxr_render, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "Reuse the XR-submitted present texture for the desktop mirror to skip the separate unbiased mirror pass")
+CVARD(Bool, vr_openxr_multiview_mirror_reuse, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "When multiview is active, reuse the XR-submitted eye textures for the desktop mirror unless an unbiased mirror path is explicitly needed")
+CVARD(Bool, vr_openxr_multiview_postprocess, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "Use a shared layered pipeline image and a single scene handoff copy when multiview is active")
 CVAR(Float, vr_openxr_present_gamma_bias, 1.95f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_openxr_present_contrast_bias, 0.85f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_openxr_present_brightness_bias, -0.15f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
