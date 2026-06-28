@@ -126,6 +126,7 @@ int HWDrawInfo::SetupLightsForOtherPlane(subsector_t * sub, FDynLightData &light
 
 			if (!light->IsActive() || gl_IsDistanceCulled(light))
 			{
+				if (light->IsActive() && gl_IsDistanceCulled(light)) dynlights_distance_culled_flats++;
 				node = node->nextLight;
 				continue;
 			}

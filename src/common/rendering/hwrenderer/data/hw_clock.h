@@ -23,6 +23,11 @@ extern int WallBatchCount, WallItemsProcessed;
 extern int VRFinalPresentPasses, VRMirrorPreparePasses, VRSceneTransferOps, VRSubmitLayerBlits;
 
 extern int iter_dlightf, iter_dlight, draw_dlight, draw_dlightf;
+extern int dynlights_active_updates, dynlights_link_calls, dynlights_relink_calls, dynlights_unlink_calls;
+extern int dynlights_collected_subsectors, dynlights_linked_sectors, dynlights_linked_sides;
+extern int dynlights_removed_sector_links, dynlights_removed_side_links;
+extern int dynlights_distance_culled_walls, dynlights_distance_culled_flats, dynlights_distance_culled_models;
+extern int dynlights_model_subsectors, dynlights_model_candidates, dynlights_model_duplicates, dynlights_model_uploads;
 extern int rendered_lines,rendered_flats,rendered_sprites,rendered_decals,render_vertexsplit,render_texsplit;
 extern int rendered_portals;
 extern int lightbuffer_curindex, vertexbuffer_curindex, bonebuffer_curindex;

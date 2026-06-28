@@ -63,6 +63,7 @@
 #include "g_levellocals.h"
 #include "a_dynlight.h"
 #include "actorinlines.h"
+#include "hw_clock.h"
 #include "memarena.h"
 
 static FMemArena DynLightArena(sizeof(FDynamicLight) * 200);
@@ -382,6 +383,7 @@ void FDynamicLight::UpdateLocation()
 
 	if (IsActive())
 	{
+		dynlights_active_updates++;
 		AActor *target = this->target;	// perform the read barrier only once.
 
 		// Offset is calculated in relation to the owning actor.
@@ -420,6 +422,7 @@ void FDynamicLight::UpdateLocation()
 		if (X() != oldx || Y() != oldy || radius != oldradius)
 		{
 			//Update the light lists
+			dynlights_relink_calls++;
 			LinkLight();
 		}
 	}
@@ -436,7 +439,7 @@ void FDynamicLight::UpdateLocation()
 //
 //=============================================================================
 
-FLightNode * AddLightNode(FLightNode ** thread, void * linkto, FDynamicLight * light, FLightNode *& nextnode)
+FLightNode * AddLightNode(FLightNode ** thread, void * linkto, FDynamicLight * light, FLightNode *& nextnode, bool *created = nullptr)
 {
 	FLightNode * node;
 
@@ -446,6 +449,7 @@ FLightNode * AddLightNode(FLightNode ** thread, void * linkto, FDynamicLight * l
 		if (node->targ==linkto)   // Already have a node for this sector?
 		{
 			node->lightsource = light; // Yes. Setting m_thing says 'keep it'.
+			if (created) *created = false;
 			return(nextnode);
 		}
 		node = node->nextTarget;
@@ -470,6 +474,7 @@ FLightNode * AddLightNode(FLightNode ** thread, void * linkto, FDynamicLight * l
 	node->nextLight = *thread; 
 	if (node->nextLight) node->nextLight->prevLight=&node->nextLight;
 	*thread = node;
+	if (created) *created = true;
 	return(node);
 }
 
@@ -562,7 +567,9 @@ void FDynamicLight::CollectWithinRadius(const DVector3 &opos, FSection *section,
 		auto pos = collected_ss[i].pos;
 		section = collected_ss[i].sect;
 
-		touching_sector = AddLightNode(&section->lighthead, section, this, touching_sector);
+		bool createdSectorLink = false;
+		touching_sector = AddLightNode(&section->lighthead, section, this, touching_sector, &createdSectorLink);
+		if (createdSectorLink) dynlights_linked_sectors++;
 
 
 		auto processSide = [&](side_t *sidedef, const vertex_t *v1, const vertex_t *v2)
@@ -574,7 +581,9 @@ void FDynamicLight::CollectWithinRadius(const DVector3 &opos, FSection *section,
 				if ((pos.Y - v1->fY()) * (v2->fX() - v1->fX()) + (v1->fX() - pos.X) * (v2->fY() - v1->fY()) <= 0)
 				{
 					linedef->validcount = ::validcount;
-					touching_sides = AddLightNode(&sidedef->lighthead, sidedef, this, touching_sides);
+					bool createdSideLink = false;
+					touching_sides = AddLightNode(&sidedef->lighthead, sidedef, this, touching_sides, &createdSideLink);
+					if (createdSideLink) dynlights_linked_sides++;
 				}
 				else if (linedef->sidedef[0] == sidedef && linedef->sidedef[1] == nullptr)
 				{
@@ -665,6 +674,7 @@ void FDynamicLight::CollectWithinRadius(const DVector3 &opos, FSection *section,
 			}
 		}
 	}
+	dynlights_collected_subsectors += collected_ss.Size();
 	shadowmapped = hitonesidedback && !DontShadowmap();
 }
 
@@ -676,6 +686,7 @@ void FDynamicLight::CollectWithinRadius(const DVector3 &opos, FSection *section,
 
 void FDynamicLight::LinkLight()
 {
+	dynlights_link_calls++;
 	// mark the old light nodes
 	FLightNode * node;
 	
@@ -711,6 +722,7 @@ void FDynamicLight::LinkLight()
 	{
 		if (node->lightsource == nullptr)
 		{
+			dynlights_removed_side_links++;
 			node = DeleteLightNode(node);
 		}
 		else
@@ -722,6 +734,7 @@ void FDynamicLight::LinkLight()
 	{
 		if (node->lightsource == nullptr)
 		{
+			dynlights_removed_sector_links++;
 			node = DeleteLightNode(node);
 		}
 		else
@@ -737,8 +750,17 @@ void FDynamicLight::LinkLight()
 //==========================================================================
 void FDynamicLight::UnlinkLight ()
 {
-	while (touching_sides) touching_sides = DeleteLightNode(touching_sides);
-	while (touching_sector) touching_sector = DeleteLightNode(touching_sector);
+	dynlights_unlink_calls++;
+	while (touching_sides)
+	{
+		dynlights_removed_side_links++;
+		touching_sides = DeleteLightNode(touching_sides);
+	}
+	while (touching_sector)
+	{
+		dynlights_removed_sector_links++;
+		touching_sector = DeleteLightNode(touching_sector);
+	}
 	shadowmapped = false;
 }
 

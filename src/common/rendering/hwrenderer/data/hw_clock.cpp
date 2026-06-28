@@ -38,6 +38,8 @@
 #include "v_video.h"
 #include "hw_clock.h"
 #include "hw_vrmodes.h"
+#include "a_dynlight.h"
+#include "hw_cvars.h"
 
 static const char* GetOpenXrSyncModeName(int syncMode)
 {
@@ -77,6 +79,11 @@ int vertexcount, flatvertices, flatprimitives;
 
 int rendered_lines,rendered_flats,rendered_sprites,render_vertexsplit,render_texsplit,rendered_decals, rendered_portals, rendered_commandbuffers;
 int iter_dlightf, iter_dlight, draw_dlight, draw_dlightf;
+int dynlights_active_updates, dynlights_link_calls, dynlights_relink_calls, dynlights_unlink_calls;
+int dynlights_collected_subsectors, dynlights_linked_sectors, dynlights_linked_sides;
+int dynlights_removed_sector_links, dynlights_removed_side_links;
+int dynlights_distance_culled_walls, dynlights_distance_culled_flats, dynlights_distance_culled_models;
+int dynlights_model_subsectors, dynlights_model_candidates, dynlights_model_duplicates, dynlights_model_uploads;
 int lightbuffer_curindex, vertexbuffer_curindex, bonebuffer_curindex;
 
 void ResetProfilingData()
@@ -138,6 +145,11 @@ void ResetProfilingData()
 
 	flatvertices=flatprimitives=vertexcount=0;
 	render_texsplit=render_vertexsplit=rendered_lines=rendered_flats=rendered_sprites=rendered_decals=rendered_portals = 0;
+	dynlights_active_updates = dynlights_link_calls = dynlights_relink_calls = dynlights_unlink_calls = 0;
+	dynlights_collected_subsectors = dynlights_linked_sectors = dynlights_linked_sides = 0;
+	dynlights_removed_sector_links = dynlights_removed_side_links = 0;
+	dynlights_distance_culled_walls = dynlights_distance_culled_flats = dynlights_distance_culled_models = 0;
+	dynlights_model_subsectors = dynlights_model_candidates = dynlights_model_duplicates = dynlights_model_uploads = 0;
 	lightbuffer_curindex = vertexbuffer_curindex = bonebuffer_curindex = 0;
 }
 
@@ -223,6 +235,14 @@ static void AppendLightStats(FString &out)
 {
 	out.AppendFormat("DLight - Walls: %d processed, %d rendered\n", iter_dlight, draw_dlight);
 	out.AppendFormat("DLight - Flats: %d processed, %d rendered\n", iter_dlightf, draw_dlightf);
+	out.AppendFormat("DLight - Link: active_updates=%d link_calls=%d relinks=%d unlinks=%d collected_ss=%d linked_sectors=%d linked_sides=%d removed_sector_links=%d removed_side_links=%d\n",
+		dynlights_active_updates, dynlights_link_calls, dynlights_relink_calls, dynlights_unlink_calls,
+		dynlights_collected_subsectors, dynlights_linked_sectors, dynlights_linked_sides,
+		dynlights_removed_sector_links, dynlights_removed_side_links);
+	out.AppendFormat("DLight - DistanceCull: walls=%d flats=%d models=%d\n",
+		dynlights_distance_culled_walls, dynlights_distance_culled_flats, dynlights_distance_culled_models);
+	out.AppendFormat("DLight - ModelGather: subsectors=%d candidates=%d duplicates=%d uploads=%d\n",
+		dynlights_model_subsectors, dynlights_model_candidates, dynlights_model_duplicates, dynlights_model_uploads);
 }
 
 static void AppendBufferStats(FString &out)
@@ -313,6 +333,20 @@ static void AppendBenchmarkHeader(FString& out)
 		vrinfo.DirectXrRender ? "yes" : "no",
 		GetOpenXrSyncModeName(vrinfo.SyncMode),
 		"unsupported");
+	out.AppendFormat("DynLight Config: r_dynlights=%s gl_lights=%s sprites=%s particles=%s weapons=%s shadowmap=%s\n",
+		r_dynlights ? "on" : "off",
+		gl_lights ? "on" : "off",
+		gl_light_sprites ? "on" : "off",
+		gl_light_particles ? "on" : "off",
+		gl_light_weapons ? "on" : "off",
+		gl_light_shadowmap ? "on" : "off");
+	out.AppendFormat("DynLight Limits: distance_cull=%.1f max_intensity=%.1f max_collected_ss=%d flat_max=%d wall_max=%d range_limit=%d\n\n",
+		(double)gl_light_distance_cull,
+		(double)gl_light_max_intensity,
+		(int)gl_light_max_collected_subsectors,
+		(int)gl_light_flat_max_lights,
+		(int)gl_light_wall_max_lights,
+		(int)gl_light_range_limit);
 }
 
 void CheckBench()

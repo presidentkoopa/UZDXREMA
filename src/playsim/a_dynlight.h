@@ -7,6 +7,8 @@
 EXTERN_CVAR(Bool, r_dynlights)
 EXTERN_CVAR(Bool, gl_lights)
 EXTERN_CVAR(Float, gl_light_distance_cull)
+EXTERN_CVAR(Float, gl_light_max_intensity)
+EXTERN_CVAR(Int, gl_light_max_collected_subsectors)
 
 struct side_t;
 struct seg_t;

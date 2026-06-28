@@ -33,6 +33,7 @@
 #include "g_levellocals.h"
 #include "actorinlines.h"
 #include "hw_dynlightdata.h"
+#include "hw_clock.h"
 #include "hw_shadowmap.h"
 #include "hwrenderer/scene/hw_drawinfo.h"
 #include "hwrenderer/scene/hw_drawstructs.h"
@@ -239,14 +240,17 @@ void hw_GetDynModelLight(AActor *self, FDynLightData &modellightdata)
 
 		BSPWalkCircle(self->Level, x, y, radiusSquared, [&](subsector_t *subsector) // Iterate through all subsectors potentially touched by actor
 		{
+			dynlights_model_subsectors++;
 			auto section = subsector->section;
 			if (section->validcount == dl_validcount) return;	// already done from a previous subsector.
 			FLightNode * node = section->lighthead;
 			while (node) // check all lights touching a subsector
 			{
+				dynlights_model_candidates++;
 				FDynamicLight *light = node->lightsource;
 				if (!light->IsActive() || gl_IsDistanceCulled(light))
 				{
+					if (light->IsActive() && gl_IsDistanceCulled(light)) dynlights_distance_culled_models++;
 					node=node->nextLight;
 					continue;
 				}
@@ -264,8 +268,10 @@ void hw_GetDynModelLight(AActor *self, FDynLightData &modellightdata)
 						if (std::find(addedLights.begin(), addedLights.end(), light) == addedLights.end()) // Check if we already added this light from a different subsector
 						{
 							AddLightToList(modellightdata, group, light, true);
+							dynlights_model_uploads++;
 							addedLights.Push(light);
 						}
+						else dynlights_model_duplicates++;
 					}
 				}
 				node = node->nextLight;

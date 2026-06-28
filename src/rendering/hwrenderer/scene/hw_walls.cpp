@@ -467,7 +467,8 @@ void HWWall::SetupLights(HWDrawInfo*di, FDynLightData &lightdata)
 	// Iterate through all dynamic lights which touch this wall and render them
 	while (node && (!gl_light_wall_max_lights || lightsWallPerEye < gl_light_wall_max_lights))
 	{
-		if (node->lightsource->IsActive() && !node->lightsource->DontLightMap() && !gl_IsDistanceCulled(node->lightsource))
+		auto *light = node->lightsource;
+		if (light->IsActive() && !light->DontLightMap() && !gl_IsDistanceCulled(light))
 		{
 			iter_dlight++;
 
@@ -476,7 +477,6 @@ void HWWall::SetupLights(HWDrawInfo*di, FDynLightData &lightdata)
 			float y = posrel.Y;
 			float z = posrel.Z;
 			float dist = fabsf(p.DistToPoint(x, z, y));
-			FDynamicLight* light = node->lightsource;
 			float radius = light->GetRadius();
 			float scale = 1.0f / ((2.f * radius) - dist);
 			FVector3 fn, pos;
@@ -521,6 +521,10 @@ void HWWall::SetupLights(HWDrawInfo*di, FDynLightData &lightdata)
 					}
 				}
 			}
+		}
+		else if (light->IsActive() && !light->DontLightMap() && gl_IsDistanceCulled(light))
+		{
+			dynlights_distance_culled_walls++;
 		}
 		node = node->nextLight;
 	}

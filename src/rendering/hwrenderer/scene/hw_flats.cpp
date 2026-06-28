@@ -174,6 +174,7 @@ void HWFlat::SetupLights(HWDrawInfo *di, FLightNode * node, FDynLightData &light
 
 		if (!light->IsActive() || light->DontLightMap() || gl_IsDistanceCulled(light))
 		{
+			if (light->IsActive() && !light->DontLightMap() && gl_IsDistanceCulled(light)) dynlights_distance_culled_flats++;
 			node = node->nextLight;
 			continue;
 		}
