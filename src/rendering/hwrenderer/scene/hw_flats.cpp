@@ -38,6 +38,14 @@
 #include "matrix.h"
 #include "hw_dynlightdata.h"
 #include "hw_cvars.h"
+
+struct FFlatLightCandidate
+{
+	FDynamicLight *Light;
+	float Score;
+};
+
+static thread_local TArray<FFlatLightCandidate> flatLightCandidates;
 #include "hw_clock.h"
 #include "hw_lighting.h"
 #include "hw_material.h"
@@ -168,7 +176,52 @@ void HWFlat::SetupLights(HWDrawInfo *di, FLightNode * node, FDynLightData &light
 		dynlightindex = -1;
 		return;
 	}
-	while (node && (!gl_light_flat_max_lights || lightsFlatPerEye < gl_light_flat_max_lights))
+	const int renderLimit = gl_light_flat_max_lights;
+	const int candidateBudget = gl_light_flat_candidate_budget;
+	if (candidateBudget > 0)
+	{
+		auto &candidates = flatLightCandidates;
+		candidates.Clear();
+		while (node)
+		{
+			FDynamicLight * light = node->lightsource;
+
+			if (!light->IsActive() || light->DontLightMap() || gl_IsDistanceCulled(light))
+			{
+				if (light->IsActive() && !light->DontLightMap() && gl_IsDistanceCulled(light)) dynlights_distance_culled_flats++;
+				node = node->nextLight;
+				continue;
+			}
+			iter_dlightf++;
+
+			// we must do the side check here because gl_GetLight needs the correct plane orientation
+			// which we don't have for Legacy-style 3D-floors
+			double planeh = plane.plane.ZatPoint(light->Pos);
+			if ((planeh<light->Z() && ceiling) || (planeh>light->Z() && !ceiling))
+			{
+				node = node->nextLight;
+				continue;
+			}
+
+			p.Set(plane.plane.Normal(), plane.plane.fD());
+			DVector3 posrel = gl_GetLightPosRelative(light, portalgroup);
+			float radius = light->GetRadius();
+			float dist = fabsf(p.DistToPoint((float)posrel.X, (float)posrel.Z, (float)posrel.Y));
+			if (radius > 0.f && dist <= radius)
+			{
+				gl_InsertBestLightCandidate(candidates, { light, dist / radius }, candidateBudget);
+			}
+			node = node->nextLight;
+		}
+
+		for (unsigned int c = 0; c < candidates.Size() && (!renderLimit || lightsFlatPerEye < renderLimit); ++c)
+		{
+			lightsFlatPerEye++;
+			draw_dlightf += 1;
+			AddLightToList(lightdata, portalgroup, candidates[c].Light, false);
+		}
+	}
+	else while (node && (!renderLimit || lightsFlatPerEye < renderLimit))
 	{
 		FDynamicLight * light = node->lightsource;
 

@@ -25,6 +25,8 @@ EXTERN_CVAR (Int, gl_storage_buffer_type);
 EXTERN_CVAR (Float, gl_light_distance_cull);
 EXTERN_CVAR (Int, gl_light_flat_max_lights);
 EXTERN_CVAR (Int, gl_light_wall_max_lights);
+EXTERN_CVAR (Int, gl_light_flat_candidate_budget);
+EXTERN_CVAR (Int, gl_light_wall_candidate_budget);
 EXTERN_CVAR (Int, gl_light_range_limit);
 
 EXTERN_CVAR(Bool, gl_global_fade);

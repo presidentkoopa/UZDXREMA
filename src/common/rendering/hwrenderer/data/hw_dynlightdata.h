@@ -78,6 +78,33 @@ inline DVector3 gl_GetLightPosRelative(FDynamicLight *light, int portalgroup)
 	return light->mPosRelativeCache;
 }
 
+template<typename CandidateT>
+inline void gl_InsertBestLightCandidate(TArray<CandidateT> &candidates, const CandidateT &candidate, int limit)
+{
+	if (limit <= 0)
+	{
+		return;
+	}
+
+	candidates.Push(candidate);
+	for (unsigned int i = candidates.Size() - 1; i > 0; --i)
+	{
+		if (candidates[i].Score >= candidates[i - 1].Score)
+		{
+			break;
+		}
+
+		CandidateT tmp = candidates[i - 1];
+		candidates[i - 1] = candidates[i];
+		candidates[i] = tmp;
+	}
+
+	if ((int)candidates.Size() > limit)
+	{
+		candidates.Pop();
+	}
+}
+
 inline bool gl_IsDistanceCulled(FDynamicLight *light)
 {
 	if (!gl_light_distance_cull_cache)

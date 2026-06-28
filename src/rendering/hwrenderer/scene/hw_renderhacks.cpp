@@ -38,6 +38,14 @@
 #include "hw_clock.h"
 #include "hw_dynlightdata.h"
 #include "flatvertices.h"
+
+struct FRenderHackLightCandidate
+{
+	FDynamicLight *Light;
+	float Score;
+};
+
+static thread_local TArray<FRenderHackLightCandidate> renderHackLightCandidates;
 #include "hw_lightbuffer.h"
 #include "hwrenderer/scene/hw_portal.h"
 #include "hw_fakeflat.h"
@@ -120,7 +128,43 @@ int HWDrawInfo::SetupLightsForOtherPlane(subsector_t * sub, FDynLightData &light
 		FLightNode * node = sub->section->lighthead;
 
 		lightdata.Clear();
-		while (node && (!gl_light_flat_max_lights || lightsFlatPerEye < gl_light_flat_max_lights))
+		const int renderLimit = gl_light_flat_max_lights;
+		const int candidateBudget = gl_light_flat_candidate_budget;
+		if (candidateBudget > 0)
+		{
+			auto &candidates = renderHackLightCandidates;
+			candidates.Clear();
+			while (node)
+			{
+				FDynamicLight * light = node->lightsource;
+
+				if (!light->IsActive() || gl_IsDistanceCulled(light))
+				{
+					if (light->IsActive() && gl_IsDistanceCulled(light)) dynlights_distance_culled_flats++;
+					node = node->nextLight;
+					continue;
+				}
+				iter_dlightf++;
+
+				p.Set(plane->Normal(), plane->fD());
+				DVector3 posrel = gl_GetLightPosRelative(light, sub->sector->PortalGroup);
+				float radius = light->GetRadius();
+				float dist = fabsf(p.DistToPoint((float)posrel.X, (float)posrel.Z, (float)posrel.Y));
+				if (radius > 0.f && dist <= radius && !p.PointOnSide((float)posrel.X, (float)posrel.Z, (float)posrel.Y))
+				{
+					gl_InsertBestLightCandidate(candidates, { light, dist / radius }, candidateBudget);
+				}
+				node = node->nextLight;
+			}
+
+			for (unsigned int c = 0; c < candidates.Size() && (!renderLimit || lightsFlatPerEye < renderLimit); ++c)
+			{
+				lightsFlatPerEye++;
+				draw_dlightf += 1;
+				AddLightToList(lightdata, sub->sector->PortalGroup, candidates[c].Light, false);
+			}
+		}
+		else while (node && (!renderLimit || lightsFlatPerEye < renderLimit))
 		{
 			FDynamicLight * light = node->lightsource;
 

@@ -344,12 +344,14 @@ static void AppendBenchmarkHeader(FString& out)
 		gl_light_model_dedupe_cache ? "on" : "off",
 		gl_light_spot_cache ? "on" : "off",
 		gl_light_pos_relative_cache ? "on" : "off");
-	out.AppendFormat("DynLight Limits: distance_cull=%.1f max_intensity=%.1f max_collected_ss=%d flat_max=%d wall_max=%d range_limit=%d\n\n",
+	out.AppendFormat("DynLight Limits: distance_cull=%.1f max_intensity=%.1f max_collected_ss=%d flat_max=%d wall_max=%d flat_budget=%d wall_budget=%d range_limit=%d\n\n",
 		(double)gl_light_distance_cull,
 		(double)gl_light_max_intensity,
 		(int)gl_light_max_collected_subsectors,
 		(int)gl_light_flat_max_lights,
 		(int)gl_light_wall_max_lights,
+		(int)gl_light_flat_candidate_budget,
+		(int)gl_light_wall_candidate_budget,
 		(int)gl_light_range_limit);
 }
 
