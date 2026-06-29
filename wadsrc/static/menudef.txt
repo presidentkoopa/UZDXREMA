@@ -3878,11 +3878,11 @@ OptionMenu "InfoAndCreditsMenu"
 	Title "$INFOCREDMNU_TITLE"
 	StaticPatch 50, -10, "DOOMXR"
 	Position 270
-	Submenu		"$INFOCREDMNU_INSTRUCTIONS", "QuestZDoomInstructions", 0, 1
-	Submenu		"$INFOCREDMNU_CREDITS", "QuestZDoomCredits", 0, 1
+	Submenu		"$INFOCREDMNU_INSTRUCTIONS", "DoomXRInstructions", 0, 1
+	Submenu		"$INFOCREDMNU_CREDITS", "DoomXRCredits", 0, 1
 }
 
-OptionMenu "QuestZDoomInstructions"
+OptionMenu "DoomXRInstructions"
 { 
 	Title "$INFOCREDMNU_TITLE"
 	StaticPatch 50, -10, "DOOMXR"
@@ -3939,7 +3939,7 @@ OptionMenu "QuestZDoomInstructions"
 	StaticText	""
 }
 
-OptionMenu "QuestZDoomCredits"
+OptionMenu "DoomXRCredits"
 { 
 	Title "$INFOCREDMNU_TITLE"
 	StaticPatch 50, -10, "DOOMXR"

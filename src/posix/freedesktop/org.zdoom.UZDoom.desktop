@@ -1,5 +1,5 @@
 [Desktop Entry]
-Name=UZDoom
+Name=DoomXR
 Comment=Multi-game launcher for Doom era games
 Icon=org.zdoom.UZDoom
 Categories=Game;Shooter;
@@ -13,7 +13,7 @@ MimeType=application/x-doom-wad;application/x-doom-pk7;application/x-doom-pk3;
 Actions=launch-safemode;launch-doom-1;launch-doom-2;launch-heretic;launch-hexen;launch-strife;
 
 [Desktop Action launch-safemode]
-Name=UZDoom Safemode
+Name=DoomXR Safemode
 Icon=org.zdoom.UZDoom
 Exec=uzdoom -noautoload -noautoexec %F
 

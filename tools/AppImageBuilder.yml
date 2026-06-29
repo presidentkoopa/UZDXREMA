@@ -5,7 +5,7 @@ version: 1
 AppDir:
   app_info:
     id: org.zdoom.UZDoom
-    name: UZDoom
+    name: DoomXR
     icon: org.zdoom.UZDoom
     version: '{{GIT_DESCRIBE}}'
     exec: ./usr/bin/uzdoom
