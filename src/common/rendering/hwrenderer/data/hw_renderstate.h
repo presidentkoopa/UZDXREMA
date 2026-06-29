@@ -236,6 +236,7 @@ protected:
 	int mTextureMode;
 	int mTextureClamp;
 	int mTextureModeFlags;
+	int mTextureModeFlagsExtra;
 	int mSoftLight;
 	float mLightParms[4];
 
@@ -279,6 +280,7 @@ public:
 		mTextureMode = -1;
 		mTextureClamp = 0;
 		mTextureModeFlags = 0;
+		mTextureModeFlagsExtra = 0;
 		mStreamData.uDesaturationFactor = 0.0f;
 		mAlphaThreshold = 0.5f;
 		mModelMatrixEnabled = false;
@@ -406,10 +408,15 @@ public:
 
 	int GetTextureModeAndFlags(int tempTM)
 	{
-		int f = mTextureModeFlags;
+		int f = mTextureModeFlags | mTextureModeFlagsExtra;
 		if (!mBrightmapEnabled) f &= ~(TEXF_Brightmap | TEXF_Glowmap);
 		if (mTextureClamp) f |= TEXF_ClampY;
 		return (mTextureMode == TM_NORMAL && tempTM == TM_OPAQUE ? TM_OPAQUE : mTextureMode) | f;
+	}
+
+	void SetTextureModeFlagsExtra(int flags)
+	{
+		mTextureModeFlagsExtra = flags;
 	}
 
 	void EnableTexture(bool on)

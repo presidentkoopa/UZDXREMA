@@ -96,13 +96,16 @@ vec3 ProcessMaterialLight(Material material, vec3 ambientLight)
 				vec4 lightspot2 = lights[i+3];
 
 				vec3 L = normalize(lightpos.xyz - worldpos);
+				float NdotL = max(dot(N, L), 0.0);
+				if (NdotL <= 0.0)
+					continue;
 				vec3 H = normalize(V + L);
 
 				float attenuation = linearDistanceAttenuation(lightpos);
 				if (lightspot1.w == 1.0)
 					attenuation *= spotLightAttenuation(lightpos, lightspot1.xyz, lightspot2.x, lightspot2.y);
 				if (lightcolor.a < 0.0)
-					attenuation *= clamp(dot(N, L), 0.0, 1.0); // Sign bit is the attenuated light flag
+					attenuation *= NdotL; // Sign bit is the attenuated light flag
 
 				if (attenuation > 0.0)
 				{
@@ -119,10 +122,10 @@ vec3 ProcessMaterialLight(Material material, vec3 ambientLight)
 					vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
 
 					vec3 nominator = NDF * G * F;
-					float denominator = 4.0 * clamp(dot(N, V), 0.0, 1.0) * clamp(dot(N, L), 0.0, 1.0);
+					float denominator = 4.0 * clamp(dot(N, V), 0.0, 1.0) * NdotL;
 					vec3 specular = nominator / max(denominator, 0.001);
 
-					Lo += (kD * albedo / PI + specular) * radiance;
+					Lo += (kD * albedo / PI + specular) * radiance * NdotL;
 				}
 			}
 			//
@@ -136,13 +139,16 @@ vec3 ProcessMaterialLight(Material material, vec3 ambientLight)
 				vec4 lightspot2 = lights[i+3];
 
 				vec3 L = normalize(lightpos.xyz - worldpos);
+				float NdotL = max(dot(N, L), 0.0);
+				if (NdotL <= 0.0)
+					continue;
 				vec3 H = normalize(V + L);
 
 				float attenuation = linearDistanceAttenuation(lightpos);
 				if (lightspot1.w == 1.0)
 					attenuation *= spotLightAttenuation(lightpos, lightspot1.xyz, lightspot2.x, lightspot2.y);
 				if (lightcolor.a < 0.0)
-					attenuation *= clamp(dot(N, L), 0.0, 1.0); // Sign bit is the attenuated light flag
+					attenuation *= NdotL; // Sign bit is the attenuated light flag
 
 				if (attenuation > 0.0)
 				{
@@ -159,10 +165,10 @@ vec3 ProcessMaterialLight(Material material, vec3 ambientLight)
 					vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
 
 					vec3 nominator = NDF * G * F;
-					float denominator = 4.0 * clamp(dot(N, V), 0.0, 1.0) * clamp(dot(N, L), 0.0, 1.0);
+					float denominator = 4.0 * clamp(dot(N, V), 0.0, 1.0) * NdotL;
 					vec3 specular = nominator / max(denominator, 0.001);
 
-					Lo -= (kD * albedo / PI + specular) * radiance;
+					Lo -= (kD * albedo / PI + specular) * radiance * NdotL;
 				}
 			}
 		}

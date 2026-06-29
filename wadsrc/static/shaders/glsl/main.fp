@@ -47,6 +47,7 @@ const int TEXF_Brightmap = 0x10000;
 const int TEXF_Detailmap = 0x20000;
 const int TEXF_Glowmap = 0x40000;
 const int TEXF_ClampY = 0x80000;
+const int TEXF_FlipNormal = 0x100000;
 
 //===========================================================================
 //
@@ -648,12 +649,21 @@ vec3 ApplyNormalMap(vec2 texcoord)
 
 	mat3 tbn = cotangent_frame(interpolatedNormal, pixelpos.xyz, vTexCoord.st);
 	vec3 bumpedNormal = normalize(tbn * map);
+	if ((uTextureMode & TEXF_FlipNormal) != 0)
+	{
+		bumpedNormal = -bumpedNormal;
+	}
 	return bumpedNormal;
 }
 #else
 vec3 ApplyNormalMap(vec2 texcoord)
 {
-	return normalize(vWorldNormal.xyz);
+	vec3 normal = normalize(vWorldNormal.xyz);
+	if ((uTextureMode & TEXF_FlipNormal) != 0)
+	{
+		normal = -normal;
+	}
+	return normal;
 }
 #endif
 

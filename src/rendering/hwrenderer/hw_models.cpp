@@ -85,6 +85,7 @@ void FHWModelRenderer::BeginDrawHUDModel(FRenderStyle style, const VSMatrix &obj
 {
 	state.SetDepthFunc(DF_LEqual);
 	state.SetDepthClamp(true);
+	state.SetTextureModeFlagsExtra(TEXF_FlipNormal);
 	
 	/* hack the depth range to prevent view model from poking into walls */
     gldepthmin = 0;
@@ -107,6 +108,7 @@ void FHWModelRenderer::EndDrawHUDModel(FRenderStyle style, int smf_flags)
 {
 	state.SetBoneIndexBase(-1);
 	state.EnableModelMatrix(false);
+	state.SetTextureModeFlagsExtra(0);
 
 	state.SetDepthFunc(DF_Less);
 	if (!(style == DefaultRenderStyle()) || (smf_flags & MDL_FORCECULLBACKFACES))

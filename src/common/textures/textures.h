@@ -92,6 +92,7 @@ enum texflags
 	TEXF_Detailmap = 0x20000,
 	TEXF_Glowmap = 0x40000,
 	TEXF_ClampY = 0x80000,
+	TEXF_FlipNormal = 0x100000,
 };
 
 
