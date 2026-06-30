@@ -8,6 +8,7 @@ OptionMenu "OptionsMenuSimple" protected
 	Submenu "$OPTMNU_INFOCREDITS", 		"InfoAndCreditsMenu"
 	Submenu "$OPTMNU_QUICKMENU",		"QuickMenu"
 	Submenu "$VRPREFMNU_TITLE",			"VROptionsMenu"
+	Submenu "$VRPERFMNU_TITLE",			"VRPerfTweakMenu"
 	StaticText " "
 	Submenu "$OPTMNU_CONTROLS",			"CustomizeControls"
 	Submenu "$OPTMNU_MOUSE",			"MouseOptionsSimple"

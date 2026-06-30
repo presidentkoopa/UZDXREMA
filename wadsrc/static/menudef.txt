@@ -365,6 +365,7 @@ OptionMenu "OptionsMenu" protected
 	Submenu "$OPTMNU_INFOCREDITS", 		"InfoAndCreditsMenu"
 	Submenu "$OPTMNU_QUICKMENU",		"QuickMenu"
 	Submenu "$VRPREFMNU_TITLE",			"VROptionsMenu"
+	Submenu "$VRPERFMNU_TITLE",			"VRPerfTweakMenu"
 	StaticText " "
 	Submenu "$OPTMNU_CONTROLS",			"CustomizeControls"
 	IfNotOption(OpenXR)
@@ -3133,22 +3134,8 @@ OptionMenu VROptionsMenu protected
 	}
 	Slider "$VRPREFMNU_WORLDSCALE",     "vr_vunits_per_meter", 1, 60, 1, 0
 	Slider "$VRPREFMNU_HEIGHT_ADJUST",		        "vr_height_adjust", -0.5, 1.0, 0.01, 2
-	ifOption(OpenVR, OpenXR)
-	{
-		StaticText ""
-		StaticText "$VRPREFMNU_PERFORMANCE", gold
-		Option "$VRPREFMNU_BSP_MULTITHREAD", "gl_multithread", "OnOff"
-		StaticText "$VRPREFMNU_BSP_MULTITHREAD_HELP", "Brown"
-		Option "$VRPREFMNU_SCENE_MULTITHREAD", "vr_scene_multithread", "OnOff"
-		StaticText "$VRPREFMNU_SCENE_MULTITHREAD_HELP", "Brown"
-	}
 	ifOption(OpenXR)
 	{
-		Option "$VRPREFMNU_MULTIVIEW", "vr_openxr_multiview", "OnOff"
-		StaticText "$VRPREFMNU_MULTIVIEW_HELP", "Brown"
-		Option "$VRPREFMNU_TEXTURE_THREAD", "gl_texture_thread", "OnOff"
-		StaticText "$VRPREFMNU_TEXTURE_THREAD_HELP", "Brown"
-		
 		StaticText ""
 		StaticText "$VRPREFMNU_DISPLAY_ADJUST", gold
 		Slider "$VRPREFMNU_ADJUST_GAMMA",     		"vr_openxr_present_gamma_bias", -2, 2, 0.01, 2
@@ -3157,7 +3144,8 @@ OptionMenu VROptionsMenu protected
 		Slider "$VRPREFMNU_ADJUST_SATURATION",     "vr_openxr_present_saturation_bias", -2, 2, 0.01, 2
 	}
 	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_desktop_view vr_vunits_per_meter vr_height_adjust vr_scene_multithread vr_openxr_multiview vr_openxr_present_gamma_bias vr_openxr_present_contrast_bias vr_openxr_present_brightness_bias vr_openxr_present_saturation_bias"
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_desktop_view vr_vunits_per_meter vr_height_adjust vr_openxr_present_gamma_bias vr_openxr_present_contrast_bias vr_openxr_present_brightness_bias vr_openxr_present_saturation_bias"
+
 	StaticText ""
 	StaticText "$VRPREFMNU_VR_CONTROLS", gold
 	ifOption(OpenVR, OpenXR)
@@ -3865,6 +3853,106 @@ OptionMenu QuickMenu protected
 		Option "$VRPREFMNU_TEXTURE_THREAD", "gl_texture_thread", "OnOff"
 		StaticText "$VRPREFMNU_TEXTURE_THREAD_QUICKHELP", "Brown"
 	}
+}
+
+/*=======================================
+ *
+ * VR Performance Tweak Menu
+ *
+ *=======================================*/
+
+OptionMenu VRPerfTweakMenu protected
+{
+	Title "$VRPERFMNU_TITLE"
+	
+	StaticText ""
+	StaticText "$VRPERFMNU_PERFORMANCE", gold
+	StaticText ""
+	Option "$VRPREFMNU_BSP_MULTITHREAD", "gl_multithread", "OnOff"
+	StaticText "$VRPREFMNU_BSP_MULTITHREAD_HELP", "Brown"
+	StaticText ""
+	Option "$VRPREFMNU_SCENE_MULTITHREAD", "vr_scene_multithread", "OnOff"
+	StaticText "$VRPREFMNU_SCENE_MULTITHREAD_HELP", "Brown"
+	ifOption(OpenVR, OpenXR)
+	{
+		StaticText ""
+		Option "$VRPREFMNU_MULTIVIEW", "vr_openxr_multiview", "OnOff"
+		StaticText "$VRPREFMNU_MULTIVIEW_HELP", "Brown"
+		StaticText ""
+		Option "$VRPREFMNU_TEXTURE_THREAD", "gl_texture_thread", "OnOff"
+		StaticText "$VRPREFMNU_TEXTURE_THREAD_HELP", "Brown"
+	}
+
+	StaticText " "
+	StaticText "$VRPERFMNU_FILTER", gold
+	StaticText " "
+	Option "$GLTEXMNU_ANISOTROPIC",		gl_texture_filter_anisotropic,	"Anisotropy"
+	StaticText "$VRPERFMNU_ANISOTROPIC_TIP", "Brown"
+	
+	StaticText " "
+	ifOption(MMX)
+	{
+		Option "$GLTEXMNU_HQRESIZE",		gl_texture_hqresizemode,		"HqResizeModes"
+	}
+	else
+	{
+		Option "$GLTEXMNU_HQRESIZE",		gl_texture_hqresizemode,		"HqResizeModesNoMMX"
+	}
+	Option "$GLTEXMNU_HQRESIZEMULT",	gl_texture_hqresizemult,		"HqResizeMultipliers"
+	StaticText "$VRPERFMNU_HQRESIZE_TIP", "Brown"
+	
+	StaticText " "
+	Option "$GLTEXMNU_PRECACHETEX",		gl_precache,					"YesNo"
+	StaticText "$VRPERFMNU_PRECACHE_TIP", "Brown"
+
+	StaticText " "
+	Option "$GLPREFMNU_MULTISAMPLE", 			gl_multisample,					"Multisample"
+	StaticText "$VRPERFMNU_MSAA_TIP", "Brown"
+	
+
+	StaticText " "
+	StaticText "$VRPERFMNU_SCENE", gold
+	StaticText " "
+	Option "$GLPREFMNU_RENDERSKYDOME", gl_skydome, "YesNo"
+	StaticText "$QZDMNU_AFFECT_PERF_TIP", "Brown"
+	
+	StaticText " "
+	ScaleSlider "$GLPREFMNU_DECORATIVE_SPRITE_CULL_DISTANCE",		gl_sprite_decor_distance_cull, 0.0, 8000.0, 100.0, "$GLPREFMNU_CULLING_DISABLED"
+	ScaleSlider "$DSPLYMNU_SPRITECULL",			gl_sprite_distance_cull, 0.0, 8000.0, 100.0, "$GLPREFMNU_CULLING_DISABLED"
+	ScaleSlider "$DSPLYMNU_LINECULL",			gl_line_distance_cull, 0.0, 16000.0, 100.0, "$GLPREFMNU_CULLING_DISABLED"
+	StaticText "$VRPERFMNU_CULL_TIP", "Brown"
+	Command "$DSPLYMNU_DISABLERENDERCULL",		"disablerendercull"
+
+	StaticText " "
+	Option "$GLPREFMNU_GLOBAL_FADE",						gl_global_fade, "OnOff"
+	Slider "$GLPREFMNU_GLOBAL_FADE_DENSITY",				gl_global_fade_density, 0.0001, 0.005, 0.0001, 4
+	Slider "$GLPREFMNU_GLOBAL_FADE_GRADIENT",				gl_global_fade_gradient, 0.1, 2, 0.1, 1
+	ColorPicker "$GLPREFMNU_GLOBAL_FADE_COLOR",			gl_global_fade_color
+	StaticText "$VRPERFMNU_FADE_TIP", "Brown"
+	
+	ifOption(Developer1, Developer2)
+	{
+		StaticText " "
+		StaticText "$VRPERFMNU_DEV_ONLY", gold
+		StaticText " "
+		StaticText "$VRPERFMNU_DEV_WARN", Brick
+		StaticText "$VRPERFMNU_DEV_WARN2", Brick
+		StaticText " "
+		Slider "$DEVOPTMNU_RENDER_SCALE", "vr_openxr_render_scale", 0.25, 4.0, 0.05, 2
+		StaticText "$VRPERFMNU_RENDER_SCALE_TIP", "Brown"
+		StaticText " "
+		Slider "$DEVOPTMNU_BSP_WORKER_THREADS", "gl_bsp_worker_threads", 1, 8, 1
+		StaticText "$VRPERFMNU_BSP_WORKER_TIP", "Brown"
+		StaticText " "
+		Option "$DEVOPTMNU_BSP_WALL_BATCH_SIZE", "gl_bsp_wall_batch_size", "WallBatchSizes"
+		Option "$DEVOPTMNU_BSP_SKY_SECTORS_ON_MAIN_THREAD", "gl_bsp_worker_sky_mainthread", "OnOff"
+		Option "$GLPREFMNU_DESKTOP_MIRROR_REUSE_MULTIVIEW_FRAMES", "vr_openxr_multiview_mirror_reuse", "YesNo"
+		Option "$GLPREFMNU_LAYERED_MULTIVIEW_POSTPROCESS", "vr_openxr_multiview_postprocess", "YesNo"
+		StaticText "$VRPERFMNU_OPT_DEFAULT_TIP", "Brown"
+	}
+
+	StaticText " "
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar gl_multithread vr_scene_multithread vr_openxr_multiview gl_texture_thread gl_texture_filter_anisotropic gl_texture_hqresizemode gl_texture_hqresizemult gl_precache gl_multisample gl_skydome gl_sprite_decor_distance_cull gl_sprite_distance_cull gl_line_distance_cull gl_global_fade gl_global_fade_density gl_global_fade_gradient gl_global_fade_color vr_openxr_render_scale gl_bsp_worker_threads gl_bsp_wall_batch_size gl_bsp_worker_sky_mainthread vr_openxr_multiview_mirror_reuse vr_openxr_multiview_postprocess"
 }
 
 /*=======================================
