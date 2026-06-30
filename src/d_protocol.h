@@ -67,6 +67,8 @@ struct usercmd_t
 	short	pitch;			// up/down
 	short	yaw;			// left/right
 	short	roll;			// "tilt"
+	short	weaponpitch;	// main-hand aim pitch
+	short	weaponyaw;		// main-hand aim yaw
 	short	forwardmove;
 	short	sidemove;
 	short	upmove;
@@ -83,6 +85,8 @@ enum
 	UCMDF_SIDEMOVE		= 0x10,
 	UCMDF_UPMOVE		= 0x20,
 	UCMDF_ROLL			= 0x40,
+	UCMDF_WEAPONPITCH	= 0x80,
+	UCMDF_WEAPONYAW		= 0x100,
 };
 
 // When changing the following enum, be sure to update Net_SkipCommand()
@@ -124,7 +128,7 @@ enum EDemoCommand
 	DEM_RUNSCRIPT,		// 32 Word: Script#, Byte: # of args; each arg is a 4-byte int
 	DEM_SINFCHANGEDXOR,	// 33 Like DEM_SINFCHANGED, but data is a byte indicating how to set a bit
 	DEM_INVDROP,		// 34 4 bytes: ID of item to drop
-	DEM_WARPCHEAT,		// 35 4 bytes: 2 for x, 2 for y
+	DEM_WARPCHEAT,		// 35 13 bytes: 4 for x, 4 for y, 4 for z, 1 for telefrag
 	DEM_CENTERVIEW,		// 36
 	DEM_SUMMONFRIEND,	// 37 String: Thing to fabricate
 	DEM_SPRAY,			// 38 String: The decal to spray

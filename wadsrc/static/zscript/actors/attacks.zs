@@ -469,7 +469,7 @@ extend class Actor
 				Vector3 dir;
 				Vector3 yoffsetDir;
 				Vector3 zoffsetDir;
-				if (weapon.bOffhandWeapon)
+				if (weapon.bOffhandWeapon && !multiplayer)
 				{
 					spawnpos = player.mo.OffhandPos;
 					directionRoll = -player.mo.OffhandRoll;
@@ -489,7 +489,7 @@ extend class Actor
 				directionAngle = dir.x;
 				directionPitch = dir.y;
 
-				if (!use_action_spawn_yzoffset)
+				if (!multiplayer && !use_action_spawn_yzoffset)
 					yofs = zofs = 0;
 				
 				spawnpos += (
@@ -590,7 +590,7 @@ extend class Actor
 
 			if (weapon && weapon == invoker && player.mo.OverrideAttackPosDir)
 			{
-				if (weapon.bOffhandWeapon)
+				if (weapon.bOffhandWeapon && !multiplayer)
 				{
 					spawnpos = player.mo.OffhandPos;
 					dir = player.mo.OffhandDir(self, directionAngle, self.Pitch);

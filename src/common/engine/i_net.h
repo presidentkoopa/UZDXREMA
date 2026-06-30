@@ -5,6 +5,7 @@
 
 // Called by D_DoomMain.
 int I_InitNetwork (void);
+void CloseNetwork(void);
 void I_NetCmd (void);
 void I_NetMessage(const char*, ...);
 void I_NetError(const char* error);
@@ -12,6 +13,52 @@ void I_NetProgress(int val);
 void I_NetInit(const char* msg, int num);
 bool I_NetLoop(bool (*timer_callback)(void*), void* userdata);
 void I_NetDone();
+bool I_ConsumeCancelledNetWaitBoot();
+
+enum ENetWaitBackend
+{
+	NETWAITBACKEND_None,
+	NETWAITBACKEND_Widget,
+	NETWAITBACKEND_VRShell
+};
+
+enum ENetWaitRole
+{
+	NETWAITROLE_None,
+	NETWAITROLE_Host,
+	NETWAITROLE_Client
+};
+
+enum ENetWaitPhase
+{
+	NETWAITPHASE_Inactive,
+	NETWAITPHASE_Contacting,
+	NETWAITPHASE_WaitingForPlayers,
+	NETWAITPHASE_Ready,
+	NETWAITPHASE_Error
+};
+
+enum ENetWaitSourceContext
+{
+	NETWAITSOURCE_Boot,
+	NETWAITSOURCE_Title,
+	NETWAITSOURCE_InLevel
+};
+
+void I_BeginNetWaitSession(ENetWaitRole role, ENetWaitPhase phase, const char* msg, int foundPlayers, int totalPlayers, ENetWaitSourceContext source = NETWAITSOURCE_Boot);
+void I_UpdateNetWaitSession(ENetWaitPhase phase, const char* msg, int foundPlayers, int totalPlayers);
+void I_FinishNetWaitSession();
+void I_FailNetWaitSession(const char* error);
+void I_CancelNetWaitSession();
+bool I_IsNetWaitSessionActive();
+bool I_IsUsingVRNetWaitShell();
+ENetWaitBackend I_GetNetWaitBackend();
+ENetWaitRole I_GetNetWaitRole();
+ENetWaitPhase I_GetNetWaitPhase();
+ENetWaitSourceContext I_GetNetWaitSourceContext();
+const char* I_GetNetWaitMessage();
+int I_GetNetWaitFoundPlayers();
+int I_GetNetWaitTotalPlayers();
 
 enum ENetConstants
 {

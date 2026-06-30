@@ -1291,7 +1291,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_Recoil)
 	if (player != nullptr && player->mo == self)
 	{
 		//We don't want to adjust the player's camera - that could make them sick
-		if (!vr_recoil) return 0;
+		if (multiplayer || !vr_recoil) return 0;
 		player->keepmomentum = true;
 	}
 
@@ -5697,6 +5697,10 @@ DEFINE_ACTION_FUNCTION(AActor, AttackDir)
 	PARAM_OBJECT_NOT_NULL(source, AActor);
 	PARAM_ANGLE(yaw);
 	PARAM_ANGLE(pitch);
+	if (self->player != nullptr && multiplayer && self->OverrideAttackPosDir)
+	{
+		ACTION_RETURN_VEC3(DVector3((self->AttackAngle + DAngle::fromDeg(90.)).Degrees(), (-self->AttackPitch).Degrees(), 0.));
+	}
 	DVector3 dir = self->AttackDir(source, yaw, pitch);
 	ACTION_RETURN_VEC3(DVector3(dir.Angle().Degrees(), dir.Pitch().Degrees(), 0.));
 }
@@ -5707,6 +5711,10 @@ DEFINE_ACTION_FUNCTION(AActor, OffhandDir)
 	PARAM_OBJECT_NOT_NULL(source, AActor);
 	PARAM_ANGLE(yaw);
 	PARAM_ANGLE(pitch);
+	if (self->player != nullptr && multiplayer && self->OverrideAttackPosDir)
+	{
+		ACTION_RETURN_VEC3(DVector3((self->AttackAngle + DAngle::fromDeg(90.)).Degrees(), (-self->AttackPitch).Degrees(), 0.));
+	}
 	DVector3 dir = self->OffhandDir(source, yaw, pitch);
 	ACTION_RETURN_VEC3(DVector3(dir.Angle().Degrees(), dir.Pitch().Degrees(), 0.));
 }

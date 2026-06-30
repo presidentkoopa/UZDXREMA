@@ -589,6 +589,7 @@ void P_SetupLevel(FLevelLocals *Level, int position, bool newGame)
 	//Trigger a Yaw/Pitch recalc in the QuestZDoom code to avoid moving in the wrong direction
 	resetDoomYaw = true;
 	resetPreviousPitch = true;
+	VR_ResetTransientNetSafeState();
 
 	// This check was previously done at run time each time the heightsec was checked.
 	// However, since 3D floors are static data, we can easily precalculate this and store it in the sector's flags for quick access.

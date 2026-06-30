@@ -299,6 +299,7 @@ VulkanRenderDevice::~VulkanRenderDevice()
 {
 	StopBackgroundCache();
 	vkDeviceWaitIdle(device->device); // make sure the GPU is no longer using any objects before RAII tears them down
+	PPResource::ResetAll();
 
 	delete mVertexData;
 	delete mSkyData;

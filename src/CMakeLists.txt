@@ -1231,6 +1231,7 @@ set (PCH_SOURCES
 	common/engine/stringtable.cpp
 	common/engine/i_net.cpp
 	common/engine/i_interface.cpp
+	common/engine/multiplayerlaunch.cpp
 	common/engine/renderstyle.cpp
 	common/engine/v_colortables.cpp
 	common/engine/serializer.cpp

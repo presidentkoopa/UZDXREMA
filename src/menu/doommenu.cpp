@@ -37,6 +37,7 @@
 #include "c_buttons.h"
 #include "c_console.h"
 #include "c_bind.h"
+#include "c_cvars.h"
 #include "d_eventbase.h"
 #include "g_input.h"
 #include "configfile.h"
@@ -45,6 +46,8 @@
 #include "vm.h"
 #include "v_video.h"
 #include "i_system.h"
+#include "i_net.h"
+#include "m_argv.h"
 #include "types.h"
 #include "texturemanager.h"
 #include "v_draw.h"
@@ -60,6 +63,9 @@
 #include "d_main.h"
 #include "i_system.h"
 #include "doommenu.h"
+#include "multiplayerlaunch.h"
+#include "gamedata/g_mapinfo.h"
+#include "p_setup.h"
 #include "r_utility.h"
 #include "gameconfigfile.h"
 #include "d_player.h"
@@ -78,6 +84,229 @@ EXTERN_CVAR(Bool, show_messages)
 EXTERN_CVAR(Float, hud_scalefactor)
 
 CVAR(Bool, m_simpleoptions, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+
+CVAR(Int, mp_host_players, 2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, mp_host_gamemode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, mp_host_netmode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, mp_host_skill, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(String, mp_host_map, "", CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(String, mp_join_address, "", CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+static bool OptionGroupHasNumericValue(FOptionValues* values, double desired)
+{
+	if (values == nullptr)
+	{
+		return false;
+	}
+
+	for (auto& entry : values->mValues)
+	{
+		if (entry.Value == desired)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+static bool OptionGroupHasTextValue(FOptionValues* values, const char* desired)
+{
+	if (values == nullptr || desired == nullptr || *desired == 0)
+	{
+		return false;
+	}
+
+	for (auto& entry : values->mValues)
+	{
+		if (entry.TextValue.CompareNoCase(desired) == 0)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+static void ResetMultiplayerMenuCVarsToDefaults()
+{
+	static const char* const names[] =
+	{
+		"mp_host_players",
+		"mp_host_gamemode",
+		"mp_host_netmode",
+		"mp_host_skill",
+		"mp_host_map",
+		"mp_join_address",
+	};
+
+	for (const char* name : names)
+	{
+		if (auto* cvar = FindCVar(name, nullptr))
+		{
+			cvar->ResetToDefault();
+		}
+	}
+}
+
+static void SetOptionValues(const FName& name, FOptionValues* values)
+{
+	FOptionValues** old = OptionValues.CheckKey(name);
+	if (old != nullptr)
+	{
+		delete *old;
+		*old = values;
+	}
+	else
+	{
+		OptionValues[name] = values;
+	}
+}
+
+void M_BuildMultiplayerOptionGroups()
+{
+	{
+		auto* players = new FOptionValues;
+		for (int i = 2; i <= MAXNETNODES; ++i)
+		{
+			FOptionValues::Pair pair;
+			pair.Value = i;
+			pair.Text = FStringf("%d Players", i);
+			players->mValues.Push(pair);
+		}
+		SetOptionValues(FName("MultiplayerPlayers"), players);
+		if (mp_host_players < 2 || mp_host_players > MAXNETNODES)
+		{
+			mp_host_players = 2;
+		}
+	}
+
+	{
+		auto* modes = new FOptionValues;
+		{
+			FOptionValues::Pair pair;
+			pair.Value = 0;
+			pair.Text = GStrings.GetString("OPTMNU_MULTIPLAYER_COOP");
+			modes->mValues.Push(pair);
+		}
+		{
+			FOptionValues::Pair pair;
+			pair.Value = 1;
+			pair.Text = GStrings.GetString("OPTMNU_MULTIPLAYER_DEATHMATCH");
+			modes->mValues.Push(pair);
+		}
+		{
+			FOptionValues::Pair pair;
+			pair.Value = 2;
+			pair.Text = GStrings.GetString("OPTMNU_MULTIPLAYER_ALTDEATH");
+			modes->mValues.Push(pair);
+		}
+		SetOptionValues(FName("MultiplayerGameModes"), modes);
+		if (!OptionGroupHasNumericValue(modes, mp_host_gamemode))
+		{
+			mp_host_gamemode = 0;
+		}
+	}
+
+	{
+		auto* netmodes = new FOptionValues;
+		{
+			FOptionValues::Pair pair;
+			pair.Value = 0;
+			pair.Text = GStrings.GetString("OPTMNU_MULTIPLAYER_P2P");
+			netmodes->mValues.Push(pair);
+		}
+		{
+			FOptionValues::Pair pair;
+			pair.Value = 1;
+			pair.Text = GStrings.GetString("OPTMNU_MULTIPLAYER_PACKETSERVER");
+			netmodes->mValues.Push(pair);
+		}
+		SetOptionValues(FName("MultiplayerNetModes"), netmodes);
+		if (!OptionGroupHasNumericValue(netmodes, mp_host_netmode))
+		{
+			mp_host_netmode = 0;
+		}
+	}
+
+	{
+		auto* skills = new FOptionValues;
+		int defaultSkill = 1;
+		bool haveDefaultSkill = false;
+		for (unsigned i = 0; i < AllSkills.Size(); ++i)
+		{
+			if (AllSkills[i].NoMenu)
+			{
+				continue;
+			}
+			FOptionValues::Pair pair;
+			pair.Value = i + 1;
+			const char* text = AllSkills[i].MenuName.GetChars();
+			pair.Text = (text != nullptr && *text != 0) ? text : AllSkills[i].Name.GetChars();
+			skills->mValues.Push(pair);
+			if (!haveDefaultSkill)
+			{
+				defaultSkill = (int)pair.Value;
+				haveDefaultSkill = true;
+			}
+		}
+		SetOptionValues(FName("MultiplayerSkills"), skills);
+		if (!OptionGroupHasNumericValue(skills, mp_host_skill))
+		{
+			mp_host_skill = defaultSkill;
+		}
+	}
+
+	{
+		auto* maps = new FOptionValues;
+		for (unsigned i = 0; i < wadlevelinfos.Size(); ++i)
+		{
+			auto& info = wadlevelinfos[i];
+			if (!info.isValid() || info.MapName.IsEmpty() || !P_CheckMapData(info.MapName.GetChars()))
+			{
+				continue;
+			}
+			bool duplicate = false;
+			for (auto& existing : maps->mValues)
+			{
+				if (existing.TextValue.CompareNoCase(info.MapName) == 0)
+				{
+					duplicate = true;
+					break;
+				}
+			}
+			if (duplicate)
+			{
+				continue;
+			}
+
+			FOptionValues::Pair pair;
+			pair.Value = (double)i;
+			pair.TextValue = info.MapName;
+			FString title = info.LookupLevelName();
+			pair.Text = title.IsNotEmpty() ? title.GetChars() : info.MapName.GetChars();
+			maps->mValues.Push(pair);
+		}
+		SetOptionValues(FName("MultiplayerMaps"), maps);
+	}
+
+	FOptionValues** mapValues = OptionValues.CheckKey(FName("MultiplayerMaps"));
+	bool mapFound = false;
+	if (mapValues != nullptr)
+	{
+		const char* currentMap = mp_host_map;
+		if (OptionGroupHasTextValue(*mapValues, currentMap))
+		{
+			mapFound = true;
+		}
+	}
+
+	if (!mapFound)
+	{
+		if (mapValues != nullptr && (*mapValues)->mValues.Size() > 0)
+		{
+			mp_host_map = (*mapValues)->mValues[0].TextValue.GetChars();
+		}
+	}
+}
 
 typedef void(*hfunc)();
 DMenu* CreateMessageBoxMenu(DMenu* parent, const char* message, int messagemode, bool playsound, FName action = NAME_None, hfunc handler = nullptr);
@@ -645,6 +874,24 @@ CCMD(reset2saved)
 CCMD(resetb2defaults)
 {
 	C_SetDefaultBindings ();
+}
+
+CCMD(mp_launch_host)
+{
+	M_SetPendingMultiplayerLaunchHost(mp_host_players, mp_host_netmode, mp_host_gamemode, mp_host_skill, mp_host_map);
+	M_BeginPendingMultiplayerLaunch();
+}
+
+CCMD(mp_launch_join)
+{
+	M_SetPendingMultiplayerLaunchJoin(mp_join_address);
+	M_BeginPendingMultiplayerLaunch();
+}
+
+CCMD(mp_reset_defaults)
+{
+	ResetMultiplayerMenuCVarsToDefaults();
+	M_BuildMultiplayerOptionGroups();
 }
 
 

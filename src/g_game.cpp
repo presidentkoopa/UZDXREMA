@@ -93,13 +93,180 @@
 #include "fs_findfile.h"
 #include "hw_vrmodes.h"
 #include "hw_vrwheel.h"
-
 #include <QzDoom/VrCommon.h>
 #include <cmath>
 
 
 static FRandom pr_dmspawn ("DMSpawn");
 static FRandom pr_pspawn ("PlayerSpawn");
+
+static inline int joyint(double val);
+EXTERN_CVAR(Float, vr_vunits_per_meter);
+
+static inline int joyint_deadzone(double val)
+{
+	// `joyint` rounds away from zero, so tiny floating-point noise can still
+	// become a 1-unit ticcmd delta. VR locomotion is especially sensitive to
+	// that in multiplayer because those deltas are serialized into netcmds.
+	if (fabs(val) < 0.5)
+	{
+		return 0;
+	}
+	return joyint(val);
+}
+
+static void VR_ApplyStickMove(int forwardScale, int sideScale, float joyforward, float joyside, int &forward, int &side)
+{
+	// Convert local VR locomotion intent into ordinary command movement before sim.
+	side += joyint_deadzone(joyside * sideScale);
+	forward += joyint_deadzone(joyforward * forwardScale);
+}
+
+static void VR_ApplyTeleportBurstMove(int forwardScale, int sideScale, int &forward, int &side)
+{
+	constexpr float kTeleportBurstUnitsPerTick = 127.0f;
+	float burstForwardUnits = 0.0f;
+	float burstSideUnits = 0.0f;
+	if (!VR_ConsumeTeleportCommandStep(kTeleportBurstUnitsPerTick, &burstForwardUnits, &burstSideUnits))
+	{
+		return;
+	}
+
+	side += joyint_deadzone(clamp(burstSideUnits / kTeleportBurstUnitsPerTick, -1.0f, 1.0f) * sideScale);
+	forward += joyint_deadzone(clamp(burstForwardUnits / kTeleportBurstUnitsPerTick, -1.0f, 1.0f) * forwardScale);
+}
+
+static void VR_ApplyMultiplayerCrouchButton(ticcmd_t* cmd, bool vrActive)
+{
+	static bool vrMpCrouchTarget = false;
+	static float vrMpCrouchBlend = 0.0f;
+
+	if (cmd == nullptr || !multiplayer || !vrActive || vr_crouch_use_button)
+	{
+		vrMpCrouchTarget = false;
+		vrMpCrouchBlend = 0.0f;
+		VR_ClearMultiplayerCrouchHeight();
+		return;
+	}
+
+	auto* player = &players[consoleplayer];
+	float hmdHeightMapUnits = 0.0f;
+	if (player == nullptr || player->mo == nullptr || !VR_GetMultiplayerCrouchHeight(&hmdHeightMapUnits))
+	{
+		vrMpCrouchTarget = false;
+		vrMpCrouchBlend = max(0.0f, vrMpCrouchBlend - 0.35f);
+		return;
+	}
+
+	const double defaultViewHeight = player->DefaultViewHeight();
+	if (defaultViewHeight <= 0.0)
+	{
+		vrMpCrouchTarget = false;
+		vrMpCrouchBlend = 0.0f;
+		return;
+	}
+
+	const float heightRatio = clamp(hmdHeightMapUnits / float(defaultViewHeight), 0.0f, 1.25f);
+	constexpr float kCrouchOnRatio = 0.82f;
+	constexpr float kCrouchOffRatio = 0.90f;
+	constexpr float kBlendRisePerTic = 0.40f;
+	constexpr float kBlendFallPerTic = 0.30f;
+
+	if (heightRatio <= kCrouchOnRatio)
+	{
+		vrMpCrouchTarget = true;
+	}
+	else if (heightRatio >= kCrouchOffRatio)
+	{
+		vrMpCrouchTarget = false;
+	}
+
+	vrMpCrouchBlend += vrMpCrouchTarget ? kBlendRisePerTic : -kBlendFallPerTic;
+	vrMpCrouchBlend = clamp(vrMpCrouchBlend, 0.0f, 1.0f);
+
+	if (vrMpCrouchBlend >= 0.5f)
+	{
+		cmd->ucmd.buttons |= BT_CROUCH;
+	}
+}
+
+namespace
+{
+	enum class EVRCanonicalAimOwner : uint8_t
+	{
+		MainHand = 0,
+		Offhand = 1,
+	};
+
+	EVRCanonicalAimOwner GVRCanonicalAimOwner = EVRCanonicalAimOwner::MainHand;
+
+	static bool VR_HandHasActiveSequence(player_t* player, int hand)
+	{
+		if (player == nullptr)
+		{
+			return false;
+		}
+
+		AActor* weapon = hand != 0 ? player->OffhandWeapon : player->ReadyWeapon;
+		if (weapon == nullptr)
+		{
+			return false;
+		}
+
+		DPSprite* pspr = player->FindPSprite(hand != 0 ? PSP_OFFHANDWEAPON : PSP_WEAPON);
+		if (pspr == nullptr || pspr->GetCaller() != weapon)
+		{
+			return false;
+		}
+
+		const uint32_t readyMask = hand != 0
+			? (WF_OFFHANDREADY | WF_OFFHANDREADYALT)
+			: (WF_WEAPONREADY | WF_WEAPONREADYALT);
+
+		return (player->WeaponState & readyMask) == 0;
+	}
+
+	static EVRCanonicalAimOwner VR_ResolveCanonicalAimOwner(player_t* player, uint32_t buttons)
+	{
+		if (player == nullptr)
+		{
+			return EVRCanonicalAimOwner::MainHand;
+		}
+
+		const bool hasMainWeapon = player->ReadyWeapon != nullptr;
+		const bool hasOffhandWeapon = player->OffhandWeapon != nullptr;
+
+		const bool mainInputActive = hasMainWeapon &&
+			(buttons & (BT_ATTACK | BT_ALTATTACK | BT_RELOAD | BT_MAINHANDRELOAD)) != 0;
+		const bool offhandInputActive = hasOffhandWeapon &&
+			(buttons & (BT_OFFHANDATTACK | BT_OFFHANDALTATTACK | BT_OFFHANDRELOAD)) != 0;
+
+		const bool mainSequenceActive = VR_HandHasActiveSequence(player, 0);
+		const bool offhandSequenceActive = VR_HandHasActiveSequence(player, 1);
+
+		if (mainInputActive || mainSequenceActive)
+		{
+			return EVRCanonicalAimOwner::MainHand;
+		}
+
+		if (offhandInputActive)
+		{
+			return EVRCanonicalAimOwner::Offhand;
+		}
+
+		if (GVRCanonicalAimOwner == EVRCanonicalAimOwner::Offhand && offhandSequenceActive)
+		{
+			return EVRCanonicalAimOwner::Offhand;
+		}
+
+		if (offhandSequenceActive)
+		{
+			return EVRCanonicalAimOwner::Offhand;
+		}
+
+		return EVRCanonicalAimOwner::MainHand;
+	}
+}
 
 extern int startpos, laststartpos;
 
@@ -342,10 +509,20 @@ CCMD (switchhand)
 		auto mo = players[consoleplayer].mo;
 		if (mo)
 		{
-			IFVIRTUALPTRNAME(mo, NAME_PlayerPawn, SwitchWeaponHand)
+			if (multiplayer)
 			{
-				VMValue param[] = { mo, hand };
-				VMCall(func, param, 2, nullptr, 0);
+				Net_WriteInt8(DEM_ZSC_CMD);
+				Net_WriteString("vr_switchhand");
+				Net_WriteInt16(1);
+				Net_WriteInt8(hand != 0 ? 1 : 0);
+			}
+			else
+			{
+				IFVIRTUALPTRNAME(mo, NAME_PlayerPawn, SwitchWeaponHand)
+				{
+					VMValue param[] = { mo, hand };
+					VMCall(func, param, 2, nullptr, 0);
+				}
 			}
 		}
 	}
@@ -913,19 +1090,105 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 	{
 		forward += xs_CRoundToInt(mousey * m_forward);
 	}
-#ifdef USE_OPENXR
-	if (vrmode->IsVR() && !vr_teleport) {
-		float joyforward=0;
-		float joyside=0;
-		float dummy=0;
-		VR_GetMove(&joyforward, &joyside, &dummy, &dummy, &dummy, &dummy, &dummy, &dummy);
-		side += joyint(joyside * sidemove[speed]);
-		forward += joyint(joyforward * forwardmove[speed]);
+	if (vrmode->IsVR())
+	{
+		float joyforward = 0;
+		float joyside = 0;
+		float hmdforward = 0;
+		float hmdside = 0;
+		float dummy = 0;
+		float yaw = 0;
+		float pitch = 0;
+		float roll = 0;
+		VR_GetMove(&joyforward, &joyside, &hmdforward, &hmdside, &dummy, &yaw, &pitch, &roll);
+		if (!vr_teleport || !multiplayer)
+		{
+			VR_ApplyStickMove(forwardmove[speed], sidemove[speed], joyforward, joyside, forward, side);
+		}
+		if (multiplayer)
+		{
+			float roomscaleOffsetX = 0.0f;
+			float roomscaleOffsetY = 0.0f;
+			VR_GetMultiplayerRoomscaleWorldOffset(&roomscaleOffsetX, &roomscaleOffsetY);
+
+			const float roomscaleDistanceSquared = roomscaleOffsetX * roomscaleOffsetX + roomscaleOffsetY * roomscaleOffsetY;
+			const float roomscaleRecenterThresholdUnits = 0.35f * vr_vunits_per_meter;
+			if (roomscaleDistanceSquared >= roomscaleRecenterThresholdUnits * roomscaleRecenterThresholdUnits)
+			{
+				player_t* localPlayer = &players[consoleplayer];
+				if (localPlayer != nullptr && localPlayer->mo != nullptr)
+				{
+					VR_QueueMultiplayerRoomscaleTeleportTarget(
+						VR_MakeCanonicalMultiplayerTeleportTarget(
+							localPlayer->mo->X() + roomscaleOffsetX,
+							localPlayer->mo->Y() + roomscaleOffsetY,
+							localPlayer->mo->Z(),
+							false));
+				}
+			}
+			if (vr_teleport)
+			{
+				VR_ApplyTeleportBurstMove(forwardmove[1], sidemove[1], forward, side);
+			}
+			else
+			{
+				VR_ClearTeleportCommandBurst();
+			}
+		}
+		else
+		{
+			VR_ClearTeleportCommandBurst();
+		}
 	}
-#endif
-	if (vrmode->IsVR() && vr_teleport)
+	if (vrmode->IsVR() && vr_teleport && !multiplayer)
 	{
 		side = forward = 0;
+	}
+	else if (!vrmode->IsVR() || !multiplayer)
+	{
+		VR_ClearTeleportCommandBurst();
+		VR_ClearMultiplayerRoomscaleWorldOffset();
+	}
+
+	VR_ApplyMultiplayerCrouchButton(cmd, vrmode->IsVR());
+
+	if (multiplayer && vrmode->IsVR())
+	{
+		VRMultiplayerTeleportTarget teleportTarget;
+		if (VR_ConsumeMultiplayerTeleportTarget(&teleportTarget))
+		{
+			player_t* player = &players[consoleplayer];
+			bool teleportApplied = false;
+			if (player != nullptr && player->mo != nullptr)
+			{
+				// Explicit teleport locomotion still uses telefrag; roomscale recenter does not.
+				const DVector3 destination(teleportTarget.x, teleportTarget.y, teleportTarget.z);
+				const bool blockPlayerTelefrag = teleportTarget.telefrag && P_TeleportDestinationHitsPlayer(player->mo, destination);
+				const bool applyTelefrag = teleportTarget.telefrag && !blockPlayerTelefrag;
+				const auto savedFlags2 = player->mo->flags2;
+				if (!applyTelefrag)
+				{
+					player->mo->flags2 &= ~MF2_TELESTOMP;
+				}
+				teleportApplied = P_TeleportMove(player->mo, destination, applyTelefrag);
+				player->mo->flags2 = savedFlags2;
+				teleportTarget.telefrag = applyTelefrag;
+			}
+
+			if (teleportApplied)
+			{
+				Net_WriteInt8(DEM_WARPCHEAT);
+				Net_WriteInt32(teleportTarget.x);
+				Net_WriteInt32(teleportTarget.y);
+				Net_WriteInt32(teleportTarget.z);
+				Net_WriteInt8(teleportTarget.telefrag ? 1 : 0);
+				VR_ClearMultiplayerRoomscaleWorldOffset();
+			}
+		}
+	}
+	else
+	{
+		VR_ClearMultiplayerTeleportTarget();
 	}
 
 	cmd->ucmd.pitch = LocalViewPitch >> 16;
@@ -956,6 +1219,33 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 	cmd->ucmd.sidemove += clamp(side, -127, 127);
 	cmd->ucmd.yaw = LocalViewAngle >> 16;
 	cmd->ucmd.upmove = fly;
+	cmd->ucmd.weaponpitch = cmd->ucmd.pitch;
+	cmd->ucmd.weaponyaw = cmd->ucmd.yaw;
+	if (vrmode->IsVR())
+	{
+		const float cmdAngleScale = 65536.0f / 360.0f;
+		const float bodyYaw = doomYaw;
+		player_t* localPlayer = &players[consoleplayer];
+		if (multiplayer)
+		{
+			GVRCanonicalAimOwner = VR_ResolveCanonicalAimOwner(localPlayer, cmd->ucmd.buttons);
+		}
+		else
+		{
+			GVRCanonicalAimOwner = EVRCanonicalAimOwner::MainHand;
+		}
+
+		const bool useOffhandAim = multiplayer
+			&& GVRCanonicalAimOwner == EVRCanonicalAimOwner::Offhand
+			&& localPlayer != nullptr
+			&& localPlayer->OffhandWeapon != nullptr;
+		const float* sourceAngles = useOffhandAim ? offhandangles : weaponangles;
+		const float weaponYaw = -90.0f + bodyYaw + (sourceAngles[YAW] - playerYaw);
+		const float weaponPitch = -sourceAngles[PITCH];
+
+		cmd->ucmd.weaponpitch = (short)std::lround(weaponPitch * cmdAngleScale);
+		cmd->ucmd.weaponyaw = (short)std::lround(weaponYaw * cmdAngleScale);
+	}
 	LocalViewAngle = 0;
 	LocalViewPitch = 0;
 

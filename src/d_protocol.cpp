@@ -180,7 +180,7 @@ void WriteDouble(double v, uint8_t** stream)
 int UnpackUserCmd (usercmd_t *ucmd, const usercmd_t *basis, uint8_t **stream)
 {
 	uint8_t *start = *stream;
-	uint8_t flags;
+	uint16_t flags;
 
 	if (basis != NULL)
 	{
@@ -194,7 +194,7 @@ int UnpackUserCmd (usercmd_t *ucmd, const usercmd_t *basis, uint8_t **stream)
 		memset (ucmd, 0, sizeof(usercmd_t));
 	}
 
-	flags = ReadInt8 (stream);
+	flags = ReadInt16 (stream);
 
 	if (flags)
 	{
@@ -234,6 +234,10 @@ int UnpackUserCmd (usercmd_t *ucmd, const usercmd_t *basis, uint8_t **stream)
 			ucmd->upmove = ReadInt16 (stream);
 		if (flags & UCMDF_ROLL)
 			ucmd->roll = ReadInt16 (stream);
+		if (flags & UCMDF_WEAPONPITCH)
+			ucmd->weaponpitch = ReadInt16 (stream);
+		if (flags & UCMDF_WEAPONYAW)
+			ucmd->weaponyaw = ReadInt16 (stream);
 	}
 
 	return int(*stream - start);
@@ -242,7 +246,7 @@ int UnpackUserCmd (usercmd_t *ucmd, const usercmd_t *basis, uint8_t **stream)
 // Returns the number of bytes written
 int PackUserCmd (const usercmd_t *ucmd, const usercmd_t *basis, uint8_t **stream)
 {
-	uint8_t flags = 0;
+	uint16_t flags = 0;
 	uint8_t *temp = *stream;
 	uint8_t *start = *stream;
 	usercmd_t blank;
@@ -254,7 +258,7 @@ int PackUserCmd (const usercmd_t *ucmd, const usercmd_t *basis, uint8_t **stream
 		basis = &blank;
 	}
 
-	WriteInt8 (0, stream);			// Make room for the packing bits
+	WriteInt16 (0, stream);			// Make room for the packing bits
 
 	buttons_changed = ucmd->buttons ^ basis->buttons;
 	if (buttons_changed != 0)
@@ -322,9 +326,19 @@ int PackUserCmd (const usercmd_t *ucmd, const usercmd_t *basis, uint8_t **stream
 		flags |= UCMDF_ROLL;
 		WriteInt16 (ucmd->roll, stream);
 	}
+	if (ucmd->weaponpitch != basis->weaponpitch)
+	{
+		flags |= UCMDF_WEAPONPITCH;
+		WriteInt16 (ucmd->weaponpitch, stream);
+	}
+	if (ucmd->weaponyaw != basis->weaponyaw)
+	{
+		flags |= UCMDF_WEAPONYAW;
+		WriteInt16 (ucmd->weaponyaw, stream);
+	}
 
 	// Write the packing bits
-	WriteInt8 (flags, &temp);
+	WriteInt16 (flags, &temp);
 
 	return int(*stream - start);
 }
@@ -352,6 +366,8 @@ FSerializer &Serialize(FSerializer &arc, const char *key, usercmd_t &cmd, usercm
 			("pitch", cmd.pitch)
 			("yaw", cmd.yaw)
 			("roll", cmd.roll)
+			("weaponpitch", cmd.weaponpitch)
+			("weaponyaw", cmd.weaponyaw)
 			("forwardmove", cmd.forwardmove)
 			("sidemove", cmd.sidemove)
 			("upmove", cmd.upmove)
@@ -370,7 +386,9 @@ int WriteUserCmdMessage (usercmd_t *ucmd, const usercmd_t *basis, uint8_t **stre
 			ucmd->forwardmove != 0 ||
 			ucmd->sidemove != 0 ||
 			ucmd->upmove != 0 ||
-			ucmd->roll != 0)
+			ucmd->roll != 0 ||
+			ucmd->weaponpitch != 0 ||
+			ucmd->weaponyaw != 0)
 		{
 			WriteInt8 (DEM_USERCMD, stream);
 			return PackUserCmd (ucmd, basis, stream) + 1;
@@ -383,7 +401,9 @@ int WriteUserCmdMessage (usercmd_t *ucmd, const usercmd_t *basis, uint8_t **stre
 		ucmd->forwardmove != basis->forwardmove ||
 		ucmd->sidemove != basis->sidemove ||
 		ucmd->upmove != basis->upmove ||
-		ucmd->roll != basis->roll)
+		ucmd->roll != basis->roll ||
+		ucmd->weaponpitch != basis->weaponpitch ||
+		ucmd->weaponyaw != basis->weaponyaw)
 	{
 		WriteInt8 (DEM_USERCMD, stream);
 		return PackUserCmd (ucmd, basis, stream) + 1;
@@ -411,20 +431,26 @@ int SkipTicCmd (uint8_t **stream, int count)
 			if (type == DEM_USERCMD)
 			{
 				moreticdata = false;
-				skip = 1;
-				if (*flow & UCMDF_PITCH)		skip += 2;
-				if (*flow & UCMDF_YAW)			skip += 2;
-				if (*flow & UCMDF_FORWARDMOVE)	skip += 2;
-				if (*flow & UCMDF_SIDEMOVE)		skip += 2;
-				if (*flow & UCMDF_UPMOVE)		skip += 2;
-				if (*flow & UCMDF_ROLL)			skip += 2;
-				if (*flow & UCMDF_BUTTONS)
+				skip = 0;
+				uint16_t flags = ReadInt16(&flow);
+				if (flags & UCMDF_PITCH)		skip += 2;
+				if (flags & UCMDF_YAW)			skip += 2;
+				if (flags & UCMDF_FORWARDMOVE)	skip += 2;
+				if (flags & UCMDF_SIDEMOVE)		skip += 2;
+				if (flags & UCMDF_UPMOVE)		skip += 2;
+				if (flags & UCMDF_ROLL)			skip += 2;
+				if (flags & UCMDF_WEAPONPITCH)	skip += 2;
+				if (flags & UCMDF_WEAPONYAW)	skip += 2;
+				if (flags & UCMDF_BUTTONS)
 				{
-					if (*++flow & 0x80)
+					uint8_t in = *flow++;
+					if (in & 0x80)
 					{
-						if (*++flow & 0x80)
+						in = *flow++;
+						if (in & 0x80)
 						{
-							if (*++flow & 0x80)
+							in = *flow++;
+							if (in & 0x80)
 							{
 								++flow;
 							}

@@ -74,6 +74,7 @@ LISTMENU "MainMenu"
 	IfGame(Doom, Strife, Chex)
 	{
 		PatchItem "M_NGAME", "n", "PlayerclassMenu"
+		TextItem "$MNU_MULTIPLAYER", "m", "MultiplayerMenu"
 		ifOption(SwapMenu)
 		{
 			PatchItem "M_LOADG", "l", "LoadGameMenu", 0
@@ -96,6 +97,7 @@ LISTMENU "MainMenu"
 	IfGame(Heretic, Hexen)
 	{
 		TextItem "$MNU_NEWGAME", "n", "PlayerclassMenu"
+		TextItem "$MNU_MULTIPLAYER", "m", "MultiplayerMenu"
 		TextItem "$MNU_OPTIONS", "o", "OptionsMenu"
 		TextItem "$MNU_GAMEFILES", "g", "GameFilesMenu"
 		TextItem "$MNU_INFO", "i", "ReadThisMenu"
@@ -127,6 +129,7 @@ LISTMENU "MainMenuTextOnly"
 	}
 	
 	TextItem "$MNU_NEWGAME", "n", "PlayerclassMenu"
+	TextItem "$MNU_MULTIPLAYER", "m", "MultiplayerMenu"
 	TextItem "$MNU_OPTIONS", "o", "OptionsMenu"
 	TextItem "$MNU_LOADGAME", "l", "LoadGameMenu"
 	TextItem "$MNU_SAVEGAME", "s", "SaveGameMenu"
@@ -375,6 +378,7 @@ OptionMenu "OptionsMenu" protected
 	Submenu "$OPTMNU_JOYSTICK",			"JoystickOptions"
 	StaticText " "
 	Submenu "$OPTMNU_PLAYER",			"NewPlayerMenu"
+	Submenu "$OPTMNU_MULTIPLAYER",		"MultiplayerMenu"
 	Submenu "$OPTMNU_GAMEPLAY",			"GameplayOptions"
 	Submenu "$OPTMNU_COMPATIBILITY",	"CompatibilityOptions"
 	Submenu "$OPTMNU_AUTOMAP",			"AutomapOptions"
@@ -3248,6 +3252,75 @@ OptionMenu DeveloperOptionsMenu protected
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar gl_no_ssbo gl_multithread gl_bsp_worker_threads gl_bsp_wall_batch_size gl_bsp_worker_sky_mainthread gl_texture_thread_models gl_texture_thread_upload gl_texture_thread_workers vk_max_transfer_threads gl_background_flush_count gl_light_distance_cull gl_light_distance_cull_cache gl_light_model_dedupe_cache gl_light_spot_cache gl_light_pos_relative_cache gl_light_wall_max_lights gl_light_flat_max_lights gl_line_distance_cull vr_openxr_multiview vr_desktop_view_openxr_render vr_openxr_multiview_mirror_reuse vr_openxr_multiview_postprocess vr_openxr_sync_mode vr_openxr_debug_submit_mode vr_openxr_render_scale vr_openxr_fov_adjust_deg vr_openxr_eye_shift_scale vr_openxr_force_recommended_viewport vr_openxr_use_screen_viewport_for_submit vr_openvr_menu_pointer_pitch_bias vr_openvr_menu_pointer_tip_offset vr_hud_debug_border"
 }
 
+
+/*=======================================
+ *
+ * Multiplayer options menu
+ *
+ *=======================================*/
+
+OptionMenu "MultiplayerMenu" protected
+{
+	Title "$MNU_MULTIPLAYER"
+	StaticText ""
+	Submenu "$OPTMNU_PLAYER",					"NewPlayerMenu"
+	StaticText ""
+	Submenu "$OPTMNU_MULTIPLAYER_HOST_GAME",	"HostMultiplayerMenu"
+	Submenu "$OPTMNU_MULTIPLAYER_JOIN_GAME",	"JoinMultiplayerMenu"
+}
+
+OptionValue "MultiplayerPlayers"
+{
+	// Filled in programmatically
+}
+
+OptionValue "MultiplayerSkills"
+{
+	// Filled in programmatically
+}
+
+OptionValue "MultiplayerMaps"
+{
+	// Filled in programmatically
+}
+
+OptionValue "MultiplayerGameModes"
+{
+	// Filled in programmatically
+}
+
+OptionValue "MultiplayerNetModes"
+{
+	// Filled in programmatically
+}
+
+OptionMenu "HostMultiplayerMenu" protected
+{
+	Title "$OPTMNU_MULTIPLAYER_HOST"
+	StaticText ""
+	Option "$OPTMNU_MULTIPLAYER_NUM_PLAYERS",	"mp_host_players", "MultiplayerPlayers"
+	Option "$OPTMNU_MULTIPLAYER_DIFFICULTY",	"mp_host_skill", "MultiplayerSkills"
+	Option "$OPTMNU_MULTIPLAYER_MAP",			"mp_host_map", "MultiplayerMaps"
+	Option "$OPTMNU_MULTIPLAYER_GAME_MODE",		"mp_host_gamemode", "MultiplayerGameModes"
+	Option "$OPTMNU_MULTIPLAYER_NET_MODE",		"mp_host_netmode", "MultiplayerNetModes"
+	StaticText "$OPTMNU_MULTIPLAYER_NETMODE_TIP1", "Brown"
+	StaticText "$OPTMNU_MULTIPLAYER_NETMODE_TIP2", "Brown"
+	StaticText ""
+	SafeCommand "$OPTMNU_MULTIPLAYER_ENTER",	"mp_launch_host"
+	StaticText ""
+	SafeCommand "$OPTMNU_DEFAULTS",				"mp_reset_defaults"
+}
+
+OptionMenu "JoinMultiplayerMenu" protected
+{
+	Title "$OPTMNU_MULTIPLAYER_JOIN"
+	StaticText ""
+	TextField "$OPTMNU_MULTIPLAYER_SERVER",		mp_join_address
+	StaticText ""
+	SafeCommand "$OPTMNU_MULTIPLAYER_ENTER",	"mp_launch_join"
+	StaticText ""
+	SafeCommand "$OPTMNU_DEFAULTS",				"mp_reset_defaults"
+}
 
 
 /*=======================================

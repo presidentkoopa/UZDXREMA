@@ -21,6 +21,7 @@
 #include "g_statusbar/sbar.h"
 #include "sound/s_doomsound.h"
 #include "vm.h"
+#include "d_net.h"
 #include "playsim/p_pspr.h"
 #include <QzDoom/VrCommon.h>
 #include "hw_vrmodes.h"
@@ -164,6 +165,24 @@ namespace
 		return ToGamePoint(point);
 	}
 
+	static bool GetLocalControllerPose(int abstractHand, DVector3& pos)
+	{
+		auto vrmode = VRMode::GetVRModeCached(true);
+		if (vrmode == nullptr || !vrmode->IsVR())
+		{
+			return false;
+		}
+
+		VSMatrix mat;
+		if (!vrmode->GetWeaponTransform(&mat, abstractHand))
+		{
+			return false;
+		}
+
+		pos = MatrixPointToGame(mat, 0.0, 0.0, 0.0);
+		return true;
+	}
+
 	static DVector3 AngleToVector(DAngle yaw, DAngle pitch)
 	{
 		const double pc = pitch.Cos();
@@ -222,6 +241,22 @@ namespace
 
 	static bool GetHandPose(player_t* player, int abstractHand, DVector3& pos, DVector3& dir)
 	{
+		if (GetLocalControllerPose(abstractHand, pos))
+		{
+			DVector3 head = r_viewpoint.CenterEyePos.LengthSquared() > 1e-8 ? r_viewpoint.CenterEyePos : r_viewpoint.Pos;
+			dir = head - pos;
+			if (dir.LengthSquared() <= 1e-8)
+			{
+				dir = AngleToVector(r_viewpoint.Angles.Yaw, r_viewpoint.Angles.Pitch);
+			}
+			if (dir.LengthSquared() <= 1e-8)
+			{
+				dir = { 1.0, 0.0, 0.0 };
+			}
+			dir.MakeUnit();
+			return true;
+		}
+
 		if (player == nullptr || player->mo == nullptr)
 		{
 			return false;
@@ -702,7 +737,7 @@ namespace
 
 	static void ApplyWheelTimeControl()
 	{
-		if (GVRWheel.TimeControlActive)
+		if (GVRWheel.TimeControlActive || multiplayer)
 		{
 			return;
 		}
@@ -807,7 +842,18 @@ namespace
 			if (weapon != nullptr)
 			{
 				const bool targetOffhand = GVRWheel.Type == EVRWheelType::OffhandWeapon;
-				MoveWeaponToHand(player, weapon, targetOffhand);
+				if (multiplayer)
+				{
+					Net_WriteInt8(DEM_ZSC_CMD);
+					Net_WriteString("vr_moveweaphand");
+					Net_WriteInt16(5);
+					Net_WriteInt32(weapon->InventoryID);
+					Net_WriteInt8(targetOffhand ? 1 : 0);
+				}
+				else
+				{
+					MoveWeaponToHand(player, weapon, targetOffhand);
+				}
 			}
 		}
 		else if (GVRWheel.Type == EVRWheelType::Inventory)

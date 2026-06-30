@@ -336,6 +336,16 @@ static float getViewpointYaw()
 	return doomYaw;
 }
 
+static void QueueMultiplayerTeleportTarget(const player_t* player, const DVector3& target)
+{
+	if (player == nullptr || player->mo == nullptr)
+	{
+		return;
+	}
+
+	VR_QueueMultiplayerTeleportTarget(VR_MakeCanonicalMultiplayerTeleportTarget(target.X, target.Y, target.Z, true));
+}
+
 // feature toggles, for testing and debugging
 static const bool doTrackHmdYaw = true;
 static const bool doTrackHmdPitch = true;
@@ -1090,19 +1100,22 @@ namespace s3d
 		}
 
 		if (doTrackHmdHorizontalPosition) {
-			// shift viewpoint when hmd position shifts
-			static bool is_initial_origin_set = false;
-			if (!is_initial_origin_set) {
-				// initialize origin to first noted HMD location
-				// TODO: implement recentering based on a CCMD
-				openvr_origin = openvr_HmdPos;
-				is_initial_origin_set = true;
-			}
-			openvr_dpos = openvr_HmdPos - openvr_origin;
+			if (!multiplayer)
+			{
+				// shift viewpoint when hmd position shifts
+				static bool is_initial_origin_set = false;
+				if (!is_initial_origin_set) {
+					// initialize origin to first noted HMD location
+					// TODO: implement recentering based on a CCMD
+					openvr_origin = openvr_HmdPos;
+					is_initial_origin_set = true;
+				}
+				openvr_dpos = openvr_HmdPos - openvr_origin;
 
-			LSVec3 doom_dpos = LSMatrix44(doomInOpenVR) * openvr_dpos;
-			doom_EyeOffset[0] += doom_dpos[0];
-			doom_EyeOffset[1] += doom_dpos[1];
+				LSVec3 doom_dpos = LSMatrix44(doomInOpenVR) * openvr_dpos;
+				doom_EyeOffset[0] += doom_dpos[0];
+				doom_EyeOffset[1] += doom_dpos[1];
+			}
 		}
 
 		return { doom_EyeOffset[0], doom_EyeOffset[1], doom_EyeOffset[2] };
@@ -1199,7 +1212,8 @@ namespace s3d
 
 		static VRTextureBounds_t tBounds = { 0, 0, 1, 1 };
 
-		const bool showOverlay = (ConsoleState != c_up) || (!forceDisableOverlay && VR_UseScreenLayer());
+		const bool renderNetWaitShell = VR_IsNetWaitShellActive();
+		const bool showOverlay = renderNetWaitShell || (ConsoleState != c_up) || (!forceDisableOverlay && VR_UseScreenLayer());
 		if (!showOverlay)
 		{
 			//clear and hide overlay when not in use
@@ -1217,7 +1231,7 @@ namespace s3d
 		}
 		else {
 			// create a solid color backdrop texture
-			const bool useBlackBackdrop = (gamestate == GS_STARTUP || gamestate == GS_DEMOSCREEN || gamestate == GS_INTRO || gamestate == GS_TITLELEVEL);
+			const bool useBlackBackdrop = renderNetWaitShell || (gamestate == GS_STARTUP || gamestate == GS_DEMOSCREEN || gamestate == GS_INTRO || gamestate == GS_TITLELEVEL);
 			const int currentBackdropMode = useBlackBackdrop ? 0 : 1;
 			if (prevOverlayBG != vr_overlayscreen_bg || prevOverlayBackdropMode != currentBackdropMode) {
 				prevOverlayBG = vr_overlayscreen_bg;
@@ -2089,10 +2103,15 @@ namespace s3d
 			static bool havePreviousYaw = false;
 			static float previousCinemaSnapTurn = 0.0f;
 			static bool wasLockedToScreenLayerLastFrame = false;
+			player_t* player = &players[consoleplayer];
 			if (!havePreviousYaw || resetPreviousHmdYaw) {
 				previousHmdYaw = hmdYaw;
 				havePreviousYaw = true;
 				resetPreviousHmdYaw = false;
+			}
+			if (resetDoomYaw || (player && player->resetDoomYaw))
+			{
+				previousHmdYaw = hmdYaw;
 			}
 			hmdYawDeltaDegrees = hmdYaw - previousHmdYaw;
 			double cinemaTurnDeltaDegrees = 0.0;
@@ -2479,6 +2498,12 @@ namespace s3d
 				//DVector2 v = DVector2(-openvr_dpos.x, openvr_dpos.z).Rotated(openvr_to_doom_angle);
 				positional_movementSideways = v.Y;
 				positional_movementForward = v.X;
+				if (multiplayer)
+				{
+					VR_AddMultiplayerRoomscaleWorldOffset(
+						positional_movementSideways * vr_vunits_per_meter,
+						positional_movementForward * vr_vunits_per_meter);
+				}
 			}
 
 			//Off-hand specific stuff
@@ -3071,7 +3096,7 @@ namespace s3d
 
 		haptics->ProcessHaptics();
 
-		if (gamestate == GS_LEVEL && menuactive == MENU_Off && !paused && ConsoleState == c_up) {
+		if (gamestate == GS_LEVEL && menuactive == MENU_Off && !paused && ConsoleState == c_up && !VR_IsNetWaitShellActive()) {
 			cachedScreenBlocks = screenblocks;
 			screenblocks = 12; // always be full-screen during 3D scene render
 			QzDoom_setUseScreenLayer(false);
@@ -3233,35 +3258,47 @@ namespace s3d
 					double pixelstretch = level.info ? level.info->pixelstretch : 1.2;
 
 					// Thanks to Emawind for the codes for natural crouching
-					if (!vr_crouch_use_button)
+					if (!multiplayer)
 					{
-						static double defaultViewHeight = player->DefaultViewHeight();
-						player->crouching = 10;
-						player->crouchfactor = HmdHeight / defaultViewHeight;
+						if (!vr_crouch_use_button)
+						{
+							static double defaultViewHeight = player->DefaultViewHeight();
+							player->crouching = 10;
+							player->crouchfactor = HmdHeight / defaultViewHeight;
+						}
+						else if (player->crouching == 10)
+						{
+							player->Uncrouch();
+						}
 					}
-					else if (player->crouching == 10)
+					else if (!vr_crouch_use_button)
 					{
-						player->Uncrouch();
+						VR_SetMultiplayerCrouchHeight((float)HmdHeight);
+					}
+					else
+					{
+						VR_ClearMultiplayerCrouchHeight();
 					}
 
 					LSMatrix44 mat;
 					if (GetWeaponTransform(&mat, VR_MAINHAND))
 					{
-						player->mo->AttackPos.X = mat[3][0];
-						player->mo->AttackPos.Y = mat[3][2];
-						player->mo->AttackPos.Z = mat[3][1];
-
 						getMainHandAngles();
-
-						player->mo->AttackPitch = DAngle::fromDeg(VR_UseCinematicScreenLayer() ? 
-							-weaponangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees() :
-							-weaponangles[PITCH]);
-						player->mo->AttackAngle = DAngle::fromDeg(-90 + getViewpointYaw() + (weaponangles[YAW] - hmdorientation[YAW]));
-						player->mo->AttackRoll = DAngle::fromDeg(weaponangles[ROLL]);
+						if (!multiplayer)
+						{
+							player->mo->AttackPos.X = mat[3][0];
+							player->mo->AttackPos.Y = mat[3][2];
+							player->mo->AttackPos.Z = mat[3][1];
+							player->mo->AttackPitch = DAngle::fromDeg(VR_UseCinematicScreenLayer() ?
+								-weaponangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees() :
+								-weaponangles[PITCH]);
+							player->mo->AttackAngle = DAngle::fromDeg(-90 + getViewpointYaw() + (weaponangles[YAW] - playerYaw));
+							player->mo->AttackRoll = DAngle::fromDeg(weaponangles[ROLL]);
+						}
 					}
 
 					LSMatrix44 matOffhand;
-					if (GetWeaponTransform(&matOffhand, VR_OFFHAND))
+					if (!multiplayer && GetWeaponTransform(&matOffhand, VR_OFFHAND))
 					{
 						player->mo->OffhandPos.X = matOffhand[3][0];
 						player->mo->OffhandPos.Y = matOffhand[3][2];
@@ -3301,35 +3338,34 @@ namespace s3d
 							}
 						}
 						else if (trigger_teleport && m_TeleportTarget == TRACE_HitFloor) {
-							auto vel = player->mo->Vel;
-							player->mo->Vel = DVector3(m_TeleportLocation.X - player->mo->X(),
-								m_TeleportLocation.Y - player->mo->Y(), 0);
-							bool wasOnGround = player->mo->Z() <= player->mo->floorz + 0.1;
-							double oldZ = player->mo->Z();
-							P_XYMovement(player->mo, DVector2(0, 0));
+							if (multiplayer)
+							{
+								QueueMultiplayerTeleportTarget(player, m_TeleportLocation);
+							}
+							else
+							{
+								auto vel = player->mo->Vel;
+								player->mo->Vel = DVector3(m_TeleportLocation.X - player->mo->X(),
+									m_TeleportLocation.Y - player->mo->Y(), 0);
+								bool wasOnGround = player->mo->Z() <= player->mo->floorz + 0.1;
+								double oldZ = player->mo->Z();
+								P_XYMovement(player->mo, DVector2(0, 0));
 
-							//if we were on the ground before offsetting, make sure we still are (this fixes not being able to move on lifts)
-							if (player->mo->Z() >= oldZ && wasOnGround) {
-								player->mo->SetZ(player->mo->floorz);
+								//if we were on the ground before offsetting, make sure we still are (this fixes not being able to move on lifts)
+								if (player->mo->Z() >= oldZ && wasOnGround) {
+									player->mo->SetZ(player->mo->floorz);
+								}
+								else {
+									player->mo->SetZ(oldZ);
+								}
+								player->mo->Vel = vel;
 							}
-							else {
-								player->mo->SetZ(oldZ);
-							}
-							player->mo->Vel = vel;
+
+							m_TeleportTarget = TRACE_HitNone;
+							m_TeleportLocation = DVector3(0, 0, 0);
 						}
 
 						trigger_teleport = false;
-					}
-
-					bool rightHanded = vr_control_scheme < 10;
-					// if right handed we use the left controller otherwise right controller
-					if (GetHandTransform(rightHanded ? 0 : 1, &mat) && vr_move_use_offhand)
-					{
-						player->mo->ThrustAngleOffset = DAngle::fromDeg(RAD2DEG(atan2f(-mat[2][2], -mat[2][0]))) - player->mo->Angles.Yaw;
-					}
-					else
-					{
-						player->mo->ThrustAngleOffset = nullAngle;
 					}
 
 					//Positional Movement
@@ -3338,24 +3374,34 @@ namespace s3d
 					float dummy=0;
 					VR_GetMove(&dummy, &dummy, &hmd_forward, &hmd_side, &dummy, &dummy, &dummy, &dummy);
 					
-					auto vel = player->mo->Vel;
-					player->mo->Vel = DVector3((DVector2(hmd_side, hmd_forward) * vr_vunits_per_meter), 0);
-					//player->mo->Vel = DVector3((DVector2(-openvr_dpos.x, openvr_dpos.z) * vr_vunits_per_meter).Rotated(openvr_to_doom_angle), 0);
-					bool wasOnGround = player->mo->Z() <= player->mo->floorz;
-					float oldZ = player->mo->Z();
-					P_XYMovement(player->mo, DVector2(0, 0));
+					if (!multiplayer)
+					{
+						// Roomscale/HMD positional locomotion stays local to single-player until it has
+						// an explicit deterministic netplay contract.
+						auto vel = player->mo->Vel;
+						player->mo->Vel = DVector3((DVector2(hmd_side, hmd_forward) * vr_vunits_per_meter), 0);
+						//player->mo->Vel = DVector3((DVector2(-openvr_dpos.x, openvr_dpos.z) * vr_vunits_per_meter).Rotated(openvr_to_doom_angle), 0);
+						bool wasOnGround = player->mo->Z() <= player->mo->floorz;
+						float oldZ = player->mo->Z();
+						P_XYMovement(player->mo, DVector2(0, 0));
 
-					//if we were on the ground before offsetting, make sure we still are (this fixes not being able to move on lifts)
-					if (player->mo->Z() >= oldZ && wasOnGround)
-					{
-						player->mo->SetZ(player->mo->floorz);
+						//if we were on the ground before offsetting, make sure we still are (this fixes not being able to move on lifts)
+						if (player->mo->Z() >= oldZ && wasOnGround)
+						{
+							player->mo->SetZ(player->mo->floorz);
+						}
+						else
+						{
+							player->mo->SetZ(oldZ);
+						}
+						player->mo->Vel = vel;
 					}
-					else
+					if (!multiplayer)
 					{
-						player->mo->SetZ(oldZ);
+						// In single-player we convert roomscale deltas into pawn motion,
+						// so the local HMD anchor advances with the consumed movement.
+						openvr_origin += openvr_dpos;
 					}
-					player->mo->Vel = vel;
-					openvr_origin += openvr_dpos;
 				}
 				updateHmdPose(r_viewpoint);
 			}  // not in menu section
@@ -3376,7 +3422,7 @@ namespace s3d
 			{
 				forceDisableOverlay = false;
 			}
-				const bool overlayVisibleNow = (VR_UseScreenLayer() || gamestate == GS_TITLELEVEL || menuactive != MENU_Off || ConsoleState != c_up);
+				const bool overlayVisibleNow = VR_IsNetWaitShellActive() || VR_UseScreenLayer() || gamestate == GS_TITLELEVEL || menuactive != MENU_Off || ConsoleState != c_up;
 				if ((vr_overlayscreen == 1 || vr_overlayscreen == 2) && overlayVisibleNow && !openvrOverlayWasVisible)
 				{
 					// Re-anchor stationary overlay whenever virtual screen is (re)entered.

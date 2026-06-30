@@ -178,7 +178,7 @@ class PhoenixRodPowered : PhoenixRod
 		{
 			Vector3 dir;
 			Vector3 yoffsetDir;
-			if (weapon.bOffhandWeapon)
+			if (weapon.bOffhandWeapon && !multiplayer)
 			{
 				spawnpos = player.mo.OffhandPos;
 				directionRoll = -player.mo.OffhandRoll;

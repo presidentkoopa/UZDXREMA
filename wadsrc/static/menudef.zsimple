@@ -15,6 +15,7 @@ OptionMenu "OptionsMenuSimple" protected
 	Submenu "$OPTMNU_JOYSTICK",			"JoystickOptions"
 	StaticText " "
 	Submenu "$OPTMNU_PLAYER",			"NewPlayerMenu"
+	Submenu "$OPTMNU_MULTIPLAYER",		"MultiplayerMenu"
 	StaticText " "
 	Submenu "$OPTMNU_SOUND",			"SoundOptionsSimple"
 	Submenu "$OPTMNU_DISPLAY",			"VideoOptionsSimple"

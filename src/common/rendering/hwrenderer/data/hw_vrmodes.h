@@ -190,3 +190,7 @@ bool VR_UsePortableHud();
 bool VR_ShouldDrawMountedHud();
 void VR_SuppressMountedHudForFrames(int frames);
 bool VR_GetMountedHudTransform(VSMatrix& out);
+bool VR_IsNetWaitShellActive();
+bool VR_CanUseNetWaitShell();
+bool VR_NetWaitLoop(bool (*timer_callback)(void*), void* userdata);
+void VR_RenderNetWaitShellContents(int width, int height, bool outside2D = false);

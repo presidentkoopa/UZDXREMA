@@ -147,7 +147,7 @@ extend class StateProvider
 		A_StartSound (hitsound, CHAN_WEAPON);
 			
 		// turn to face target
-		if ((!player.PlayInVR || vanilla_melee_attack) && !(flags & SF_NOTURN))
+		if ((!player.PlayInVR || (!multiplayer && vanilla_melee_attack)) && !(flags & SF_NOTURN))
 		{
 			double anglediff = deltaangle(angle, t.angleFromSource);
 

@@ -130,7 +130,7 @@ class StateProvider : Inventory
 		if (weapon && player.mo.OverrideAttackPosDir)
 		{
 			Vector3 dir;
-			if (weapon.bOffhandWeapon)
+			if (weapon.bOffhandWeapon && !multiplayer)
 			{
 				dir = player.mo.OffhandDir(self, bangle, bslope);
 			}
@@ -286,7 +286,7 @@ class StateProvider : Inventory
 					if (weapon && player.mo.OverrideAttackPosDir)
 					{
 						Vector3 dir;
-						if (weapon.bOffhandWeapon)
+						if (weapon.bOffhandWeapon && !multiplayer)
 						{
 							dir = player.mo.OffhandDir(misl, misl.Angle + angle, misl.Pitch);
 						}
@@ -399,7 +399,7 @@ class StateProvider : Inventory
 				else			A_StartSound(weapon.AttackSound, CHAN_WEAPON);
 			}
 
-			if ((!player.PlayInVR || vanilla_melee_attack) && !(flags & CPF_NOTURN))
+			if ((!player.PlayInVR || (!multiplayer && vanilla_melee_attack)) && !(flags & CPF_NOTURN))
 			{
 				// turn to face target
 				self.Angle = t.angleFromSource;

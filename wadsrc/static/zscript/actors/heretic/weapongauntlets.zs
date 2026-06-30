@@ -129,7 +129,7 @@ class Gauntlets : Weapon
 			A_StartSound ("weapons/gauntletshit", CHAN_AUTO);
 		}
 
-		if (!player.PlayInVR || vanilla_melee_attack)
+		if (!player.PlayInVR || (!multiplayer && vanilla_melee_attack))
 		{
 			// turn to face target
 			ang = t.angleFromSource;

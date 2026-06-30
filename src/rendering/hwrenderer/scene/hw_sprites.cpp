@@ -855,7 +855,7 @@ void HWSprite::Process(HWDrawInfo *di, AActor* thing, sector_t * sector, area_t 
 		DVector3 vieworigin = viewmaster->Pos();
 
 		//If we get here, then we want to override the location of the camera actor
-		auto vrmode = VRMode::GetVRModeCached(true);
+		auto vrmode = VRMode::GetVRMode(true);
 		if (vrmode->GetTeleportLocation(thingpos))
 		{
 			vieworigin = thingpos;

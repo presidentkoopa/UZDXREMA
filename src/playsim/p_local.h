@@ -263,6 +263,7 @@ bool	P_TryMove(AActor* thing, const DVector2 &pos, int dropoff, const secplane_t
 bool P_CheckMove(AActor *thing, const DVector2 &pos, FCheckPosition& tm, int flags);
 bool	P_CheckMove(AActor *thing, const DVector2 &pos, int flags = 0);
 void	P_ApplyTorque(AActor *mo);
+bool	P_TeleportDestinationHitsPlayer(AActor* thing, const DVector3& pos);
 
 bool	P_TeleportMove(AActor* thing, const DVector3 &pos, bool telefrag, bool modifyactor = true);	// [RH] Added z and telefrag parameters
 

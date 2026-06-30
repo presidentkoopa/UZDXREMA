@@ -93,7 +93,7 @@ class StrifeGrenadeLauncher : StrifeWeapon
 				Vector3 dir;
 				Vector3 offsetDir;
 				Vector3 zoffsetDir;
-				if (weapon.bOffhandWeapon)
+				if (weapon.bOffhandWeapon && !multiplayer)
 				{
 					dir = player.mo.OffhandDir(self, Angle, pitch);
 					offsetDir = player.mo.OffhandDir(self, Angle + angleofs, pitch);

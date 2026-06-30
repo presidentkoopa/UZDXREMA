@@ -31,6 +31,7 @@
 #include "rendering/hwrenderer/scene/hw_drawinfo.h"
 #include "common/rendering/hwrenderer/data/hw_viewpointbuffer.h"
 #include "v_draw.h"
+#include "i_net.h"
 
 #include <cstring>
 #include <cmath>
@@ -522,6 +523,16 @@ static float GetViewpointYaw()
 	if (cinemamode)
 		return cinemamodeYaw;
 	return doomYaw;
+}
+
+static void QueueMultiplayerTeleportTarget(const player_t* player, const DVector3& target)
+{
+    if (player == nullptr || player->mo == nullptr)
+    {
+        return;
+    }
+
+    VR_QueueMultiplayerTeleportTarget(VR_MakeCanonicalMultiplayerTeleportTarget(target.X, target.Y, target.Z, true));
 }
 
 struct XrSafeSourceRect
@@ -2617,6 +2628,11 @@ void VKOpenXRDeviceMode::DestroyMenuPointerBeamSwapchain() const
 	}
 }
 
+static bool IsNetWaitShellActive()
+{
+	return VR_IsNetWaitShellActive();
+}
+
 void VKOpenXRDeviceMode::DestroyOpenXR() const
 {
 	StopHaptics();
@@ -2763,6 +2779,10 @@ void VKOpenXRDeviceMode::PurgeDeferredOpenXRResources() const
 
 VKOpenXRDeviceMode::FrameRenderMode VKOpenXRDeviceMode::DetermineFrameRenderMode() const
 {
+	if (IsNetWaitShellActive())
+	{
+		return FrameRenderMode::VirtualScreen;
+	}
 	const bool forceVirtualScreen = gamestate == GS_LEVEL && menuactive == MENU_Off && (cinemamode || vr_overlayscreen_always);
 	return (IsGameplaySceneActive() && !forceVirtualScreen) ? FrameRenderMode::GameplayEyes : FrameRenderMode::VirtualScreen;
 }
@@ -2934,6 +2954,12 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 		DVector2 rotated = DVector2(positionDeltaThisFrame[0], positionDeltaThisFrame[2]).Rotated(DAngle::fromDeg(-rotation));
 		positional_movementSideways = rotated.Y;
 		positional_movementForward = rotated.X;
+		if (multiplayer)
+		{
+			VR_AddMultiplayerRoomscaleWorldOffset(
+				positional_movementSideways * vr_vunits_per_meter,
+				positional_movementForward * vr_vunits_per_meter);
+		}
 	}
 
 	if (!xrUsingStageSpace && !xrHasLocalHeightAnchor)
@@ -2955,11 +2981,16 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 	static bool wasLockedToScreenLayerLastFrame = false;
 	const float currentHmdYaw = hmdorientation[1] + snapTurn;
 	const bool lockGameplayViewToScreenLayer = ShouldUseScreenLayerForCurrentFrame();
+	player_t* player = &players[consoleplayer];
 	if (!havePreviousYaw)
 	{
 		previousHmdYaw = currentHmdYaw;
 		doomYaw = r_viewpoint.Angles.Yaw.Degrees();
 		havePreviousYaw = true;
+	}
+	if (resetDoomYaw || (player && player->resetDoomYaw))
+	{
+		previousHmdYaw = currentHmdYaw;
 	}
 	float hmdYawDeltaDegrees = currentHmdYaw - previousHmdYaw;
 	float cinemaTurnDeltaDegrees = 0.0f;
@@ -3663,35 +3694,49 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		if (player && player->mo)
 		{
 			const float hmdHeight = GetHmdAdjustedHeightInMapUnit(xrUsingStageSpace ? false : xrHasLocalHeightAnchor, xrLocalHeightAnchor);
-			if (!vr_crouch_use_button)
+			if (!multiplayer)
 			{
-				const double defaultViewHeight = player->DefaultViewHeight();
-				if (defaultViewHeight > 0.0)
+				if (!vr_crouch_use_button)
 				{
-					player->crouching = 10;
-					player->crouchfactor = hmdHeight / defaultViewHeight;
+					const double defaultViewHeight = player->DefaultViewHeight();
+					if (defaultViewHeight > 0.0)
+					{
+						player->crouching = 10;
+						player->crouchfactor = hmdHeight / defaultViewHeight;
+					}
+				}
+				else if (player->crouching == 10)
+				{
+					player->Uncrouch();
 				}
 			}
-			else if (player->crouching == 10)
+			else if (!vr_crouch_use_button)
 			{
-				player->Uncrouch();
+				VR_SetMultiplayerCrouchHeight(hmdHeight);
+			}
+			else
+			{
+				VR_ClearMultiplayerCrouchHeight();
 			}
 
 			LSMatrix44 mat;
 			if (GetWeaponTransform(&mat, VR_MAINHAND))
 			{
-				player->mo->AttackPos.X = mat[3][0];
-				player->mo->AttackPos.Y = mat[3][2];
-				player->mo->AttackPos.Z = mat[3][1];
-				player->mo->AttackPitch = DAngle::fromDeg(VR_UseCinematicScreenLayer()
-					? -weaponangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees()
-					: -weaponangles[PITCH]);
-				player->mo->AttackAngle = DAngle::fromDeg(-90 + GetViewpointYaw() + (weaponangles[YAW] - hmdorientation[YAW]));
-				player->mo->AttackRoll = DAngle::fromDeg(weaponangles[ROLL]);
+				if (!multiplayer)
+				{
+					player->mo->AttackPos.X = mat[3][0];
+					player->mo->AttackPos.Y = mat[3][2];
+					player->mo->AttackPos.Z = mat[3][1];
+					player->mo->AttackPitch = DAngle::fromDeg(ShouldUseScreenLayerForCurrentFrame()
+						? -weaponangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees()
+						: -weaponangles[PITCH]);
+					player->mo->AttackAngle = DAngle::fromDeg(-90 + GetViewpointYaw() + (weaponangles[YAW] - playerYaw));
+					player->mo->AttackRoll = DAngle::fromDeg(weaponangles[ROLL]);
+				}
 			}
 
 			LSMatrix44 matOffhand;
-			if (GetWeaponTransform(&matOffhand, VR_OFFHAND))
+			if (!multiplayer && GetWeaponTransform(&matOffhand, VR_OFFHAND))
 			{
 				player->mo->OffhandPos.X = matOffhand[3][0];
 				player->mo->OffhandPos.Y = matOffhand[3][2];
@@ -3728,52 +3773,57 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 				}
 				else if (trigger_teleport && m_TeleportTarget == TRACE_HitFloor)
 				{
-					auto vel = player->mo->Vel;
-					player->mo->Vel = DVector3(m_TeleportLocation.X - player->mo->X(),
-						m_TeleportLocation.Y - player->mo->Y(), 0);
-					bool wasOnGround = player->mo->Z() <= player->mo->floorz + 0.1;
-					double oldZ = player->mo->Z();
-					P_XYMovement(player->mo, DVector2(0, 0));
-
-					if (player->mo->Z() >= oldZ && wasOnGround)
+					if (multiplayer)
 					{
-						player->mo->SetZ(player->mo->floorz);
+						QueueMultiplayerTeleportTarget(player, m_TeleportLocation);
 					}
 					else
 					{
-						player->mo->SetZ(oldZ);
+						auto vel = player->mo->Vel;
+						player->mo->Vel = DVector3(m_TeleportLocation.X - player->mo->X(),
+							m_TeleportLocation.Y - player->mo->Y(), 0);
+						bool wasOnGround = player->mo->Z() <= player->mo->floorz + 0.1;
+						double oldZ = player->mo->Z();
+						P_XYMovement(player->mo, DVector2(0, 0));
+
+						if (player->mo->Z() >= oldZ && wasOnGround)
+						{
+							player->mo->SetZ(player->mo->floorz);
+						}
+						else
+						{
+							player->mo->SetZ(oldZ);
+						}
+						player->mo->Vel = vel;
 					}
-					player->mo->Vel = vel;
+
+					m_TeleportTarget = TRACE_HitNone;
+					m_TeleportLocation = DVector3(0, 0, 0);
 				}
 
 				trigger_teleport = false;
 			}
 
-			if (*vr_move_use_offhand && xrHandPoseValid[offHand])
+			if (!multiplayer)
 			{
-				const DAngle offhandYaw = DAngle::fromDeg(GetViewpointYaw() - hmdorientation[YAW] + offhandangles[YAW]);
-				player->mo->ThrustAngleOffset = offhandYaw - player->mo->Angles.Yaw;
-			}
-			else
-			{
-				player->mo->ThrustAngleOffset = nullAngle;
-			}
+				// Roomscale/HMD positional locomotion stays local to single-player until it has
+				// an explicit deterministic netplay contract.
+				auto vel = player->mo->Vel;
+				player->mo->Vel = DVector3((DVector2(positional_movementSideways, positional_movementForward) * vr_vunits_per_meter), 0);
+				bool wasOnGround = player->mo->Z() <= player->mo->floorz;
+				float oldZ = player->mo->Z();
+				P_XYMovement(player->mo, DVector2(0, 0));
 
-			auto vel = player->mo->Vel;
-			player->mo->Vel = DVector3((DVector2(positional_movementSideways, positional_movementForward) * vr_vunits_per_meter), 0);
-			bool wasOnGround = player->mo->Z() <= player->mo->floorz;
-			float oldZ = player->mo->Z();
-			P_XYMovement(player->mo, DVector2(0, 0));
-
-			if (player->mo->Z() >= oldZ && wasOnGround)
-			{
-				player->mo->SetZ(player->mo->floorz);
+				if (player->mo->Z() >= oldZ && wasOnGround)
+				{
+					player->mo->SetZ(player->mo->floorz);
+				}
+				else
+				{
+					player->mo->SetZ(oldZ);
+				}
+				player->mo->Vel = vel;
 			}
-			else
-			{
-				player->mo->SetZ(oldZ);
-			}
-			player->mo->Vel = vel;
 
 		}
 	}
@@ -4556,16 +4606,18 @@ void VKOpenXRDeviceMode::updateVirtualScreenLayer() const
 
 bool VKOpenXRDeviceMode::ShouldRenderVirtualScreen() const
 {
+	const bool renderNetWaitShell = IsNetWaitShellActive();
 	const int effectiveOverlayMode = (vr_overlayscreen == 0) ? 2 : vr_overlayscreen;
-	const bool overlayEnabled = (effectiveOverlayMode > 0) || vr_overlayscreen_always;
+	const bool overlayEnabled = renderNetWaitShell || (effectiveOverlayMode > 0) || vr_overlayscreen_always;
 	return ShouldUseScreenLayerForCurrentFrame() &&
-		(gamestate != GS_LEVEL || menuactive != MENU_Off || cinemamode || ConsoleState != c_up || vr_overlayscreen_always) &&
+		(renderNetWaitShell || gamestate != GS_LEVEL || menuactive != MENU_Off || cinemamode || ConsoleState != c_up || vr_overlayscreen_always) &&
 		overlayEnabled;
 }
 
 bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 {
 	auto* vkfb = dynamic_cast<VulkanRenderDevice*>(screen);
+	const bool renderNetWaitShell = IsNetWaitShellActive();
 	if (!vkfb || !xrFrameInProgress || xrSession == XR_NULL_HANDLE || xrVkDevice == nullptr || xrVkCommandBuffer == nullptr)
 	{
 		xrVirtualScreenVisible = false;
@@ -4586,9 +4638,9 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 	xrVirtualScreenWasVisibleLastFrame = true;
 
 	// Treat titlemap/titlelevel like an in-level scene for composition purposes.
-	// It still uses virtual-screen mode, but should not inherit the blank overlay
-	const bool forceOverlay = !IsLevelSceneState() || menuactive != MENU_Off || cinemamode || ConsoleState != c_up || vr_overlayscreen_always;
-	const bool allowBlankOverlay = vr_overlayscreen_always || cinemamode || !IsLevelSceneState();
+	// It still uses virtual-screen mode, but should not inherit the blank overlay.
+	const bool forceOverlay = renderNetWaitShell || !IsLevelSceneState() || menuactive != MENU_Off || cinemamode || ConsoleState != c_up || vr_overlayscreen_always;
+	const bool allowBlankOverlay = renderNetWaitShell || vr_overlayscreen_always || cinemamode || !IsLevelSceneState();
 	xrMenuPointerBeamImageIndex = -1;
 	if (twod == nullptr || (twod->DrawCount() == 0 && !allowBlankOverlay && !forceOverlay))
 	{
@@ -4658,7 +4710,7 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 
 	xrVirtualScreenImageIndex = (int)imageIndex;
 	auto& target = xrVirtualScreenTextures[imageIndex];
-	const bool useSceneBackdrop = IsLevelSceneState();
+	const bool useSceneBackdrop = IsLevelSceneState() && !renderNetWaitShell;
 	if (useSceneBackdrop)
 	{
 		vkfb->GetPostprocess()->BlitCurrentToImage(&target, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -4684,7 +4736,7 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 	}
 	else
 	{
-		const XrVector3f bg = GetVirtualScreenBackgroundColor();
+		const XrVector3f bg = renderNetWaitShell ? XrVector3f{ 0.0f, 0.0f, 0.0f } : GetVirtualScreenBackgroundColor();
 		screen->mSceneClearColor[0] = bg.x;
 		screen->mSceneClearColor[1] = bg.y;
 		screen->mSceneClearColor[2] = bg.z;
@@ -4711,11 +4763,17 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 	{
 		renderState->Clear(CT_Color);
 	}
-	if (twod != nullptr && twod->HasCommandsForPass(true))
+	if (renderNetWaitShell)
+	{
+		VR_RenderNetWaitShellContents((int)screenWidth, (int)screenHeight, false);
+		screen->Draw2D(false);
+		twod->Clear();
+	}
+	else if (twod != nullptr && twod->HasCommandsForPass(true))
 	{
 		screen->Draw2D(true);
 	}
-	if (xrMenuPointerActive && xrMenuPointerHasHit && twod != nullptr)
+	if (!renderNetWaitShell && xrMenuPointerActive && xrMenuPointerHasHit && twod != nullptr)
 	{
 		const float beamEndX = xrMenuPointerX;
 		const float beamEndY = xrMenuPointerY;
@@ -4738,7 +4796,7 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 		}
 		twod->AddColorOnlyQuad((int)(beamEndX - 3.0f), (int)(beamEndY - 3.0f), 6, 6, PalEntry(255, cursorColor.r, cursorColor.g, cursorColor.b));
 	}
-	if (twod != nullptr && twod->HasCommandsForPass(false))
+	if (!renderNetWaitShell && twod != nullptr && twod->HasCommandsForPass(false))
 	{
 		screen->Draw2D(false);
 	}

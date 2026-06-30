@@ -65,7 +65,7 @@ class Mace : HereticWeapon
 		let directionPitch = pitch;
 		if (player.mo.OverrideAttackPosDir)
 		{
-			if (hand == 1)
+			if (hand == 1 && !multiplayer)
 			{
 				spawnpos = player.mo.OffhandPos;
 				directionAngle = player.mo.OffhandAngle + 90;
@@ -162,7 +162,7 @@ class MacePowered : Mace
 		let directionPitch = pitch;
 		if (player.mo.OverrideAttackPosDir)
 		{
-			if (hand == 1)
+			if (hand == 1 && !multiplayer)
 			{
 				directionPitch = -player.mo.OffhandPitch;
 			}

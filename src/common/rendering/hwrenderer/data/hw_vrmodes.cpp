@@ -57,6 +57,8 @@
 #include "hw_cvars.h"
 #include "hw_vrmodes.h"
 #include "v_video.h"
+#include "i_time.h"
+#include "g_input.h"
 #include "version.h"
 #include "i_interface.h"
 #include "menu.h"
@@ -75,12 +77,20 @@
 #include "textures.h"
 #include "gametexture.h"
 #include "common/2d/v_2ddrawer.h"
+#include <chrono>
+#include <thread>
 #include <algorithm>
 #include <functional>
-#include <thread>
 #include "c_dispatch.h"
+#include "c_bind.h"
 #include "c_console.h"
+#include "d_eventbase.h"
 #include "common/scripting/jit/jit.h"
+#include "common/fonts/v_font.h"
+#include "common/2d/v_draw.h"
+#include "v_text.h"
+#include "i_net.h"
+#include "keydef.h"
 
 EXTERN_CVAR(Int, developer);
 
@@ -299,6 +309,271 @@ bool VR_GetMountedHudTransform(VSMatrix& out)
 	}
 	out = mountTransform;
 	return true;
+}
+
+namespace
+{
+	bool IsOpenVRNetWaitModeActive()
+	{
+#ifdef USE_OPENVR
+		auto* mode = dynamic_cast<const s3d::OpenVRMode*>(VRMode::GetVRModeCached(true));
+		return mode != nullptr && mode->IsVR();
+#else
+		return false;
+#endif
+	}
+
+#ifdef USE_OPENXR
+	const s3d::VKOpenXRDeviceMode* GetOpenXRNetWaitMode()
+	{
+		if (V_GetBackend() != 1)
+			return nullptr;
+		auto* mode = dynamic_cast<const s3d::VKOpenXRDeviceMode*>(VRMode::GetVRModeCached(true));
+		return (mode != nullptr && mode->IsVR()) ? mode : nullptr;
+	}
+#endif
+
+	FFont* GetNetWaitFont()
+	{
+		if (SmallFont != nullptr)
+			return SmallFont;
+		if (AlternativeSmallFont != nullptr)
+			return AlternativeSmallFont;
+		if (BigFont != nullptr)
+			return BigFont;
+		if (NewSmallFont != nullptr)
+			return NewSmallFont;
+		return NewConsoleFont;
+	}
+
+	FString GetNetWaitPrimaryMessage()
+	{
+		const char* message = I_GetNetWaitMessage();
+		if (message != nullptr && message[0] != '\0')
+		{
+			return FString(message);
+		}
+		if (I_GetNetWaitRole() == NETWAITROLE_Client)
+		{
+			return FString("Contacting host");
+		}
+		return FString("Waiting for players");
+	}
+
+	FString GetNetWaitSecondaryMessage()
+	{
+		if (I_GetNetWaitTotalPlayers() > 0)
+		{
+			return FStringf("%d/%d players", I_GetNetWaitFoundPlayers(), I_GetNetWaitTotalPlayers());
+		}
+		if (I_GetNetWaitPhase() == NETWAITPHASE_Contacting || I_GetNetWaitRole() == NETWAITROLE_Client)
+		{
+			static const char spinnerChars[4] = { '|', '/', '-', '\\' };
+			return FStringf("Contacting host %c", spinnerChars[(I_msTime() / 250) & 3]);
+		}
+		return FString();
+	}
+
+	void MarkRecentCommandsAsOutside2D(F2DDrawer* drawer, int startIndex)
+	{
+		if (drawer == nullptr)
+		{
+			return;
+		}
+
+		for (int i = startIndex; i < drawer->mData.Size(); ++i)
+		{
+			drawer->mData[i].mOutside2D = true;
+		}
+
+		drawer->mHasInside2DCommands = false;
+		drawer->mHasOutside2DCommands = false;
+		for (const auto& cmd : drawer->mData)
+		{
+			if (cmd.mOutside2D)
+				drawer->mHasOutside2DCommands = true;
+			else
+				drawer->mHasInside2DCommands = true;
+		}
+	}
+
+	bool ConsumeNetWaitCancelEvent()
+	{
+		auto isMenuAbortBinding = [](int key)
+		{
+			const char* bind = Bindings.GetBind((unsigned int)key);
+			if (bind == nullptr || bind[0] == '\0')
+			{
+				return false;
+			}
+
+			return stricmp(bind, "menu_main") == 0 ||
+				stricmp(bind, "toggleconsole") == 0 ||
+				strstr(bind, "menu_main") != nullptr;
+		};
+
+		for (int evnum = eventtail; evnum != eventhead; evnum = (evnum + 1) & (MAXEVENTS - 1))
+		{
+			event_t& ev = events[evnum];
+			if (ev.type != EV_KeyDown)
+			{
+				continue;
+			}
+
+			if (ev.data1 == KEY_ESCAPE || ev.data1 == KEY_PAD_BACK || ev.data1 == KEY_PAD_B || isMenuAbortBinding(ev.data1))
+			{
+				ev.type = EV_None;
+				return true;
+			}
+		}
+		return false;
+	}
+}
+
+bool VR_IsNetWaitShellActive()
+{
+	return I_IsNetWaitSessionActive() && I_IsUsingVRNetWaitShell();
+}
+
+bool VR_CanUseNetWaitShell()
+{
+	if (IsOpenVRNetWaitModeActive())
+	{
+		return true;
+	}
+#ifdef USE_OPENXR
+	return GetOpenXRNetWaitMode() != nullptr;
+#else
+	return false;
+#endif
+}
+
+bool VR_NetWaitLoop(bool (*timer_callback)(void*), void* userdata)
+{
+	if (!VR_CanUseNetWaitShell())
+	{
+		return false;
+	}
+
+	uint64_t nextCallbackTime = I_msTime();
+	const bool cancelOnMenuOpen = (menuactive == MENU_Off);
+	const bool cancelOnConsoleOpen = (ConsoleState == c_up);
+	for (;;)
+	{
+		I_GetEvent();
+		if (ConsumeNetWaitCancelEvent())
+		{
+			return false;
+		}
+		D_ProcessEvents();
+		if ((cancelOnMenuOpen && menuactive != MENU_Off) ||
+			(cancelOnConsoleOpen && ConsoleState != c_up))
+		{
+			return false;
+		}
+		if (screen != nullptr)
+		{
+			screen->BeginFrame();
+			screen->Update();
+		}
+
+		const uint64_t now = I_msTime();
+		if (now >= nextCallbackTime)
+		{
+			if (timer_callback != nullptr && timer_callback(userdata))
+			{
+				return true;
+			}
+			nextCallbackTime = now + 500;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(4));
+	}
+}
+
+void VR_RenderNetWaitShellContents(int width, int height, bool outside2D)
+{
+	if (screen == nullptr || twod == nullptr)
+	{
+		return;
+	}
+
+	twod->Clear();
+	twod->Begin(width, height);
+	twod->AddColorOnlyQuad(0, 0, width, height, PalEntry(255, 0, 0, 0), nullptr, false, outside2D);
+
+	FFont* font = GetNetWaitFont();
+	if (font == nullptr)
+	{
+		font = NewConsoleFont;
+	}
+	if (font != nullptr)
+	{
+		const int textScaleX = outside2D ? 8 : 4;
+		const int textScaleY = outside2D ? 10 : 4;
+		const int virtualTextWidth = std::max(1, width / textScaleX);
+		const int virtualTextHeight = std::max(1, height / textScaleY);
+		const FString primary = GetNetWaitPrimaryMessage();
+		const FString secondary = GetNetWaitSecondaryMessage();
+		const FString hint = FString("Press Menu\\Cancel to Abort");
+		const int primaryWidth = font->StringWidth(primary);
+		const int primaryX = std::max(4, (virtualTextWidth - primaryWidth) / 2);
+		const int primaryY = std::max(4, virtualTextHeight / 2 - font->GetHeight() * 4);
+		const int primaryCommandStart = twod->mData.Size();
+		DrawText(twod, font, CR_RED, primaryX, primaryY, primary.GetChars(),
+			DTA_VirtualWidth, virtualTextWidth,
+			DTA_VirtualHeight, virtualTextHeight,
+			TAG_DONE);
+		if (outside2D)
+		{
+			MarkRecentCommandsAsOutside2D(twod, primaryCommandStart);
+		}
+
+		if (!secondary.IsEmpty())
+		{
+			const int secondaryWidth = font->StringWidth(secondary);
+			const int secondaryX = std::max(4, (virtualTextWidth - secondaryWidth) / 2);
+			const int secondaryY = primaryY + font->GetHeight() + 8;
+			const int secondaryCommandStart = twod->mData.Size();
+			DrawText(twod, font, CR_GRAY, secondaryX, secondaryY, secondary.GetChars(),
+				DTA_VirtualWidth, virtualTextWidth,
+				DTA_VirtualHeight, virtualTextHeight,
+				TAG_DONE);
+			if (outside2D)
+			{
+				MarkRecentCommandsAsOutside2D(twod, secondaryCommandStart);
+			}
+
+			const int hintWidth = font->StringWidth(hint);
+			const int hintX = std::max(4, (virtualTextWidth - hintWidth) / 2);
+			const int hintY = secondaryY + (font->GetHeight() * 5);
+			const int hintCommandStart = twod->mData.Size();
+			DrawText(twod, font, CR_CREAM, hintX, hintY, hint.GetChars(),
+				DTA_VirtualWidth, virtualTextWidth,
+				DTA_VirtualHeight, virtualTextHeight,
+				TAG_DONE);
+			if (outside2D)
+			{
+				MarkRecentCommandsAsOutside2D(twod, hintCommandStart);
+			}
+		}
+		else
+		{
+			const int hintWidth = font->StringWidth(hint);
+			const int hintX = std::max(4, (virtualTextWidth - hintWidth) / 2);
+			const int hintY = primaryY + font->GetHeight() * 3;
+			const int hintCommandStart = twod->mData.Size();
+			DrawText(twod, font, CR_GRAY, hintX, hintY, hint.GetChars(),
+				DTA_VirtualWidth, virtualTextWidth,
+				DTA_VirtualHeight, virtualTextHeight,
+				TAG_DONE);
+			if (outside2D)
+			{
+				MarkRecentCommandsAsOutside2D(twod, hintCommandStart);
+			}
+		}
+	}
+
+	twod->End();
 }
 
 bool VR_UsePortableHud()
@@ -824,6 +1099,12 @@ static DVector3 MapWeaponDir(AActor* actor, DAngle yaw, DAngle pitch, int hand =
 {
 	LSMatrix44 mat;
 	auto vrmode = VRMode::GetVRModeCached(true);
+	if (multiplayer)
+	{
+		double pc = pitch.Cos();
+		DVector3 direction = { pc * yaw.Cos(), pc * yaw.Sin(), -pitch.Sin() };
+		return direction;
+	}
 	if (!vrmode->GetWeaponTransform(&mat, hand))
 	{
 		double pc = pitch.Cos();
@@ -867,14 +1148,23 @@ void VRMode::SetUp() const
 	player_t* player = &players[consoleplayer];
 	if (player && player->mo)
 	{
-		player->PlayInVR = IsVR();
-		player->mo->OverrideAttackPosDir = !puristmode && (IsVR() || vr_override_weap_pos);
 		player->mo->AttackDir = MapAttackDir;
 		player->mo->OffhandDir = MapOffhandDir;
-		double shootz = player->mo->Center() - player->mo->Floorclip + player->mo->AttackOffset();
-		player->mo->AttackPos = player->mo->OffhandPos = player->mo->PosAtZ(shootz);
-		player->mo->AttackAngle = player->mo->OffhandAngle = r_viewpoint.Angles.Yaw - DAngle::fromDeg(90.);
-		player->mo->AttackPitch = player->mo->OffhandPitch = - r_viewpoint.Angles.Pitch;
+
+		// In multiplayer, attack pose is reconstructed from synchronized input in
+		// playsim code. Do not let renderer setup stamp local VR state into the
+		// player actor.
+		if (!multiplayer)
+		{
+			player->mo->OverrideAttackPosDir = !puristmode && (IsVR() || vr_override_weap_pos);
+			double shootz = player->mo->Center() - player->mo->Floorclip + player->mo->AttackOffset();
+			player->mo->AttackPos = player->mo->PosAtZ(shootz);
+			player->mo->AttackAngle = r_viewpoint.Angles.Yaw - DAngle::fromDeg(90.);
+			player->mo->AttackPitch = -r_viewpoint.Angles.Pitch;
+			player->mo->OffhandPos = player->mo->PosAtZ(shootz);
+			player->mo->OffhandAngle = r_viewpoint.Angles.Yaw - DAngle::fromDeg(90.);
+			player->mo->OffhandPitch = -r_viewpoint.Angles.Pitch;
+		}
 	}
 }
 
