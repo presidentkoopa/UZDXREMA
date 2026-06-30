@@ -1521,10 +1521,16 @@ namespace s3d
 		const float pixelUnit = mountScale * 0.002f;
 		const float baseWidth = (float)surface.GetWidth() * pixelUnit;
 		const float baseHeight = (float)surface.GetHeight() * pixelUnit;
+		const bool portableHud = VR_UsePortableHud();
 
 		auto savedMatrix = state.mModelMatrix;
 		state.mModelMatrix = mountTransform;
 		state.EnableModelMatrix(true);
+		if (portableHud)
+		{
+			// Portable HUD should stay visible over weapon models in VR.
+			state.SetDepthFunc(DF_Always);
+		}
 		di->DrawHudQuad(state, surface.GetGameTexture(),
 			baseWidth,
 			baseHeight,
@@ -1544,6 +1550,10 @@ namespace s3d
 			di->DrawVRHudBorder(state, baseWidth + (borderPadX * 2.0f), borderPadY, borderColor, 0.f, -((baseHeight * 0.5f) + (borderPadY * 0.5f)));
 			di->DrawVRHudBorder(state, borderPadX, baseHeight, borderColor, -((baseWidth * 0.5f) + (borderPadX * 0.5f)), 0.f);
 			di->DrawVRHudBorder(state, borderPadX, baseHeight, borderColor, (baseWidth * 0.5f) + (borderPadX * 0.5f), 0.f);
+		}
+		if (portableHud)
+		{
+			state.SetDepthFunc(DF_Less);
 		}
 		state.mModelMatrix = savedMatrix;
 		state.EnableModelMatrix(false);
