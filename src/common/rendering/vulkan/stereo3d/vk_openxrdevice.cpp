@@ -1404,54 +1404,30 @@ DVector3 VKOpenXRDeviceEyePose::GetViewShift(FRenderViewpoint& vp) const
 	const float hmdHeight = GetHmdAdjustedHeightInMapUnit(mode.xrUsingStageSpace ? false : mode.xrHasLocalHeightAnchor, mode.xrLocalHeightAnchor);
 	const player_t* player = &players[consoleplayer];
 	const float playerHeight = (player && player->mo) ? GetDoomPlayerHeightWithoutCrouch(player) : hmdHeight;
-	DVector3 shift = { 0.0, 0.0, hmdHeight - playerHeight };
+	float angles[3];
+	angles[0] = vp.HWAngles.Pitch.Degrees();
+	angles[1] = GetViewpointYaw();
+	angles[2] = vp.HWAngles.Roll.Degrees();
 
-	if (eye >= 0 && (size_t)eye < mode.xrViews.size())
-	{
-		const XrQuaternionf headOrientation = GetCenteredViewOrientation(mode.xrViews);
-		const XrVector3f headRight = NormalizeVector(RotateVector(headOrientation, { 1.0f, 0.0f, 0.0f }));
-		const XrVector3f eyeOffsetMeters = {
-			currentEyePose.position.x - hmdPosition[0],
-			currentEyePose.position.y - hmdPosition[1],
-			currentEyePose.position.z - hmdPosition[2]
-		};
-		const XrVector3f localEyeOffset = RotateVector(ConjugateQuaternion(headOrientation), eyeOffsetMeters);
+	float forward[3];
+	float right[3];
+	float up[3];
+	AngleVectors(angles, forward, right, up);
 
-		const double pixelstretch = r_viewpoint.ViewLevel ? r_viewpoint.ViewLevel->pixelstretch : 1.2;
-		const double stereoShift = localEyeOffset.x * vr_vunits_per_meter * vr_openxr_eye_shift_scale * pixelstretch;
-		const double yaw = DEG2RAD(vp.HWAngles.Yaw.Degrees());
-		shift.X += -cos(yaw) * stereoShift;
-		shift.Y += sin(yaw) * stereoShift;
-	}
-
-	return shift;
+	const float stereoSeparation = (vr_ipd * 0.5f) * vr_vunits_per_meter * (eye == 0 ? -1.0f : 1.0f);
+	return {
+		right[0] * stereoSeparation,
+		right[1] * stereoSeparation,
+		right[2] * stereoSeparation + (hmdHeight - playerHeight)
+	};
 }
 
 void VKOpenXRDeviceEyePose::AdjustViewpointUniforms(HWViewpointUniforms& uniforms) const
 {
-	auto& mode = const_cast<VKOpenXRDeviceMode&>((const VKOpenXRDeviceMode&)VKOpenXRDeviceMode::getInstance());
-	if (eye < 0 || (size_t)eye >= mode.xrViews.size() || mode.xrViews.empty())
-	{
-		uniforms.CalcDependencies();
-		return;
-	}
-
-	const XrQuaternionf baseOrientation = GetCenteredViewOrientation(mode.xrViews);
-	const XrQuaternionf eyeOrientation = currentEyePose.orientation;
-	const XrQuaternionf relativeOrientation = MultiplyQuaternion(ConjugateQuaternion(baseOrientation), eyeOrientation);
-	const XrQuaternionf inverseRelativeOrientation = ConjugateQuaternion(relativeOrientation);
-
-	VSMatrix rotation;
-	rotation.loadIdentity();
-	rotation.multQuaternion(TVector4<FLOATTYPE>(
-		(FLOATTYPE)inverseRelativeOrientation.x,
-		(FLOATTYPE)inverseRelativeOrientation.y,
-		(FLOATTYPE)inverseRelativeOrientation.z,
-		(FLOATTYPE)inverseRelativeOrientation.w));
-	rotation.multMatrix(uniforms.mViewMatrix);
-	uniforms.mViewMatrix = rotation;
+	// Keep the Vulkan scene path aligned with the stable OpenXR/OpenGL path:
+	// use the centered head orientation for the gameplay camera and let the
+	// per-eye OpenXR projection handle the asymmetric frustum
 	uniforms.CalcDependencies();
-
 }
 
 void VKOpenXRDeviceEyePose::SetUp() const
