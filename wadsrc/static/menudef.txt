@@ -355,7 +355,7 @@ DefaultOptionMenu
 
 OptionMenu CommandLineProfileMenu protected
 {
-	Title "Active profile"
+	Title "$OPTMNU_ACTIVE_PROFILE"
 	StaticText ""
 }
 
@@ -390,7 +390,7 @@ OptionMenu "OptionsMenu" protected
 	StaticText " "
 	Submenu "$OS_TITLE", "os_Menu"
 	Option "$OPTMNU_SIMPLEON",			"m_simpleoptions", "OnOff"
-	LabeledSubmenu "Active profile", "cmdlineprofile", "CommandLineProfileMenu"
+	LabeledSubmenu "$OPTMNU_ACTIVE_PROFILE", "cmdlineprofile", "CommandLineProfileMenu"
 	StaticText " "
 	SafeCommand	"$OPTMNU_DEFAULTS",		"reset2defaults"
 	SafeCommand	"$OPTMNU_RESETTOSAVED",	"reset2saved"
@@ -527,10 +527,10 @@ ListMenu "PlayerMenu"
 
 OptionValue "Layouts"
 {
-	0, "QZD Pre 1.3.0"
-	1, "QZD Dual Wield"
-	2, "QZD Classic"
-	3, "QZD Koopa"
+	0, "$OPTVAL_CLASSICZ"
+	1, "$OPTVAL_MODERN"
+	2, "$OPTVAL_MODERN2"
+	3, "$OPTVAL_MODERN3"
 	4, "$OPTVAL_MODERN"
 	5, "$OPTVAL_CLASSICZ"
 	6, "$OPTVAL_MODERNLEFT"
@@ -624,7 +624,7 @@ OptionMenu "ActionControlsMenu" protected
 	Control    "$CNTRLMNU_STRAFE"           , "+strafe"
 
 	StaticText ""
-	StaticText "Advanced reloading", gold
+	StaticText "$CNTRLMNU_ADVANCED_RELOADING", gold
 	Control    "$CNTRLMNU_MAINHANDRELOAD"    , "+mh_reload"
 	Control    "$CNTRLMNU_OFFHANDRELOAD"     , "+oh_reload"
 }
@@ -691,7 +691,7 @@ OptionMenu "ActionDoubleControlsMenu" protected
 	DoubleControl    "$CNTRLMNU_STRAFE"           , "+strafe"
 
 	StaticText ""
-	StaticText "Advanced reloading", gold
+	StaticText "$CNTRLMNU_ADVANCED_RELOADING", gold
 	DoubleControl    "$CNTRLMNU_MAINHANDRELOAD"    , "+mh_reload"
 	DoubleControl    "$CNTRLMNU_OFFHANDRELOAD"     , "+oh_reload"
 }
@@ -1272,8 +1272,8 @@ OptionMenu "SWROptions" protected
 	Option "$DSPLYMNU_MODELS",					"r_models", "OnOff"
 	Option "$DSPLYMNU_MODELSCARMACK",			"r_models_carmack", "OnOff"
 	StaticText " "
-	ScaleSlider "$DSPLYMNU_SPRITECULL",			"r_sprite_distance_cull", 0.0, 8000.0, 500.0, "Culling disabled"
-	ScaleSlider "$DSPLYMNU_LINECULL",			"r_line_distance_cull", 0.0, 16000.0, 1000.0, "Culling disabled"
+	ScaleSlider "$DSPLYMNU_SPRITECULL",			"r_sprite_distance_cull", 0.0, 8000.0, 500.0, "$GLPREFMNU_CULLING_DISABLED"
+	ScaleSlider "$DSPLYMNU_LINECULL",			"r_line_distance_cull", 0.0, 16000.0, 1000.0, "$GLPREFMNU_CULLING_DISABLED"
 	Command "$DSPLYMNU_DISABLERENDERCULL",	"disablerendercull"
 	SafeCommand "$DSPLYMNU_RESETRENDERCULL",	"resetcvar r_sprite_distance_cull r_line_distance_cull"
 }
@@ -1646,7 +1646,7 @@ OptionMenu "MiscOptions" protected
 	Option "$MISCMNU_ALWAYSTALLY",				"sv_alwaystally", "AlwaysTally"
 	StaticText ""
 	Option "$VIDMNU_SHOWFPSONHUD",		        "vid_fps", "OnOff"
-	Option "Lock FrameRate (IF LOW PERF.)",         "cl_capfps", "OnOff"
+	Option "$MISCMNU_LOCK_FRAMERATE_IF_LOW_PERF",         "cl_capfps", "OnOff"
 
 	StaticText " "
 	Option "$MISCMNU_DEVELOPERMODE",			"developer", "DevMessageLevels"
@@ -2526,16 +2526,16 @@ OptionMenu ModReplayerOptions protected
 	Slider "$ADVSNDMNU_MIDIVOICES", 		"fluid_voices", 16, 4096, 16, 0
 	// other CVARs need to be revieved for usefulness
 	StaticText ""
-	StaticText "Advanced Options", gold
-	Slider "Reverb room size",				"fluid_reverb_roomsize", 0, 1.2, 0.1, 1
-	Slider "Reverb damping",				"fluid_reverb_damping", 0, 1.0, 0.1, 1
-	Slider "Reverb width",					"fluid_reverb_width", 0, 100.0, 0.1, 1
-	Slider "Reverb level",					"fluid_reverb_level", 0, 1.0, 0.1, 1
+	StaticText "$ADVSNDMNU_ADVANCED_OPTIONS", gold
+	Slider "$ADVSNDMNU_REVERB_ROOM_SIZE",		"fluid_reverb_roomsize", 0, 1.2, 0.1, 1
+	Slider "$ADVSNDMNU_REVERB_DAMPING",		"fluid_reverb_damping", 0, 1.0, 0.1, 1
+	Slider "$ADVSNDMNU_REVERB_WIDTH",		"fluid_reverb_width", 0, 100.0, 0.1, 1
+	Slider "$ADVSNDMNU_REVERB_LEVEL",		"fluid_reverb_level", 0, 1.0, 0.1, 1
 	StaticText ""
-	Slider "Chorus voices",					"fluid_chorus_voices", 0, 99, 1, 0
-	Slider "Chorus level",					"fluid_chorus_level", 0, 10.0, 0.1, 1
-	Slider "Chorus speed",					"fluid_chorus_speed", 0.29, 5.0, 0.1, 2
-	Slider "Chorus depth",					"fluid_chorus_depth", 0, 256.0, 0.1, 1
+	Slider "$ADVSNDMNU_CHORUS_VOICES",		"fluid_chorus_voices", 0, 99, 1, 0
+	Slider "$ADVSNDMNU_CHORUS_LEVEL",		"fluid_chorus_level", 0, 10.0, 0.1, 1
+	Slider "$ADVSNDMNU_CHORUS_SPEED",		"fluid_chorus_speed", 0.29, 5.0, 0.1, 2
+	Slider "$ADVSNDMNU_CHORUS_DEPTH",		"fluid_chorus_depth", 0, 256.0, 0.1, 1
 	StaticText " "
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar fluid_patchset fluid_gain fluid_voices fluid_reverb fluid_reverb_roomsize fluid_reverb_damping fluid_reverb_width fluid_reverb_level fluid_chorus fluid_chorus_voices fluid_chorus_level fluid_chorus_speed fluid_chorus_depth"
  }
@@ -2890,7 +2890,7 @@ OptionMenu VRHUDOptions protected
 	Title "$VRHUDMNU_TITLE"
 
 	StaticText ""
-	StaticText "HUD", gold
+	StaticText "$VRHUDMNU_HUD", gold
 	StaticText ""
 	Slider "$VRHUDMNU_HUD_SCALE",		        "vr_hud_scale", 0.05, 1.0, 0.05, 2
 	ScaleSlider "$VRHUDMNU_HUD_ITEM_SCALE", 	"hud_scale", -1.0, 8.0, 1.0, "$SCALEMNU_USEUI", "$SCALEMNU_USEFS"
@@ -3208,8 +3208,8 @@ OptionValue "OpenXRDebugSubmitMode"
 
 OptionValue "OpenXRSyncMode"
 {
-	0, "Legacy"
-	1, "Defer Desktop Present"
+	0, "$OPTVAL_LEGACY"
+	1, "$OPTVAL_DEFER_DESKTOP_PRESENT"
 }
 
 OptionValue "WallBatchSizes"
@@ -3228,7 +3228,7 @@ OptionMenu DeveloperOptionsMenu protected
 	{
 	Slider "$DEVOPTMNU_RENDER_SCALE", "vr_openxr_render_scale", 0.25, 4.0, 0.05, 2
 	Option "$DEVOPTMNU_DEBUG_SUBMIT_MODE", "vr_openxr_debug_submit_mode", "OpenXRDebugSubmitMode"
-	Option "OpenXR Sync Mode", "vr_openxr_sync_mode", "OpenXRSyncMode"
+	Option "$DEVOPTMNU_OPENXR_SYNC_MODE", "vr_openxr_sync_mode", "OpenXRSyncMode"
 	Slider "$DEVOPTMNU_FOV_ADJUST", "vr_openxr_fov_adjust_deg", -30.0, 30.0, 0.5, 1
 	Slider "$DEVOPTMNU_EYE_SHIFT_SCALE", "vr_openxr_eye_shift_scale", 0.1, 3.0, 0.05, 2
 	Option "$DEVOPTMNU_FORCE_RECOMMENDED_VIEWPORT", "vr_openxr_force_recommended_viewport", "OnOff"
@@ -3241,12 +3241,12 @@ OptionMenu DeveloperOptionsMenu protected
 	Slider "$DEVOPTMNU_BSP_WORKER_THREADS", "gl_bsp_worker_threads", 1, 8, 1
 	Option "$DEVOPTMNU_BSP_WALL_BATCH_SIZE", "gl_bsp_wall_batch_size", "WallBatchSizes"
 	Option "$DEVOPTMNU_BSP_SKY_SECTORS_ON_MAIN_THREAD", "gl_bsp_worker_sky_mainthread", "OnOff"
-	Option "Desktop Mirror Reuse Multiview Frames", "vr_openxr_multiview_mirror_reuse", "YesNo"
-	Option "Layered Multiview Postprocess", "vr_openxr_multiview_postprocess", "YesNo"
-	Option "DynLight Distance Cull Cache", "gl_light_distance_cull_cache", "OnOff"
-	Option "DynLight Model Dedupe Cache", "gl_light_model_dedupe_cache", "OnOff"
-	Option "DynLight Spotlight Cache", "gl_light_spot_cache", "OnOff"
-	Option "DynLight Portal Position Cache", "gl_light_pos_relative_cache", "OnOff"
+	Option "$GLPREFMNU_DESKTOP_MIRROR_REUSE_MULTIVIEW_FRAMES", "vr_openxr_multiview_mirror_reuse", "YesNo"
+	Option "$GLPREFMNU_LAYERED_MULTIVIEW_POSTPROCESS", "vr_openxr_multiview_postprocess", "YesNo"
+	Option "$DEVOPTMNU_DYNLIGHT_DISTANCE_CULL_CACHE", "gl_light_distance_cull_cache", "OnOff"
+	Option "$DEVOPTMNU_DYNLIGHT_MODEL_DEDUPE_CACHE", "gl_light_model_dedupe_cache", "OnOff"
+	Option "$DEVOPTMNU_DYNLIGHT_SPOTLIGHT_CACHE", "gl_light_spot_cache", "OnOff"
+	Option "$DEVOPTMNU_DYNLIGHT_PORTAL_POSITION_CACHE", "gl_light_pos_relative_cache", "OnOff"
 	}
 	ifOption(OpenVR)
 	{
@@ -3255,7 +3255,7 @@ OptionMenu DeveloperOptionsMenu protected
 	}
 	Option "$DEVOPTMNU_HUD_DEBUG_BORDER", "vr_hud_debug_border", "OnOff"
 	StaticText " "
-	StaticText "Options Marked With * Requires a Restart Of The Game", "Brown"
+	StaticText "$DEVOPTMNU_OPTIONS_MARKED_WITH_RESTART", "Brown"
 	StaticText " "
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar gl_no_ssbo gl_multithread gl_bsp_worker_threads gl_bsp_wall_batch_size gl_bsp_worker_sky_mainthread gl_texture_thread_models gl_texture_thread_upload gl_texture_thread_workers vk_max_transfer_threads gl_background_flush_count gl_light_distance_cull gl_light_distance_cull_cache gl_light_model_dedupe_cache gl_light_spot_cache gl_light_pos_relative_cache gl_light_wall_max_lights gl_light_flat_max_lights gl_line_distance_cull vr_openxr_multiview vr_desktop_view_openxr_render vr_openxr_multiview_mirror_reuse vr_openxr_multiview_postprocess vr_openxr_sync_mode vr_openxr_debug_submit_mode vr_openxr_render_scale vr_openxr_fov_adjust_deg vr_openxr_eye_shift_scale vr_openxr_force_recommended_viewport vr_openxr_use_screen_viewport_for_submit vr_openvr_menu_pointer_pitch_bias vr_openvr_menu_pointer_tip_offset vr_hud_debug_border"
 }
@@ -3397,10 +3397,10 @@ OptionValue "DitherModes"
 {
 	0, "$OPTVAL_OFF"
 	-1, "$OPTVAL_ON"
-	6, "6 BPC"
-	8, "8 BPC"
-	10, "10 BPC"
-	12, "12 BPC"
+	6, "$OPTVAL_6BPC"
+	8, "$OPTVAL_8BPC"
+	10, "$OPTVAL_10BPC"
+	12, "$OPTVAL_12BPC"
 }
 
 OptionValue "BillboardModes"
@@ -3431,11 +3431,11 @@ OptionValue "HqResizeModes"
 OptionValue "HqResizeMultipliers"
 {
    1, "$OPTVAL_OFF"
-   2, "2x"
-   3, "3x"
-   4, "4x"
-   5, "5x"
-   6, "6x"
+   2, "$OPTVAL_2X"
+   3, "$OPTVAL_3X"
+   4, "$OPTVAL_4X"
+   5, "$OPTVAL_5X"
+   6, "$OPTVAL_6X"
 }
 
 OptionValue "HqResizeModesNoMMX"
@@ -3552,14 +3552,14 @@ OptionMenu "GLLightOptions" protected
 	StaticText "$GLLIGHTMNU_ADVANCED", gold
 	Option "$GLLIGHTMNU_LIGHTSHADOWMAPQUALITY", gl_shadowmap_quality,	"ShadowMapQuality"
 	Option "$GLLIGHTMNU_LIGHTSHADOWMAPFILTER", 	gl_shadowmap_filter,	"ShadowMapFilter"
-	ScaleSlider "$GLLIGHTMNU_LIGHTSCULL",		gl_light_distance_cull, 0.0, 16000.0, 100.0, "Culling disabled"
+	ScaleSlider "$GLLIGHTMNU_LIGHTSCULL",		gl_light_distance_cull, 0.0, 16000.0, 100.0, "$GLPREFMNU_CULLING_DISABLED"
 	Slider "$GLLIGHTMNU_MAXINTENSITY",			gl_light_max_intensity, 50, 2000, 50, 0
 	Slider "$GLLIGHTMNU_MAXCOLLECTEDSS",		gl_light_max_collected_subsectors, 0, 5000, 100, 0
-	ScaleSlider "$GLLIGHTMNU_MAXWALLLIGHTS",	gl_light_wall_max_lights, 0, 10000, 100, "Limit disabled"
-	ScaleSlider "$GLLIGHTMNU_MAXFLATLIGHTS",	gl_light_flat_max_lights, 0, 10000, 100, "Limit disabled"
-	ScaleSlider "$GLLIGHTMNU_LIGHTRANGELIMIT",	gl_light_range_limit, 0, 200, 4, "Limit disabled"
-	ScaleSlider "Wall Surface Light Budget",	gl_light_wall_candidate_budget, 0, 32, 1, "Limit disabled"
-	ScaleSlider "Flat Surface Light Budget",	gl_light_flat_candidate_budget, 0, 32, 1, "Limit disabled"
+	ScaleSlider "$GLLIGHTMNU_MAXWALLLIGHTS",	gl_light_wall_max_lights, 0, 10000, 100, "$GLPREFMNU_LIMIT_DISABLED"
+	ScaleSlider "$GLLIGHTMNU_MAXFLATLIGHTS",	gl_light_flat_max_lights, 0, 10000, 100, "$GLPREFMNU_LIMIT_DISABLED"
+	ScaleSlider "$GLLIGHTMNU_LIGHTRANGELIMIT",	gl_light_range_limit, 0, 200, 4, "$GLPREFMNU_LIMIT_DISABLED"
+	ScaleSlider "$GLLIGHTMNU_WALL_SURFACE_LIGHT_BUDGET",	gl_light_wall_candidate_budget, 0, 32, 1, "$GLPREFMNU_LIMIT_DISABLED"
+	ScaleSlider "$GLLIGHTMNU_FLAT_SURFACE_LIGHT_BUDGET",	gl_light_flat_candidate_budget, 0, 32, 1, "$GLPREFMNU_LIMIT_DISABLED"
 	StaticText " "
 	SafeCommand "$OPTMNU_DEFAULTS",				"resetcvar r_dynlights gl_lights gl_lights_checkside gl_light_sprites gl_light_particles gl_light_shadowmap gl_light_buffer_type gl_shadowmap_quality gl_shadowmap_filter gl_light_distance_cull gl_light_max_intensity gl_light_max_collected_subsectors gl_light_wall_max_lights gl_light_flat_max_lights gl_light_range_limit gl_light_wall_candidate_budget gl_light_flat_candidate_budget " 
 }
@@ -3593,22 +3593,22 @@ OptionMenu "OpenGLOptions" protected
 	StaticText " "
 	Option "$GLPREFMNU_MULTISAMPLE", 			gl_multisample,					"Multisample"
 	StaticText " "
-	Option "Global fade",						gl_global_fade, "OnOff"
-	Slider "Global fade density",				gl_global_fade_density, 0.0001, 0.005, 0.0001, 4
-	Slider "Global fade gradient",				gl_global_fade_gradient, 0.1, 2, 0.1, 1
-	ColorPicker "Global fade color",			gl_global_fade_color
+	Option "$GLPREFMNU_GLOBAL_FADE",						gl_global_fade, "OnOff"
+	Slider "$GLPREFMNU_GLOBAL_FADE_DENSITY",				gl_global_fade_density, 0.0001, 0.005, 0.0001, 4
+	Slider "$GLPREFMNU_GLOBAL_FADE_GRADIENT",				gl_global_fade_gradient, 0.1, 2, 0.1, 1
+	ColorPicker "$GLPREFMNU_GLOBAL_FADE_COLOR",			gl_global_fade_color
 	StaticText " "
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar gl_lightmode gl_bandedswlight gl_fogmode gl_brightfog gl_weaponlight gl_plane_reflection gl_enhanced_nightvision gl_enhanced_nv_stealth gl_spriteclip gl_sprite_blend gl_fuzztype gl_billboard_mode gl_billboard_faces_camera gl_particles_style gl_render_precise gl_skydome gl_menu_blur gl_multisample gl_global_fade gl_global_fade_density gl_global_fade_gradient gl_global_fade_color"
 	StaticText " "
-	StaticText "Advanced Options", gold
-	ScaleSlider "Decorative Sprite Cull Distance",		gl_sprite_decor_distance_cull, 0.0, 8000.0, 100.0, "Culling disabled"
-	ScaleSlider "$DSPLYMNU_SPRITECULL",			gl_sprite_distance_cull, 0.0, 8000.0, 100.0, "Culling disabled"
-	ScaleSlider "$DSPLYMNU_LINECULL",			gl_line_distance_cull, 0.0, 16000.0, 100.0, "Culling disabled"
+	StaticText "$GLPREFMNU_ADVANCED_OPTIONS", gold
+	ScaleSlider "$GLPREFMNU_DECORATIVE_SPRITE_CULL_DISTANCE",		gl_sprite_decor_distance_cull, 0.0, 8000.0, 100.0, "$GLPREFMNU_CULLING_DISABLED"
+	ScaleSlider "$DSPLYMNU_SPRITECULL",			gl_sprite_distance_cull, 0.0, 8000.0, 100.0, "$GLPREFMNU_CULLING_DISABLED"
+	ScaleSlider "$DSPLYMNU_LINECULL",			gl_line_distance_cull, 0.0, 16000.0, 100.0, "$GLPREFMNU_CULLING_DISABLED"
 	Command "$DSPLYMNU_DISABLERENDERCULL",		"disablerendercull"
 	SafeCommand "$DSPLYMNU_RESETRENDERCULL",	"resetcvar gl_sprite_distance_cull gl_line_distance_cull gl_sprite_decor_distance_cull"
 	StaticText " "
-	ScaleSlider "Max rendered vertices",		gl_max_vertices, 0, 40000, 1000, "Limit disabled"
-	ScaleSlider "Max rendered portals",			gl_max_portals, -1, 20, 1, "Portals disabled", "Limit disabled"
+	ScaleSlider "$GLPREFMNU_MAX_RENDERED_VERTICES",		gl_max_vertices, 0, 40000, 1000, "$GLPREFMNU_LIMIT_DISABLED"
+	ScaleSlider "$GLPREFMNU_MAX_RENDERED_PORTALS",			gl_max_portals, -1, 20, 1, "$GLPREFMNU_PORTALS_DISABLED", "$GLPREFMNU_LIMIT_DISABLED"
 	StaticText " "
 	Option "$GLPREFMNU_MIRRORS",				gl_mirrors,						"OnOff"
 	Option "$GLPREFMNU_ENVIRONMENTMAPMIRROR",	gl_mirror_envmap,				"OnOff"
@@ -3651,7 +3651,7 @@ OptionMenu "PostProcessMenu" protected
 	Option "$GLPREFMNU_CUSTOMPOST",		 		gl_custompost,					"OnOff"
 	Option "$GLPREFMNU_CUSTOMSHADER",	 		gl_customshader,				"OnOff"
 	Option "$GLPREFMNU_LITESHADER",				gl_lite_shader,					"ShaderQuality"
-	StaticText "Changing these options requires a restart", "Brown"
+	StaticText "$GLPREFMNU_CHANGING_THESE_OPTIONS_REQUIRES_A_RESTART", "Brown"
 	StaticText " "
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar gl_bloom gl_lens gl_ssao gl_ssao_portals gl_fxaa gl_dither_bpc gl_tonemap gl_paltonemap_powtable gl_paltonemap_reverselookup gl_custompost gl_customshader gl_lite_shader"
 }
@@ -3807,45 +3807,45 @@ OptionMenu QuickMenu protected
 
 	StaticText " "
 	Option "$VIDMNU_REFRESHRATE", "vid_refreshrate", "RefreshRate"
-	StaticText "Change the refresh rate, recommended 72Hz.", "Brown"
+	StaticText "$QZDMNU_RECOMMEND_REFRESH_RATE", "Brown"
 	
 	StaticText " "
 	Option "$GLLIGHTMNU_LIGHTSENABLED", gl_lights, "OnOff"
-	StaticText "Greatly affects performance, best off.", "Brown"
+	StaticText "$QZDMNU_AFFECT_PERF_TIP", "Brown"
 	
 	StaticText " "
 	Option "$GLPREFMNU_RENDERSKYDOME", gl_skydome, "YesNo"
-	StaticText "Greatly affects performance, best off.", "Brown"
+	StaticText "$QZDMNU_AFFECT_PERF_TIP", "Brown"
 	
 	StaticText " "
 	Option "$DSPLYMNU_SPRITESHADOW", "r_actorspriteshadow", "SpriteShadowModes"
-	StaticText "May cause issues with some mods.", "Brown"
+	StaticText "$QZDMNU_MOD_ISSUE_TIP", "Brown"
 	
 	StaticText " "
 	Option "$GLPREFMNU_BUFFERTYPE", gl_storage_buffer_type, "StorageBuffer"
-	StaticText "Choose UBO for performance and SSBO for stability.", "Brown"
+	StaticText "$QZDMNU_UBO_PERF_TIP", "Brown"
 	
 	StaticText " "
 	Option "$GLPREFMNU_SECLIGHTMODE", gl_lightmode, "LightingModes"
-	StaticText "Certain mods look better with different modes.", "Brown"
+	StaticText "$QZDMNU_MODS_LOOK_TIP", "Brown"
 	
 	StaticText " "
 	Option "$GLTEXMNU_TEXFILTER", gl_texture_filter, "FilterModes"
-	StaticText "Set to None for unfiltered pixel appearance.", "Brown"
+	StaticText "$QZDMNU_FILTER_APPEARENCE_TIP", "Brown"
 	
 	StaticText " "
 	Option "$VIDMNU_SHOWFPSONHUD", "vid_fps", "OnOff"
-	StaticText "Option retained only for the current session.", "Brown"
+	StaticText "$QZDMNU_SHOW_FPS", "Brown"
 	
 	StaticText " "
 	Option "$GMPLYMNU_ALLOWJUMP", "sv_jump", "JumpCrouchFreeLook"
-	StaticText "Gameplay option only intended", "Brown"
-	StaticText "for a specific session/playthrough.", "Brown"
+	StaticText "$QZDMNU_ALLOWJUMP_TIP1", "Brown"
+	StaticText "$QZDMNU_ALLOWJUMP_TIP2", "Brown"
 
 	StaticText " "
 	Option "$GLPREFMNU_CUSTOMPOST", gl_custompost, "OnOff"
-	StaticText "This option on can prevent some mods from running.", "Brown"
-	StaticText "Recommended to keep it on.", "Brown"
+	StaticText "$QZDMNU_PP_SHADER_TIP1", "Brown"
+	StaticText "$QZDMNU_PP_SHADER_TIP2", "Brown"
 	
 	ifOption(OpenVR, OpenXR)
 	{
@@ -4018,42 +4018,42 @@ OptionMenu "DoomXRCredits"
 
 OptionValue "UseModes"
 {
-	0, "Head"
-	1, "Hands"
-	2, "Head and hands"
+	0, "$OPTVAL_HEAD"
+	1, "$OPTVAL_HANDS"
+	2, "$OPTVAL_HEAD_AND_HANDS"
 }
 
 OptionMenu "ExperimentalMenu"
 {
-	Title "Experimental"
-	StaticText "Features in development", "Gold"
+	Title "$EXPMNU_TITLE"
+	StaticText "$EXPMNU_FEATURES_IN_DEVELOPMENT", "Gold"
 	StaticText " "
-	Option "Purist mode", "puristmode", "OnOff"
-	StaticText "Experience vanilla doom in VR.", "Brown"
-	StaticText "Freelook and player autoaim work as intended.", "Brown"
+	Option "$EXPMNU_PURIST_MODE", "puristmode", "OnOff"
+	StaticText "$EXPMNU_EXPERIENCE_VANILLA_DOOM_IN_VR", "Brown"
+	StaticText "$EXPMNU_FREELOOK_AND_PLAYER_AUTOAIM_WORK_AS_INTENDED", "Brown"
 	StaticText " "
-	Option "Use action spawn offset", "use_action_spawn_yzoffset", "YesNo"
-	StaticText "Use horizontal and vertical spawn offset", "Brown"
-	StaticText "for projectile, missile and hitscan attacks.", "Brown"
+	Option "$EXPMNU_USE_ACTION_SPAWN_OFFSET", "use_action_spawn_yzoffset", "YesNo"
+	StaticText "$EXPMNU_USE_HORIZONTAL_AND_VERTICAL_SPAWN_OFFSET", "Brown"
+	StaticText "$EXPMNU_FOR_PROJECTILE_MISSILE_AND_HITSCAN_ATTACKS", "Brown"
 	StaticText " "
-	Option "Store save picture", "storesavepic", "OnOff"
-	StaticText "A screenshot is taken just before saving", "Brown"
-	StaticText "and stored inside the savegame.", "Brown"
+	Option "$EXPMNU_STORE_SAVE_PICTURE", "storesavepic", "OnOff"
+	StaticText "$EXPMNU_A_SCREENSHOT_IS_TAKEN_JUST_BEFORE_SAVING", "Brown"
+	StaticText "$EXPMNU_AND_STORED_INSIDE_THE_SAVEGAME", "Brown"
 	StaticText " "
-	CommandInput "Type in console"
-	StaticText "Use the character input grid to type in console.", "Brown"
-	StaticText "We can finally type in console without a keyboard!", "Brown"
+	CommandInput "$EXPMNU_TYPE_IN_CONSOLE"
+	StaticText "$EXPMNU_USE_THE_CHARACTER_INPUT_GRID_TO_TYPE_IN_CONSOLE", "Brown"
+	StaticText "$EXPMNU_WE_CAN_FINALLY_TYPE_IN_CONSOLE_WITHOUT_A_KEYBOARD", "Brown"
 	StaticText " "
-	Option "Activate (use) mode", "use_mode", UseModes
-	StaticText "Choose how to activate objects", "Brown"
+	Option "$EXPMNU_ACTIVATE_USE_MODE", "use_mode", UseModes
+	StaticText "$EXPMNU_CHOOSE_HOW_TO_ACTIVATE_OBJECTS", "Brown"
 	StaticText " "
-	Slider "Keep momentum threshold",   "vr_momentum_threshold", 0.1, 2, 0.1
-	StaticText "Small recoil require smaller threshold to move the player", "Brown"
-	StaticText "A value under one fix the motorcycle handling in Ashes 2063", "Brown"
+	Slider "$EXPMNU_KEEP_MOMENTUM_THRESHOLD",   "vr_momentum_threshold", 0.1, 2, 0.1
+	StaticText "$EXPMNU_SMALL_RECOIL_REQUIRE_SMALLER_THRESHOLD_TO_MOVE_THE_PLAYER", "Brown"
+	StaticText "$EXPMNU_A_VALUE_UNDER_ONE_FIX_THE_MOTORCYCLE_HANDLING_IN_ASHES_2063", "Brown"
 	StaticText " "
-	Option "Vanilla melee attack", "vanilla_melee_attack", "OnOff"
-	StaticText "Turn to face target and auto forward motion", "Brown"
-	StaticText "during melee attack (Chainsaw/Gauntlets)", "Brown"
+	Option "$EXPMNU_VANILLA_MELEE_ATTACK", "vanilla_melee_attack", "OnOff"
+	StaticText "$EXPMNU_TURN_TO_FACE_TARGET_AND_AUTO_FORWARD_MOTION", "Brown"
+	StaticText "$EXPMNU_DURING_MELEE_ATTACK_CHAINSAW_GAUNTLETS", "Brown"
 }
 
 /*=======================================
