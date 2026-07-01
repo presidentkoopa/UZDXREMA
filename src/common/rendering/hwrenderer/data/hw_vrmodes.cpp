@@ -375,6 +375,16 @@ namespace
 		return FString();
 	}
 
+	FString GetNetWaitAddressMessage()
+	{
+		const char* localAddress = I_GetLocalAddress();
+		if (localAddress != nullptr && localAddress[0] != '\0')
+		{
+			return FStringf("Local IP: %s", localAddress);
+		}
+		return FString("Local IP: unavailable");
+	}
+
 	void MarkRecentCommandsAsOutside2D(F2DDrawer* drawer, int startIndex)
 	{
 		if (drawer == nullptr)
@@ -515,63 +525,47 @@ void VR_RenderNetWaitShellContents(int width, int height, bool outside2D)
 		const int virtualTextHeight = std::max(1, height / textScaleY);
 		const FString primary = GetNetWaitPrimaryMessage();
 		const FString secondary = GetNetWaitSecondaryMessage();
+		const FString address = GetNetWaitAddressMessage();
 		const FString hint = FString("Press Menu\\Cancel to Abort");
-		const int primaryWidth = font->StringWidth(primary);
-		const int primaryX = std::max(4, (virtualTextWidth - primaryWidth) / 2);
-		const int primaryY = std::max(4, virtualTextHeight / 2 - font->GetHeight() * 4);
-		const int primaryCommandStart = twod->mData.Size();
-		DrawText(twod, font, CR_RED, primaryX, primaryY, primary.GetChars(),
-			DTA_VirtualWidth, virtualTextWidth,
-			DTA_VirtualHeight, virtualTextHeight,
-			TAG_DONE);
-		if (outside2D)
-		{
-			MarkRecentCommandsAsOutside2D(twod, primaryCommandStart);
-		}
-
+		const int lineHeight = font->GetHeight();
+		const int lineGap = 8;
+		const int hintGap = std::max(12, lineHeight * 2);
+		int blockHeight = lineHeight + hintGap + lineHeight;
 		if (!secondary.IsEmpty())
 		{
-			const int secondaryWidth = font->StringWidth(secondary);
-			const int secondaryX = std::max(4, (virtualTextWidth - secondaryWidth) / 2);
-			const int secondaryY = primaryY + font->GetHeight() + 8;
-			const int secondaryCommandStart = twod->mData.Size();
-			DrawText(twod, font, CR_GRAY, secondaryX, secondaryY, secondary.GetChars(),
-				DTA_VirtualWidth, virtualTextWidth,
-				DTA_VirtualHeight, virtualTextHeight,
-				TAG_DONE);
-			if (outside2D)
-			{
-				MarkRecentCommandsAsOutside2D(twod, secondaryCommandStart);
-			}
-
-			const int hintWidth = font->StringWidth(hint);
-			const int hintX = std::max(4, (virtualTextWidth - hintWidth) / 2);
-			const int hintY = secondaryY + (font->GetHeight() * 5);
-			const int hintCommandStart = twod->mData.Size();
-			DrawText(twod, font, CR_CREAM, hintX, hintY, hint.GetChars(),
-				DTA_VirtualWidth, virtualTextWidth,
-				DTA_VirtualHeight, virtualTextHeight,
-				TAG_DONE);
-			if (outside2D)
-			{
-				MarkRecentCommandsAsOutside2D(twod, hintCommandStart);
-			}
+			blockHeight += lineHeight + lineGap;
 		}
-		else
+		if (!address.IsEmpty())
 		{
-			const int hintWidth = font->StringWidth(hint);
-			const int hintX = std::max(4, (virtualTextWidth - hintWidth) / 2);
-			const int hintY = primaryY + font->GetHeight() * 3;
-			const int hintCommandStart = twod->mData.Size();
-			DrawText(twod, font, CR_GRAY, hintX, hintY, hint.GetChars(),
+			blockHeight += lineHeight + lineGap;
+		}
+		int currentY = std::max(4, (virtualTextHeight - blockHeight) / 2);
+
+		auto drawCenteredLine = [&](EColorRange color, const FString& text)
+		{
+			if (text.IsEmpty())
+			{
+				return;
+			}
+			const int textWidth = font->StringWidth(text);
+			const int textX = std::max(4, (virtualTextWidth - textWidth) / 2);
+			const int commandStart = twod->mData.Size();
+			DrawText(twod, font, color, textX, currentY, text.GetChars(),
 				DTA_VirtualWidth, virtualTextWidth,
 				DTA_VirtualHeight, virtualTextHeight,
 				TAG_DONE);
 			if (outside2D)
 			{
-				MarkRecentCommandsAsOutside2D(twod, hintCommandStart);
+				MarkRecentCommandsAsOutside2D(twod, commandStart);
 			}
-		}
+			currentY += lineHeight + lineGap;
+		};
+
+		drawCenteredLine(CR_RED, primary);
+		drawCenteredLine(CR_GRAY, secondary);
+		drawCenteredLine(CR_CREAM, address);
+		currentY += hintGap - lineGap;
+		drawCenteredLine(secondary.IsEmpty() ? CR_GRAY : CR_CREAM, hint);
 	}
 
 	twod->End();

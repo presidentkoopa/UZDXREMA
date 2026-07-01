@@ -76,6 +76,7 @@
 #include "cmdlib.h"
 #include "printf.h"
 #include "i_interface.h"
+#include "i_time.h"
 #include "hw_vrmodes.h"
 #include "doomstat.h"
 #include "c_dispatch.h"
@@ -122,6 +123,8 @@ static u_short DOOMPORT = (IPPORT_USERRESERVED + 29);
 static SOCKET mysocket = INVALID_SOCKET;
 static sockaddr_in sendaddress[MAXNETNODES];
 static uint8_t sendplayer[MAXNETNODES];
+static FString gLocalAddressString;
+static uint64_t gLocalAddressLookupTime = 0;
 
 struct NetWaitSessionState
 {
@@ -137,6 +140,135 @@ struct NetWaitSessionState
 
 static NetWaitSessionState gNetWaitSession;
 static bool gNetWaitCancelledByUser = false;
+
+static int ScoreLocalIPv4Address(uint32_t address)
+{
+	const uint32_t hostAddress = ntohl(address);
+	if (hostAddress == 0 || (hostAddress & 0xFF000000) == 0x7F000000)
+	{
+		return 0;
+	}
+	if ((hostAddress & 0xFFFF0000) == 0xC0A80000)
+	{
+		return 4;
+	}
+	if ((hostAddress & 0xFFFF0000) >= 0xAC100000 && (hostAddress & 0xFFFF0000) <= 0xAC1F0000)
+	{
+		return 4;
+	}
+	if ((hostAddress & 0xFF000000) == 0x0A000000)
+	{
+		return 4;
+	}
+	if ((hostAddress & 0xFFFF0000) == 0xA9FE0000)
+	{
+		return 2;
+	}
+	return 1;
+}
+
+static bool TryFormatIPv4Address(uint32_t address, FString& outAddress)
+{
+	if (ScoreLocalIPv4Address(address) <= 0)
+	{
+		return false;
+	}
+
+	in_addr inaddr;
+	inaddr.s_addr = address;
+	const char* text = inet_ntoa(inaddr);
+	if (text == nullptr || text[0] == '\0')
+	{
+		return false;
+	}
+
+	outAddress = text;
+	return true;
+}
+
+static FString ResolveLocalAddress()
+{
+	FString addressText;
+
+#ifdef __WIN32__
+	WSADATA wsad;
+	const bool winsockReady = WSAStartup(MAKEWORD(1, 1), &wsad) == 0;
+#else
+	const bool winsockReady = true;
+#endif
+
+	if (!winsockReady)
+	{
+		return FString();
+	}
+
+	SOCKET probeSocket = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (probeSocket != INVALID_SOCKET)
+	{
+		sockaddr_in probeAddress;
+		memset(&probeAddress, 0, sizeof(probeAddress));
+		probeAddress.sin_family = AF_INET;
+		probeAddress.sin_port = htons(53);
+		probeAddress.sin_addr.s_addr = inet_addr("8.8.8.8");
+		if (probeAddress.sin_addr.s_addr != INADDR_NONE &&
+			connect(probeSocket, (sockaddr*)&probeAddress, sizeof(probeAddress)) != SOCKET_ERROR)
+		{
+			sockaddr_in localAddress;
+			socklen_t localAddressSize = sizeof(localAddress);
+			memset(&localAddress, 0, sizeof(localAddress));
+			if (getsockname(probeSocket, (sockaddr*)&localAddress, &localAddressSize) == 0 &&
+				TryFormatIPv4Address(localAddress.sin_addr.s_addr, addressText))
+			{
+				closesocket(probeSocket);
+#ifdef __WIN32__
+				WSACleanup();
+#endif
+				return addressText;
+			}
+		}
+		closesocket(probeSocket);
+	}
+
+	char hostname[256] = {};
+	if (gethostname(hostname, (int)sizeof(hostname)) == 0 && hostname[0] != '\0')
+	{
+		if (hostent* hostentry = gethostbyname(hostname))
+		{
+			int bestScore = 0;
+			for (char** addressList = hostentry->h_addr_list; addressList != nullptr && *addressList != nullptr; ++addressList)
+			{
+				in_addr candidate = {};
+				memcpy(&candidate, *addressList, sizeof(candidate));
+				const int score = ScoreLocalIPv4Address(candidate.s_addr);
+				if (score > bestScore && TryFormatIPv4Address(candidate.s_addr, addressText))
+				{
+					bestScore = score;
+					if (bestScore >= 4)
+					{
+						break;
+					}
+				}
+			}
+		}
+	}
+
+#ifdef __WIN32__
+	WSACleanup();
+#endif
+
+	return addressText;
+}
+
+const char* I_GetLocalAddress()
+{
+	const uint64_t now = I_msTime();
+	if (gLocalAddressLookupTime == 0 || now - gLocalAddressLookupTime >= 1000)
+	{
+		gLocalAddressString = ResolveLocalAddress();
+		gLocalAddressLookupTime = now;
+	}
+	return gLocalAddressString.GetChars();
+}
 
 static bool ShouldUseVRNetWaitShellBackend()
 {

@@ -14,6 +14,7 @@ void I_NetInit(const char* msg, int num);
 bool I_NetLoop(bool (*timer_callback)(void*), void* userdata);
 void I_NetDone();
 bool I_ConsumeCancelledNetWaitBoot();
+const char* I_GetLocalAddress();
 
 enum ENetWaitBackend
 {

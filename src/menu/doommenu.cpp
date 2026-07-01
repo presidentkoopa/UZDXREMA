@@ -93,6 +93,8 @@ CVAR(Int, mp_host_skill, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(String, mp_host_map, "", CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(String, mp_join_address, "", CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
+static DMenuItemBase* gHostMultiplayerMenuIpItem = nullptr;
+
 static bool OptionGroupHasNumericValue(FOptionValues* values, double desired)
 {
 	if (values == nullptr)
@@ -160,6 +162,45 @@ static void SetOptionValues(const FName& name, FOptionValues* values)
 	{
 		OptionValues[name] = values;
 	}
+}
+
+static void UpdateHostMultiplayerMenuIpItem()
+{
+	static const FName hostMenuName("HostMultiplayerMenu");
+	DMenuDescriptor** desc = MenuDescriptors.CheckKey(hostMenuName);
+	if (desc == nullptr || !(*desc)->IsKindOf(RUNTIME_CLASS(DOptionMenuDescriptor)))
+	{
+		gHostMultiplayerMenuIpItem = nullptr;
+		return;
+	}
+
+	auto* menu = static_cast<DOptionMenuDescriptor*>(*desc);
+	for (unsigned i = 0; i < menu->mItems.Size(); ++i)
+	{
+		if (menu->mItems[i] == gHostMultiplayerMenuIpItem)
+		{
+			menu->mItems.Delete(i);
+			if (menu->mSelectedItem > (int)i)
+			{
+				menu->mSelectedItem--;
+			}
+			break;
+		}
+	}
+
+	const char* localAddress = I_GetLocalAddress();
+	FString label = (localAddress != nullptr && localAddress[0] != '\0')
+		? FStringf("Local IP: %s", localAddress)
+		: FString("Local IP: unavailable");
+
+	auto* item = CreateOptionMenuItemStaticText(label.GetChars(), -1, true);
+	menu->mItems.Insert(0, item);
+	GC::WriteBarrier(menu, item);
+	if (menu->mSelectedItem >= 0)
+	{
+		menu->mSelectedItem++;
+	}
+	gHostMultiplayerMenuIpItem = item;
 }
 
 void M_BuildMultiplayerOptionGroups()
@@ -401,6 +442,8 @@ DEFINE_ACTION_FUNCTION_NATIVE(DMenu, StartGameDirect, StartGameDirect)
 
 bool M_SetSpecialMenu(FName& menu, int param)
 {
+	static const FName hostMultiplayerMenuName("HostMultiplayerMenu");
+
 	// some menus need some special treatment
 	switch (menu.GetIndex())
 	{
@@ -532,6 +575,11 @@ bool M_SetSpecialMenu(FName& menu, int param)
 		// [MK] allow us to override the ReadThisMenu class
 		menu = gameinfo.HelpMenuClass;
 		break;
+	}
+
+	if (menu == hostMultiplayerMenuName)
+	{
+		UpdateHostMultiplayerMenuIpItem();
 	}
 
 	DMenuDescriptor** desc = MenuDescriptors.CheckKey(menu);
