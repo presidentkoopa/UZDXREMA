@@ -121,6 +121,7 @@ EXTERN_CVAR(Int, vr_mode);
 
 extern float weaponangles[3];
 extern float offhandangles[3];
+extern float hmdorientation[3];
 
 static int gSuppressMountedHudFrames = 0;
 static uint64_t gSuppressMountedHudLastFrameTime = 0;
@@ -1148,22 +1149,56 @@ void VRMode::SetUp() const
 	player_t* player = &players[consoleplayer];
 	if (player && player->mo)
 	{
+		player->PlayInVR = IsVR();
 		player->mo->AttackDir = MapAttackDir;
 		player->mo->OffhandDir = MapOffhandDir;
 
-		// In multiplayer, attack pose is reconstructed from synchronized input in
-		// playsim code. Do not let renderer setup stamp local VR state into the
-		// player actor.
+		// Multiplayer reconstructs attack pose from synchronized input in playsim.
+		// In local VR, keep render-time attack pose aligned to the current controller
+		// transform instead of resetting to the generic head-height fallback.
 		if (!multiplayer)
 		{
 			player->mo->OverrideAttackPosDir = !puristmode && (IsVR() || vr_override_weap_pos);
-			double shootz = player->mo->Center() - player->mo->Floorclip + player->mo->AttackOffset();
-			player->mo->AttackPos = player->mo->PosAtZ(shootz);
-			player->mo->AttackAngle = r_viewpoint.Angles.Yaw - DAngle::fromDeg(90.);
-			player->mo->AttackPitch = -r_viewpoint.Angles.Pitch;
-			player->mo->OffhandPos = player->mo->PosAtZ(shootz);
-			player->mo->OffhandAngle = r_viewpoint.Angles.Yaw - DAngle::fromDeg(90.);
-			player->mo->OffhandPitch = -r_viewpoint.Angles.Pitch;
+			if (player->mo->OverrideAttackPosDir && IsVR())
+			{
+				VSMatrix attackTransform;
+				if (GetWeaponTransform(&attackTransform, VR_MAINHAND))
+				{
+					const FLOATTYPE* attackMatrix = attackTransform.get();
+					player->mo->AttackPos.X = attackMatrix[12];
+					player->mo->AttackPos.Y = attackMatrix[14];
+					player->mo->AttackPos.Z = attackMatrix[13];
+					player->mo->AttackPitch = DAngle::fromDeg(VR_UseCinematicScreenLayer()
+						? -weaponangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees()
+						: -weaponangles[PITCH]);
+					player->mo->AttackAngle = DAngle::fromDeg(-90 + r_viewpoint.Angles.Yaw.Degrees() + (weaponangles[YAW] - playerYaw));
+					player->mo->AttackRoll = DAngle::fromDeg(weaponangles[ROLL]);
+				}
+
+				VSMatrix offhandTransform;
+				if (GetWeaponTransform(&offhandTransform, VR_OFFHAND))
+				{
+					const FLOATTYPE* offhandMatrix = offhandTransform.get();
+					player->mo->OffhandPos.X = offhandMatrix[12];
+					player->mo->OffhandPos.Y = offhandMatrix[14];
+					player->mo->OffhandPos.Z = offhandMatrix[13];
+					player->mo->OffhandPitch = DAngle::fromDeg(VR_UseCinematicScreenLayer()
+						? -offhandangles[PITCH] - r_viewpoint.Angles.Pitch.Degrees()
+						: -offhandangles[PITCH]);
+					player->mo->OffhandAngle = DAngle::fromDeg(-90 + r_viewpoint.Angles.Yaw.Degrees() + (offhandangles[YAW] - hmdorientation[YAW]));
+					player->mo->OffhandRoll = DAngle::fromDeg(offhandangles[ROLL]);
+				}
+			}
+			else
+			{
+				double shootz = player->mo->Center() - player->mo->Floorclip + player->mo->AttackOffset();
+				player->mo->AttackPos = player->mo->PosAtZ(shootz);
+				player->mo->AttackAngle = r_viewpoint.Angles.Yaw - DAngle::fromDeg(90.);
+				player->mo->AttackPitch = -r_viewpoint.Angles.Pitch;
+				player->mo->OffhandPos = player->mo->PosAtZ(shootz);
+				player->mo->OffhandAngle = r_viewpoint.Angles.Yaw - DAngle::fromDeg(90.);
+				player->mo->OffhandPitch = -r_viewpoint.Angles.Pitch;
+			}
 		}
 	}
 }
@@ -1291,7 +1326,6 @@ extern float weaponoffset[3];
 extern float weaponangles[3];
 extern float offhandoffset[3];
 extern float offhandangles[3];
-extern float hmdorientation[3];
 extern float hmdPosition[3];
 
 ADD_STAT(vrstats)

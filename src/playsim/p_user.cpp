@@ -99,6 +99,9 @@
 
 static FRandom pr_skullpop ("SkullPop");
 
+EXTERN_CVAR(Bool, puristmode)
+EXTERN_CVAR(Bool, vr_override_weap_pos)
+
 static inline DAngle CmdAngleToDAngle(short value)
 {
 	return DAngle::fromDeg(double(value) * (360.0 / 65536.0));
@@ -111,17 +114,50 @@ static void UpdateCanonicalMainHandPose(player_t *player)
 		return;
 	}
 
+	const VRMode* vrMode = VRMode::GetVRModeCached(true);
+	const bool isLocalVr = !multiplayer && vrMode != nullptr && vrMode->IsVR();
 	if (multiplayer)
 	{
 		player->mo->OverrideAttackPosDir = true;
 	}
-	else if (!player->mo->OverrideAttackPosDir)
+	else
+	{
+		player->mo->OverrideAttackPosDir = !puristmode && (isLocalVr || vr_override_weap_pos);
+	}
+
+	if (!player->mo->OverrideAttackPosDir)
 	{
 		return;
 	}
 
-	const double shootz = player->mo->Center() - player->mo->Floorclip + player->mo->AttackOffset();
-	player->mo->AttackPos = player->mo->PosAtZ(shootz);
+	bool seededMainHandFromController = false;
+	if (isLocalVr)
+	{
+		VSMatrix attackTransform;
+		if (vrMode->GetWeaponTransform(&attackTransform, VR_MAINHAND))
+		{
+			const FLOATTYPE* attackMatrix = attackTransform.get();
+			player->mo->AttackPos.X = attackMatrix[12];
+			player->mo->AttackPos.Y = attackMatrix[14];
+			player->mo->AttackPos.Z = attackMatrix[13];
+			seededMainHandFromController = true;
+		}
+
+		VSMatrix offhandTransform;
+		if (vrMode->GetWeaponTransform(&offhandTransform, VR_OFFHAND))
+		{
+			const FLOATTYPE* offhandMatrix = offhandTransform.get();
+			player->mo->OffhandPos.X = offhandMatrix[12];
+			player->mo->OffhandPos.Y = offhandMatrix[14];
+			player->mo->OffhandPos.Z = offhandMatrix[13];
+		}
+	}
+
+	if (!seededMainHandFromController)
+	{
+		const double shootz = player->mo->Center() - player->mo->Floorclip + player->mo->AttackOffset();
+		player->mo->AttackPos = player->mo->PosAtZ(shootz);
+	}
 	player->mo->AttackPitch = CmdAngleToDAngle(player->cmd.ucmd.weaponpitch);
 	player->mo->AttackAngle = CmdAngleToDAngle(player->cmd.ucmd.weaponyaw);
 	player->mo->AttackRoll = nullAngle;
