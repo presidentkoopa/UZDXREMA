@@ -37,6 +37,24 @@
 #include "vm.h"
 
 static TArray<IJoystickConfig *> Joysticks;
+static void UpdateControllerOptionsVisibility();
+
+static void InsertJoystickOptionsItem(DOptionMenuDescriptor* menu)
+{
+	unsigned insertIndex = menu->mItems.Size();
+	if (auto* playerItem = menu->GetItem(NAME_NewPlayerMenu))
+	{
+		const unsigned found = menu->mItems.Find(playerItem);
+		if (found < menu->mItems.Size())
+		{
+			insertIndex = found;
+		}
+	}
+
+	auto* item = CreateOptionMenuItemSubmenu("$OPTMNU_JOYSTICK", NAME_JoystickOptions, 0);
+	GC::WriteBarrier(menu, item);
+	menu->mItems.Insert(insertIndex, item);
+}
 
 DEFINE_ACTION_FUNCTION(IJoystickConfig, GetSensitivity)
 {
@@ -156,6 +174,9 @@ DEFINE_ACTION_FUNCTION(IJoystickConfig, SetEnabledInBackground)
 
 void UpdateJoystickMenu(IJoystickConfig *selected)
 {
+	I_GetJoysticks(Joysticks);
+	UpdateControllerOptionsVisibility();
+
 	DMenuDescriptor **desc = MenuDescriptors.CheckKey(NAME_JoystickOptions);
 	DMenuDescriptor **ddesc = MenuDescriptors.CheckKey("JoystickOptionsDefaults");
 	if (ddesc == nullptr) return;	// without any data the menu cannot be set up and must remain empty.
@@ -169,7 +190,6 @@ void UpdateJoystickMenu(IJoystickConfig *selected)
 		int i;
 		int itemnum = -1;
 
-		I_GetJoysticks(Joysticks);
 		if ((unsigned)itemnum >= Joysticks.Size())
 		{
 			itemnum = Joysticks.Size() - 1;
@@ -225,6 +245,39 @@ void UpdateJoystickMenu(IJoystickConfig *selected)
 				{
 					CurrentMenu->Close();
 				}
+			}
+		}
+	}
+}
+
+static void UpdateControllerOptionsVisibility()
+{
+	DMenuDescriptor** desc = MenuDescriptors.CheckKey(NAME_Optionsmenu);
+	if (desc == nullptr || !(*desc)->IsKindOf(RUNTIME_CLASS(DOptionMenuDescriptor)))
+	{
+		return;
+	}
+
+	auto* menu = static_cast<DOptionMenuDescriptor*>(*desc);
+	auto* joystickItem = menu->GetItem(NAME_JoystickOptions);
+	const bool shouldShow = Joysticks.Size() > 0;
+
+	if (shouldShow)
+	{
+		if (joystickItem == nullptr)
+		{
+			InsertJoystickOptionsItem(menu);
+		}
+	}
+	else if (joystickItem != nullptr)
+	{
+		const unsigned index = menu->mItems.Find(joystickItem);
+		if (index < menu->mItems.Size())
+		{
+			menu->mItems.Delete(index);
+			if (menu->mSelectedItem >= (int)menu->mItems.Size())
+			{
+				menu->mSelectedItem = menu->mItems.Size() > 0 ? (int)menu->mItems.Size() - 1 : 0;
 			}
 		}
 	}

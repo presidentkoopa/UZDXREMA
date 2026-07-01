@@ -1555,6 +1555,22 @@ const VRMode& VKOpenXRDeviceMode::getInstance()
 	return instance;
 }
 
+bool OpenXRInputDeviceAvailable()
+{
+	const auto* mode = dynamic_cast<const VKOpenXRDeviceMode*>(VRMode::GetVRModeCached(true));
+	return mode != nullptr && mode->HasActiveInputSession();
+}
+
+bool OpenXROnHandIsRight()
+{
+	return GetMainHandIndex() == 1;
+}
+
+bool VKOpenXRDeviceMode::HasActiveInputSession() const
+{
+	return isOpenXRReady && isSessionRunning && xrSession != XR_NULL_HANDLE;
+}
+
 static void DisableOpenXRModeForCurrentRun(const char* reason)
 {
 	if (vr_mode == VR_OPENXR_MOBILE)

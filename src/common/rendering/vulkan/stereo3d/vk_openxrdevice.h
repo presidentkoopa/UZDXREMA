@@ -12,6 +12,9 @@ class VkTextureImage;
 
 namespace s3d {
 
+bool OpenXRInputDeviceAvailable();
+bool OpenXROnHandIsRight();
+
 class VKOpenXRDeviceEyePose : public VREyeInfo
 {
 public:
@@ -77,6 +80,7 @@ public:
 	virtual bool ShouldUseRecommendedRenderSizeThisFrame() const override;
 	virtual bool ShouldUseScreenLayerForCurrentFrame() const override;
 	virtual bool IsInitialized() const override;
+	bool HasActiveInputSession() const;
 	
 	virtual bool GetHandTransform(int hand, VSMatrix* out) const override;
 	virtual bool RenderPlayerSpritesInScene() const { return true; }

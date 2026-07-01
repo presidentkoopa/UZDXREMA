@@ -51,6 +51,7 @@
 #include "vm.h"
 #include "gamestate.h"
 #include "i_interface.h"
+#include "m_joy.h"
 #include "menustate.h"
 #include "i_time.h"
 #include "printf.h"
@@ -530,6 +531,11 @@ DEFINE_ACTION_FUNCTION(DMenu, ActivateMenu)
 void M_SetMenu(FName menu, int param)
 {
 	if (sysCallbacks.SetSpecialMenu && !sysCallbacks.SetSpecialMenu(menu, param)) return;
+
+	if (menu == NAME_Optionsmenu || menu == NAME_JoystickOptions)
+	{
+		UpdateJoystickMenu(I_UpdateDeviceList());
+	}
 
 	DMenuDescriptor **desc = MenuDescriptors.CheckKey(menu);
 	if (desc != nullptr)

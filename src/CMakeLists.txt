@@ -525,6 +525,7 @@ if (ENABLE_OPENXR)
 	endif()
 	
 	set(OPENXR_SOURCES
+		common/platform/win32/i_openXR.cpp
 		common/rendering/stereo3d/openxr/oxr_loader.cpp
 	)
 	if (HAVE_VULKAN)

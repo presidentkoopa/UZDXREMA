@@ -48,6 +48,9 @@ enum
 	INPUT_XInput,
 	INPUT_RawPS2,
 	INPUT_OpenVR,
+#ifdef USE_OPENXR
+	INPUT_OpenXR,
+#endif
 	NUM_JOYDEVICES
 };
 
@@ -134,6 +137,9 @@ void I_StartupXInput();
 void I_StartupDirectInputJoystick();
 void I_StartupRawPS2();
 void I_StartupOpenVR();
+#ifdef USE_OPENXR
+void I_StartupOpenXR();
+#endif
 bool I_IsPS2Adapter(DWORD vidpid);
 
 // USB HID usage page numbers

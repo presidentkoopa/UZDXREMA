@@ -551,6 +551,11 @@ bool I_InitInput (void *hwnd)
 	Printf ("I_StartupDirectInputJoystick\n");
 	I_StartupDirectInputJoystick();
 
+#ifdef USE_OPENXR
+	Printf ("I_StartupOpenXR\n");
+	I_StartupOpenXR();
+#endif
+
 	return TRUE;
 }
 

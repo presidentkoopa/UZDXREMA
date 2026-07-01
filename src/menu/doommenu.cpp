@@ -74,6 +74,7 @@
 #include "shiftstate.h"
 #include "s_music.h"
 #include "hwrenderer/scene/hw_drawinfo.h"
+#include "m_joy.h"
 #include "profiledef.h"
 
 EXTERN_CVAR(Int, cl_gfxlocalization)
@@ -1319,6 +1320,7 @@ void M_CreateGameMenus()
 	InitCrosshairsList();
 	InitKeySections();
 	InitCommandLineProfileMenu();
+	UpdateJoystickMenu(I_UpdateDeviceList());
 
 	auto opt = OptionValues.CheckKey(NAME_PlayerTeam);
 	if (opt != nullptr)
