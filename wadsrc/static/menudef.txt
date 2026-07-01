@@ -3981,7 +3981,6 @@ OptionMenu VRPerfTweakMenu protected
 	StaticText " "
 	Option "$GLPREFMNU_MULTISAMPLE", 			gl_multisample,					"Multisample"
 	StaticText "$VRPERFMNU_MSAA_TIP", "Brown"
-	
 
 	StaticText " "
 	StaticText "$VRPERFMNU_SCENE", gold
@@ -4002,7 +4001,24 @@ OptionMenu VRPerfTweakMenu protected
 	Slider "$GLPREFMNU_GLOBAL_FADE_GRADIENT",				gl_global_fade_gradient, 0.1, 2, 0.1, 1
 	ColorPicker "$GLPREFMNU_GLOBAL_FADE_COLOR",			gl_global_fade_color
 	StaticText "$VRPERFMNU_FADE_TIP", "Brown"
-	
+
+	StaticText " "
+	Title "$GLLIGHTMNU_TITLE"
+	Option "$GLLIGHTMNU_LIGHTSENABLED",			gl_lights,				"OnOff"
+	Option "$GLLIGHTMNU_LIGHTWEAPONS",			gl_light_weapons,		"YesNo"
+	StaticText "$QZDMNU_AFFECT_PERF_TIP", "Brown"
+
+	StaticText ""
+	ScaleSlider "$GLLIGHTMNU_LIGHTSCULL",		gl_light_distance_cull, 0.0, 16000.0, 100.0, "$GLPREFMNU_CULLING_DISABLED"
+	Slider "$GLLIGHTMNU_MAXINTENSITY",			gl_light_max_intensity, 50, 2000, 50, 0
+	Slider "$GLLIGHTMNU_MAXCOLLECTEDSS",		gl_light_max_collected_subsectors, 0, 5000, 100, 0
+	ScaleSlider "$GLLIGHTMNU_MAXWALLLIGHTS",	gl_light_wall_max_lights, 0, 10000, 100, "$GLPREFMNU_LIMIT_DISABLED"
+	ScaleSlider "$GLLIGHTMNU_MAXFLATLIGHTS",	gl_light_flat_max_lights, 0, 10000, 100, "$GLPREFMNU_LIMIT_DISABLED"
+	ScaleSlider "$GLLIGHTMNU_LIGHTRANGELIMIT",	gl_light_range_limit, 0, 200, 4, "$GLPREFMNU_LIMIT_DISABLED"
+	ScaleSlider "$GLLIGHTMNU_WALL_SURFACE_LIGHT_BUDGET",	gl_light_wall_candidate_budget, 0, 32, 1, "$GLPREFMNU_LIMIT_DISABLED"
+	ScaleSlider "$GLLIGHTMNU_FLAT_SURFACE_LIGHT_BUDGET",	gl_light_flat_candidate_budget, 0, 32, 1, "$GLPREFMNU_LIMIT_DISABLED"
+	StaticText "$VRPERFMNU_CULL_TIP", "Brown"
+
 	ifOption(Developer1, Developer2)
 	{
 		StaticText " "
@@ -4025,7 +4041,7 @@ OptionMenu VRPerfTweakMenu protected
 	}
 
 	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar gl_multithread vr_scene_multithread vr_openxr_multiview gl_texture_thread gl_texture_filter_anisotropic gl_texture_hqresizemode gl_texture_hqresizemult gl_precache gl_multisample gl_skydome gl_sprite_decor_distance_cull gl_sprite_distance_cull gl_line_distance_cull gl_global_fade gl_global_fade_density gl_global_fade_gradient gl_global_fade_color vr_openxr_render_scale gl_bsp_worker_threads gl_bsp_wall_batch_size gl_bsp_worker_sky_mainthread vr_openxr_multiview_mirror_reuse vr_openxr_multiview_postprocess"
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar gl_multithread vr_scene_multithread vr_openxr_multiview gl_texture_thread gl_texture_filter_anisotropic gl_texture_hqresizemode gl_texture_hqresizemult gl_precache gl_multisample gl_skydome gl_sprite_decor_distance_cull gl_sprite_distance_cull gl_line_distance_cull gl_global_fade gl_global_fade_density gl_global_fade_gradient gl_global_fade_color gl_lights gl_light_weapons gl_light_distance_cull gl_light_max_intensity gl_light_max_collected_subsectors gl_light_wall_max_lights gl_light_flat_max_lights gl_light_range_limit gl_light_wall_candidate_budget gl_light_flat_candidate_budget vr_openxr_render_scale gl_bsp_worker_threads gl_bsp_wall_batch_size gl_bsp_worker_sky_mainthread vr_openxr_multiview_mirror_reuse vr_openxr_multiview_postprocess"
 }
 
 /*=======================================
