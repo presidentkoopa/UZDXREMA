@@ -35,6 +35,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "doomtype.h"
 #include "doomdef.h"
@@ -47,6 +48,8 @@
 #include "sbar.h"
 #include "teaminfo.h"
 #include "cmdlib.h"
+#include "i_time.h"
+#include "m_random.h"
 #include "serializer.h"
 #include "vm.h"
 #include "gstrings.h"
@@ -70,6 +73,22 @@ CVAR (Float,	wbobfire,				0.f,		CVAR_USERINFO | CVAR_ARCHIVE);
 CVAR (String,	playerclass,			"Fighter",	CVAR_USERINFO | CVAR_ARCHIVE);
 CVAR (Bool,		classicflight,			false,		CVAR_USERINFO | CVAR_ARCHIVE);
 CVAR (Bool,		vertspread,				false,		CVAR_USERINFO | CVAR_ARCHIVE);
+
+static void D_AssignDefaultMultiplayerName()
+{
+	if (doomcom.numnodes <= 1 || strcmp(name, "Player") != 0)
+	{
+		return;
+	}
+
+	const uint32_t seed = uint32_t(I_msTime()) ^ uint32_t(time(nullptr)) ^
+		uint32_t(M_Random(999)) ^ (uint32_t(consoleplayer + 1) << 16);
+	const unsigned int suffix = (seed % 999) + 1;
+	char generatedName[16];
+	mysnprintf(generatedName, countof(generatedName), "Player" TEXTCOLOR_LIGHTBLUE "#%03u" TEXTCOLOR_NORMAL, suffix);
+	name = generatedName;
+	Printf("Using default multiplayer name %s\n", generatedName);
+}
 
 enum
 {
@@ -389,6 +408,8 @@ void D_SetupUserInfo ()
 {
 	int i;
 	userinfo_t *coninfo;
+
+	D_AssignDefaultMultiplayerName();
 
 	// Reset everybody's userinfo to a default state.
 	for (i = 0; i < MAXPLAYERS; i++)
