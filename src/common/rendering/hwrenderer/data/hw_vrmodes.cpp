@@ -701,6 +701,8 @@ CVAR(Color, vr_laser_color, 0xff0000, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR(Bool, vr_laser_show_melee, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR(Bool, vr_laser_hide_on_wheel, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR(Bool, vr_laser_beam, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVARD(Bool, vr_laser_other_players_beam, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "Draw laser beams for other players in multiplayer")
+CVARD(Bool, vr_laser_other_players_pointer, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "Draw laser pointers for other players in multiplayer")
 CVAR(Float, vr_laser_beam_alpha, 0.3f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR(Float, vr_laser_beam_width, 0.15f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR(Float, vr_laser_pointer_scale, 0.1f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);

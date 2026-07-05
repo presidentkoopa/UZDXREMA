@@ -68,6 +68,8 @@ EXTERN_CVAR(Bool, vr_laser_sight)
 EXTERN_CVAR(Bool, vr_laser_show_melee)
 EXTERN_CVAR(Bool, vr_laser_hide_on_wheel)
 EXTERN_CVAR(Bool, vr_laser_beam)
+EXTERN_CVAR(Bool, vr_laser_other_players_beam)
+EXTERN_CVAR(Bool, vr_laser_other_players_pointer)
 EXTERN_CVAR(Color, vr_laser_color)
 EXTERN_CVAR(Float, vr_laser_beam_alpha)
 EXTERN_CVAR(Float, vr_laser_beam_width)
@@ -403,7 +405,26 @@ static DVector3 GetLaserBeamControllerDirection(bool offhand)
 	return LaserAngleToVector(yaw, DAngle::fromDeg(controllerAngles[0]));
 }
 
-static DVector3 GetLaserBeamControllerOrigin(player_t* player, bool offhand)
+static DVector3 GetLaserBeamAttackDirection(player_t* player, bool offhand)
+{
+	if (player == nullptr || player->mo == nullptr)
+	{
+		return {};
+	}
+
+	const VRMode* vrmode = VRMode::GetVRModeCached(true);
+	if (vrmode != nullptr && vrmode->IsVR() && player == &players[consoleplayer])
+	{
+		return GetLaserBeamControllerDirection(offhand);
+	}
+
+	auto* mo = player->mo;
+	const DAngle aimYaw = (offhand ? mo->OffhandAngle : mo->AttackAngle) + DAngle::fromDeg(90.0);
+	const DAngle aimPitch = -(offhand ? mo->OffhandPitch : mo->AttackPitch);
+	return LaserAngleToVector(aimYaw, aimPitch);
+}
+
+static DVector3 GetLaserBeamAttackOrigin(player_t* player, bool offhand)
 {
 	if (player == nullptr || player->mo == nullptr)
 	{
@@ -436,9 +457,10 @@ static bool GetLaserBeamEndpoints(player_t* player, AActor* weapon, bool offhand
 	}
 
 	auto* mo = player->mo;
-	const DVector3 direction = GetLaserBeamControllerDirection(offhand);
-	const DVector3 base = GetLaserBeamControllerOrigin(player, offhand);
+	const DVector3 direction = GetLaserBeamAttackDirection(player, offhand);
+	const DVector3 base = GetLaserBeamAttackOrigin(player, offhand);
 	const DVector3 weaponOffset = GetWeaponLaserBeamOffset(weapon);
+	const bool isLocalPlayer = player == &players[consoleplayer];
 	const DVector3 forward = direction;
 	DVector3 side = DVector3(0.0, 0.0, 1.0) ^ forward;
 	if (side.LengthSquared() < 1e-8)
@@ -459,6 +481,7 @@ static bool GetLaserBeamEndpoints(player_t* player, AActor* weapon, bool offhand
 		(double)vr_laser_source_offset_z + weaponOffset.Z);
 
 	points.Start = base +
+		forward * (isLocalPlayer ? 0.0 : 20.0) +
 		forward * totalOffset.X +
 		side * totalOffset.Y +
 		up * totalOffset.Z;
@@ -843,7 +866,7 @@ void DrawHitscanTracers(FRenderState& state)
 
 void DrawLaserSightWorld(FRenderState& state)
 {
-	if (!vr_laser_sight && !vr_laser_beam)
+	if (!vr_laser_sight && !vr_laser_beam && !vr_laser_other_players_beam && !vr_laser_other_players_pointer)
 	{
 		return;
 	}
@@ -864,8 +887,13 @@ void DrawLaserSightWorld(FRenderState& state)
 		return;
 	}
 
-	auto drawHand = [&state, player](bool offhand)
+	auto drawHand = [&state](player_t* player, bool offhand, bool allowPointer, bool allowBeamToggle)
 	{
+		if (player == nullptr || player->mo == nullptr || !player->mo->OverrideAttackPosDir)
+		{
+			return;
+		}
+
 		AActor* weapon = offhand ? player->OffhandWeapon : player->ReadyWeapon;
 		if (weapon == nullptr)
 		{
@@ -882,14 +910,28 @@ void DrawLaserSightWorld(FRenderState& state)
 		FLaserBeamPoints points;
 		if (GetLaserBeamEndpoints(player, weapon, offhand, points))
 		{
-			const bool drawBeam = vr_laser_beam || (weapon != nullptr && (weapon->IntVar(NAME_WeaponFlags) & WIF_HASLASERBEAM));
-			const bool drawPointer = vr_laser_sight;
+			const bool drawBeam = allowBeamToggle || (weapon != nullptr && (weapon->IntVar(NAME_WeaponFlags) & WIF_HASLASERBEAM));
+			const bool drawPointer = allowPointer;
 			DrawLaserBeamGeometry(state, points.Start, points.BeamEnd, points.HitEnd, drawBeam, drawPointer);
 		}
 	};
 
-	drawHand(false);
-	drawHand(true);
+	drawHand(player, false, !!vr_laser_sight, !!vr_laser_beam);
+	drawHand(player, true, !!vr_laser_sight, !!vr_laser_beam);
+
+	if (multiplayer && vr_laser_other_players_beam)
+	{
+		for (int i = 0; i < MAXPLAYERS; ++i)
+		{
+			player_t* other = &players[i];
+			if (other == player || !playeringame[i] || other->mo == nullptr || other->playerstate != PST_LIVE)
+			{
+				continue;
+			}
+
+			drawHand(other, false, !!vr_laser_other_players_pointer, !!vr_laser_other_players_beam);
+		}
+	}
 }
 
 //==========================================================================
