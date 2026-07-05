@@ -403,6 +403,31 @@ static DVector3 GetLaserBeamControllerDirection(bool offhand)
 	return LaserAngleToVector(yaw, DAngle::fromDeg(controllerAngles[0]));
 }
 
+static DVector3 GetLaserBeamControllerOrigin(player_t* player, bool offhand)
+{
+	if (player == nullptr || player->mo == nullptr)
+	{
+		return {};
+	}
+
+	auto* mo = player->mo;
+	const DVector3 fallback = offhand ? mo->OffhandPos : mo->AttackPos;
+	const VRMode* vrmode = VRMode::GetVRModeCached(true);
+	if (vrmode == nullptr || !vrmode->IsVR() || player != &players[consoleplayer])
+	{
+		return fallback;
+	}
+
+	VSMatrix controllerTransform;
+	if (!vrmode->GetWeaponTransform(&controllerTransform, offhand ? VR_OFFHAND : VR_MAINHAND))
+	{
+		return fallback;
+	}
+
+	const FLOATTYPE* controllerMatrix = controllerTransform.get();
+	return DVector3(controllerMatrix[12], controllerMatrix[14], controllerMatrix[13]);
+}
+
 static bool GetLaserBeamEndpoints(player_t* player, AActor* weapon, bool offhand, FLaserBeamPoints& points)
 {
 	if (player == nullptr || player->mo == nullptr || !player->mo->OverrideAttackPosDir)
@@ -412,7 +437,7 @@ static bool GetLaserBeamEndpoints(player_t* player, AActor* weapon, bool offhand
 
 	auto* mo = player->mo;
 	const DVector3 direction = GetLaserBeamControllerDirection(offhand);
-	const DVector3 base = offhand ? mo->OffhandPos : mo->AttackPos;
+	const DVector3 base = GetLaserBeamControllerOrigin(player, offhand);
 	const DVector3 weaponOffset = GetWeaponLaserBeamOffset(weapon);
 	const DVector3 forward = direction;
 	DVector3 side = DVector3(0.0, 0.0, 1.0) ^ forward;

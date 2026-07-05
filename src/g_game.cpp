@@ -1219,8 +1219,26 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 	cmd->ucmd.sidemove += clamp(side, -127, 127);
 	cmd->ucmd.yaw = LocalViewAngle >> 16;
 	cmd->ucmd.upmove = fly;
+
+	// Multiplayer reconstructs weapon aim from weaponpitch/weaponyaw for both
+	// VR and flatscreen peers. These fields use the same stored convention as
+	// AActor::AttackPitch/AttackAngle: pitch is negated, and yaw is stored as
+	// world yaw minus 90 degrees.
 	cmd->ucmd.weaponpitch = cmd->ucmd.pitch;
 	cmd->ucmd.weaponyaw = cmd->ucmd.yaw;
+	{
+		const float cmdAngleScale = 65536.0f / 360.0f;
+		player_t* localPlayer = &players[consoleplayer];
+		if (localPlayer != nullptr && localPlayer->mo != nullptr)
+		{
+			const DAngle yawDelta = DAngle::fromDeg(cmd->ucmd.yaw * (360.0 / 65536.0));
+			const DAngle pitchDelta = DAngle::fromDeg(cmd->ucmd.pitch * (360.0 / 65536.0));
+			const DAngle absoluteYaw = localPlayer->mo->Angles.Yaw + yawDelta;
+			const DAngle absolutePitch = localPlayer->mo->Angles.Pitch - pitchDelta;
+			cmd->ucmd.weaponyaw = (short)std::lround((absoluteYaw - DAngle::fromDeg(90.0)).Degrees() * cmdAngleScale);
+			cmd->ucmd.weaponpitch = (short)std::lround((-absolutePitch).Degrees() * cmdAngleScale);
+		}
+	}
 	if (vrmode->IsVR())
 	{
 		const float cmdAngleScale = 65536.0f / 360.0f;

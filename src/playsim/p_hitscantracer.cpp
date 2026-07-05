@@ -8,6 +8,7 @@
 #include "d_player.h"
 #include "g_levellocals.h"
 #include "gamedata/a_weapons.h"
+#include "hw_vrmodes.h"
 #include "playsim/p_local.h"
 
 EXTERN_CVAR(Int, vr_hitscan_tracer)
@@ -117,6 +118,29 @@ static AActor* GetFiringWeapon(AActor* actor, int flags)
 	return (flags & LAF_ISOFFHAND) ? actor->player->OffhandWeapon : actor->player->ReadyWeapon;
 }
 
+static DVector3 GetLocalTracerOrigin(AActor* actor, int flags, const DVector3& fallback)
+{
+	if (actor == nullptr || actor->player == nullptr || actor->player != &players[consoleplayer])
+	{
+		return fallback;
+	}
+
+	const VRMode* vrmode = VRMode::GetVRModeCached(true);
+	if (vrmode == nullptr || !vrmode->IsVR())
+	{
+		return fallback;
+	}
+
+	VSMatrix controllerTransform;
+	if (!vrmode->GetWeaponTransform(&controllerTransform, (flags & LAF_ISOFFHAND) ? VR_OFFHAND : VR_MAINHAND))
+	{
+		return fallback;
+	}
+
+	const FLOATTYPE* controllerMatrix = controllerTransform.get();
+	return DVector3(controllerMatrix[12], controllerMatrix[14], controllerMatrix[13]);
+}
+
 void P_QueueHitscanTracer(AActor* actor, const DVector3& attackPos, const DVector3& damagePos, int flags)
 {
 	if (actor == nullptr || actor->Level == nullptr)
@@ -124,7 +148,8 @@ void P_QueueHitscanTracer(AActor* actor, const DVector3& attackPos, const DVecto
 		return;
 	}
 
-	DVector3 tracerVector = damagePos - attackPos;
+	const DVector3 tracerOrigin = GetLocalTracerOrigin(actor, flags, attackPos);
+	DVector3 tracerVector = damagePos - tracerOrigin;
 	const double totalDistance = tracerVector.Length();
 	if (totalDistance <= 0.01)
 	{
@@ -167,7 +192,7 @@ void P_QueueHitscanTracer(AActor* actor, const DVector3& attackPos, const DVecto
 
 	const double tracerSpeed = std::max(1.0, (double)vr_hitscan_tracer_speed * 100.0 / (double)TICRATE);
 	FHitscanTracer tracer;
-	tracer.Start = attackPos + tracerVector * startOffset;
+	tracer.Start = tracerOrigin + tracerVector * startOffset;
 	tracer.Direction = tracerVector;
 	tracer.Distance = remainingDistance;
 	tracer.SpawnTime = actor->Level->maptime;
@@ -184,7 +209,8 @@ void P_QueueHitscanRicochet(AActor* actor, const DVector3& attackPos, const DVec
 		return;
 	}
 
-	DVector3 shotVector = impactPos - attackPos;
+	const DVector3 tracerOrigin = GetLocalTracerOrigin(actor, flags, attackPos);
+	DVector3 shotVector = impactPos - tracerOrigin;
 	const double totalDistance = shotVector.Length();
 	if (totalDistance <= 0.01)
 	{
@@ -209,12 +235,12 @@ void P_QueueHitscanRicochet(AActor* actor, const DVector3& attackPos, const DVec
 		}
 	}
 
-	if (!ShouldSpawnRicochet(attackPos, impactPos, flags))
+	if (!ShouldSpawnRicochet(tracerOrigin, impactPos, flags))
 	{
 		return;
 	}
 
-	const uint64_t seed = MakeRicochetSeed(attackPos, impactPos, flags);
+	const uint64_t seed = MakeRicochetSeed(tracerOrigin, impactPos, flags);
 	const double ricochetScale = 2.0 + HashToUnit(HitscanTracerHash(seed ^ 0x7F4A7C15u));
 	const double ricochetDistance = std::max(2.0, (totalDistance / 9.0) * ricochetScale);
 	const double tracerSpeed = std::max(1.0, (double)vr_hitscan_tracer_speed * 100.0 / (double)TICRATE);
@@ -222,7 +248,7 @@ void P_QueueHitscanRicochet(AActor* actor, const DVector3& attackPos, const DVec
 
 	FHitscanTracer ricochet;
 	ricochet.Start = impactPos;
-	ricochet.Direction = MakeRicochetDirection(shotVector, attackPos, impactPos, flags);
+	ricochet.Direction = MakeRicochetDirection(shotVector, tracerOrigin, impactPos, flags);
 	ricochet.Distance = ricochetDistance;
 	ricochet.SpawnTime = actor->Level->maptime;
 	ricochet.Lifetime = ricochetDistance / ricochetSpeed;
