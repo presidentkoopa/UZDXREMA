@@ -882,10 +882,6 @@ void DrawLaserSightWorld(FRenderState& state)
 	}
 
 	player_t* player = &players[consoleplayer];
-	if (player == nullptr || player->mo == nullptr || !player->mo->OverrideAttackPosDir)
-	{
-		return;
-	}
 
 	auto drawHand = [&state](player_t* player, bool offhand, bool allowPointer, bool allowBeamToggle)
 	{
@@ -919,7 +915,7 @@ void DrawLaserSightWorld(FRenderState& state)
 	drawHand(player, false, !!vr_laser_sight, !!vr_laser_beam);
 	drawHand(player, true, !!vr_laser_sight, !!vr_laser_beam);
 
-	if (multiplayer && vr_laser_other_players_beam)
+	if (multiplayer && (vr_laser_other_players_beam || vr_laser_other_players_pointer))
 	{
 		for (int i = 0; i < MAXPLAYERS; ++i)
 		{
