@@ -102,6 +102,28 @@ DEFINE_ACTION_FUNCTION_NATIVE(_TexMan, SetCameraTextureAspectRatio, SetCameraTex
 	return 0;
 }
 
+static void SetCanvasTextureTranslucent(const FString& texturename, bool translucent)
+{
+	FTextureID textureid = TexMan.CheckForTexture(texturename.GetChars(), ETextureType::Wall, FTextureManager::TEXMAN_Overridable);
+	if (textureid.isValid())
+	{
+		auto tex = TexMan.GetGameTexture(textureid);
+		if (tex && tex->isHardwareCanvas())
+		{
+			static_cast<FCanvasTexture*>(tex->GetTexture())->bTranslucentCanvas = translucent;
+		}
+	}
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(_TexMan, SetCanvasTextureTranslucent, SetCanvasTextureTranslucent)
+{
+	PARAM_PROLOGUE;
+	PARAM_STRING(texturename);
+	PARAM_BOOL(translucent);
+	SetCanvasTextureTranslucent(texturename, translucent);
+	return 0;
+}
+
 //=====================================================================================
 //
 // sector_t exports

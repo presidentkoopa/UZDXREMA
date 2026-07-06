@@ -340,6 +340,13 @@ OptionValue "OffOn"
 	1, "$OPTVAL_OFF"
 }
 
+OptionValue "OffAimAlways"
+{
+	0, "$OPTVAL_OFF"
+	1, "$OPTVAL_ONAIM"
+	2, "$OPTVAL_ALWAYS"
+}
+
 OptionValue AutoOffOn
 {
 	-1, "$OPTVAL_AUTO"
@@ -476,6 +483,8 @@ OptionMenu "NewPlayerMenu" protected
 	Option "$PLYRMNU_VERTSPREAD", vertspread, "OnOff"
 	PlayerSwitchOnPickupItem "$PLYRMNU_SWITCHONPICKUP", "OffOn"
 	Option "$PLYRMNU_ALWAYSRUN", cl_run, "OnOff"
+	Option "$PLYRMNU_MULTIPLAYER_NAMETAG", "cl_otherplayernames", "OffAimAlways"
+	Option "$PLYRMNU_MULTIPLAYER_HEALTHBAR", "cl_otherplayerhealth", "OffAimAlways"
 	Class "NewPlayerMenu"
 }
 
@@ -522,6 +531,8 @@ ListMenu "PlayerMenu"
 	ValueText "$PLYRMNU_VERTSPREAD", vertspread, "OnOff"
 	ValueText "$PLYRMNU_SWITCHONPICKUP", "Switch", "OffOn"
 	ValueText "$PLYRMNU_ALWAYSRUN", "AlwaysRun", "OnOff"
+	ValueText "Other Player Names", "cl_otherplayernames", "OffAimAlways"
+	ValueText "Show Other Player Health", "cl_otherplayerhealth", "OffAimAlways"
 	Class "PlayerMenu"
 }
 

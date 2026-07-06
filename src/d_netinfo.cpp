@@ -73,6 +73,8 @@ CVAR (Float,	wbobfire,				0.f,		CVAR_USERINFO | CVAR_ARCHIVE);
 CVAR (String,	playerclass,			"Fighter",	CVAR_USERINFO | CVAR_ARCHIVE);
 CVAR (Bool,		classicflight,			false,		CVAR_USERINFO | CVAR_ARCHIVE);
 CVAR (Bool,		vertspread,				false,		CVAR_USERINFO | CVAR_ARCHIVE);
+CVAR (Int,		cl_otherplayernames,	2,			CVAR_ARCHIVE);
+CVAR (Int,		cl_otherplayerhealth,	2,			CVAR_ARCHIVE);
 
 static void D_AssignDefaultMultiplayerName()
 {

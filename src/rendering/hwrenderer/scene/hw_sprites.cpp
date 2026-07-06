@@ -115,6 +115,13 @@ void HWSprite::DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent)
 
 	if (translucent)
 	{
+		bool translucentCanvas = false;
+		if (texture && texture->isHardwareCanvas())
+		{
+			auto* canvasTex = static_cast<FCanvasTexture*>(texture->GetTexture());
+			translucentCanvas = (canvasTex != nullptr && canvasTex->bTranslucentCanvas);
+		}
+
 		// The translucent pass requires special setup for the various modes.
 
 		// for special render styles brightmaps would not look good - especially for subtractive.
@@ -126,19 +133,23 @@ void HWSprite::DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent)
 		// Optionally use STYLE_ColorBlend in place of STYLE_Add for fullbright items.
 		if (RenderStyle == LegacyRenderStyles[STYLE_Add] && trans > 1.f - FLT_EPSILON &&
 			gl_usecolorblending && !di->isFullbrightScene() && actor &&
-			fullbright && texture && !texture->GetTranslucency())
+			fullbright && texture && !texture->GetTranslucency() && !translucentCanvas)
 		{
 			RenderStyle = LegacyRenderStyles[STYLE_ColorAdd];
 		}
 
 		state.SetRenderStyle(RenderStyle);
 		state.SetTextureMode(RenderStyle);
+		if (translucentCanvas)
+		{
+			state.SetTextureMode(TM_NORMAL);
+		}
 
 		if (hw_styleflags == STYLEHW_NoAlphaTest)
 		{
 			state.AlphaFunc(Alpha_GEqual, 0.f);
 		}
-		else if (!texture || !texture->GetTranslucency()) state.AlphaFunc(Alpha_GEqual, gl_mask_sprite_threshold);
+		else if (!texture || (!texture->GetTranslucency() && !translucentCanvas)) state.AlphaFunc(Alpha_GEqual, gl_mask_sprite_threshold);
 		else state.AlphaFunc(Alpha_Greater, 0.f);
 
 		if (RenderStyle.BlendOp == STYLEOP_Shadow)
@@ -1815,6 +1826,20 @@ void HWSprite::AdjustVisualThinker(HWDrawInfo* di, DVisualThinker* spr, sector_t
 
 	auto r = spi.GetSpriteRect();
 	r.Scale(spr->Scale.X, spr->Scale.Y);
+
+	// Canvas-backed VisualThinkers are typically UI-like quads with no sprite offsets.
+	// Center them horizontally so their world position behaves like a normal world tag.
+	if (texture && texture->isHardwareCanvas())
+	{
+		ul = 1.f;
+		ur = 0.f;
+		vt = 0.f;
+		vb = 1.f;
+		r.width = texture->GetDisplayWidth() * spr->Scale.X;
+		r.height = texture->GetDisplayHeight() * spr->Scale.Y;
+		r.left = -r.width * 0.5f;
+		r.top = -r.height;
+	}
 
 	if ((spr->PT.flags & SPF_ROLL) && !(spr->PT.flags & SPF_STRETCHPIXELS))
 	{

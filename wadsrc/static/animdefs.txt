@@ -405,3 +405,19 @@ animateddoor DORALN01
 	pic DORALN08 
 
 warp texture b@ckdrop 0.83445
+canvastexture OPLTAG00 1024 256 fit 64 16 WorldPanning
+canvastexture OPLTAG01 1024 256 fit 64 16 WorldPanning
+canvastexture OPLTAG02 1024 256 fit 64 16 WorldPanning
+canvastexture OPLTAG03 1024 256 fit 64 16 WorldPanning
+canvastexture OPLTAG04 1024 256 fit 64 16 WorldPanning
+canvastexture OPLTAG05 1024 256 fit 64 16 WorldPanning
+canvastexture OPLTAG06 1024 256 fit 64 16 WorldPanning
+canvastexture OPLTAG07 1024 256 fit 64 16 WorldPanning
+canvastexture OPLVR00 1024 256 fit 96 48 WorldPanning
+canvastexture OPLVR01 1024 256 fit 96 48 WorldPanning
+canvastexture OPLVR02 1024 256 fit 96 48 WorldPanning
+canvastexture OPLVR03 1024 256 fit 96 48 WorldPanning
+canvastexture OPLVR04 1024 256 fit 96 48 WorldPanning
+canvastexture OPLVR05 1024 256 fit 96 48 WorldPanning
+canvastexture OPLVR06 1024 256 fit 96 48 WorldPanning
+canvastexture OPLVR07 1024 256 fit 96 48 WorldPanning
