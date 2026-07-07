@@ -3082,7 +3082,8 @@ OptionMenu VRWeaponWheelOptions protected
 	StaticText ""
 	StaticText "$VRWHEELMNU_WHEEL_SELECTION", gold
 	Option "$VRWHEELMNU_SHOW_WEAPONS_ITEMS", 			"vr_wheel_weapon_all", "WheelListOption"
-	Option "$VRWHEELMNU_ITEM_WHEEL_HAND_SWITCH", 		"vr_wheel_switch_hands", "YesNo"
+	Option "$VRWHEELMNU_HIDE_OTHER_CLASS_WEAPONS", 			"vr_wheel_hide_other_class_weapons", "YesNo"
+	Option "$VRWHEELMNU_ITEM_WHEEL_HAND_SWITCH", 			"vr_wheel_switch_hands", "YesNo"
 	StaticText "$VRWHEELMNU_SWITCH_HANDS_HELP", "Brown"
 	Option "$VRWHEELMNU_AUTO_SPLIT_LIST", 				"vr_wheel_auto_split", "YesNo"
 	StaticText "$VRWHEELMNU_AUTO_SPLIT_HELP", "Brown"
@@ -3101,7 +3102,7 @@ OptionMenu VRWeaponWheelOptions protected
 	Slider "$VRWHEELMNU_MODEL_ICON_Z_OFFSET", 			"vr_wheel_icon_model_zoffset", -100.0, 100.0, 1.0, 0, vr_wheel_icon_load_model
 	StaticText ""
 
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_wheel_icon_bg_color vr_wheel_icon_select_color vr_wheel_icon_scale vr_wheel_radius vr_wheel_distance vr_wheel_xoffset vr_wheel_yoffset vr_wheel_time_slow vr_wheel_weapon_all vr_wheel_switch_hands vr_wheel_selection_type vr_wheel_select_angle vr_wheel_deadzone vr_wheel_sound vr_wheel_hide_hand_weapon vr_wheel_icon_load_model vr_wheel_icon_model_scale vr_wheel_icon_model_yaw vr_wheel_icon_model_xoffset vr_wheel_icon_model_zoffset"
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_wheel_icon_bg_color vr_wheel_icon_select_color vr_wheel_icon_scale vr_wheel_radius vr_wheel_distance vr_wheel_xoffset vr_wheel_yoffset vr_wheel_time_slow vr_wheel_weapon_all vr_wheel_hide_other_class_weapons vr_wheel_switch_hands vr_wheel_selection_type vr_wheel_select_angle vr_wheel_deadzone vr_wheel_sound vr_wheel_hide_hand_weapon vr_wheel_icon_load_model vr_wheel_icon_model_scale vr_wheel_icon_model_yaw vr_wheel_icon_model_xoffset vr_wheel_icon_model_zoffset"
 }
 
 OptionMenu VRHitscanTracerOptions protected

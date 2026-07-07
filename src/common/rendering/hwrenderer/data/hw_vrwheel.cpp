@@ -38,6 +38,7 @@ EXTERN_CVAR(Float, gl_mask_sprite_threshold)
 CVAR(Bool, vr_wheel_weapon_all, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_wheel_switch_hands, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_wheel_hide_hand_weapon, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, vr_wheel_hide_other_class_weapons, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_wheel_sound, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_wheel_icon_load_model, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_wheel_auto_split, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -629,6 +630,56 @@ namespace
 		entries.Push(entry);
 	}
 
+	static bool IsWeaponAllowedForCurrentPlayerClass(player_t* player, AActor* weapon)
+	{
+		if (!vr_wheel_hide_other_class_weapons || player == nullptr || weapon == nullptr)
+		{
+			return true;
+		}
+
+		PClassActor* playerClass = player->cls;
+		if (playerClass == nullptr && player->mo != nullptr)
+		{
+			playerClass = player->mo->GetClass();
+		}
+		if (playerClass == nullptr)
+		{
+			return true;
+		}
+
+		auto restricted = static_cast<TArray<PClassActor*>*>(weapon->ScriptVar(NAME_RestrictedToPlayerClass, nullptr));
+		if (restricted != nullptr && restricted->Size() > 0)
+		{
+			bool allowed = false;
+			for (auto cls : *restricted)
+			{
+				if (cls != nullptr && playerClass->IsDescendantOf(cls))
+				{
+					allowed = true;
+					break;
+				}
+			}
+			if (!allowed)
+			{
+				return false;
+			}
+		}
+
+		auto forbidden = static_cast<TArray<PClassActor*>*>(weapon->ScriptVar(NAME_ForbiddenToPlayerClass, nullptr));
+		if (forbidden != nullptr)
+		{
+			for (auto cls : *forbidden)
+			{
+				if (cls != nullptr && playerClass->IsDescendantOf(cls))
+				{
+					return false;
+				}
+			}
+		}
+
+		return true;
+	}
+
 	static void BuildWeaponEntries(player_t* player, TArray<VRWheelEntry>& out)
 	{
 		out.Clear();
@@ -650,6 +701,10 @@ namespace
 				auto owned = player->mo->FindInventory(weapType);
 				AActor* weapon = owned != nullptr ? owned : GetDefaultByType(weapType);
 				if (weapon == nullptr || !IsWheelWeaponUsable(weapon))
+				{
+					continue;
+				}
+				if (!IsWeaponAllowedForCurrentPlayerClass(player, weapon))
 				{
 					continue;
 				}
