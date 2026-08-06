@@ -486,7 +486,15 @@ enum
 	PLANEF_BLOCKSOUND	= 32,
 	PLANEF_DISABLED		= 64,
 	PLANEF_OBSTRUCTED	= 128,	// if the portal plane is beyond the sector's floor or ceiling.
-	PLANEF_LINKED		= 256	// plane is flagged as a linked portal
+	PLANEF_LINKED		= 256,	// plane is flagged as a linked portal
+
+	// GlowColor was written as a fallback, not as an authored choice, so the plane
+	// texture's own glow outranks it. Set only by SetGlowColorAuto, cleared by
+	// SetGlowColor. The polarity is deliberate: the flag marks the *weaker* case, so
+	// everything that wrote GlowColor before this flag existed - the UDMF loader, ACS
+	// SetSectorGlow, Sector_SetGlow, ZScript SetGlowColor - keeps its authority
+	// without having to be found and updated.
+	PLANEF_GLOWAUTO		= 512
 };
 
 // Internal sector flags
@@ -965,9 +973,29 @@ public:
 		planes[pos].GlowHeight = height;
 	}
 
+	// An explicit choice of glow colour. Outranks the plane texture's own glow, which
+	// is what "the mapper picked this" has always meant here.
 	void SetGlowColor(int pos, PalEntry color)
 	{
 		planes[pos].GlowColor = color;
+		planes[pos].Flags &= ~PLANEF_GLOWAUTO;
+	}
+
+	// Same write, but as a fallback: the plane texture's own glow wins over it. This is
+	// what lets a mod paint a colour onto every plane in the map without erasing the
+	// colours GLDEFS 'Glow { Flats { } }' supplies - nukage stays green, and the paint
+	// lands only where nothing else had an opinion.
+	void SetGlowColorAuto(int pos, PalEntry color)
+	{
+		planes[pos].GlowColor = color;
+		planes[pos].Flags |= PLANEF_GLOWAUTO;
+	}
+
+	// False if the current GlowColor came from SetGlowColorAuto. Lets a caller that
+	// saved a plane's glow put it back the way it found it.
+	bool IsGlowAuthored(int pos) const
+	{
+		return !(planes[pos].Flags & PLANEF_GLOWAUTO);
 	}
 
 	FTextureID GetTexture(int pos) const

@@ -322,6 +322,13 @@ struct TexMan
 	native static int CheckRealHeight(TextureID tex);
 	native static bool OkForLocalization(TextureID patch, String textSubstitute);
 	native static bool UseGamePalette(TextureID tex);
+	// The average colour of the texture's pixels - what the engine itself uses to give a
+	// glowing flat its colour, but available for any texture, glowing or not.
+	// 'normalize' scales the brightest channel up to that value so a dim average still
+	// reads as a hue; pass 0 for the plain average.
+	// This decodes the texture. Call it once per texture and keep the answer; calling it
+	// per sector, or per tic, will cost you.
+	native static color GetAverageColor(TextureID tex, int normalize = 153);
 	native static Canvas GetCanvas(String texture);
 }
 
