@@ -719,6 +719,70 @@ void HWDrawInfo::RenderParticles(subsector_t *sub, sector_t *front)
 	SetupSprite.Unclock();
 }
 
+//==========================================================================
+//
+// [GITD-BB] The billboard DRAW half.
+//
+// Billboards are not attached to subsectors and are not in the BSP, so unlike
+// sprites and particles they cannot be picked up by the tree walk -- they are
+// dispatched once for the whole scene instead.
+//
+// Gathered against CenterEyePos, not Viewpoint.Pos: this runs once per eye in
+// VR (hw_entrypoint.cpp loops the scene per eye), and gathering against the
+// per-eye position would let a panel fall inside rs_bb_cullradius for one eye
+// and outside it for the other, so it would appear in half the headset. The
+// centre is eye-independent, so both eyes agree on the same set.
+//
+//==========================================================================
+
+void HWDrawInfo::DispatchBillboards()
+{
+	if (!Level || Level->Billboards.Size() == 0) return;
+
+	SetupSprite.Clock();
+
+	// radius reject + rs_bb_maxpanels cap, nearest kept. One linear pass.
+	TArray<int> visible;
+	Level->GatherVisibleBillboards(Viewpoint.CenterEyePos, visible);
+
+	for (unsigned n = 0; n < visible.Size(); n++)
+	{
+		const FBillboard &bb = Level->Billboards[visible[n]];
+
+		// TickBillboards() already resolved pos for this tic, including the
+		// attached follow and BBF_VIEWRELATIVEZ. For an ATTACHED panel that
+		// leaves the position quantised to the 35Hz tic, which reads as judder
+		// on a panel held near the face, so take the host actor's interpolated
+		// position at render framerate instead. Z is left exactly as
+		// TickBillboards set it whenever BBF_VIEWRELATIVEZ owns it.
+		DVector3 bpos = bb.pos;
+		if (bb.flags & BBF_ATTACHED)
+		{
+			if (AActor *mo = bb.attachedTo.Get())
+			{
+				const DVector3 ip = mo->InterpolatedPosition(Viewpoint.TicFrac) + bb.attachOffset;
+				bpos.X = ip.X;
+				bpos.Y = ip.Y;
+				if (!(bb.flags & BBF_VIEWRELATIVEZ)) bpos.Z = ip.Z;
+			}
+		}
+
+		if (mClipPortal)
+		{
+			int clipres = mClipPortal->ClipPoint(bpos.XY());
+			if (clipres == PClip_InFront) continue;
+		}
+
+		sector_t *sector = Level->PointInSector(bpos.XY());
+		if (!sector) continue;
+
+		HWSprite sprite;
+		sprite.ProcessBillboard(this, &bb, bpos, sector);
+	}
+
+	SetupSprite.Unclock();
+}
+
 
 //==========================================================================
 //

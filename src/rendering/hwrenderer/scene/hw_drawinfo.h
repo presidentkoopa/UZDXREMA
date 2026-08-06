@@ -206,6 +206,10 @@ private:
 	public:
 	void RenderThings(subsector_t * sub, sector_t * sector);
 	void RenderParticles(subsector_t *sub, sector_t *front);
+	// [GITD-BB] the billboard DRAW half: turns every visible billboard into a
+	// camera-facing quad in the translucent lists. Must run inside the vertex
+	// buffer's Map/Unmap window -- HWSprite::CreateVertices allocates from it.
+	void DispatchBillboards();
 	void DoSubsector(subsector_t * sub);
 	int SetupLightsForOtherPlane(subsector_t * sub, FDynLightData &lightdata, const secplane_t *plane);
 	int CreateOtherPlaneVertices(subsector_t *sub, const secplane_t *plane);

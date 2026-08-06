@@ -491,6 +491,10 @@ void HWDrawInfo::CreateScene(bool drawpsprites)
 	HandleHackedSubsectors();	// open sector hacks for deep water
 	PrepareUnhandledMissingTextures();
 	DispatchRenderHacks();
+	// [GITD-BB] billboards are not in the BSP, so they are dispatched for the
+	// whole scene here rather than per subsector. Must stay inside the
+	// mVertexData Map/Unmap window below -- CreateVertices allocates from it.
+	DispatchBillboards();
 	screen->mLights->Unmap();
 	screen->mVertexData->Unmap();
 
