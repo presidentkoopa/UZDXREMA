@@ -254,6 +254,7 @@ class FShader
 	FUniform4f muGlowTopColor;
 	FUniform4f muGlowBottomPlane;
 	FUniform4f muGlowTopPlane;
+	FUniform4f muWallGlowColor;
 	FUniform4f muGradientBottomPlane;
 	FUniform4f muGradientTopPlane;
 	FUniform4f muSplitBottomPlane;

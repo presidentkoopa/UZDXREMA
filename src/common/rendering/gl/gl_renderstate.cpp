@@ -144,6 +144,7 @@ bool FGLRenderState::ApplyShader()
 	activeShader->muTextureModulateColor.Set(mStreamData.uTextureModulateColor);
 	activeShader->muTextureBlendColor.Set(mStreamData.uTextureBlendColor);
 	activeShader->muDetailParms.Set(&mStreamData.uDetailParms.X);
+	activeShader->muWallGlowColor.Set(&mStreamData.uWallGlowColor.X);
 	activeShader->muGlobalFadeMode.Set(mStreamData.uGlobalFadeMode);
 	activeShader->muGlobalFade.Set(mStreamData.uGlobalFade);
 	activeShader->muGlobalFadeDensity.Set(mStreamData.uGlobalFadeDensity);

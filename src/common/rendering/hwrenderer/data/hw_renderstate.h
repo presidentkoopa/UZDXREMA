@@ -215,7 +215,12 @@ struct StreamData
 	int padding2;
 	int padding3;
 
-	FVector4 padding4;
+	// rgb = tint, a = strength. Self-illumination for wall textures listed in a GLDEFS
+	// 'Glow { Walls { } }' block. Unrelated to uGlowTop/BottomColor, which are the sector's
+	// floor and ceiling glow landing *on* a wall.
+	// NOTE: this occupies what used to be 'padding4'. The mirrored declaration in
+	// vulkan/shaders/vk_shader.cpp must be kept in step or std140 desyncs silently.
+	FVector4 uWallGlowColor;
 };
 
 class FRenderState
@@ -320,6 +325,7 @@ public:
 		mStreamData.uSplitBottomPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uDynLightColor = { 0.0f, 0.0f, 0.0f, 1.0f };
 		mStreamData.uDetailParms = { 0.0f, 0.0f, 0.0f, 0.0f };
+		mStreamData.uWallGlowColor = { 0.0f, 0.0f, 0.0f, 0.0f };
 #ifdef NPOT_EMULATION
 		mStreamData.uNpotEmulation = { 0,0,0,0 };
 #endif
@@ -471,6 +477,18 @@ public:
 	{
 		mStreamData.uGlowTopColor = { t[0], t[1], t[2], t[3] };
 		mStreamData.uGlowBottomColor = { b[0], b[1], b[2], b[3] };
+	}
+
+	// Self-illumination for a wall whose texture is listed in a GLDEFS glow 'Walls' block.
+	// strength <= 0 switches it off. Must be reset by the caller once the wall is drawn.
+	void SetWallGlow(float r, float g, float b, float strength)
+	{
+		mStreamData.uWallGlowColor = { r, g, b, strength };
+	}
+
+	void ClearWallGlow()
+	{
+		mStreamData.uWallGlowColor = { 0.0f, 0.0f, 0.0f, 0.0f };
 	}
 
 	void SetSoftLightLevel(int llevel, int blendfactor = 0)

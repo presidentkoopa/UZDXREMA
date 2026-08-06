@@ -47,6 +47,17 @@
 
 EXTERN_CVAR(Int, gl_max_vertices)
 
+// Honour the 'Walls' branch of a GLDEFS 'Glow' block: a wall drawn with one of the listed
+// textures lights itself. Separate from the sector floor/ceiling glow that lands on walls.
+CVAR(Bool, gl_texture_wallglow, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+CUSTOM_CVAR(Float, gl_texture_wallglow_intensity, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	// Master scale over the per-texture 'intensity' from GLDEFS.
+	if (self < 0.f) self = 0.f;
+	else if (self > 4.f) self = 4.f;
+}
+
 extern int wallVerticesPerEye;
 extern int lightsWallPerEye;
 
@@ -209,6 +220,16 @@ void HWWall::RenderTexturedWall(HWWallDispatcher*di, FRenderState &state, int rf
 		state.SetGlowParams(topglowcolor, bottomglowcolor);
 		SetGlowPlanes(state, frontsector->ceilingplane, frontsector->floorplane);
 	}
+
+	// A texture listed in a GLDEFS 'Glow { Walls { } }' block lights itself. This is independent
+	// of HWF_GLOW above - that one is the sector's floor/ceiling glow being cast onto this wall.
+	bool wallglow = gl_texture_wallglow && texture != nullptr && texture->isWallGlowing();
+	if (wallglow)
+	{
+		float strength = texture->GetWallGlowStrength() * (1.f / 100.f) * gl_texture_wallglow_intensity;
+		if (strength > 0.f) state.SetWallGlow(1.f, 1.f, 1.f, strength);
+		else wallglow = false;
+	}
 	state.SetMaterial(texture, UF_Texture, 0, flags & 3, NO_TRANSLATION, -1);
 #ifdef NPOT_EMULATION
 	// Test code, could be reactivated as a compatibility option in the unlikely event that some old vanilla map eve needs it.
@@ -326,6 +347,7 @@ void HWWall::RenderTexturedWall(HWWallDispatcher*di, FRenderState &state, int rf
 	state.SetTextureMode(tmode);
 	state.SetTextureClamp(false);
 	state.EnableGlow(false);
+	if (wallglow) state.ClearWallGlow();
 	state.EnableGradient(false);
 	state.ApplyTextureManipulation(nullptr);
 }
