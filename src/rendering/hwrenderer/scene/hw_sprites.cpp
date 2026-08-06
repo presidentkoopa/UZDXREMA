@@ -1714,7 +1714,21 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 
 	trans = 1.0f;
 	isBillboard = true;
-	bbData = bb->data;
+
+	// Which payloads may put bb->data on uAddColor, and which must NOT.
+	//
+	// The SDF payloads unpack it there, and they are safe to do so because they
+	// never call getTexel -- the one place uAddColor is consumed as a colour.
+	// BB_TEXTURE is the opposite case: it draws through the DEFAULT shader,
+	// whose getTexel does `texel.rgb += uAddColor.rgb` (see main.fp), and its
+	// data is a texture index that has already been consumed on the CPU below.
+	// Leaving an index in that uniform adds it to the card as a garbage
+	// additive tint -- a mid-range index lands as a strong blue. So the
+	// texture payload sends a neutral 0 and lets its colour arrive the way
+	// getTexel intends, as the uObjectColor modulate.
+	const bool isTexturePayload = (bb->payload == BB_TEXTURE);
+	bbData = isTexturePayload ? 0 : bb->data;
+
 	switch (bb->payload)
 	{
 	case BB_PANEL:  OverrideShader = SHADER_GitdBBPanel;  break;
@@ -1744,7 +1758,6 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 	ThingColor = bb->color;
 	ThingColor.a = 255;
 
-	const bool isTexturePayload = (bb->payload == BB_TEXTURE);
 	if (isTexturePayload)
 	{
 		FTextureID tid;
