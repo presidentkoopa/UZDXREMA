@@ -1686,6 +1686,15 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 	// only half the headset. CenterEyePos is eye-independent, so both eyes
 	// agree. Everything past this point is paid for twice, at headset
 	// resolution -- the cull radius is the cheapest lever there is.
+	//
+	// NOTE TO WHOEVER OWNS THE DISPATCH LOOP: this rejection is the backstop,
+	// not the whole cull. A caller that resolves a sector per billboard (a
+	// PointInSector BSP descent) before calling us pays that descent for every
+	// panel in the level, per eye, including the ones rejected right here.
+	// Do the same squared-distance test against r_billboard_maxdist in the
+	// dispatch loop BEFORE the sector lookup; this test then only catches
+	// whatever slips through. EXTERN_CVAR(Float, r_billboard_maxdist) is all
+	// that takes.
 	if (r_billboard_maxdist > 0.0f)
 	{
 		const double maxd = r_billboard_maxdist;
