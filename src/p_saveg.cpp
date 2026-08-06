@@ -915,6 +915,37 @@ void FLevelLocals::SpawnExtraPlayers()
 
 //============================================================================
 //
+// [RS36-BB] Billboards are level state, not thinkers, so they serialize with
+// the level. Unlike the line_t overloads above, def is always null here
+// (TArray elements get no per-element default), so it is never touched.
+//
+//============================================================================
+
+FSerializer &Serialize(FSerializer &arc, const char *key, FBillboard &bb, FBillboard *def)
+{
+	if (arc.BeginObject(key))
+	{
+		arc("id", bb.id)
+			("pos", bb.pos)
+			("size", bb.size)
+			("payload", bb.payload)
+			("data", bb.data)
+			("color", bb.color)
+			("flags", bb.flags)
+			("lifetime", bb.lifetime)
+			("spawntic", bb.spawntic)
+			("wipetype", bb.wipeType)
+			("wipeprogress", bb.wipeProgress)
+			("viewzoffset", bb.viewZOffset)
+			("attachedto", bb.attachedTo)
+			("attachoffset", bb.attachOffset)
+			.EndObject();
+	}
+	return arc;
+}
+
+//============================================================================
+//
 //
 //
 //============================================================================
@@ -995,6 +1026,19 @@ void FLevelLocals::Serialize(FSerializer &arc, bool hubload)
 		("frozenstate", frozenstate)
 		("visualthinkerhead", VisualThinkerHead);
 
+	// [RS36-BB] All billboards travel, not just persistent and attached ones:
+	// maptime is saved just above, so a transient's spawntic stays meaningful
+	// and it resumes its remaining lifetime after the load. attachedTo rides
+	// the object table (ReadObjects ran earlier); a pointer whose actor did not
+	// survive loads as null, and the next tic's TickBillboards() drops that
+	// billboard exactly as it would have live. NextBillboardID travels so
+	// handles stay unique across a load.
+	//
+	// A view-relative panel's saved pos.Z is not authoritative and does not
+	// need to be -- TickBillboards() re-anchors it to the loading player's own
+	// eye on the first tic after the load, which is the entire point of [R5].
+	arc("billboards", Billboards)
+		("nextbillboardid", NextBillboardID);
 
 	// Hub transitions must keep the current total time
 	if (!hubload)

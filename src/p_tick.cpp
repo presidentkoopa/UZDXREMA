@@ -163,6 +163,13 @@ void P_Ticker (void)
 
 		P_ThinkParticles(Level);	// [RH] make the particles think
 
+		// [RS36-BB] Billboards are set-and-forget, NOT re-published each tic,
+		// so this is maintenance rather than a clear: resolve attachment
+		// follow, re-anchor view-relative panels, expire transients and drop
+		// billboards whose attachment died. Once per game tic, not per render
+		// frame, so a high VR frame rate cannot strobe them.
+		Level->TickBillboards();
+
 		for (i = 0; i < MAXPLAYERS; i++)
 			if (Level->PlayerInGame(i))
 				P_PlayerThink(Level->Players[i]);
