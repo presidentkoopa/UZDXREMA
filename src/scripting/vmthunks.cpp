@@ -1077,7 +1077,10 @@ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetXOffset, SetXOffset)
 	 ACTION_RETURN_FLOAT(self->GetGlowHeight(pos));
  }
 
- static double GetGlowColor(sector_t *self, int pos)
+ // int, not double: the JIT builds the direct-call signature from the ZScript
+ // declaration, which is 'color'. Returning a double here left the caller reading an
+ // integer return register the callee never wrote.
+ static int GetGlowColor(sector_t *self, int pos)
  {
 	 return self->GetGlowColor(pos);
  }
@@ -1115,6 +1118,73 @@ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetXOffset, SetXOffset)
 	 PARAM_COLOR(o);
 	 self->SetGlowColor(pos, o);
 	 return 0;
+ }
+
+ static void SetGlowColorAuto(sector_t *self, int pos, int o)
+ {
+	 self->SetGlowColorAuto(pos, o);
+ }
+
+ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetGlowColorAuto, SetGlowColorAuto)
+ {
+	 PARAM_SELF_STRUCT_PROLOGUE(sector_t);
+	 PARAM_INT(pos);
+	 PARAM_COLOR(o);
+	 self->SetGlowColorAuto(pos, o);
+	 return 0;
+ }
+
+ static int IsGlowAuthored(sector_t *self, int pos)
+ {
+	 return self->IsGlowAuthored(pos);
+ }
+
+ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, IsGlowAuthored, IsGlowAuthored)
+ {
+	 PARAM_SELF_STRUCT_PROLOGUE(sector_t);
+	 PARAM_INT(pos);
+	 ACTION_RETURN_BOOL(self->IsGlowAuthored(pos));
+ }
+
+ // The glow this plane's own texture brings, before any sector colour is considered:
+ // what GLDEFS 'Glow { Flats { } }' put there, resolved through the current animation
+ // frame the same way the renderer resolves it. Returns colour 0 and height 0 when the
+ // texture does not glow. This reads a material property; it does not make anything glow.
+ static int GetTextureGlow(sector_t *self, int pos, double *height)
+ {
+	 auto tex = TexMan.GetGameTexture(self->GetTexture(pos));
+	 if (tex != NULL && tex->isGlowing())
+	 {
+		 if (!tex->isAutoGlowing()) tex = TexMan.GetGameTexture(self->GetTexture(pos), true);
+		 if (tex->isGlowing())	// recheck the current animation frame.
+		 {
+			 float glowdata[3];
+			 tex->GetGlowColor(glowdata);
+			 // GetGlowColor switches glowing back off if the averaged colour came out
+			 // black, so ask again rather than handing back a black "glow".
+			 if (tex->isGlowing())
+			 {
+				 *height = tex->GetGlowHeight();
+				 return PalEntry(255,
+					 int(glowdata[0] * 255.f + 0.5f),
+					 int(glowdata[1] * 255.f + 0.5f),
+					 int(glowdata[2] * 255.f + 0.5f));
+			 }
+		 }
+	 }
+	 *height = 0;
+	 return 0;
+ }
+
+ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, GetTextureGlow, GetTextureGlow)
+ {
+	 PARAM_SELF_STRUCT_PROLOGUE(sector_t);
+	 PARAM_INT(pos);
+	 double height;
+	 int glowcolor = GetTextureGlow(self, pos, &height);
+	 if (numret > 0) ret[0].SetInt(glowcolor);
+	 if (numret > 1) ret[1].SetFloat(height);
+	 return numret;
  }
 
  static F3DFloor* Get3DFloor(sector_t *self, unsigned int index)

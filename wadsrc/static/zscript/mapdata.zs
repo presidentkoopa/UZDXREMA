@@ -541,7 +541,18 @@ struct Sector native play
 	native clearscope double GetGlowHeight(int pos) const;
 	native clearscope color GetGlowColor(int pos) const;
 	native void SetGlowHeight(int pos, double height);
+	// An explicit choice of glow colour, which outranks the plane texture's own glow.
 	native void SetGlowColor(int pos, color color);
+	// The same write as a fallback: the plane texture's own glow (GLDEFS 'Glow { Flats { } }')
+	// wins over it. Use this to paint glow across sectors you did not individually choose,
+	// so the pass lands only where the texture had no colour of its own.
+	native void SetGlowColorAuto(int pos, color color);
+	// False if the plane's current glow colour came from SetGlowColorAuto. Save this
+	// alongside GetGlowColor to put a plane back exactly as you found it.
+	native clearscope bool IsGlowAuthored(int pos) const;
+	// The glow the plane's own texture brings, ignoring any sector colour: colour and
+	// reach, or 0, 0 if that texture does not glow.
+	native clearscope color, double GetTextureGlow(int pos) const;
 	native void SetSpecialColor(int pos, color color);
 	native void SetAdditiveColor(int pos, Color color);
 	native void SetColorization(int tier, Name cname);

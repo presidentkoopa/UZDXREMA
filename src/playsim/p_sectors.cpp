@@ -1189,6 +1189,51 @@ double GetFriction(const sector_t *self, int plane, double *pMoveFac)
 
  //==========================================================================
  //
+ // Resolves one plane's glow into rgb + reach.
+ //
+ // Precedence, strongest first:
+ //   1. an authored colour - the map, ACS, Sector_SetGlow, or a script calling
+ //      SetGlowColor. ~0u is authored too; it means "no glow at all".
+ //   2. the plane texture's own glow, from GLDEFS 'Glow { Flats { } }'.
+ //   3. a colour written through SetGlowColorAuto, which is a fallback and only
+ //      lands where the texture had nothing to say.
+ //
+ // Fills glowdata[0..2] with rgb and glowdata[3] with the reach, and returns
+ // whether the plane glows at all.
+ //
+ //==========================================================================
+
+ static bool ResolvePlaneGlow(sector_t *sec, int pos, float *glowdata)
+ {
+	 glowdata[3] = 0;
+	 auto c = sec->planes[pos].GlowColor;
+	 if (c == ~0u) return false;	// authored as "no glow"
+
+	 if (c == 0 || !sec->IsGlowAuthored(pos))
+	 {
+		 auto tex = TexMan.GetGameTexture(sec->GetTexture(pos));
+		 if (tex != NULL && tex->isGlowing())
+		 {
+			 if (!tex->isAutoGlowing()) tex = TexMan.GetGameTexture(sec->GetTexture(pos), true);
+			 if (tex->isGlowing())	// recheck the current animation frame.
+			 {
+				 tex->GetGlowColor(glowdata);
+				 glowdata[3] = (float)tex->GetGlowHeight();
+				 return true;
+			 }
+		 }
+		 if (c == 0) return false;	// nothing authored, nothing on the texture
+	 }
+
+	 glowdata[0] = c.r / 255.f;
+	 glowdata[1] = c.g / 255.f;
+	 glowdata[2] = c.b / 255.f;
+	 glowdata[3] = sec->planes[pos].GlowHeight;
+	 return glowdata[3] > 0;
+ }
+
+ //==========================================================================
+ //
  // Checks whether a sprite should be affected by a glow
  //
  //==========================================================================
@@ -1196,28 +1241,7 @@ double GetFriction(const sector_t *self, int plane, double *pMoveFac)
  int sector_t::CheckSpriteGlow(int lightlevel, const DVector3 &pos)
  {
 	 float bottomglowcolor[4];
-	 bottomglowcolor[3] = 0;
-	 auto c = planes[sector_t::floor].GlowColor;
-	 if (c == 0)
-	 {
-		 auto tex = TexMan.GetGameTexture(GetTexture(sector_t::floor));
-		 if (tex != NULL && tex->isGlowing())
-		 {
-			 if (!tex->isAutoGlowing()) tex = TexMan.GetGameTexture(GetTexture(sector_t::floor), true);
-			 if (tex->isGlowing())	// recheck the current animation frame.
-			 {
-				 tex->GetGlowColor(bottomglowcolor);
-				 bottomglowcolor[3] = (float)tex->GetGlowHeight();
-			 }
-		 }
-	 }
-	 else if (c != ~0u)
-	 {
-		 bottomglowcolor[0] = c.r / 255.f;
-		 bottomglowcolor[1] = c.g / 255.f;
-		 bottomglowcolor[2] = c.b / 255.f;
-		 bottomglowcolor[3] = planes[sector_t::floor].GlowHeight;
-	 }
+	 ResolvePlaneGlow(this, sector_t::floor, bottomglowcolor);
 
 	 if (bottomglowcolor[3]> 0)
 	 {
@@ -1240,56 +1264,12 @@ double GetFriction(const sector_t *self, int plane, double *pMoveFac)
  //==========================================================================
  bool sector_t::GetWallGlow(float *topglowcolor, float *bottomglowcolor)
  {
-	 bool ret = false;
-	 bottomglowcolor[3] = topglowcolor[3] = 0;
-	 auto c = planes[sector_t::ceiling].GlowColor;
-	 if (c == 0)
-	 {
-		 auto tex = TexMan.GetGameTexture(GetTexture(sector_t::ceiling));
-		 if (tex != NULL && tex->isGlowing())
-		 {
-			 if (!tex->isAutoGlowing()) tex = TexMan.GetGameTexture(GetTexture(sector_t::ceiling), true);
-			 if (tex->isGlowing())	// recheck the current animation frame.
-			 {
-				 ret = true;
-				 tex->GetGlowColor(topglowcolor);
-				 topglowcolor[3] = (float)tex->GetGlowHeight();
-			 }
-		 }
-	 }
-	 else if (c != ~0u)
-	 {
-		 topglowcolor[0] = c.r / 255.f;
-		 topglowcolor[1] = c.g / 255.f;
-		 topglowcolor[2] = c.b / 255.f;
-		 topglowcolor[3] = planes[sector_t::ceiling].GlowHeight;
-		 ret = topglowcolor[3] > 0;
-	 }
-
-	 c = planes[sector_t::floor].GlowColor;
-	 if (c == 0)
-	 {
-		 auto tex = TexMan.GetGameTexture(GetTexture(sector_t::floor));
-		 if (tex != NULL && tex->isGlowing())
-		 {
-			 if (!tex->isAutoGlowing()) tex = TexMan.GetGameTexture(GetTexture(sector_t::floor), true);
-			 if (tex->isGlowing())	// recheck the current animation frame.
-			 {
-				 ret = true;
-				 tex->GetGlowColor(bottomglowcolor);
-				 bottomglowcolor[3] = (float)tex->GetGlowHeight();
-			 }
-		 }
-	 }
-	 else if (c != ~0u)
-	 {
-		 bottomglowcolor[0] = c.r / 255.f;
-		 bottomglowcolor[1] = c.g / 255.f;
-		 bottomglowcolor[2] = c.b / 255.f;
-		 bottomglowcolor[3] = planes[sector_t::floor].GlowHeight;
-		 ret = bottomglowcolor[3] > 0;
-	 }
-	 return ret;
+	 // '|', not '||': both planes must be resolved. The hand-written version this
+	 // replaced assigned to a single 'ret' twice, so an authored floor colour with
+	 // zero reach threw away a ceiling glow that had already been found.
+	 bool top = ResolvePlaneGlow(this, sector_t::ceiling, topglowcolor);
+	 bool bottom = ResolvePlaneGlow(this, sector_t::floor, bottomglowcolor);
+	 return top | bottom;
  }
 
 
