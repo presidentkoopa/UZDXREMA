@@ -553,10 +553,10 @@ static void CreateIndexedFlatVertices(FFlatVertexBuffer* fvb, TArray<sector_t>& 
 	{
 		Printf(PRINT_LOG, "Sector %d\n", i);
 		Printf(PRINT_LOG, "%d vertices, %d indices\n", vert.vertices.Size(), vert.indices.Size());
-		int j = 0;
-		for (auto &v : vert.vertices)
+		// Read positions, not vertices: the synthetic interior points have no vertex_t to deref.
+		for (unsigned j = 0; j < vert.positions.Size(); j++)
 		{
-			Printf(PRINT_LOG, "    %d: (%2.3f, %2.3f)\n", j++, v.vertex->fX(), v.vertex->fY());
+			Printf(PRINT_LOG, "    %d: (%2.3f, %2.3f)\n", j, vert.positions[j].X, vert.positions[j].Y);
 		}
 		for (unsigned i=0;i<vert.indices.Size();i+=3)
 		{

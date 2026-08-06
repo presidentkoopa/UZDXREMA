@@ -227,7 +227,16 @@ void HWWall::RenderTexturedWall(HWWallDispatcher*di, FRenderState &state, int rf
 	if (wallglow)
 	{
 		float strength = texture->GetWallGlowStrength() * (1.f / 100.f) * gl_texture_wallglow_intensity;
-		if (strength > 0.f) state.SetWallGlow(1.f, 1.f, 1.f, strength);
+		if (strength > 0.f)
+		{
+			// The texture's own averaged colour, so a lava wall glows lava-coloured rather than
+			// white. Resolved and cached on first use, one decode per texture and nothing after.
+			// GetWallGlowColor, not GetGlowColor: the latter clears GTexf_Glowing on a black
+			// average, which is the flat path's flag, and a black wall here glows black.
+			float c[3];
+			texture->GetWallGlowColor(c);
+			state.SetWallGlow(c[0], c[1], c[2], strength);
+		}
 		else wallglow = false;
 	}
 	state.SetMaterial(texture, UF_Texture, 0, flags & 3, NO_TRANSLATION, -1);

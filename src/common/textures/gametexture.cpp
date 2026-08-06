@@ -273,6 +273,40 @@ void FGameTexture::GetGlowColor(float* data)
 	data[2] = GlowColor.b * (1 / 255.0f);
 }
 
+//==========================================================================
+//
+// Calculates the tint for a wall self-glow (GLDEFS 'Glow { Walls { } }').
+//
+// Same average as GetGlowColor above, and deliberately NOT that function. Two
+// differences, both load-bearing:
+//
+//  - it never touches GTexf_Glowing. That flag belongs to the flat glow, and
+//    GetGlowColor clears it when the average comes out black. A wall drawing
+//    itself has no business switching a flat's glow off, and the wall path can
+//    now reach this during the draw phase where previously only the flat
+//    renderer could - so borrowing GetGlowColor would let a wall mutate state
+//    another renderer reads.
+//
+//  - black is a legal answer here and means black: an additive term of zero,
+//    not "this texture does not glow". Since the colour alone therefore cannot
+//    say whether it has been resolved, GTexf_WallGlowResolved does, which is
+//    also what keeps a black texture from re-decoding on every single draw.
+//
+//==========================================================================
+
+void FGameTexture::GetWallGlowColor(float* data)
+{
+	if (!(flags & GTexf_WallGlowResolved))
+	{
+		auto buffer = Base->GetBgraBitmap(nullptr);
+		WallGlowColor = averageColor((uint32_t*)buffer.GetPixels(), buffer.GetWidth() * buffer.GetHeight(), 153);
+		flags |= GTexf_WallGlowResolved;
+	}
+	data[0] = WallGlowColor.r * (1 / 255.0f);
+	data[1] = WallGlowColor.g * (1 / 255.0f);
+	data[2] = WallGlowColor.b * (1 / 255.0f);
+}
+
 //===========================================================================
 //
 //

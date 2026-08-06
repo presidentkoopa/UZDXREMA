@@ -59,6 +59,8 @@ struct FFlatVertex
 		x = _x;
 		z = _y;
 		y = _z;
+		// Anything that is not a sector plane has to carry the sentinel or it picks up edge glow it was never meant to have.
+		edgedist = edgedistall = FLATVERTEX_NO_EDGE;
 	}
 
 	void SetTexCoord(float _u = 0, float _v = 0)
@@ -87,6 +89,7 @@ public:
 	unsigned int mIndex;
 	std::atomic<unsigned int> mCurIndex;
 	unsigned int mNumReserved;
+	unsigned int mHighWater = 0;	// peak mCurIndex ever reached, for sizing BUFFER_SIZE
 
 	unsigned int mMapStart;
 
