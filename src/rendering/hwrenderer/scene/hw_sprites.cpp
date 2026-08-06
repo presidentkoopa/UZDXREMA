@@ -98,16 +98,11 @@ CUSTOM_CVAR(Int, gl_fuzztype, 0, CVAR_ARCHIVE)
 	if (self < 0 || self > 8) self = 0;
 }
 
-// [GITD-BB] Radial cull for billboards, in map units. The design is
-// "unlimited panels" -- the live set is not capped in code, so the draw path
-// carries the whole cost of keeping it cheap. ProcessBillboard rejects on a
-// squared-distance compare before it touches a texture or a material, which is
-// what makes a large live set affordable. 0 disables the cull entirely.
-// This is the player-facing knob the panel budget is meant to be tuned with.
-CUSTOM_CVAR(Float, r_billboard_maxdist, 768.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-{
-	if (self < 0) self = 0;
-}
+// [GITD-BB] The billboard radial cull and panel cap live in
+// FLevelLocals::GatherVisibleBillboards (g_level.cpp), tuned by rs_bb_cullradius
+// and rs_bb_maxpanels. Deliberately NOT duplicated here: two cull radii that can
+// disagree is worse than one, and the gather version also applies the cap to the
+// survivors keeping the nearest, which a per-panel test cannot do.
 
 //==========================================================================
 //
@@ -1673,36 +1668,20 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 
 	const auto &vp = di->Viewpoint;
 
-	// Radial cull, first thing and as cheaply as it can possibly be done.
-	// "Unlimited panels" means the live set is not capped in code, so this
-	// test is the only thing standing between a large live set and the frame
-	// budget: reject before touching a texture, a material or a colormap.
-	// Squared compare -- no sqrt, no DVector3 temporaries.
+	// No radial cull here on purpose. FLevelLocals::GatherVisibleBillboards
+	// (g_level.cpp) already did it for the whole frame: squared-distance reject
+	// against rs_bb_cullradius, then the rs_bb_maxpanels cap applied to the
+	// survivors keeping the NEAREST, which is strictly better than anything a
+	// per-panel test in here could do -- it can drop the furthest panels rather
+	// than whichever happened to arrive last. DispatchBillboards calls it once
+	// and only hands us the survivors, so by the time we get here the panel has
+	// already earned its place and a second radius test would just be a second
+	// tunable that could disagree with the first.
 	//
-	// Measured against CenterEyePos, NOT Pos, deliberately. hw_entrypoint.cpp
-	// runs the whole scene once per eye, so this function is called twice per
-	// frame in VR; culling against the per-eye position would let a panel sit
-	// inside the radius for one eye and outside it for the other and pop in
-	// only half the headset. CenterEyePos is eye-independent, so both eyes
-	// agree. Everything past this point is paid for twice, at headset
-	// resolution -- the cull radius is the cheapest lever there is.
-	//
-	// NOTE TO WHOEVER OWNS THE DISPATCH LOOP: this rejection is the backstop,
-	// not the whole cull. A caller that resolves a sector per billboard (a
-	// PointInSector BSP descent) before calling us pays that descent for every
-	// panel in the level, per eye, including the ones rejected right here.
-	// Do the same squared-distance test against r_billboard_maxdist in the
-	// dispatch loop BEFORE the sector lookup; this test then only catches
-	// whatever slips through. EXTERN_CVAR(Float, r_billboard_maxdist) is all
-	// that takes.
-	if (r_billboard_maxdist > 0.0f)
-	{
-		const double maxd = r_billboard_maxdist;
-		const double dx = bpos.X - vp.CenterEyePos.X;
-		const double dy = bpos.Y - vp.CenterEyePos.Y;
-		const double dz = bpos.Z - vp.CenterEyePos.Z;
-		if (dx * dx + dy * dy + dz * dz > maxd * maxd) return;
-	}
+	// Everything below is paid for TWICE in VR, at headset resolution:
+	// hw_entrypoint.cpp walks the whole scene once per eye. That is why the
+	// dispatcher gathers against CenterEyePos rather than the per-eye position
+	// -- see the note there.
 
 	// Billboards are UI-grade objects: fullbright by default, so a card is
 	// readable in a dark room. (A future flag bit can opt into sector light.)
@@ -1844,24 +1823,38 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 	y = (float)bpos.Y;
 	z = (float)bpos.Z;
 
-	// bb->size is the FULL edge length of the card in map units, not a half-
-	// extent: the quad spans size/2 either side of the anchor, so size 64
-	// gives a card 64 tall. (Spec requirement 6 -- this was never written down
-	// on DXR2 and nobody could tell which of the two it meant.)
-	const float half = (float)(bb->size * 0.5);
-	const float ps = (float)di->Level->pixelstretch;
-	const float scalefac = half / (float)sqrt(ps);
+	// bb->size is the FULL edge length in map units, edge to edge, and pos is
+	// the CENTRE: size 88 is a card 88 tall, not 176 and not 80. The half-
+	// extent below must come out at EXACTLY size*0.5 in world units, because
+	// FLevelLocals::AimBillboard accepts a hit only where |local u| and
+	// |local v| are <= size*0.5. Draw and aim share that number or clicking a
+	// row lands on the wrong row.
+	//
+	// Which is why there is no pixelstretch in here. DXR2 built this quad by
+	// copying ProcessParticle, and inherited two fudges from it: a
+	// /sqrt(pixelstretch) shrink (~9% short at the default 1.2) and a *ps on
+	// only the X component, which makes the width swing by 20% as you orbit the
+	// panel. Both exist to keep round particles looking round and are wrong for
+	// a card that has to agree with a ray test. The canonical real-content path
+	// uses neither: AdjustVisualThinker applies r.width/r.height straight in
+	// world units. So does this.
+	const double half = bb->size * 0.5;
 
-	const float viewvecX = (float)vp.ViewVector.X * scalefac * ps;
-	const float viewvecY = (float)vp.ViewVector.Y * scalefac;
+	// Screen right in world XY for a camera looking along ViewVector (unit) is
+	// (+ViewVector.Y, -ViewVector.X), so (x1,y1) is the screen-RIGHT edge --
+	// which is what the UV block above depends on. Isotropic: the yaw that
+	// CalculateVertices adds to face the camera is a rotation, so it preserves
+	// this length and the extent stays size*0.5 whatever direction you view from.
+	const double offX = vp.ViewVector.Y * half;
+	const double offY = vp.ViewVector.X * half;
 
 	// (x1,y1) = screen right, (x2,y2) = screen left, z1 = top, z2 = bottom.
-	x1 = x + viewvecY;
-	x2 = x - viewvecY;
-	y1 = y - viewvecX;
-	y2 = y + viewvecX;
-	z1 = z + scalefac;
-	z2 = z - scalefac;
+	x1 = (float)(bpos.X + offX);
+	x2 = (float)(bpos.X - offX);
+	y1 = (float)(bpos.Y - offY);
+	y2 = (float)(bpos.Y + offY);
+	z1 = (float)(bpos.Z + half);
+	z2 = (float)(bpos.Z - half);
 
 	// Sorted from the eye-independent centre, for the same reason the cull is.
 	depth = (float)((x - vp.CenterEyePos.X) * vp.TanCos + (y - vp.CenterEyePos.Y) * vp.TanSin);
