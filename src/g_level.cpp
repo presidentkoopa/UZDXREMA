@@ -33,6 +33,7 @@
 */
 
 #include <assert.h>
+#include <algorithm>	// [RS36-BB] GatherVisibleBillboards' over-cap sort
 
 #include "d_main.h"
 #include "g_level.h"
@@ -2295,6 +2296,317 @@ void FLevelLocals::Mark()
 	{
 		GC::Mark(p);
 	}
+	// [RS36-BB] Mark attached billboards' owners exactly like CorpseQueue
+	// above. Unattached billboards hold a null attachedTo (FBillboard
+	// initializes it -- TObjPtr does not), so this is safe for every entry.
+	for (auto &b : Billboards)
+	{
+		GC::Mark(b.attachedTo);
+	}
+}
+
+//==========================================================================
+//
+//
+//==========================================================================
+
+//==========================================================================
+//
+// [RS36-BB] Billboards -- storage, lifetime and API.
+//
+// The primitive and the meaning of every field are documented on FBillboard
+// in g_levellocals.h. Read the note on `size` there before calling anything
+// here: it is a FULL extent, not a half-extent.
+//
+// These live on FLevelLocals rather than as file-statics beside the VM thunks
+// so that the storage, the lifetime rules and the API that mutates them all
+// sit together and can be exercised without going through ZScript. The script
+// thunks are thin wrappers over these.
+//
+//==========================================================================
+
+// [R1] Player-facing limits ONLY. Neither of these caps storage: billboards
+// are inserted unconditionally and both knobs are applied at gather time, so
+// changing either at runtime brings existing panels straight back with no
+// respawn and no bookkeeping. 0 = unlimited in both cases.
+CVAR(Float, rs_bb_cullradius, 1024.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Int, rs_bb_maxpanels, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+FBillboard *FLevelLocals::FindBillboardByID(int id)
+{
+	if (id <= 0) return nullptr;
+	for (auto &b : Billboards)
+	{
+		if (b.id == id) return &b;
+	}
+	return nullptr;
+}
+
+double FLevelLocals::BillboardViewZ()
+{
+	// [R5] The LOCAL viewer's eye. A billboard faces whoever is looking, so
+	// "current view z" means this client's camera -- which under VR is the
+	// player's real room-scale headset height, not a nominal ViewHeight. Read
+	// fresh every tic so it tracks crouching and standing.
+	if (consoleplayer >= 0 && consoleplayer < MAXPLAYERS && PlayerInGame(consoleplayer))
+	{
+		const player_t *p = Players[consoleplayer];
+		if (p != nullptr) return p->viewz;
+	}
+	return 0.0;
+}
+
+// Shared by the three creation paths: when BBF_VIEWRELATIVEZ is set, the Z the
+// caller supplied is an eye-relative offset rather than a world Z, so stash it
+// and resolve an initial position from the current eye. TickBillboards()
+// re-resolves it every tic thereafter.
+static void RS_InitBillboardZ(FLevelLocals *self, FBillboard &bb, double callerZ)
+{
+	if (bb.flags & BBF_VIEWRELATIVEZ)
+	{
+		bb.viewZOffset = callerZ;
+		bb.pos.Z = self->BillboardViewZ() + bb.viewZOffset;
+	}
+}
+
+void FLevelLocals::AddBillboard(const DVector3 &pos, double size, int payload, int data, PalEntry color, int flags, double lifetime)
+{
+	FBillboard bb;
+	bb.pos = pos;
+	bb.size = size;
+	bb.payload = payload;
+	bb.data = data;
+	bb.color = color;
+	// transient: never persistent, never attached, whatever the caller passed
+	bb.flags = flags & ~(BBF_PERSISTENT | BBF_ATTACHED);
+	bb.lifetime = lifetime;
+	bb.spawntic = maptime;
+	RS_InitBillboardZ(this, bb, pos.Z);
+	Billboards.Push(bb);
+}
+
+int FLevelLocals::AddBillboardPersistent(const DVector3 &pos, double size, int payload, int data, PalEntry color, int flags, double lifetime)
+{
+	FBillboard bb;
+	bb.id = NextBillboardID++;
+	bb.pos = pos;
+	bb.size = size;
+	bb.payload = payload;
+	bb.data = data;
+	bb.color = color;
+	bb.flags = (flags & ~BBF_ATTACHED) | BBF_PERSISTENT;
+	bb.lifetime = lifetime;
+	bb.spawntic = maptime;
+	RS_InitBillboardZ(this, bb, pos.Z);
+	Billboards.Push(bb);
+	return bb.id;
+}
+
+void FLevelLocals::UpdateBillboard(int id, int data, PalEntry color)
+{
+	FBillboard *bb = FindBillboardByID(id);
+	if (bb != nullptr)
+	{
+		bb->data = data;
+		bb->color = color;
+	}
+}
+
+void FLevelLocals::MoveBillboard(int id, const DVector3 &pos)
+{
+	FBillboard *bb = FindBillboardByID(id);
+	if (bb == nullptr) return;
+	bb->pos = pos;
+	// Keep a view-relative panel view-relative across a move: the caller is
+	// still supplying an eye offset in Z, not a world Z.
+	if (bb->flags & BBF_VIEWRELATIVEZ)
+	{
+		bb->viewZOffset = pos.Z;
+		bb->pos.Z = BillboardViewZ() + bb->viewZOffset;
+	}
+}
+
+// [R3] Tears a panel down on its own. This is the piece that was missing from
+// the live DXR2 runtime even though AttachBillboard worked, which left no way
+// to remove a card except destroying its host actor. It deliberately does NOT
+// touch attachedTo's actor: dropping the billboard is the whole operation.
+// Safe on a stale, already-removed or never-issued handle.
+void FLevelLocals::RemoveBillboard(int id)
+{
+	if (id <= 0) return;
+	for (unsigned i = 0; i < Billboards.Size(); i++)
+	{
+		if (Billboards[i].id == id)
+		{
+			Billboards.Delete(i);
+			return;
+		}
+	}
+}
+
+int FLevelLocals::AttachBillboard(AActor *mo, const DVector3 &offset, double size, int payload, int data, PalEntry color, int flags, double lifetime)
+{
+	if (mo == nullptr) return -1;
+	FBillboard bb;
+	bb.id = NextBillboardID++;
+	bb.attachedTo = mo;
+	bb.attachOffset = offset;
+	bb.pos = mo->Pos() + offset;
+	bb.size = size;
+	bb.payload = payload;
+	bb.data = data;
+	bb.color = color;
+	bb.flags = (flags & ~BBF_PERSISTENT) | BBF_ATTACHED;
+	bb.lifetime = lifetime;   // kept for reference; the tick pass ignores lifetime while attached
+	bb.spawntic = maptime;
+	RS_InitBillboardZ(this, bb, offset.Z);
+	Billboards.Push(bb);
+	return bb.id;
+}
+
+//==========================================================================
+//
+// [RS36-BB] Per-tic maintenance.
+//
+// NOT a clear. Billboards are set-and-forget, so this only resolves
+// attachment follow, re-anchors view-relative panels, expires transients and
+// drops billboards whose attachment died. Runs once per game tic rather than
+// per render frame, so VR's frame rate cannot make panels strobe.
+//
+//==========================================================================
+
+void FLevelLocals::TickBillboards()
+{
+	// [R5] resolved once per tic, not once per billboard
+	const double viewz = BillboardViewZ();
+
+	for (int bi = (int)Billboards.Size() - 1; bi >= 0; bi--)
+	{
+		auto &bb = Billboards[bi];
+
+		if (bb.flags & BBF_ATTACHED)
+		{
+			AActor *mo = bb.attachedTo.Get();
+			if (mo == nullptr)
+			{
+				// "attached billboards die with their actor"
+				Billboards.Delete(bi);
+				continue;
+			}
+			bb.pos = mo->Pos() + bb.attachOffset;
+			if (bb.flags & BBF_VIEWRELATIVEZ) bb.pos.Z = viewz + bb.viewZOffset;
+			continue;   // attached billboards never self-expire by lifetime
+		}
+
+		if (bb.flags & BBF_VIEWRELATIVEZ) bb.pos.Z = viewz + bb.viewZOffset;
+
+		if (!(bb.flags & BBF_PERSISTENT) && bb.lifetime > 0.0)
+		{
+			const double ageSec = (maptime - bb.spawntic) / (double)TICRATE;
+			if (ageSec >= bb.lifetime)
+			{
+				Billboards.Delete(bi);
+			}
+		}
+	}
+}
+
+//==========================================================================
+//
+// [RS36-BB][R1] Radial cull + player-facing cap.
+//
+// The whole point of the uncapped store: rejection is cheap and happens here,
+// once per frame, instead of constraining what may exist. Squared distance
+// only -- no sqrt on the reject path, no allocation, one linear pass.
+//
+//==========================================================================
+
+unsigned FLevelLocals::GatherVisibleBillboards(const DVector3 &viewpos, TArray<int> &out)
+{
+	out.Clear();
+
+	const double radius = rs_bb_cullradius;
+	const double radiusSq = radius > 0.0 ? radius * radius : 0.0;
+
+	for (unsigned i = 0; i < Billboards.Size(); i++)
+	{
+		const FBillboard &bb = Billboards[i];
+		if (bb.size <= 0.0) continue;
+		if (radiusSq > 0.0 && (bb.pos - viewpos).LengthSquared() > radiusSq) continue;
+		out.Push((int)i);
+	}
+
+	// The cap applies to what SURVIVED the radius, and keeps the nearest, so an
+	// over-budget scene drops the panels furthest away rather than whichever
+	// happened to be created last. Only pays for the sort when over budget.
+	const int cap = rs_bb_maxpanels;
+	if (cap > 0 && out.Size() > (unsigned)cap)
+	{
+		const TArray<FBillboard> &bbs = Billboards;
+		std::sort(out.begin(), out.end(), [&bbs, &viewpos](int a, int b)
+		{
+			return (bbs[a].pos - viewpos).LengthSquared() < (bbs[b].pos - viewpos).LengthSquared();
+		});
+		out.Resize((unsigned)cap);
+	}
+	return out.Size();
+}
+
+//==========================================================================
+//
+// [RS36-BB] Ray-vs-panel test.
+//
+// The panel's normal points from the billboard toward the ray origin --
+// "camera-facing" for whoever is aiming, not necessarily the render camera.
+// Tests every live billboard, deliberately including ones the radial cull
+// would drop this frame, so an aim result never depends on the cull settings.
+//
+//==========================================================================
+
+int FLevelLocals::AimBillboard(const DVector3 &start, const DVector3 &dir_, DVector2 *outUV)
+{
+	DVector3 dir = dir_;
+	const double dlen = dir.Length();
+	if (dlen < 1.e-6) return -1;
+	dir /= dlen;
+
+	int bestId = -1;
+	double bestT = 1.e30;
+	DVector2 bestUV(0, 0);
+
+	for (auto &bb : Billboards)
+	{
+		if (bb.size <= 0.0) continue;
+		DVector3 toBB = bb.pos - start;
+		const double toBBLen = toBB.Length();
+		DVector3 normal = toBBLen > 1.e-6 ? -(toBB / toBBLen) : DVector3(0, 1, 0);
+		const double denom = normal | dir;
+		if (fabs(denom) < 1.e-6) continue;
+		const double t = (toBB | normal) / denom;
+		if (t < 0.0 || t > bestT) continue;
+
+		const DVector3 hit = start + dir * t;
+		const DVector3 worldUp(0, 0, 1);
+		DVector3 right = (fabs(normal.Z) > 0.999) ? DVector3(1, 0, 0) : (worldUp ^ normal);
+		const double rlen = right.Length();
+		if (rlen < 1.e-6) continue;
+		right /= rlen;
+		const DVector3 up = (normal ^ right).Unit();
+
+		const DVector3 rel = hit - bb.pos;
+		// half-extent derived from the FULL extent in bb.size -- see FBillboard
+		const double half = bb.size * 0.5;
+		const double lu = rel | right;
+		const double lv = rel | up;
+		if (lu < -half || lu > half || lv < -half || lv > half) continue;
+
+		bestT = t;
+		bestId = bb.id;
+		bestUV = DVector2((lu + half) / (half * 2.0), (lv + half) / (half * 2.0));
+	}
+
+	if (outUV != nullptr) *outUV = bestUV;
+	return bestId;
 }
 
 //==========================================================================

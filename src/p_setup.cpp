@@ -334,6 +334,16 @@ void FLevelLocals::ClearLevelData(bool fullgc)
 	ACSThinker = nullptr;
 	FraggleScriptThinker = nullptr;
 	CorpseQueue.Clear();
+	// [RS36-BB] Billboards are level state and FLevelLocals is reused across
+	// levels, so they have to be dropped here exactly like CorpseQueue above --
+	// otherwise panels, their handles, and attachedTo pointers into the
+	// destroyed level all leak into the next map.
+	//
+	// NextBillboardID is deliberately NOT reset: letting it keep climbing means
+	// a handle the mod held across a level change can never accidentally match
+	// a freshly created panel. A stale handle stays inert, which is what
+	// RemoveBillboard/UpdateBillboard already tolerate.
+	Billboards.Clear();
 	canvasTextureInfo.EmptyList();
 	sections.Clear();
 	segs.Clear();
