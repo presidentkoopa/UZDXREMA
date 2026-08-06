@@ -50,7 +50,8 @@ tree and says so.
 9. [Savegame compatibility](#9-savegame-compatibility)
 10. [Conflict risk per file](#10-conflict-risk-per-file)
 11. [Defects found and repaired](#11-defects-found-and-repaired)
-12. [Appendix — deprecated actor flags (not a code change)](#12-appendix--deprecated-actor-flags-not-a-code-change)
+12. [Complete file manifest](#12-complete-file-manifest)
+13. [Appendix — deprecated actor flags (not a code change)](#13-appendix--deprecated-actor-flags-not-a-code-change)
 
 ---
 
@@ -102,7 +103,7 @@ E-core  (storage, lifetime, savegame)  ->  E-script (natives, GetIndex)  ->  E-d
 * **E-script** — `namedef.h`, `codegen.cpp`, `vmthunks.cpp`, `doombase.zs`,
   `base.zs`. **Requires E-core.**
 * **E-draw** — `hw_drawstructs.h`, `hw_sprites.cpp`, `hw_bsp.cpp`,
-  `hw_drawinfo.{h,cpp}`, `hw_shaderpatcher.cpp`. **Requires E-core** (it reads
+  `hw_drawinfo.h`, `hw_drawinfo.cpp`, `hw_shaderpatcher.cpp`. **Requires E-core** (it reads
   `FBillboard` and `FLevelLocals::Billboards`). Independent of E-script.
 
 ### Soft constraint — D after C
@@ -350,9 +351,9 @@ reaching it.
 | `src/r_data/gldefs.cpp` | `:1130-1155` (`GLDefsParser::ParseGlow`, `WALLS` branch) | New `intensity <percent>` keyword; calls `tex->SetWallGlowing(strength)` alongside the existing `SetAutoGlowing()` |
 | `src/common/rendering/hwrenderer/data/hw_renderstate.h` | `:242` member; `:359` reset; `:518-528` setters | `FVector4 uWallGlowColor` in the old `padding4` slot; `SetWallGlow(r,g,b,strength)` / `ClearWallGlow()` |
 | `src/common/rendering/vulkan/shaders/vk_shader.cpp` | `:231`, `:336` | GLSL mirror of the member + `#define uWallGlowColor` |
-| `src/common/rendering/gl/gl_shader.{h,cpp}` | `h:257`; `cpp:267-268`, `:621` | `FUniform4f muWallGlowColor`, uniform declaration, `Init` |
+| `src/common/rendering/gl/gl_shader.h` + `gl_shader.cpp` | `h:257`; `cpp:267-268`, `:621` | `FUniform4f muWallGlowColor`, uniform declaration, `Init` |
 | `src/common/rendering/gl/gl_renderstate.cpp` | `:147` | `muWallGlowColor.Set(...)` in `ApplyShader` |
-| `src/common/rendering/gles/gles_shader.{h,cpp}` | `h:345`; `cpp:309-310`, `:611` | same for GLES |
+| `src/common/rendering/gles/gles_shader.h` + `gles_shader.cpp` | `h:345`; `cpp:309-310`, `:611` | same for GLES |
 | `src/common/rendering/gles/gles_renderstate.cpp` | `:258` | same for GLES |
 | `src/rendering/hwrenderer/scene/hw_walls.cpp` | `:49-59` cvars; `:224-242` in `RenderTexturedWall`; `:359` | The whole consumer |
 | `wadsrc/static/shaders/glsl/main.fp` | `:800-808` in `getLightColor` | `color.rgb += desaturate(vec4(uWallGlowColor.rgb * uWallGlowColor.a, 1.0)).rgb;` |
@@ -502,12 +503,12 @@ illuminates nothing.
 | `src/rendering/hwrenderer/hw_vertexbuilder.cpp` | `:74-99` fan rewrite; `:213-311` the whole baking pass; `:334-350` `SetFlatVertex` retyped; `:353-455` `CreateIndexedSectorVerticesLM`; `:457-485` `CreateIndexedSectorVertices` | The bulk of the feature |
 | `src/common/rendering/hwrenderer/data/hw_renderstate.h` | `:77-90` `EFlatGlowShape`; `:246-253` three members; `:265` `mFlatGlowEnabled` bit; `:371-374` reset; `:541-570` setters | State plumbing |
 | `src/common/rendering/vulkan/shaders/vk_shader.cpp` | `:232-234`, `:349-351` | GLSL mirrors + `#define`s |
-| `gl_shader.{h,cpp}`, `gl_renderstate.cpp` | `h:261-263,287`; `cpp:274-277,624-626`; `renderstate:167-174` | Three uniforms + `currentflatglowstate` gate |
-| `gles_shader.{h,cpp}`, `gles_renderstate.cpp` | `h:270,342-344,371,433`; `cpp:316-319,543,614-616,719`; `renderstate:199,290-297` | Same, plus `DEF_USE_FLAT_GLOW` permutation, `aEdgeDist` attribute binding, tag bit 25 |
+| `gl_shader.h`, `gl_shader.cpp`, `gl_renderstate.cpp` | `h:261-263,287`; `cpp:274-277,624-626`; `renderstate:167-174` | Three uniforms + `currentflatglowstate` gate |
+| `gles_shader.h`, `gles_shader.cpp`, `gles_renderstate.cpp` | `h:270,342-344,371,433`; `cpp:316-319,543,614-616,719`; `renderstate:199,290-297` | Same, plus `DEF_USE_FLAT_GLOW` permutation, `aEdgeDist` attribute binding, tag bit 25 |
 | `src/rendering/hwrenderer/scene/hw_flats.cpp` | `:56-102` cvars; `:104-152` `SetupFlatGlow`; `:441-444`, `:497` in `DrawFlat` | The consumer |
 | `wadsrc/static/shaders/glsl/main.vp` | `:9`, `:18`, `:84-89` | `aEdgeDist` in, `vEdgeDist` out, `vEdgeDist = mix(aEdgeDist.x, aEdgeDist.y, uFlatGlowParms.y)` |
 | `wadsrc/static/shaders/glsl/main.fp` | `:11`; `:710-752` `flatGlowFalloff`; `:788-797` in `getLightColor` | Seven falloff shapes + the additive term |
-| `wadsrc/static/shaders_gles/glsl/main.{vp,fp}` | mirrored, inside `#if (DEF_USE_FLAT_GLOW)` | GLES twins |
+| `wadsrc/static/shaders_gles/glsl/main.vp` + `main.fp` | mirrored, inside `#if (DEF_USE_FLAT_GLOW)` | GLES twins |
 
 Commits `e6cc648978` (core), `b7e2748854` (falloff shapes), `d08105b5d6`
 (the invariant comment).
@@ -833,7 +834,7 @@ Ported from `E:\DXR2` @ `bb6988908f` by three lanes.
 | | `:1583-1590` | The `ProcessParticle` UV warning comment |
 | | `:1650-1861` | `HWSprite::ProcessBillboard` |
 | `src/rendering/hwrenderer/scene/hw_bsp.cpp` | `:722-783` | `HWDrawInfo::DispatchBillboards` |
-| `src/rendering/hwrenderer/scene/hw_drawinfo.{h,cpp}` | `h:209-212`; `cpp:494-497` | Declaration + the call site inside `CreateScene` |
+| `src/rendering/hwrenderer/scene/hw_drawinfo.h` + `hw_drawinfo.cpp` | `h:209-212`; `cpp:494-497` | Declaration + the call site inside `CreateScene` |
 | `src/common/rendering/hwrenderer/data/hw_shaderpatcher.cpp` | `:293-300` | Comment only — the shader table rows were removed by the backout |
 
 ### 7.3 `FBillboard` — the primitive
@@ -1210,11 +1211,11 @@ For someone merging into a fork that already diverges from `emawind84/gzdoom`.
 | **medium** | `src/common/rendering/vulkan/shaders/vk_shader.cpp` | Must mirror the above exactly. |
 | **medium** | `src/common/rendering/hwrenderer/data/flatvertices.h` | `FFlatVertex` layout. |
 | **medium** | `src/rendering/hwrenderer/scene/hw_walls.cpp`, `hw_flats.cpp` | Insertions inside `RenderTexturedWall` / `DrawFlat`. |
-| **medium** | `wadsrc/static/shaders*/glsl/main.{fp,vp}` (four files) | Two trees, must stay in sync. |
-| **medium** | `src/common/rendering/gles/gles_shader.{h,cpp}` | Permutation tag bit 25 and the `aEdgeDist` attribute binding must not collide with your own. |
-| **low** | `gl_shader.{h,cpp}`, `gles_shader` uniform lines, `gl_renderstate.cpp`, `gles_renderstate.cpp` | Appended beside existing `muGlow*` lines. |
+| **medium** | `shaders/glsl/main.fp`, `main.vp` + `shaders_gles/glsl/main.fp`, `main.vp` | Two trees, must stay in sync. |
+| **medium** | `src/common/rendering/gles/gles_shader.h` + `gles_shader.cpp` | Permutation tag bit 25 and the `aEdgeDist` attribute binding must not collide with your own. |
+| **low** | `gl_shader.h`, `gl_shader.cpp`, `gles_shader.h`, `gles_shader.cpp` uniform lines, `gl_renderstate.cpp`, `gles_renderstate.cpp` | Appended beside existing `muGlow*` lines. |
 | **low** | `g_levellocals.h`, `g_level.cpp`, `p_saveg.cpp`, `vmthunks.cpp`, `doombase.zs`, `base.zs`, `mapdata.zs`, `gametexture.h`, `r_defs.h`, `buffers.h`, `namedef.h`, `hw_drawstructs.h`, `hw_vertexbuilder.h` | Appended blocks / single enum entries. |
-| **low** | `p_tick.cpp`, `p_setup.cpp`, `hw_drawinfo.{h,cpp}`, `hw_bsp.cpp`, `codegen.cpp`, `flatvertices.cpp`, `gldefs.cpp`, `hw_shaderpatcher.cpp` | One-to-ten-line insertions. |
+| **low** | `p_tick.cpp`, `p_setup.cpp`, `hw_drawinfo.h`, `hw_drawinfo.cpp`, `hw_bsp.cpp`, `codegen.cpp`, `flatvertices.cpp`, `gldefs.cpp`, `hw_shaderpatcher.cpp` | One-to-ten-line insertions. |
 | **none** | `wadsrc/static/language.0`, `language.csv` | Two characters. |
 
 ---
@@ -1408,7 +1409,7 @@ following:
 
 * **§3's claim that `MISSILEMORE` / `MISSILEEVENMORE` / `SHORTMISSILERANGE`
   "cannot be fixed" is wrong.** All three have real property bindings. See
-  [§12](#12-appendix--deprecated-actor-flags-not-a-code-change). The paragraph
+  [§13](#13-appendix--deprecated-actor-flags-not-a-code-change). The paragraph
   also contradicts itself, listing `+SHORTMISSILERANGE → MaxTargetRange 896` as
   a rename one sentence before saying it cannot be fixed.
 * **§4's `hw_sprites.cpp` line numbers are stale.** The swapped UV form is at
@@ -1432,7 +1433,73 @@ following:
 
 ---
 
-## 12. Appendix — deprecated actor flags (not a code change)
+## 12. Complete file manifest
+
+Every file this fork changes, and which feature owns it. `git diff --name-only
+origin/questzdoom...questzdoom` produces exactly this list — 45 entries, 43 of
+them code and data, 2 documentation. If you are cherry-picking a feature, take
+its rows plus every **shared** row.
+
+Feature keys: **A** language fix · **B** wall glow · **C** flat edge glow ·
+**D** ZScript glow API · **E** billboards · **S** shared by B and C
+
+| file | feature | what it carries |
+|---|---|---|
+| `wadsrc/static/language.0` | A | one appended comma |
+| `wadsrc/static/language.csv` | A | one appended comma |
+| `src/common/textures/gametexture.h` | B | `GTexf_WallGlowing`, `GTexf_WallGlowResolved`, `WallGlowStrength`, `WallGlowColor`, four accessors |
+| `src/common/textures/gametexture.cpp` | B | `GetWallGlowColor` |
+| `src/r_data/gldefs.cpp` | B | `intensity` keyword in the `WALLS` branch |
+| `src/rendering/hwrenderer/scene/hw_walls.cpp` | B | two cvars, the consumer in `RenderTexturedWall` |
+| `src/common/rendering/hwrenderer/data/buffers.h` | C | `VATTR_EDGEDIST` |
+| `src/common/rendering/hwrenderer/data/flatvertices.h` | C | `FFlatVertex` +2 floats, `FLATVERTEX_NO_EDGE`, `mHighWater` |
+| `src/common/rendering/hwrenderer/data/flatvertices.cpp` | C | vertex format, watermark, `flatvertexpeak` |
+| `src/rendering/hwrenderer/hw_vertexbuilder.h` | C | `VertexContainer::positions`, `AddInteriorVertex` |
+| `src/rendering/hwrenderer/hw_vertexbuilder.cpp` | C | edge-distance baking, centre-anchored fan |
+| `src/rendering/hwrenderer/scene/hw_flats.cpp` | C | 16 cvars, `SetupFlatGlow`, the `DrawFlat` hook |
+| `src/gamedata/r_defs.h` | D | `PLANEF_GLOWAUTO`, `SetGlowColorAuto`, `IsGlowAuthored` |
+| `src/playsim/p_sectors.cpp` | D | `ResolvePlaneGlow`; `GetWallGlow`/`CheckSpriteGlow` rewritten |
+| `wadsrc/static/zscript/mapdata.zs` | D | three `Sector` natives |
+| `src/g_levellocals.h` | E | `FBillboard`, both enums, `FLevelLocals` members and API |
+| `src/g_level.cpp` | E | storage, lifetime, cull, aim, GC marking, two cvars |
+| `src/p_saveg.cpp` | E | `Serialize(FBillboard&)` + two level keys |
+| `src/p_setup.cpp` | E | `Billboards.Clear()` in `ClearLevelData` |
+| `src/p_tick.cpp` | E | `TickBillboards()` in `P_Ticker` |
+| `src/common/engine/namedef.h` | E | `xx(GetIndex)` |
+| `src/common/scripting/backend/codegen.cpp` | E | `TextureID.GetIndex()` intrinsic |
+| `wadsrc/static/zscript/doombase.zs` | E | three enums, seven `LevelLocals` natives |
+| `src/rendering/hwrenderer/scene/hw_drawstructs.h` | E | `HWSprite::isBillboard`, `bbData`, `ProcessBillboard` decl |
+| `src/rendering/hwrenderer/scene/hw_sprites.cpp` | E | `ProcessBillboard`, the `DrawSprite` branch, the UV rule |
+| `src/rendering/hwrenderer/scene/hw_bsp.cpp` | E | `DispatchBillboards` |
+| `src/rendering/hwrenderer/scene/hw_drawinfo.h` | E | `DispatchBillboards` declaration |
+| `src/rendering/hwrenderer/scene/hw_drawinfo.cpp` | E | the call site in `CreateScene` |
+| `src/common/rendering/hwrenderer/data/hw_shaderpatcher.cpp` | E | comment only — the payload rows were backed out |
+| `src/scripting/vmthunks.cpp` | D + E | `TexMan.GetAverageColor`, three `Sector` natives, the `GetGlowColor` return-type fix, seven billboard thunks |
+| `wadsrc/static/zscript/engine/base.zs` | D + E | `TexMan.GetAverageColor`, `TextureID.GetIndex` |
+| `src/common/rendering/hwrenderer/data/hw_renderstate.h` | **S** | `StreamData` tail, `EFlatGlowShape`, setters — [§2.1](#21-streamdata-member-order) |
+| `src/common/rendering/vulkan/shaders/vk_shader.cpp` | **S** | the hand-written GLSL mirror of that tail |
+| `src/common/rendering/gl/gl_shader.h` | **S** | four `FUniform4f`, `currentflatglowstate` |
+| `src/common/rendering/gl/gl_shader.cpp` | **S** | uniform declarations + `Init` |
+| `src/common/rendering/gl/gl_renderstate.cpp` | **S** | `ApplyShader` uploads |
+| `src/common/rendering/gles/gles_shader.h` | **S** | same, plus `useFlatGlow` and tag bit 25 |
+| `src/common/rendering/gles/gles_shader.cpp` | **S** | same, plus `aEdgeDist` binding, `DEF_USE_FLAT_GLOW` |
+| `src/common/rendering/gles/gles_renderstate.cpp` | **S** | `ApplyShader` uploads + flavour selection |
+| `wadsrc/static/shaders/glsl/main.vp` | **S** | `aEdgeDist` in, `vEdgeDist` out |
+| `wadsrc/static/shaders/glsl/main.fp` | **S** | `flatGlowFalloff`, both glow terms |
+| `wadsrc/static/shaders_gles/glsl/main.vp` | **S** | GLES twin — [§2.2](#22-there-are-two-shader-trees) |
+| `wadsrc/static/shaders_gles/glsl/main.fp` | **S** | GLES twin |
+| `ENGINE_WORK.md` | — | prior status notes; superseded by this file where they disagree ([§11.11](#1111-corrections-to-engine_workmd)) |
+| `PORTING.md` | — | this file |
+
+**Not in the manifest, but part of shipping this:** the player-facing controls.
+Every cvar listed in [§8](#8-cvar-reference) is exposed through the mod-side
+Radiance Control Panel (`MENUDEF` / `CVARINFO` in a separate repo), not through
+an engine menu. If you port a feature and want it reachable without the
+console, you need a menu entry of your own — the engine adds none.
+
+---
+
+## 13. Appendix — deprecated actor flags (not a code change)
 
 This is **not part of the fork's diff.** It is included because it is the
 single most common source of console-warning noise on a mod running on this
