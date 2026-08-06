@@ -8902,7 +8902,7 @@ FxExpression *FxMemberFunctionCall::Resolve(FCompileContext& ctx)
 	}
 	else if (Self->ValueType == TypeTextureID || (ctx.Version >= MakeVersion(4, 15, 0) && (Self->ValueType == TypeTranslationID)))
 	{
-		if (MethodName == NAME_IsValid || MethodName == NAME_IsNull || MethodName == NAME_Exists || MethodName == NAME_SetInvalid || MethodName == NAME_SetNull)
+		if (MethodName == NAME_IsValid || MethodName == NAME_IsNull || MethodName == NAME_Exists || MethodName == NAME_SetInvalid || MethodName == NAME_SetNull || MethodName == NAME_GetIndex)
 		{
 			if (ArgList.Size() > 0)
 			{
@@ -8933,6 +8933,14 @@ FxExpression *FxMemberFunctionCall::Resolve(FCompileContext& ctx)
 
 			case NAME_SetNull:
 				x = new FxAssign(Self, new FxConstant(0, ScriptPosition));
+				break;
+
+			case NAME_GetIndex:
+				// [GITD-BB] the raw index, for APIs that carry a TextureID
+				// through an int (billboard BB_TEXTURE data). The ID already
+				// IS that integer -- Self was retyped to TypeSInt32 above, so
+				// this just hands it over with no operation at all.
+				x = Self;
 				break;
 			}
 			Self = nullptr;
