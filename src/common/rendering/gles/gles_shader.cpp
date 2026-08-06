@@ -312,6 +312,10 @@ bool FShader::Load(const char * name, const char * vert_prog_lump_, const char *
 		uniform vec4 uSplitTopPlane;
 		uniform vec4 uSplitBottomPlane;
 
+		// Edge glow on flats
+		uniform vec4 uFlatGlowColor;
+		uniform vec4 uFlatGlowParms;
+
 		uniform vec4 uDetailParms;
 		// Lighting + Fog
 		uniform vec4 uLightAttr;
@@ -532,6 +536,7 @@ bool FShader::Load(const char * name, const char * vert_prog_lump_, const char *
 		glBindAttribLocation(shaderData->hShader, VATTR_NORMAL2, "aNormal2");
 		glBindAttribLocation(shaderData->hShader, VATTR_BONEWEIGHT, "aBoneWeight");
 		glBindAttribLocation(shaderData->hShader, VATTR_BONESELECTOR, "aBoneSelector");
+		glBindAttribLocation(shaderData->hShader, VATTR_EDGEDIST, "aEdgeDist");
 
 
 		glLinkProgram(shaderData->hShader);
@@ -603,6 +608,8 @@ bool FShader::Load(const char * name, const char * vert_prog_lump_, const char *
 	shaderData->muGradientTopPlane.Init(shaderData->hShader, "uGradientTopPlane");
 	shaderData->muSplitBottomPlane.Init(shaderData->hShader, "uSplitBottomPlane");
 	shaderData->muSplitTopPlane.Init(shaderData->hShader, "uSplitTopPlane");
+	shaderData->muFlatGlowColor.Init(shaderData->hShader, "uFlatGlowColor");
+	shaderData->muFlatGlowParms.Init(shaderData->hShader, "uFlatGlowParms");
 	shaderData->muDetailParms.Init(shaderData->hShader, "uDetailParms");
 	shaderData->muInterpolationFactor.Init(shaderData->hShader, "uInterpolationFactor");
 	shaderData->muAlphaThreshold.Init(shaderData->hShader, "uAlphaThreshold");
@@ -703,6 +710,7 @@ bool FShader::Bind(ShaderFlavourData& flavour)
 		variantConfig.AppendFormat("#define DEF_USE_OBJECT_COLOR_2 %d\n", flavour.useObjectColor2);
 		variantConfig.AppendFormat("#define DEF_USE_GLOW_TOP_COLOR %d\n", flavour.useGlowTopColor);
 		variantConfig.AppendFormat("#define DEF_USE_GLOW_BOTTOM_COLOR %d\n", flavour.useGlowBottomColor);
+		variantConfig.AppendFormat("#define DEF_USE_FLAT_GLOW %d\n", flavour.useFlatGlow);
 
 		variantConfig.AppendFormat("#define DEF_USE_COLOR_MAP %d\n", flavour.useColorMap);
 		variantConfig.AppendFormat("#define DEF_BUILD_LIGHTING %d\n", flavour.buildLighting);

@@ -8,6 +8,7 @@ layout(location = 4) in vec3 gradientdist;
 layout(location = 5) in vec4 vWorldNormal;
 layout(location = 6) in vec4 vEyeNormal;
 layout(location = 9) in vec3 vLightmap;
+layout(location = 10) in float vEdgeDist;
 
 #ifdef NO_CLIPDISTANCE_SUPPORT
 layout(location = 7) in vec4 ClipDistanceA;
@@ -739,6 +740,18 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 	if (uGlowBottomColor.a > 0.0 && glowdist.y < uGlowBottomColor.a)
 	{
 		color.rgb += desaturate(uGlowBottomColor * (1.0 - glowdist.y / uGlowBottomColor.a)).rgb;
+	}
+
+	//
+	// handle glowing flat edges - the other half of the seam the walls above already do.
+	// uFlatGlowColor.a is the reach and is only ever non zero while a flat is being drawn,
+	// so nothing else in the scene can pick this up.
+	//
+	if (uFlatGlowColor.a > 0.0 && vEdgeDist < uFlatGlowColor.a)
+	{
+		float t = 1.0 - vEdgeDist / uFlatGlowColor.a;
+		if (uFlatGlowParms.x != 1.0) t = pow(t, uFlatGlowParms.x);
+		color.rgb += min(desaturate(uFlatGlowColor * t).rgb, vec3(uFlatGlowParms.z));
 	}
 #endif
 	color = min(color, 1.0);

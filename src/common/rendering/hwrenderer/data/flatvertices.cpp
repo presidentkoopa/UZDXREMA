@@ -96,9 +96,10 @@ FFlatVertexBuffer::FFlatVertexBuffer(int width, int height, int pipelineNbr):
 			{ 0, VATTR_VERTEX, VFmt_Float3, (int)myoffsetof(FFlatVertex, x) },
 			{ 0, VATTR_TEXCOORD, VFmt_Float2, (int)myoffsetof(FFlatVertex, u) },
 			{ 0, VATTR_LIGHTMAP, VFmt_Float3, (int)myoffsetof(FFlatVertex, lu) },
+			{ 0, VATTR_EDGEDIST, VFmt_Float2, (int)myoffsetof(FFlatVertex, edgedist) },
 		};
 
-		mVertexBufferPipeline[n]->SetFormat(1, 3, sizeof(FFlatVertex), format);
+		mVertexBufferPipeline[n]->SetFormat(1, 4, sizeof(FFlatVertex), format);
 	}
 
 	mVertexBuffer = mVertexBufferPipeline[mPipelinePos];

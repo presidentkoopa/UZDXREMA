@@ -215,7 +215,12 @@ struct StreamData
 	int padding2;
 	int padding3;
 
-	FVector4 padding4;
+	// Edge glow on flats. rgb is the colour already scaled by intensity, a is the reach in
+	// map units - zero means off, which is how every draw that is not a flat stays clear of it.
+	FVector4 uFlatGlowColor;
+	// x = falloff exponent (1 = linear ramp), y = edge source, 0 = boundaries with a visible
+	// wall .. 1 = every sector boundary, z = cap on the glow contribution, w = unused.
+	FVector4 uFlatGlowParms;
 };
 
 class FRenderState
@@ -229,6 +234,7 @@ protected:
 	uint8_t mTextureMatrixEnabled : 1;
 	uint8_t mSplitEnabled : 1;
 	uint8_t mBrightmapEnabled : 1;
+	uint8_t mFlatGlowEnabled : 1;
 
 	int mLightIndex;
 	int mBoneIndexBase;
@@ -330,6 +336,10 @@ public:
 		mStreamData.uGlobalFadeDensity = 0.001f;
 		mStreamData.uGlobalFadeGradient = 1.5f;
 		mStreamData.uLightRangeLimit = 64;
+
+		mStreamData.uFlatGlowColor = { 0.0f, 0.0f, 0.0f, 0.0f };
+		mStreamData.uFlatGlowParms = { 1.0f, 0.0f, 1.0f, 0.0f };
+		mFlatGlowEnabled = false;
 
 		mModelMatrix.loadIdentity();
 		mTextureMatrix.loadIdentity();
@@ -482,6 +492,27 @@ public:
 	void SetNoSoftLightLevel()
 	{
 		 mLightParms[3] = -1.f;
+	}
+
+	// Edge glow on flats. Paint, not light: it is added to the surface it sits on and
+	// illuminates nothing. Reach is in map units and is deliberately not shared with the
+	// wall glow above - 64 up a wall is most of it, 64 across a floor is a trim line.
+	void SetFlatGlow(float r, float g, float b, float reach, float falloff, float edgesource, float cap)
+	{
+		mStreamData.uFlatGlowColor = { r, g, b, reach };
+		mStreamData.uFlatGlowParms = { falloff, edgesource, cap, 0.f };
+		mFlatGlowEnabled = reach > 0.f;
+	}
+
+	void ClearFlatGlow()
+	{
+		mStreamData.uFlatGlowColor = { 0.0f, 0.0f, 0.0f, 0.0f };
+		mFlatGlowEnabled = false;
+	}
+
+	bool GetFlatGlowEnabled() const
+	{
+		return !!mFlatGlowEnabled;
 	}
 
 	void SetGlowPlanes(const FVector4 &tp, const FVector4& bp)

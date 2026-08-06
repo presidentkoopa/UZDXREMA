@@ -71,16 +71,32 @@ static void CreateVerticesForSubsector(subsector_t *sub, VertexContainer &gen, i
 	}
 	else
 	{
-		int firstndx = gen.AddVertex(sub->firstline[0].v1, qualifier);
-		int secondndx = gen.AddVertex(sub->firstline[1].v1, qualifier);
-		for (unsigned int k = 2; k < sub->numlines; k++)
+		// Fan from an interior point rather than from the first vertex.
+		// Every vertex of a convex subsector lies on one of that subsector's own edges, so
+		// a fan anchored on one of them carries no interior sample for the edge distance to
+		// interpolate towards - a whole room would come out at distance 0 and glow flat.
+		// The centre point supplies that sample. It costs two extra triangles per subsector.
+		DVector2 center(0, 0);
+		for (unsigned i = 0; i < sub->numlines; i++)
 		{
-			gen.AddIndex(firstndx);
-			gen.AddIndex(secondndx);
-			auto ndx = gen.AddVertex(sub->firstline[k].v1, qualifier);
-			gen.AddIndex(ndx);
-			secondndx = ndx;
+			center += DVector2(sub->firstline[i].v1->fX(), sub->firstline[i].v1->fY());
 		}
+		center /= double(sub->numlines);
+		int centerndx = gen.AddInteriorVertex(center);
+
+		int firstndx = gen.AddVertex(sub->firstline[0].v1, qualifier);
+		int previndx = firstndx;
+		for (unsigned int k = 1; k < sub->numlines; k++)
+		{
+			auto ndx = gen.AddVertex(sub->firstline[k].v1, qualifier);
+			gen.AddIndex(centerndx);
+			gen.AddIndex(previndx);
+			gen.AddIndex(ndx);
+			previndx = ndx;
+		}
+		gen.AddIndex(centerndx);
+		gen.AddIndex(previndx);
+		gen.AddIndex(firstndx);
 	}
 }
 
@@ -177,27 +193,124 @@ static F3DFloor *Find3DFloor(sector_t* target, sector_t* model, int &ffloorIndex
 
 //==========================================================================
 //
+// Edge distance baking.
+//
+// The one primitive edge glow on flats rests on: for each point of a floor or
+// ceiling, how far is it to the nearest boundary? A flat's boundaries are the
+// linedefs of its own sector, so the candidate set is small and this is just a
+// minimum over a handful of segments, done once here at map load.
+//
+// Two answers are stored per vertex, because both looks are wanted and the
+// second one cannot be added later without rebuilding the map:
+//   x - only boundaries that show a wall at this plane. Smoother, follows
+//       architecture.
+//   y - every sector boundary, including the invisible splits mappers use to
+//       carve one room into several sectors. Those trace lines across open
+//       floor, which is where the grid look comes from.
+//
+//==========================================================================
+
+struct FEdgeBoundary
+{
+	DVector2 v1, v2;
+	double minx, miny, maxx, maxy;
+	bool visible;
+};
+
+static void BuildSectorBoundaries(sector_t* sec, int plane, TArray<FEdgeBoundary>& out)
+{
+	out.Clear();
+	for (auto ln : sec->Lines)
+	{
+		FEdgeBoundary bd;
+		bd.v1 = DVector2(ln->v1->fX(), ln->v1->fY());
+		bd.v2 = DVector2(ln->v2->fX(), ln->v2->fY());
+		if (bd.v1 == bd.v2) continue;	// degenerate linedef, it bounds nothing
+
+		// A one sided line always shows a wall. A two sided one only does where the two
+		// planes sit at different heights - that is what makes a step, a lip or a doorway
+		// something you can see. Heights are read as the map loads, so a lift or a door
+		// that moves later does not move the seam it was baked from.
+		sector_t* front = ln->frontsector;
+		sector_t* back = ln->backsector;
+		bd.visible = (front == nullptr || back == nullptr);
+		if (!bd.visible)
+		{
+			const secplane_t& fp = front->GetSecPlane(plane);
+			const secplane_t& bp = back->GetSecPlane(plane);
+			bd.visible = fabs(fp.ZatPoint(bd.v1.X, bd.v1.Y) - bp.ZatPoint(bd.v1.X, bd.v1.Y)) > EQUAL_EPSILON ||
+				fabs(fp.ZatPoint(bd.v2.X, bd.v2.Y) - bp.ZatPoint(bd.v2.X, bd.v2.Y)) > EQUAL_EPSILON;
+		}
+
+		bd.minx = min(bd.v1.X, bd.v2.X);
+		bd.maxx = max(bd.v1.X, bd.v2.X);
+		bd.miny = min(bd.v1.Y, bd.v2.Y);
+		bd.maxy = max(bd.v1.Y, bd.v2.Y);
+		out.Push(bd);
+	}
+}
+
+static double SquaredDistanceToSegment(const DVector2& p, const FEdgeBoundary& bd)
+{
+	double dx = bd.v2.X - bd.v1.X;
+	double dy = bd.v2.Y - bd.v1.Y;
+	double len2 = dx * dx + dy * dy;
+	double t = ((p.X - bd.v1.X) * dx + (p.Y - bd.v1.Y) * dy) / len2;
+	t = clamp(t, 0.0, 1.0);
+	double ox = bd.v1.X + t * dx - p.X;
+	double oy = bd.v1.Y + t * dy - p.Y;
+	return ox * ox + oy * oy;
+}
+
+// Cheap reject: no point on the segment can be nearer than its bounding box is.
+static double SquaredDistanceToBox(const DVector2& p, const FEdgeBoundary& bd)
+{
+	double dx = max(max(bd.minx - p.X, p.X - bd.maxx), 0.0);
+	double dy = max(max(bd.miny - p.Y, p.Y - bd.maxy), 0.0);
+	return dx * dx + dy * dy;
+}
+
+static void ComputeEdgeDistances(const TArray<FEdgeBoundary>& bounds, const TArray<DVector2>& points, TArray<FVector2>& out)
+{
+	out.Resize(points.Size());
+	const double nolimit = double(FLATVERTEX_NO_EDGE) * double(FLATVERTEX_NO_EDGE);
+
+	for (unsigned i = 0; i < points.Size(); i++)
+	{
+		double bestvisible = nolimit;
+		double bestall = nolimit;
+		for (auto& bd : bounds)
+		{
+			// bestall is never larger than bestvisible, so this rejects for both.
+			if (SquaredDistanceToBox(points[i], bd) >= bestvisible) continue;
+			double d = SquaredDistanceToSegment(points[i], bd);
+			if (d < bestall) bestall = d;
+			if (bd.visible && d < bestvisible) bestvisible = d;
+		}
+		out[i] = FVector2((float)sqrt(bestvisible), (float)sqrt(bestall));
+	}
+}
+
+//==========================================================================
+//
 // Initialize a single vertex
 //
 //==========================================================================
 
-static void SetFlatVertex(FFlatVertex& ffv, vertex_t* vt, const secplane_t& plane)
+static void SetFlatVertex(FFlatVertex& ffv, const DVector2& pos, const secplane_t& plane)
 {
-	ffv.x = (float)vt->fX();
-	ffv.y = (float)vt->fY();
-	ffv.z = (float)plane.ZatPoint(vt);
-	ffv.u = (float)vt->fX() / 64.f;
-	ffv.v = -(float)vt->fY() / 64.f;
+	ffv.x = (float)pos.X;
+	ffv.y = (float)pos.Y;
+	ffv.z = (float)plane.ZatPoint(pos.X, pos.Y);
+	ffv.u = (float)pos.X / 64.f;
+	ffv.v = -(float)pos.Y / 64.f;
 	ffv.lindex = -1.0f;
+	ffv.edgedist = ffv.edgedistall = FLATVERTEX_NO_EDGE;
 }
 
-static void SetFlatVertex(FFlatVertex& ffv, vertex_t* vt, const secplane_t& plane, float llu, float llv, int llindex)
+static void SetFlatVertex(FFlatVertex& ffv, const DVector2& pos, const secplane_t& plane, float llu, float llv, int llindex)
 {
-	ffv.x = (float)vt->fX();
-	ffv.y = (float)vt->fY();
-	ffv.z = (float)plane.ZatPoint(vt);
-	ffv.u = (float)vt->fX() / 64.f;
-	ffv.v = -(float)vt->fY() / 64.f;
+	SetFlatVertex(ffv, pos, plane);
 	ffv.lu = llu;
 	ffv.lv = llv;
 	ffv.lindex = (float)llindex;
@@ -221,15 +334,40 @@ static int CreateIndexedSectorVerticesLM(FFlatVertexBuffer* fvb, sector_t* sec, 
 	if (sec->transdoor && floor) diff = -1.f;
 	else diff = 0.f;
 
-	// Allocate space
-	for (i = 0, pos = 0; i < sec->subsectorcount; i++)
+	// Allocate space. Every subsector gets one extra vertex in the middle so the edge
+	// distance has an interior sample to interpolate towards, and is fanned from it.
+	unsigned totalverts = 0, totaltris = 0;
+	for (i = 0; i < sec->subsectorcount; i++)
 	{
-		pos += sec->subsectors[i]->numlines;
+		unsigned n = sec->subsectors[i]->numlines;
+		totalverts += n + 1;
+		if (n >= 3) totaltris += n;
 	}
 
 	auto& vbo_shadowdata = fvb->vbo_shadowdata;
-	int vi = vbo_shadowdata.Reserve(pos);
-	int idx = ibo_data.Reserve((pos - 2 * sec->subsectorcount) * 3);
+	int vi = vbo_shadowdata.Reserve(totalverts);
+	int idx = ibo_data.Reserve(totaltris * 3);
+
+	// Collect the positions first so the edge distances can be worked out in one pass.
+	TArray<DVector2> positions(totalverts, true);
+	for (i = 0, pos = 0; i < sec->subsectorcount; i++)
+	{
+		subsector_t* sub = sec->subsectors[i];
+		DVector2 center(0, 0);
+		for (unsigned int j = 0; j < sub->numlines; j++)
+		{
+			positions[pos + j] = DVector2(sub->firstline[j].v1->fX(), sub->firstline[j].v1->fY());
+			center += positions[pos + j];
+		}
+		if (sub->numlines > 0) center /= double(sub->numlines);
+		positions[pos + sub->numlines] = center;
+		pos += sub->numlines + 1;
+	}
+
+	TArray<FEdgeBoundary> bounds;
+	TArray<FVector2> edgedist;
+	BuildSectorBoundaries(sec, h, bounds);
+	ComputeEdgeDistances(bounds, positions, edgedist);
 
 	// Create the actual vertices.
 	for (i = 0, pos = 0; i < sec->subsectorcount; i++)
@@ -240,22 +378,31 @@ static int CreateIndexedSectorVerticesLM(FFlatVertexBuffer* fvb, sector_t* sec, 
 		{
 			float* luvs = lightmap->TexCoords;
 			int lindex = lightmap->LightmapNum;
+			float clu = 0, clv = 0;
 			for (unsigned int j = 0; j < sub->numlines; j++)
 			{
-				SetFlatVertex(vbo_shadowdata[vi + pos], sub->firstline[j].v1, plane, luvs[j * 2], luvs[j * 2 + 1], lindex);
-				vbo_shadowdata[vi + pos].z += diff;
-				pos++;
+				SetFlatVertex(vbo_shadowdata[vi + pos + j], positions[pos + j], plane, luvs[j * 2], luvs[j * 2 + 1], lindex);
+				clu += luvs[j * 2];
+				clv += luvs[j * 2 + 1];
 			}
+			// The lightmap mapping is affine in world space, so the centre of the polygon
+			// maps to the centre of its texture coordinates.
+			if (sub->numlines > 0) { clu /= sub->numlines; clv /= sub->numlines; }
+			SetFlatVertex(vbo_shadowdata[vi + pos + sub->numlines], positions[pos + sub->numlines], plane, clu, clv, lindex);
 		}
 		else
 		{
-			for (unsigned int j = 0; j < sub->numlines; j++)
+			for (unsigned int j = 0; j <= sub->numlines; j++)
 			{
-				SetFlatVertex(vbo_shadowdata[vi + pos], sub->firstline[j].v1, plane);
-				vbo_shadowdata[vi + pos].z += diff;
-				pos++;
+				SetFlatVertex(vbo_shadowdata[vi + pos + j], positions[pos + j], plane);
 			}
 		}
+		for (unsigned int j = 0; j <= sub->numlines; j++)
+		{
+			vbo_shadowdata[vi + pos + j].z += diff;
+			vbo_shadowdata[vi + pos + j].SetEdgeDist(edgedist[pos + j].X, edgedist[pos + j].Y);
+		}
+		pos += sub->numlines + 1;
 	}
 
 	// Create the indices for the subsectors
@@ -263,13 +410,17 @@ static int CreateIndexedSectorVerticesLM(FFlatVertexBuffer* fvb, sector_t* sec, 
 	{
 		subsector_t* sub = sec->subsectors[i];
 		int firstndx = vi + pos;
-		for (unsigned int k = 2; k < sub->numlines; k++)
+		int centerndx = firstndx + sub->numlines;
+		if (sub->numlines >= 3)
 		{
-			ibo_data[idx++] = firstndx;
-			ibo_data[idx++] = firstndx + k - 1;
-			ibo_data[idx++] = firstndx + k;
+			for (unsigned int k = 0; k < sub->numlines; k++)
+			{
+				ibo_data[idx++] = centerndx;
+				ibo_data[idx++] = firstndx + k;
+				ibo_data[idx++] = firstndx + ((k + 1) % sub->numlines);
+			}
 		}
-		pos += sec->subsectors[i]->numlines;
+		pos += sub->numlines + 1;
 	}
 
 	sec->ibocount = ibo_data.Size() - rt;
@@ -285,13 +436,19 @@ static int CreateIndexedSectorVertices(FFlatVertexBuffer* fvb, sector_t* sec, co
 	unsigned vi = vbo_shadowdata.Reserve(verts.vertices.Size());
 	float diff;
 
+	TArray<FEdgeBoundary> bounds;
+	TArray<FVector2> edgedist;
+	BuildSectorBoundaries(sec, h, bounds);
+	ComputeEdgeDistances(bounds, verts.positions, edgedist);
+
 	// Create the actual vertices.
 	if (sec->transdoor && floor) diff = -1.f;
 	else diff = 0.f;
 	for (unsigned i = 0; i < verts.vertices.Size(); i++)
 	{
-		SetFlatVertex(vbo_shadowdata[vi + i], verts.vertices[i].vertex, plane);
+		SetFlatVertex(vbo_shadowdata[vi + i], verts.positions[i], plane);
 		vbo_shadowdata[vi + i].z += diff;
+		vbo_shadowdata[vi + i].SetEdgeDist(edgedist[i].X, edgedist[i].Y);
 	}
 
 	auto& ibo_data = fvb->ibo_data;

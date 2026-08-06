@@ -10,12 +10,19 @@
 class FRenderState;
 struct secplane_t;
 
+// Sentinel for "this vertex is nowhere near an edge". Anything that is not a sector
+// plane (walls, sprites, models, 2D) shares this buffer, so the edge distances must
+// start out large enough that no reach setting can ever light them up.
+#define FLATVERTEX_NO_EDGE 65536.0f
+
 struct FFlatVertex
 {
 	float x, z, y;	// world position
 	float u, v;		// texture coordinates
 	float lu, lv;	// lightmap texture coordinates
 	float lindex;	// lightmap texture index
+	float edgedist;		// distance to the nearest boundary that has a visible wall
+	float edgedistall;	// distance to the nearest sector boundary of any kind, invisible splits included
 
 	void Set(float xx, float zz, float yy, float uu, float vv)
 	{
@@ -25,6 +32,7 @@ struct FFlatVertex
 		u = uu;
 		v = vv;
 		lindex = -1.0f;
+		edgedist = edgedistall = FLATVERTEX_NO_EDGE;
 	}
 
 	void Set(float xx, float zz, float yy, float uu, float vv, float llu, float llv, float llindex)
@@ -37,6 +45,13 @@ struct FFlatVertex
 		lu = llu;
 		lv = llv;
 		lindex = llindex;
+		edgedist = edgedistall = FLATVERTEX_NO_EDGE;
+	}
+
+	void SetEdgeDist(float visible, float all)
+	{
+		edgedist = visible;
+		edgedistall = all;
 	}
 
 	void SetVertex(float _x, float _y, float _z = 0)

@@ -228,7 +228,8 @@ static const char *shaderBindings = R"(
 		int padding2;
 		int padding3;
 
-		vec4 padding4;
+		vec4 uFlatGlowColor;
+		vec4 uFlatGlowParms;
 	};
 
 	layout(set = 1, binding = 2, std140) uniform StreamUBO {
@@ -339,6 +340,8 @@ static const char *shaderBindings = R"(
 	#define uGlobalFadeDensity data[uDataIndex].uGlobalFadeDensity
 	#define uGlobalFadeGradient data[uDataIndex].uGlobalFadeGradient
 	#define uLightRangeLimit data[uDataIndex].uLightRangeLimit
+	#define uFlatGlowColor data[uDataIndex].uFlatGlowColor
+	#define uFlatGlowParms data[uDataIndex].uFlatGlowParms
 
 	#define SUPPORTS_SHADOWMAPS
 	#define VULKAN_COORDINATE_SYSTEM

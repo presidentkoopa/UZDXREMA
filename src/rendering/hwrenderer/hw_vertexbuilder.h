@@ -27,20 +27,33 @@ template<> struct THashTraits<FQualifiedVertex>
 struct VertexContainer
 {
 	TArray<FQualifiedVertex> vertices;
+	// Runs parallel to 'vertices'. Holds the 2D position of every entry, including the
+	// synthetic interior points that have no vertex_t of their own.
+	TArray<DVector2> positions;
 	TMap<FQualifiedVertex, uint32_t> vertexmap;
 	bool perSubsector = false;
-	
+
 	TArray<uint32_t> indices;
-	
+
 	uint32_t AddVertex(FQualifiedVertex *vert)
 	{
 		auto check = vertexmap.CheckKey(*vert);
 		if (check != nullptr) return *check;
 		auto index = vertices.Push(*vert);
+		positions.Push(DVector2(vert->vertex->fX(), vert->vertex->fY()));
 		vertexmap[*vert] = index;
 		return index;
 	}
-	
+
+	// Interior point of a subsector. Never merged with anything, so it is not put into the map.
+	uint32_t AddInteriorVertex(const DVector2 &pos)
+	{
+		FQualifiedVertex vertx = { nullptr, -1 };
+		auto index = vertices.Push(vertx);
+		positions.Push(pos);
+		return index;
+	}
+
 	uint32_t AddVertex(vertex_t *vert, int qualifier)
 	{
 		FQualifiedVertex vertx = { vert, qualifier};

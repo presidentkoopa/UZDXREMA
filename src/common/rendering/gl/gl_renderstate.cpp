@@ -163,6 +163,13 @@ bool FGLRenderState::ApplyShader()
 		activeShader->currentglowstate = mGlowEnabled;
 	}
 
+	if (mFlatGlowEnabled || activeShader->currentflatglowstate)
+	{
+		activeShader->muFlatGlowColor.Set(&mStreamData.uFlatGlowColor.X);
+		activeShader->muFlatGlowParms.Set(&mStreamData.uFlatGlowParms.X);
+		activeShader->currentflatglowstate = mFlatGlowEnabled;
+	}
+
 	if (mGradientEnabled || activeShader->currentgradientstate)
 	{
 		activeShader->muObjectColor2.Set(mStreamData.uObjectColor2);

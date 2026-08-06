@@ -53,6 +53,89 @@ CVAR(Int, gl_max_vertices, 0, CVAR_ARCHIVE)
 extern int flatVerticesPerEye;
 extern int lightsFlatPerEye;
 
+//==========================================================================
+//
+// Edge glow on flats.
+//
+// Paint, not light. The distance from every point of a flat to its nearest
+// boundary was worked out at map load and baked into the vertices, so all that
+// happens per frame is handing the shader a colour, a reach and a falloff -
+// one multiply and an add, the same as the wall glow has always cost.
+// It changes the surface it sits on and illuminates nothing.
+//
+// The engine supplies capability only. Every knob is a cvar so a mod can drive
+// all of it live without a map restart, and the master switch stays off until
+// something turns it on.
+//
+//==========================================================================
+
+CVAR(Bool, gl_flatglow, false, CVAR_ARCHIVE)
+CVAR(Bool, gl_flatglow_floor, true, CVAR_ARCHIVE)
+CVAR(Bool, gl_flatglow_ceiling, true, CVAR_ARCHIVE)
+// Reach is in map units and is deliberately not shared with the wall glow.
+// 64 up a wall is most of its height, 64 across a floor is a trim line at its edge.
+CVAR(Float, gl_flatglow_reach, 32.f, CVAR_ARCHIVE)
+CVAR(Float, gl_flatglow_intensity, 1.f, CVAR_ARCHIVE)
+// Falloff shape. 1 reads as a ramp, higher values pull the glow towards the edge and read as light.
+CVAR(Float, gl_flatglow_falloff, 1.f, CVAR_ARCHIVE)
+// Which edges count. 0 = only boundaries with a visible wall, 1 = every sector boundary
+// including the invisible splits mappers use to carve a room up. Values in between crossfade.
+CVAR(Float, gl_flatglow_edges, 0.f, CVAR_ARCHIVE)
+CVAR(Color, gl_flatglow_color, 0xffffff, CVAR_ARCHIVE)
+// 0 = independent (the flat carries its own colour), 1 = shared seam (the corner's colour bleeds
+// onto the flat too, falling back to the cvar where there is none), 2 = shared seam only.
+CVAR(Int, gl_flatglow_colormode, 0, CVAR_ARCHIVE)
+// Glow is additive and clamps at white, so two edges meeting blow out to a flat patch. This caps
+// the contribution before it is added.
+CVAR(Float, gl_flatglow_cap, 1.f, CVAR_ARCHIVE)
+CVAR(Float, gl_flatglow_pulse, 0.f, CVAR_ARCHIVE)		// in Hz, 0 = does not move
+CVAR(Float, gl_flatglow_pulse_depth, 0.f, CVAR_ARCHIVE)
+
+static void SetupFlatGlow(FRenderState &state, sector_t *sector, bool ceiling)
+{
+	float reach = gl_flatglow_reach;
+	if (!gl_flatglow || reach <= 0.f || (ceiling ? !gl_flatglow_ceiling : !gl_flatglow_floor))
+	{
+		state.ClearFlatGlow();
+		return;
+	}
+
+	PalEntry pe = gl_flatglow_color;
+	float col[3] = { pe.r / 255.f, pe.g / 255.f, pe.b / 255.f };
+
+	if (gl_flatglow_colormode > 0)
+	{
+		// Shared seam: the corner already has a colour - the one this plane throws onto the
+		// walls around it - so put that same colour on the plane as well.
+		float top[4], bottom[4];
+		sector->GetWallGlow(top, bottom);
+		const float *seam = ceiling ? top : bottom;
+		if (seam[3] > 0.f)
+		{
+			col[0] = seam[0];
+			col[1] = seam[1];
+			col[2] = seam[2];
+		}
+		else if (gl_flatglow_colormode > 1)
+		{
+			state.ClearFlatGlow();
+			return;
+		}
+	}
+
+	float intensity = gl_flatglow_intensity;
+	if (gl_flatglow_pulse > 0.f && gl_flatglow_pulse_depth != 0.f)
+	{
+		const double twopi = 6.28318530717958647692;
+		double t = (double)screen->FrameTime / 1000.;
+		intensity *= 1.f + gl_flatglow_pulse_depth * (float)sin(t * gl_flatglow_pulse * twopi);
+	}
+	if (intensity < 0.f) intensity = 0.f;
+
+	state.SetFlatGlow(col[0] * intensity, col[1] * intensity, col[2] * intensity, reach,
+		max(*gl_flatglow_falloff, 0.01f), clamp(*gl_flatglow_edges, 0.f, 1.f), max(*gl_flatglow_cap, 0.f));
+}
+
 #ifdef _DEBUG
 CVAR(Int, gl_breaksec, -1, 0)
 #endif
@@ -336,6 +419,11 @@ void HWFlat::DrawFlat(HWDrawInfo *di, FRenderState &state, bool translucent)
 	state.ApplyTextureManipulation(TextureFx);
 	if (plane.plane.dithertransflag) state.SetEffect(EFF_DITHERTRANS);
 
+	// Render hack planes are built from throwaway vertices that carry no baked edge
+	// distance, so they get no edge glow.
+	if (hacktype & (SSRF_PLANEHACK | SSRF_FLOODHACK)) state.ClearFlatGlow();
+	else SetupFlatGlow(state, sector, ceiling);
+
 	if (hacktype & SSRF_PLANEHACK)
 	{
 		DrawOtherPlanes(di, state);
@@ -387,6 +475,7 @@ void HWFlat::DrawFlat(HWDrawInfo *di, FRenderState &state, bool translucent)
 	state.SetObjectColor(0xffffffff);
 	state.SetAddColor(0);
 	state.ApplyTextureManipulation(nullptr);
+	state.ClearFlatGlow();
 	if (plane.plane.dithertransflag) state.SetEffect(EFF_NONE);
 }
 

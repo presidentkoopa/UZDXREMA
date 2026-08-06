@@ -6,6 +6,7 @@ layout(location = 2) in vec4 aColor;
 layout(location = 0) out vec4 vTexCoord;
 layout(location = 1) out vec4 vColor;
 layout(location = 9) out vec3 vLightmap;
+layout(location = 10) out float vEdgeDist;
 
 #ifndef SIMPLE	// we do not need these for simple shaders
 layout(location = 3) in vec4 aVertex2;
@@ -14,6 +15,7 @@ layout(location = 5) in vec4 aNormal2;
 layout(location = 6) in vec3 aLightmap;
 layout(location = 7) in vec4 aBoneWeight;
 layout(location = 8) in uvec4 aBoneSelector;
+layout(location = 9) in vec2 aEdgeDist;
 
 layout(location = 2) out vec4 pixelpos;
 layout(location = 3) out vec3 glowdist;
@@ -78,6 +80,12 @@ void main()
 			glowdist.y = worldcoord.y - bottomatpoint;
 			glowdist.z = clamp(glowdist.x / (topatpoint - bottomatpoint), 0.0, 1.0);
 		}
+
+		// Edge glow on flats. The distance to the nearest boundary was worked out at map
+		// load and baked into the vertex, so all that is left is picking which of the two
+		// answers this mod wants right now. The raw distance is what gets interpolated -
+		// clamping it here instead of in the fragment shader would bend the ramp.
+		vEdgeDist = mix(aEdgeDist.x, aEdgeDist.y, uFlatGlowParms.y);
 
 		if (uObjectColor2.a != 0.0)
 		{
