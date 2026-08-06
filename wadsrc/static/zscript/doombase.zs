@@ -399,6 +399,46 @@ struct FSpawnParticleParams
 	native double rollacc;
 };
 
+// [GITD-BB] Billboard payload ids -- the `payload` argument to
+// LevelLocals.AddBillboard and its siblings. These MIRROR EBillboardPayload
+// in src/g_levellocals.h and the two must stay in step. NOTHING CHECKS THAT
+// THEY DO: passing the wrong id draws the wrong payload silently, it does not
+// error. Use these names rather than bare integers so a mistake is a compile
+// error instead of a rendering mystery.
+enum EBillboardPayload
+{
+	BB_PANEL	= 0,	// rounded-rect backing plate; data byte 0 = corner radius, byte 1 = border width (0 = plain sharp plate)
+	BB_TEXTURE	= 1,	// data = TextureID.GetIndex()
+	BB_DIGITS	= 2,	// data = value (bits 0-16, <= 99999 renders) | palette index (bits 17+)
+	BB_GLYPH	= 3,	// data = glyph id (low byte) | palette index (second byte)
+	BB_RING		= 4,	// data = progress (low byte, 0-255); clockwise gauge
+	BB_BAR		= 5		// data = progress (low byte, 0-255); fills left>right
+}
+
+// [GITD-BB] The `flags` argument. BB_ATTACHED is engine-managed -- get it by
+// calling AttachBillboard, never by passing it yourself; the native forces it
+// on and forces BB_PERSISTENT off, so passing it by hand achieves nothing.
+enum EBillboardFlags
+{
+	BB_PERSISTENT	= 1,	// bit 0 -- lives until RemoveBillboard(id)
+	BB_ATTACHED		= 2,	// bit 1 -- engine repositions it every tic; do not pass directly
+	BB_NODEPTHTEST	= 4		// bit 2 -- draws through world geometry
+}
+
+// [GITD-BB] Palette indices packed into `data` -- BB_DIGITS reads them from
+// bits 17+, BB_GLYPH from the second byte.
+enum EBillboardPalette
+{
+	BBPAL_CYAN		= 0,
+	BBPAL_GOLD		= 1,
+	BBPAL_RED		= 2,
+	BBPAL_GREEN		= 3,
+	BBPAL_WHITE		= 4,
+	BBPAL_ORANGE	= 5,
+	BBPAL_PURPLE	= 6,
+	BBPAL_MAGENTA	= 7
+}
+
 struct LevelLocals native
 {
 	enum EUDMF
@@ -563,18 +603,12 @@ struct LevelLocals native
 	// sprite. Capability only; payload MEANING (what a card/menu/readout
 	// actually looks like) is a mod-side decision.
 	//
-	// Payload ids (EBillboardPayload, g_levellocals.h):
-	//   0 BB_PANEL   -- rounded-rect backing plate; data byte 0 = corner
-	//                   radius, byte 1 = border width (0 = no border).
-	//                   data 0 = plain sharp-cornered plate.
-	//   1 BB_TEXTURE -- data = TextureID.GetIndex()
-	//   2 BB_DIGITS  -- data = value (bits 0-16, <= 99999 renders) | palette
-	//                   index (bits 17+)
-	//   3 BB_GLYPH   -- data = glyph id (low byte) | palette (second byte)
-	//   4 BB_RING    -- data = progress (low byte, 0-255); clockwise gauge
-	//   5 BB_BAR     -- data = progress (low byte, 0-255); fills left>right
-	// Palette indices (digits + glyph): 0 cyan, 1 gold, 2 red, 3 green,
-	// 4 white, 5 orange, 6 purple, 7 magenta.
+	// payload takes EBillboardPayload (BB_PANEL, BB_TEXTURE, ...), flags takes
+	// EBillboardFlags (BB_PERSISTENT, BB_NODEPTHTEST), and the palette indices
+	// packed into data are EBillboardPalette (BBPAL_CYAN, ...). All three are
+	// declared just above this struct, along with what `data` means for each
+	// payload. Pass the names, not bare integers -- a wrong integer is a
+	// silently wrong panel, never an error.
 	//
 	// col MODULATES every payload: pass White to show a palette colour or a
 	// texture unaltered. Black makes a billboard invisible -- that is a
@@ -586,8 +620,6 @@ struct LevelLocals native
 	// bounds-checks against +/-(size * 0.5) about pos, so anything else would
 	// make aim disagree with what is drawn.
 	//
-	// flags: bit 0 = persistent, bit 1 = attached (engine-managed, do not set
-	// directly -- use AttachBillboard), bit 2 = no depth test.
 	// lifetime is in SECONDS; <= 0 means permanent. It is meaningless once a
 	// billboard is persistent or attached.
 
