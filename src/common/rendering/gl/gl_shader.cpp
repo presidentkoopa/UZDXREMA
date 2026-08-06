@@ -273,6 +273,7 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 		// Edge glow on flats
 		uniform vec4 uFlatGlowColor;
 		uniform vec4 uFlatGlowParms;
+		uniform vec4 uFlatGlowShape;
 
 		uniform vec4 uDetailParms;
 		// Lighting + Fog
@@ -620,6 +621,7 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 	muSplitTopPlane.Init(hShader, "uSplitTopPlane");
 	muFlatGlowColor.Init(hShader, "uFlatGlowColor");
 	muFlatGlowParms.Init(hShader, "uFlatGlowParms");
+	muFlatGlowShape.Init(hShader, "uFlatGlowShape");
 	muDetailParms.Init(hShader, "uDetailParms");
 #ifdef NPOT_EMULATION
 	muNpotEmulation.Init(hShader, "uNpotEmulation");

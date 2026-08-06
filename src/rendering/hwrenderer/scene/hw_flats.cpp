@@ -76,8 +76,18 @@ CVAR(Bool, gl_flatglow_ceiling, true, CVAR_ARCHIVE)
 // 64 up a wall is most of its height, 64 across a floor is a trim line at its edge.
 CVAR(Float, gl_flatglow_reach, 32.f, CVAR_ARCHIVE)
 CVAR(Float, gl_flatglow_intensity, 1.f, CVAR_ARCHIVE)
-// Falloff shape. 1 reads as a ramp, higher values pull the glow towards the edge and read as light.
-CVAR(Float, gl_flatglow_falloff, 1.f, CVAR_ARCHIVE)
+// Falloff shape, see EFlatGlowShape. A floor has far more room to taper off across than a
+// wall has height, so a straight ramp puts its terminator right out in the open. 0 linear,
+// 1 power, 2 smooth, 3 inverse square, 4 gaussian, 5 inset band, 6 contour rings.
+CVAR(Int, gl_flatglow_shape, 0, CVAR_ARCHIVE)
+// The shape's own parameter: the exponent for power, the knee for inverse square and
+// gaussian, the ring thickness for contour. Ignored by linear, smooth and band.
+CVAR(Float, gl_flatglow_sharpness, 1.f, CVAR_ARCHIVE)
+// Band shape: where the line sits, measured out from the edge, and how wide it is.
+CVAR(Float, gl_flatglow_inset, 16.f, CVAR_ARCHIVE)
+CVAR(Float, gl_flatglow_bandwidth, 8.f, CVAR_ARCHIVE)
+// Contour shape: how far apart the rings are, in map units.
+CVAR(Float, gl_flatglow_spacing, 64.f, CVAR_ARCHIVE)
 // Which edges count. 0 = only boundaries with a visible wall, 1 = every sector boundary
 // including the invisible splits mappers use to carve a room up. Values in between crossfade.
 CVAR(Float, gl_flatglow_edges, 0.f, CVAR_ARCHIVE)
@@ -100,7 +110,7 @@ static void SetupFlatGlow(FRenderState &state, sector_t *sector, bool ceiling)
 		return;
 	}
 
-	PalEntry pe = gl_flatglow_color;
+	PalEntry pe = (uint32_t)gl_flatglow_color;
 	float col[3] = { pe.r / 255.f, pe.g / 255.f, pe.b / 255.f };
 
 	if (gl_flatglow_colormode > 0)
@@ -132,8 +142,10 @@ static void SetupFlatGlow(FRenderState &state, sector_t *sector, bool ceiling)
 	}
 	if (intensity < 0.f) intensity = 0.f;
 
-	state.SetFlatGlow(col[0] * intensity, col[1] * intensity, col[2] * intensity, reach,
-		max(*gl_flatglow_falloff, 0.01f), clamp(*gl_flatglow_edges, 0.f, 1.f), max(*gl_flatglow_cap, 0.f));
+	state.SetFlatGlow(col[0] * intensity, col[1] * intensity, col[2] * intensity, reach);
+	state.SetFlatGlowParams(max(*gl_flatglow_sharpness, 0.01f), clamp(*gl_flatglow_edges, 0.f, 1.f),
+		max(*gl_flatglow_cap, 0.f), clamp(*gl_flatglow_shape, 0, FGS_MAX - 1));
+	state.SetFlatGlowShape(max(*gl_flatglow_inset, 0.f), max(*gl_flatglow_bandwidth, 0.01f), max(*gl_flatglow_spacing, 1.f));
 }
 
 #ifdef _DEBUG

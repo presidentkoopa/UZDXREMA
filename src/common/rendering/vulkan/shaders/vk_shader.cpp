@@ -230,6 +230,7 @@ static const char *shaderBindings = R"(
 
 		vec4 uFlatGlowColor;
 		vec4 uFlatGlowParms;
+		vec4 uFlatGlowShape;
 	};
 
 	layout(set = 1, binding = 2, std140) uniform StreamUBO {
@@ -342,6 +343,7 @@ static const char *shaderBindings = R"(
 	#define uLightRangeLimit data[uDataIndex].uLightRangeLimit
 	#define uFlatGlowColor data[uDataIndex].uFlatGlowColor
 	#define uFlatGlowParms data[uDataIndex].uFlatGlowParms
+	#define uFlatGlowShape data[uDataIndex].uFlatGlowShape
 
 	#define SUPPORTS_SHADOWMAPS
 	#define VULKAN_COORDINATE_SYSTEM

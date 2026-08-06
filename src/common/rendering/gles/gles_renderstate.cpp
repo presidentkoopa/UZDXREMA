@@ -290,6 +290,7 @@ bool FGLRenderState::ApplyShader()
 	{
 		activeShader->cur->muFlatGlowColor.Set(&mStreamData.uFlatGlowColor.X);
 		activeShader->cur->muFlatGlowParms.Set(&mStreamData.uFlatGlowParms.X);
+		activeShader->cur->muFlatGlowShape.Set(&mStreamData.uFlatGlowShape.X);
 		activeShader->cur->currentflatglowstate = mFlatGlowEnabled;
 	}
 

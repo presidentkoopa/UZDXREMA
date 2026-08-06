@@ -260,6 +260,7 @@ class FShader
 	FUniform4f muSplitTopPlane;
 	FUniform4f muFlatGlowColor;
 	FUniform4f muFlatGlowParms;
+	FUniform4f muFlatGlowShape;
 	FUniform4f muDetailParms;
 	FBufferedUniform1f muInterpolationFactor;
 	FBufferedUniform1f muShadowmapFilter;

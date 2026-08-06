@@ -217,36 +217,63 @@ struct FEdgeBoundary
 	bool visible;
 };
 
+// A one sided line always shows a wall. A two sided one only does where the two planes sit
+// at different heights - that is what makes a step, a lip or a doorway something you can
+// see. Heights are read as the map loads, so a lift or a door that moves later does not
+// move the seam that was baked from it.
+static bool LineShowsWall(line_t* ln, int plane)
+{
+	sector_t* front = ln->frontsector;
+	sector_t* back = ln->backsector;
+	if (front == nullptr || back == nullptr) return true;
+
+	const secplane_t& fp = front->GetSecPlane(plane);
+	const secplane_t& bp = back->GetSecPlane(plane);
+	return fabs(fp.ZatPoint(ln->v1->fX(), ln->v1->fY()) - bp.ZatPoint(ln->v1->fX(), ln->v1->fY())) > EQUAL_EPSILON ||
+		fabs(fp.ZatPoint(ln->v2->fX(), ln->v2->fY()) - bp.ZatPoint(ln->v2->fX(), ln->v2->fY())) > EQUAL_EPSILON;
+}
+
+static void AddBoundary(line_t* ln, int plane, TArray<FEdgeBoundary>& out, bool keepinvisible)
+{
+	FEdgeBoundary bd;
+	bd.v1 = DVector2(ln->v1->fX(), ln->v1->fY());
+	bd.v2 = DVector2(ln->v2->fX(), ln->v2->fY());
+	if (bd.v1 == bd.v2) return;	// degenerate linedef, it bounds nothing
+
+	bd.visible = LineShowsWall(ln, plane);
+	if (!bd.visible && !keepinvisible) return;
+
+	bd.minx = min(bd.v1.X, bd.v2.X);
+	bd.maxx = max(bd.v1.X, bd.v2.X);
+	bd.miny = min(bd.v1.Y, bd.v2.Y);
+	bd.maxy = max(bd.v1.Y, bd.v2.Y);
+	out.Push(bd);
+}
+
 static void BuildSectorBoundaries(sector_t* sec, int plane, TArray<FEdgeBoundary>& out)
 {
+	// A flat only exists inside its own sector, so its own linedefs are the whole answer for
+	// "every sector boundary" - anything further out is on the far side of one of them.
 	out.Clear();
+	for (auto ln : sec->Lines) AddBoundary(ln, plane, out, true);
+
+	// "Boundaries with a visible wall" needs one more step. A wall a few units past an
+	// invisible split belongs to the neighbouring sector, not to this one, and the glow it
+	// throws has no reason to stop dead at the split. Pull in one ring of those. Walls
+	// reached across a visible boundary are left alone - that boundary already stops it.
+	TArray<sector_t*> seen;
 	for (auto ln : sec->Lines)
 	{
-		FEdgeBoundary bd;
-		bd.v1 = DVector2(ln->v1->fX(), ln->v1->fY());
-		bd.v2 = DVector2(ln->v2->fX(), ln->v2->fY());
-		if (bd.v1 == bd.v2) continue;	// degenerate linedef, it bounds nothing
+		if (ln->frontsector == nullptr || ln->backsector == nullptr) continue;
+		sector_t* other = ln->frontsector == sec ? ln->backsector : ln->frontsector;
+		if (other == nullptr || other == sec) continue;
+		if (LineShowsWall(ln, plane)) continue;
+		if (seen.Find(other) < seen.Size()) continue;
+		seen.Push(other);
 
-		// A one sided line always shows a wall. A two sided one only does where the two
-		// planes sit at different heights - that is what makes a step, a lip or a doorway
-		// something you can see. Heights are read as the map loads, so a lift or a door
-		// that moves later does not move the seam it was baked from.
-		sector_t* front = ln->frontsector;
-		sector_t* back = ln->backsector;
-		bd.visible = (front == nullptr || back == nullptr);
-		if (!bd.visible)
-		{
-			const secplane_t& fp = front->GetSecPlane(plane);
-			const secplane_t& bp = back->GetSecPlane(plane);
-			bd.visible = fabs(fp.ZatPoint(bd.v1.X, bd.v1.Y) - bp.ZatPoint(bd.v1.X, bd.v1.Y)) > EQUAL_EPSILON ||
-				fabs(fp.ZatPoint(bd.v2.X, bd.v2.Y) - bp.ZatPoint(bd.v2.X, bd.v2.Y)) > EQUAL_EPSILON;
-		}
-
-		bd.minx = min(bd.v1.X, bd.v2.X);
-		bd.maxx = max(bd.v1.X, bd.v2.X);
-		bd.miny = min(bd.v1.Y, bd.v2.Y);
-		bd.maxy = max(bd.v1.Y, bd.v2.Y);
-		out.Push(bd);
+		// Safety valve for maps that split one room into hundreds of pieces.
+		if (out.Size() > 4096) break;
+		for (auto ln2 : other->Lines) AddBoundary(ln2, plane, out, false);
 	}
 }
 

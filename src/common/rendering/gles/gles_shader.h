@@ -341,6 +341,7 @@ public: class ShaderVariantData
 		FUniform4f muGlowTopColor;
 		FUniform4f muFlatGlowColor;
 		FUniform4f muFlatGlowParms;
+		FUniform4f muFlatGlowShape;
 		FUniform4f muGlowBottomPlane;
 		FUniform4f muGlowTopPlane;
 		FUniform4f muGradientBottomPlane;

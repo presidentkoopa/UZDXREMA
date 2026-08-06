@@ -315,6 +315,7 @@ bool FShader::Load(const char * name, const char * vert_prog_lump_, const char *
 		// Edge glow on flats
 		uniform vec4 uFlatGlowColor;
 		uniform vec4 uFlatGlowParms;
+		uniform vec4 uFlatGlowShape;
 
 		uniform vec4 uDetailParms;
 		// Lighting + Fog
@@ -610,6 +611,7 @@ bool FShader::Load(const char * name, const char * vert_prog_lump_, const char *
 	shaderData->muSplitTopPlane.Init(shaderData->hShader, "uSplitTopPlane");
 	shaderData->muFlatGlowColor.Init(shaderData->hShader, "uFlatGlowColor");
 	shaderData->muFlatGlowParms.Init(shaderData->hShader, "uFlatGlowParms");
+	shaderData->muFlatGlowShape.Init(shaderData->hShader, "uFlatGlowShape");
 	shaderData->muDetailParms.Init(shaderData->hShader, "uDetailParms");
 	shaderData->muInterpolationFactor.Init(shaderData->hShader, "uInterpolationFactor");
 	shaderData->muAlphaThreshold.Init(shaderData->hShader, "uAlphaThreshold");
