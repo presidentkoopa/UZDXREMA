@@ -1802,6 +1802,22 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 	// compensate for it downstream: a payload shader that flips u to cancel a
 	// mirrored quad fixes only itself and leaves BB_TEXTURE mirrored, which is
 	// exactly how this bug survived. It is fixed here, once, for every payload.
+	//
+	// THE RULE, because a second in-world panel path is being built alongside
+	// this one and the two will look contradictory: the swap is not universal
+	// and "unswapped" is not universally wrong either. Match the convention of
+	// whoever built the corners you are drawing into.
+	//   * This path hands x1/x2/y1/y2/z1/z2 to HWSprite::CreateVertices, which
+	//     binds `ul` to v[0]/v[2] -- and those sit at (x1,y1), screen RIGHT.
+	//     HWSprite's corner NAMES do not describe its geometry, so a real
+	//     texture must be swapped. That is what :1658 is compensating for.
+	//   * A path that builds and names its own corners honestly does NOT swap.
+	//     hw_decal.cpp is the precedent: dv[UL] is genuinely the left corner
+	//     and takes the left u (:342), with v = 0 on the top corners (:339).
+	//     Unswapped there is correct for the same reason swapped is correct
+	//     here.
+	// ProcessParticle is the counter-example that proves the rule: it is
+	// unswapped while using HWSprite's corners, which is why it is wrong.
 	//----------------------------------------------------------------------
 	if (isTexturePayload)
 	{
