@@ -63,6 +63,7 @@ enum EGameTexFlags
 	GTexf_NoTrim = 1024,					// Don't perform trimming on this texture.
 	GTexf_Seen = 2048,						// Set to true when the texture is being used for rendering. Must be cleared manually if the check is needed.
 	GTexf_NoMipmap = 4096,					// Disable mipmapping for this texture
+	GTexf_WallGlowing = 8192,				// Listed in a GLDEFS 'Glow { Walls { } }' block: self-illuminates when drawn as a wall.
 };
 
 struct FMaterialLayers
@@ -114,6 +115,10 @@ class FGameTexture
 	uint8_t warped = 0;
 	int8_t expandSprite = -1;
 	uint16_t GlowHeight = 128;
+	// Strength of the wall self-glow in percent. Deliberately separate from GlowHeight/GlowColor:
+	// a texture may appear in both a Flats and a Walls glow block (Doom's FIRE* are used as both)
+	// and the flat glow properties must stay untouched.
+	uint16_t WallGlowStrength = 100;
 	PalEntry GlowColor = 0;
 
 	int16_t SkyOffset = 0;
@@ -261,6 +266,11 @@ public:
 	int GetGlowHeight() const { return GlowHeight; }
 	void SetAutoGlowing() { flags |= (GTexf_AutoGlowing | GTexf_Glowing | GTexf_RenderFullbright); }
 	void SetGlowHeight(int v) { GlowHeight = v; }
+	// Wall self-glow. Only ever set from the WALLS branch of a GLDEFS glow block and only ever
+	// read by the wall renderer, so textures that are listed as flats as well are unaffected.
+	bool isWallGlowing() const { return !!(flags & GTexf_WallGlowing); }
+	int GetWallGlowStrength() const { return WallGlowStrength; }
+	void SetWallGlowing(int strength) { flags |= GTexf_WallGlowing; WallGlowStrength = (uint16_t)strength; }
 	void SetFullbright() { flags |= GTexf_RenderFullbright;  }
 	void SetDisableFullbright(bool on) { if (on) flags |= GTexf_DisableFullbrightSprites; else flags &= ~GTexf_DisableFullbrightSprites; }
 	void SetGlowing(PalEntry color) { flags = (flags & ~GTexf_AutoGlowing) | GTexf_Glowing; GlowColor = color; }

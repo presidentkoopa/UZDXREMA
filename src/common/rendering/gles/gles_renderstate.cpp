@@ -254,6 +254,7 @@ bool FGLRenderState::ApplyShader()
 	activeShader->cur->muTextureModulateColor.Set(mStreamData.uTextureModulateColor);
 	activeShader->cur->muTextureBlendColor.Set(mStreamData.uTextureBlendColor);
 	activeShader->cur->muDetailParms.Set(&mStreamData.uDetailParms.X);
+	activeShader->cur->muWallGlowColor.Set(&mStreamData.uWallGlowColor.X);
 #ifdef NPOT_EMULATION
 	activeShader->cur->muNpotEmulation.Set(&mStreamData.uNpotEmulation.X);
 #endif

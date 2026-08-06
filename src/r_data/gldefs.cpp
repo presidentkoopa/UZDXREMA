@@ -1130,12 +1130,27 @@ class GLDefsParser
 			else if (sc.Compare("WALLS"))
 			{
 				sc.MustGetStringName("{");
+				// 'intensity <percent>' applies to every texture named after it until the next one.
+				// Names given before any 'intensity' keyword default to 100.
+				int strength = 100;
 				while (!sc.CheckString("}"))
 				{
 					sc.MustGetString();
+					if (sc.Compare("intensity"))
+					{
+						sc.MustGetNumber();
+						strength = sc.Number < 0 ? 0 : sc.Number > 1000 ? 1000 : sc.Number;
+						continue;
+					}
 					FTextureID flump=TexMan.CheckForTexture(sc.String, ETextureType::Wall,FTextureManager::TEXMAN_TryAny);
 					auto tex = TexMan.GetGameTexture(flump);
-					if (tex) tex->SetAutoGlowing();
+					if (tex)
+					{
+						tex->SetAutoGlowing();
+						// Separate from the flat glow properties - these textures are commonly
+						// listed in a Flats block as well and that glow must not be disturbed.
+						tex->SetWallGlowing(strength);
+					}
 				}
 			}
 			else if (sc.Compare("TEXTURE"))

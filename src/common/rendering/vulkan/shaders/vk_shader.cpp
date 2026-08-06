@@ -228,7 +228,8 @@ static const char *shaderBindings = R"(
 		int padding2;
 		int padding3;
 
-		vec4 padding4;
+		// Was 'padding4'. Mirrors StreamData::uWallGlowColor in hw_renderstate.h - keep in step.
+		vec4 uWallGlowColor;
 	};
 
 	layout(set = 1, binding = 2, std140) uniform StreamUBO {
@@ -327,6 +328,7 @@ static const char *shaderBindings = R"(
 	#define uGlowTopColor data[uDataIndex].uGlowTopColor
 	#define uGlowBottomPlane data[uDataIndex].uGlowBottomPlane
 	#define uGlowBottomColor data[uDataIndex].uGlowBottomColor
+	#define uWallGlowColor data[uDataIndex].uWallGlowColor
 	#define uGradientTopPlane data[uDataIndex].uGradientTopPlane
 	#define uGradientBottomPlane data[uDataIndex].uGradientBottomPlane
 	#define uSplitTopPlane data[uDataIndex].uSplitTopPlane

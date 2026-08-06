@@ -306,6 +306,9 @@ bool FShader::Load(const char * name, const char * vert_prog_lump_, const char *
 		uniform vec4 uGlowBottomPlane;
 		uniform vec4 uGlowBottomColor;
 
+		// Self-illuminating wall textures (GLDEFS Glow/Walls). rgb = tint, a = strength.
+		uniform vec4 uWallGlowColor;
+
 		uniform vec4 uGradientTopPlane;
 		uniform vec4 uGradientBottomPlane;
 
@@ -599,6 +602,7 @@ bool FShader::Load(const char * name, const char * vert_prog_lump_, const char *
 	shaderData->muGlowTopColor.Init(shaderData->hShader, "uGlowTopColor");
 	shaderData->muGlowBottomPlane.Init(shaderData->hShader, "uGlowBottomPlane");
 	shaderData->muGlowTopPlane.Init(shaderData->hShader, "uGlowTopPlane");
+	shaderData->muWallGlowColor.Init(shaderData->hShader, "uWallGlowColor");
 	shaderData->muGradientBottomPlane.Init(shaderData->hShader, "uGradientBottomPlane");
 	shaderData->muGradientTopPlane.Init(shaderData->hShader, "uGradientTopPlane");
 	shaderData->muSplitBottomPlane.Init(shaderData->hShader, "uSplitBottomPlane");

@@ -741,6 +741,17 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 		color.rgb += desaturate(uGlowBottomColor * (1.0 - glowdist.y / uGlowBottomColor.a)).rgb;
 	}
 #endif
+
+	//
+	// handle self-illuminating wall textures (GLDEFS 'Glow { Walls { } }').
+	// No distance term - the whole surface is the source, not a plane it faces.
+	// Outside the SHADER_LITE guard on purpose: this needs no interpolated glowdist.
+	//
+	if (uWallGlowColor.a > 0.0)
+	{
+		color.rgb += desaturate(vec4(uWallGlowColor.rgb * uWallGlowColor.a, 1.0)).rgb;
+	}
+
 	color = min(color, 1.0);
 
 	// these cannot be safely applied by the legacy format where the implementation cannot guarantee that the values are set.
