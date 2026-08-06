@@ -1694,29 +1694,38 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 	trans = 1.0f;
 	isBillboard = true;
 
-	// Which payloads may put bb->data on uAddColor, and which must NOT.
+	// ONLY BB_TEXTURE HAS A RENDERER.
 	//
-	// The SDF payloads unpack it there, and they are safe to do so because they
-	// never call getTexel -- the one place uAddColor is consumed as a colour.
-	// BB_TEXTURE is the opposite case: it draws through the DEFAULT shader,
-	// whose getTexel does `texel.rgb += uAddColor.rgb` (see main.fp), and its
-	// data is a texture index that has already been consumed on the CPU below.
-	// Leaving an index in that uniform adds it to the card as a garbage
-	// additive tint -- a mid-range index lands as a strong blue. So the
-	// texture payload sends a neutral 0 and lets its colour arrive the way
-	// getTexel intends, as the uObjectColor modulate.
-	const bool isTexturePayload = (bb->payload == BB_TEXTURE);
-	bbData = isTexturePayload ? 0 : bb->data;
-
-	switch (bb->payload)
+	// PANEL, DIGITS, GLYPH, RING and BAR are declared by the payload enum and a
+	// mod can pass them today, but nothing here draws them: the payload shaders
+	// are being written from scratch and deliberately have no predecessor in
+	// this tree. Until they land, those payloads draw NOTHING -- so say so once
+	// on the console rather than leaving someone to debug an invisible panel,
+	// which is the exact trap this feature has already fallen into once.
+	//
+	// When a payload shader does land, this is the whole hook: give it an
+	// OverrideShader here instead of returning, bind a real material below
+	// (every backend wants one even if the shader never samples it), and put
+	// bb->data on uAddColor via bbData. Note the asymmetry that costs an
+	// afternoon if missed: a payload drawing through the DEFAULT shader must
+	// NOT put anything on uAddColor, because getTexel does
+	// `texel.rgb += uAddColor.rgb` (main.fp) and would add it to the image as a
+	// tint. Only a shader that never calls getTexel can borrow that uniform.
+	if (bb->payload != BB_TEXTURE)
 	{
-	case BB_PANEL:  OverrideShader = SHADER_GitdBBPanel;  break;
-	case BB_DIGITS: OverrideShader = SHADER_GitdBBDigits; break;
-	case BB_GLYPH:  OverrideShader = SHADER_GitdBBGlyph;  break;
-	case BB_RING:   OverrideShader = SHADER_GitdBBRing;   break;
-	case BB_BAR:    OverrideShader = SHADER_GitdBBBar;    break;
-	default:        OverrideShader = 0;                   break; // BB_TEXTURE + unknown payloads: plain textured quad
+		static bool warned[16] = {};
+		const unsigned slot = (unsigned)bb->payload < 16u ? (unsigned)bb->payload : 15u;
+		if (!warned[slot])
+		{
+			warned[slot] = true;
+			Printf(TEXTCOLOR_ORANGE "billboard payload %d has no renderer yet; nothing will be drawn for it\n", bb->payload);
+		}
+		return;
 	}
+
+	OverrideShader = 0;	// plain textured quad through the stock default shader
+	bbData = 0;			// see the uAddColor note above: BB_TEXTURE must send neutral
+
 	modelframe = nullptr;
 	texture = nullptr;
 	topclip = LARGE_VALUE;
@@ -1737,18 +1746,10 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 	ThingColor = bb->color;
 	ThingColor.a = 255;
 
-	if (isTexturePayload)
 	{
 		FTextureID tid;
 		tid.SetIndex(bb->data);
 		if (tid.isValid()) texture = TexMan.GetGameTexture(tid, true);
-	}
-	else
-	{
-		// The SDF payload shaders synthesise everything from vTexCoord and
-		// never sample this; it is bound only because every backend wants a
-		// real material on the draw.
-		texture = TexMan.GetGameTexture(TexMan.glPart, false);
 	}
 	if (!texture || !texture->isValid()) return;
 
@@ -1777,10 +1778,13 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 	// particles are round and a 180-degree-rotated circle is the same circle.
 	// It is four lines long and it looks canonical. It is not canonical.
 	//
-	// Do not copy it for anything that draws real content, and do not
-	// compensate for it downstream: a payload shader that flips u to cancel a
-	// mirrored quad fixes only itself and leaves BB_TEXTURE mirrored, which is
-	// exactly how this bug survived. It is fixed here, once, for every payload.
+	// Do not copy it for anything that draws real content, and DO NOT COMPENSATE
+	// FOR IT DOWNSTREAM. That is worth spelling out because it is how the bug
+	// survived the first time: the previous implementation left the quad
+	// mirrored and cancelled the flip inside each payload shader instead, which
+	// fixed the shader-drawn payloads and left the plain textured one -- the
+	// only payload that actually carries text -- mirrored. A future payload
+	// shader must take vTexCoord as it arrives here and must not flip u.
 	//
 	// THE RULE, because a second in-world panel path is being built alongside
 	// this one and the two will look contradictory: the swap is not universal
@@ -1798,7 +1802,6 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 	// ProcessParticle is the counter-example that proves the rule: it is
 	// unswapped while using HWSprite's corners, which is why it is wrong.
 	//----------------------------------------------------------------------
-	if (isTexturePayload)
 	{
 		// GetSpritePositioning(0) is the untrimmed entry: SetupSpriteData
 		// leaves spi[0] at a full 0..1 range and gates every trim/expand
@@ -1809,14 +1812,6 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 		vb = spi.GetSpriteVB();
 		ul = spi.GetSpriteUR();
 		ur = spi.GetSpriteUL();
-	}
-	else
-	{
-		// The same orientation, stated numerically. The SDF payloads build
-		// their geometry out of vTexCoord and must not inherit glPart's sprite
-		// rect: s = 0 at screen left, t = 0 at the top.
-		ul = 1.0f; ur = 0.0f;
-		vt = 0.0f; vb = 1.0f;
 	}
 
 	x = (float)bpos.X;
