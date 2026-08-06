@@ -33,6 +33,7 @@
 */
 
 #include "c_cvars.h"
+#include "c_dispatch.h"
 #include "flatvertices.h"
 #include "v_video.h"
 #include "cmdlib.h"
@@ -157,8 +158,32 @@ std::pair<FFlatVertex *, unsigned int> FFlatVertexBuffer::AllocVertices(unsigned
 		// If a single scene needs 2'000'000 vertices there must be something very wrong. 
 		I_FatalError("Out of vertex memory. Tried to allocate more than %u vertices for a single frame", index + count);
 	}
+	// Deliberately an unsynchronised read-compare-write: this is a diagnostic, not a counter the
+	// renderer acts on, and two threads allocating at once can lose an update. Close enough to
+	// judge headroom by, and not worth a lock on the allocation path to make exact.
+	if (index + count > mHighWater) mHighWater = index + count;
 	vertexbuffer_curindex = mCurIndex;
 	return std::make_pair(p, index);
+}
+
+//==========================================================================
+//
+// BUFFER_SIZE is a fixed preallocation that costs its full size in video memory on every
+// pipeline buffer whether the vertices get used or not, so halving it is free memory if the
+// peak has headroom and a fatal error if it does not. Nobody has ever measured what a heavy
+// map actually reaches - this prints it, so the decision can be made on a number.
+//
+//==========================================================================
+
+CCMD(flatvertexpeak)
+{
+	unsigned int peak = (screen != nullptr && screen->mVertexData != nullptr) ? screen->mVertexData->mHighWater : 0;
+	unsigned int cap = FFlatVertexBuffer::BUFFER_SIZE;
+	unsigned int vsize = (unsigned int)sizeof(FFlatVertex);
+	double mb = (double)cap * vsize / (1024.0 * 1024.0);
+
+	Printf("Peak flat vertices: %u of %u (%.2f%%)\n", peak, cap, cap ? peak * 100.0 / cap : 0.0);
+	Printf("%u bytes per vertex, %.1f MB per pipeline buffer\n", vsize, mb);
 }
 
 //==========================================================================

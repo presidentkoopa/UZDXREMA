@@ -2321,7 +2321,9 @@ void FLevelLocals::Mark()
 // These live on FLevelLocals rather than as file-statics beside the VM thunks
 // so that the storage, the lifetime rules and the API that mutates them all
 // sit together and can be exercised without going through ZScript. The script
-// thunks are thin wrappers over these.
+// thunks in vmthunks.cpp hold no logic of their own: they unpack the VM's
+// flattened argument layout and call straight into these, so there is only one
+// place a rule about billboards can live.
 //
 //==========================================================================
 
@@ -2558,8 +2560,9 @@ unsigned FLevelLocals::GatherVisibleBillboards(const DVector3 &viewpos, TArray<i
 //
 // The panel's normal points from the billboard toward the ray origin --
 // "camera-facing" for whoever is aiming, not necessarily the render camera.
-// Tests every live billboard, deliberately including ones the radial cull
-// would drop this frame, so an aim result never depends on the cull settings.
+// Tests every live billboard that has a handle, deliberately including ones the
+// radial cull would drop this frame, so an aim result never depends on the cull
+// settings.
 //
 //==========================================================================
 
@@ -2567,7 +2570,14 @@ int FLevelLocals::AimBillboard(const DVector3 &start, const DVector3 &dir_, DVec
 {
 	DVector3 dir = dir_;
 	const double dlen = dir.Length();
-	if (dlen < 1.e-6) return -1;
+	if (dlen < 1.e-6)
+	{
+		// Every exit has to write outUV. The VM thunk hands us an uninitialised
+		// DVector2 and returns it to ZScript unconditionally, so bailing without
+		// writing hands the script a garbage uv on a degenerate aim vector.
+		if (outUV != nullptr) *outUV = DVector2(0, 0);
+		return -1;
+	}
 	dir /= dlen;
 
 	int bestId = -1;
@@ -2576,7 +2586,11 @@ int FLevelLocals::AimBillboard(const DVector3 &start, const DVector3 &dir_, DVec
 
 	for (auto &bb : Billboards)
 	{
-		if (bb.size <= 0.0) continue;
+		// A transient has no handle (id stays 0), and the point of this call is
+		// to resolve a hit to a row and fire a netevent -- a result the caller
+		// cannot act on is worse than no result, so skipping them also stops a
+		// decorative panel from occluding a clickable one behind it.
+		if (bb.size <= 0.0 || bb.id <= 0) continue;
 		DVector3 toBB = bb.pos - start;
 		const double toBBLen = toBB.Length();
 		DVector3 normal = toBBLen > 1.e-6 ? -(toBB / toBBLen) : DVector3(0, 1, 0);

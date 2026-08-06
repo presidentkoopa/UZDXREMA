@@ -1239,27 +1239,10 @@ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetXOffset, SetXOffset)
 //
 //==========================================================================
 
-	static FBillboard* FindBillboardByID(FLevelLocals *self, int id)
-	{
-		if (id <= 0) return nullptr;
-		for (auto &b : self->Billboards)
-			if (b.id == id) return &b;
-		return nullptr;
-	}
-
 	// Transient, self-expiring, no handle -- fire-and-forget.
 	static void AddBillboard(FLevelLocals *self, double x, double y, double z, double size, int payload, int data, int color, int flags, double lifetime)
 	{
-		FBillboard bb;
-		bb.pos = DVector3(x, y, z);
-		bb.size = size;
-		bb.payload = payload;
-		bb.data = data;
-		bb.color = PalEntry(color);
-		bb.flags = flags & ~3;   // transient: never persistent(bit0) or attached(bit1), regardless of caller
-		bb.lifetime = lifetime;
-		bb.spawntic = self->maptime;
-		self->Billboards.Push(bb);
+		self->AddBillboard(DVector3(x, y, z), size, payload, data, PalEntry(color), flags, lifetime);
 	}
 
 	DEFINE_ACTION_FUNCTION_NATIVE(_LevelLocals, AddBillboard, AddBillboard)
@@ -1281,18 +1264,7 @@ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetXOffset, SetXOffset)
 	// Persistent: lives until RemoveBillboard(). Returns a handle.
 	static int AddBillboardPersistent(FLevelLocals *self, double x, double y, double z, double size, int payload, int data, int color, int flags, double lifetime)
 	{
-		FBillboard bb;
-		bb.id = self->NextBillboardID++;
-		bb.pos = DVector3(x, y, z);
-		bb.size = size;
-		bb.payload = payload;
-		bb.data = data;
-		bb.color = PalEntry(color);
-		bb.flags = (flags & ~2) | 1;   // force persistent(bit0) on, attached(bit1) off
-		bb.lifetime = lifetime;
-		bb.spawntic = self->maptime;
-		self->Billboards.Push(bb);
-		return bb.id;
+		return self->AddBillboardPersistent(DVector3(x, y, z), size, payload, data, PalEntry(color), flags, lifetime);
 	}
 
 	DEFINE_ACTION_FUNCTION_NATIVE(_LevelLocals, AddBillboardPersistent, AddBillboardPersistent)
@@ -1312,8 +1284,7 @@ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetXOffset, SetXOffset)
 
 	static void UpdateBillboard(FLevelLocals *self, int id, int data, int color)
 	{
-		FBillboard *bb = FindBillboardByID(self, id);
-		if (bb) { bb->data = data; bb->color = PalEntry(color); }
+		self->UpdateBillboard(id, data, PalEntry(color));
 	}
 
 	DEFINE_ACTION_FUNCTION_NATIVE(_LevelLocals, UpdateBillboard, UpdateBillboard)
@@ -1328,8 +1299,7 @@ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetXOffset, SetXOffset)
 
 	static void MoveBillboard(FLevelLocals *self, int id, double x, double y, double z)
 	{
-		FBillboard *bb = FindBillboardByID(self, id);
-		if (bb) bb->pos = DVector3(x, y, z);
+		self->MoveBillboard(id, DVector3(x, y, z));
 	}
 
 	DEFINE_ACTION_FUNCTION_NATIVE(_LevelLocals, MoveBillboard, MoveBillboard)
@@ -1345,11 +1315,7 @@ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetXOffset, SetXOffset)
 
 	static void RemoveBillboard(FLevelLocals *self, int id)
 	{
-		if (id <= 0) return;
-		for (unsigned i = 0; i < self->Billboards.Size(); i++)
-		{
-			if (self->Billboards[i].id == id) { self->Billboards.Delete(i); return; }
-		}
+		self->RemoveBillboard(id);
 	}
 
 	DEFINE_ACTION_FUNCTION_NATIVE(_LevelLocals, RemoveBillboard, RemoveBillboard)
@@ -1365,21 +1331,7 @@ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetXOffset, SetXOffset)
 	// FBillboard's attachedTo comment in g_levellocals.h.
 	static int AttachBillboard(FLevelLocals *self, AActor *mo, double ox, double oy, double oz, double size, int payload, int data, int color, int flags, double lifetime)
 	{
-		if (!mo) return -1;
-		FBillboard bb;
-		bb.id = self->NextBillboardID++;
-		bb.attachedTo = mo;
-		bb.attachOffset = DVector3(ox, oy, oz);
-		bb.pos = mo->Pos() + bb.attachOffset;
-		bb.size = size;
-		bb.payload = payload;
-		bb.data = data;
-		bb.color = PalEntry(color);
-		bb.flags = (flags & ~1) | 2;   // force attached(bit1) on, persistent(bit0) off
-		bb.lifetime = lifetime;         // kept for reference; the tick pass ignores lifetime while attached
-		bb.spawntic = self->maptime;
-		self->Billboards.Push(bb);
-		return bb.id;
+		return self->AttachBillboard(mo, DVector3(ox, oy, oz), size, payload, data, PalEntry(color), flags, lifetime);
 	}
 
 	DEFINE_ACTION_FUNCTION_NATIVE(_LevelLocals, AttachBillboard, AttachBillboard)
@@ -1398,14 +1350,9 @@ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetXOffset, SetXOffset)
 		ACTION_RETURN_INT(AttachBillboard(self, mo, ox, oy, oz, size, payload, data, color, flags, lifetime));
 	}
 
-	// Ray-vs-panel test against every live billboard (post attachment-
-	// resolution position). The panel's normal points from the billboard
-	// toward the ray origin -- "camera-facing" for whoever is aiming, not
-	// necessarily the render camera. Returns the nearest hit's handle, or -1;
-	// uv maps the hit point to 0..1 across the panel (bottom-left origin).
-	//
-	// bb.size is treated as the FULL extent here (+/- size*0.5 about bb.pos).
-	// The renderer MUST agree or aim will not line up with what is drawn.
+	// Ray-vs-panel test. Returns the nearest hit's handle, or -1; uv maps the
+	// hit point to 0..1 across the panel (bottom-left origin). The geometry,
+	// and what bb.size means to it, live in FLevelLocals::AimBillboard.
 	//
 	// NOTE (deviation from the spec's stated signature, flagged deliberately):
 	// specced as `AimBillboard(start, dir, out Vector2 uv) -> handle`. This
@@ -1425,52 +1372,7 @@ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetXOffset, SetXOffset)
 	// jit_call.cpp:562). DVector2 is exactly that pair.
 	static int AimBillboard(FLevelLocals *self, double sx, double sy, double sz, double dx, double dy, double dz, DVector2 *outUV)
 	{
-		DVector3 start(sx, sy, sz);
-		DVector3 dir(dx, dy, dz);
-		double dlen = dir.Length();
-		if (dlen < 1.e-6)
-		{
-			if (outUV) *outUV = DVector2(0, 0);
-			return -1;
-		}
-		dir /= dlen;
-
-		int bestId = -1;
-		double bestT = 1.e30;
-		DVector2 bestUV(0, 0);
-
-		for (auto &bb : self->Billboards)
-		{
-			if (bb.size <= 0.0) continue;
-			DVector3 toBB = bb.pos - start;
-			double toBBLen = toBB.Length();
-			DVector3 normal = toBBLen > 1.e-6 ? -(toBB / toBBLen) : DVector3(0, 1, 0);
-			double denom = normal | dir;
-			if (fabs(denom) < 1.e-6) continue;
-			double t = (toBB | normal) / denom;
-			if (t < 0.0 || t > bestT) continue;
-
-			DVector3 hit = start + dir * t;
-			DVector3 worldUp(0, 0, 1);
-			DVector3 right = (fabs(normal.Z) > 0.999) ? DVector3(1, 0, 0) : (worldUp ^ normal);
-			double rlen = right.Length();
-			if (rlen < 1.e-6) continue;
-			right /= rlen;
-			DVector3 up = (normal ^ right).Unit();
-
-			DVector3 rel = hit - bb.pos;
-			double half = bb.size * 0.5;
-			double lu = rel | right;
-			double lv = rel | up;
-			if (lu < -half || lu > half || lv < -half || lv > half) continue;
-
-			bestT = t;
-			bestId = bb.id;
-			bestUV = DVector2((lu + half) / (half * 2.0), (lv + half) / (half * 2.0));
-		}
-
-		if (outUV) *outUV = bestUV;
-		return bestId;
+		return self->AimBillboard(DVector3(sx, sy, sz), DVector3(dx, dy, dz), outUV);
 	}
 
 	DEFINE_ACTION_FUNCTION_NATIVE(_LevelLocals, AimBillboard, AimBillboard)

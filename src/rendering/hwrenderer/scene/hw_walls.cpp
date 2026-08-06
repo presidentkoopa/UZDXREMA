@@ -58,6 +58,12 @@ CUSTOM_CVAR(Float, gl_texture_wallglow_intensity, 1.0f, CVAR_ARCHIVE | CVAR_GLOB
 	else if (self > 4.f) self = 4.f;
 }
 
+// False gives the flat white glow this originally shipped with, true takes the texture's own
+// averaged colour so that a lava wall glows lava-coloured. This is a cvar rather than a fixed
+// choice because it restyles every wall in a GLDEFS Walls block at once and the owner wants to
+// be able to compare the two at runtime instead of rebuilding.
+CVAR(Bool, gl_texture_wallglow_tint, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
 extern int wallVerticesPerEye;
 extern int lightsWallPerEye;
 
@@ -227,7 +233,20 @@ void HWWall::RenderTexturedWall(HWWallDispatcher*di, FRenderState &state, int rf
 	if (wallglow)
 	{
 		float strength = texture->GetWallGlowStrength() * (1.f / 100.f) * gl_texture_wallglow_intensity;
-		if (strength > 0.f) state.SetWallGlow(1.f, 1.f, 1.f, strength);
+		if (strength > 0.f)
+		{
+			if (gl_texture_wallglow_tint)
+			{
+				// GetGlowColor averages the texture once and caches the result, so this costs one
+				// decode per texture and nothing afterwards. It also switches glowing back off when
+				// that average comes out black, so a pure black texture named under Walls stops
+				// glowing - that is shared with the flat glow path and deliberately left as it is.
+				float c[3];
+				texture->GetGlowColor(c);
+				state.SetWallGlow(c[0], c[1], c[2], strength);
+			}
+			else state.SetWallGlow(1.f, 1.f, 1.f, strength);
+		}
 		else wallglow = false;
 	}
 	state.SetMaterial(texture, UF_Texture, 0, flags & 3, NO_TRANSLATION, -1);

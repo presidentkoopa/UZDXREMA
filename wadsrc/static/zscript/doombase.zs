@@ -422,7 +422,13 @@ enum EBillboardFlags
 {
 	BB_PERSISTENT	= 1,	// bit 0 -- lives until RemoveBillboard(id)
 	BB_ATTACHED		= 2,	// bit 1 -- engine repositions it every tic; do not pass directly
-	BB_NODEPTHTEST	= 4		// bit 2 -- draws through world geometry
+	BB_NODEPTHTEST	= 4,	// bit 2 -- draws through world geometry
+	// bit 3 -- the Z you pass (AddBillboard's pos.Z, AttachBillboard's
+	// offset.Z) is an offset from the viewer's eye rather than a world Z, and
+	// is re-anchored every tic, so a panel tracks crouching and room-scale VR
+	// standing instead of baking one player's eyeline in at spawn time. X and
+	// Y are unaffected.
+	BB_VIEWRELATIVEZ = 8
 }
 
 // [GITD-BB] Palette indices packed into `data` -- BB_DIGITS reads them from

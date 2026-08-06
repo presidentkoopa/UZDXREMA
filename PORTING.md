@@ -14,9 +14,14 @@ tree and says so.
 * **Base:** `emawind84/gzdoom`, branch `questzdoom` (remote `origin`).
 * **Our work:** `git log origin/questzdoom..questzdoom` — 27 commits,
   43 files, +2348 / −117.
-* **Verification level:** everything below compiles, links and boots. That is
-  the entirety of the automated evidence. Per-feature visual confirmation is
+* **Verification level:** the five features compile, link and boot. That is the
+  entirety of the automated evidence, and per-feature visual confirmation is
   stated individually and is mostly absent.
+  **The repairs in [§11](#11-defects-found-and-repaired) are newer than that
+  and have NOT been compiled** — they were made by inspection, with builds
+  off-limits. Every file table below describes the tree *including* those
+  repairs, so a reader gets the current state; the untested ones are marked
+  where they land.
 
 ---
 
@@ -32,7 +37,7 @@ tree and says so.
 8. [Cvar reference](#8-cvar-reference)
 9. [Savegame compatibility](#9-savegame-compatibility)
 10. [Conflict risk per file](#10-conflict-risk-per-file)
-11. [Defects found while writing this document](#11-defects-found-while-writing-this-document)
+11. [Defects found and repaired](#11-defects-found-and-repaired)
 12. [Appendix — deprecated actor flags (not a code change)](#12-appendix--deprecated-actor-flags-not-a-code-change)
 
 ---
@@ -336,7 +341,7 @@ reaching it.
 | `src/common/rendering/gl/gl_renderstate.cpp` | `:147` | `muWallGlowColor.Set(...)` in `ApplyShader` |
 | `src/common/rendering/gles/gles_shader.{h,cpp}` | `h:345`; `cpp:309-310`, `:611` | same for GLES |
 | `src/common/rendering/gles/gles_renderstate.cpp` | `:258` | same for GLES |
-| `src/rendering/hwrenderer/scene/hw_walls.cpp` | `:49-58` cvars; `:222-231` in `RenderTexturedWall`; `:350` | The whole consumer |
+| `src/rendering/hwrenderer/scene/hw_walls.cpp` | `:49-65` cvars; `:230-252` in `RenderTexturedWall`; `:369` | The whole consumer |
 | `wadsrc/static/shaders/glsl/main.fp` | `:800-808` in `getLightColor` | `color.rgb += desaturate(vec4(uWallGlowColor.rgb * uWallGlowColor.a, 1.0)).rgb;` |
 | `wadsrc/static/shaders_gles/glsl/main.fp` | `:477-486` | same, GLES copy |
 
@@ -361,28 +366,65 @@ Commit `4faca0f9f3`.
   given before any `intensity` default to **100**. This matters
   (see below).
 
-### The rough edge — read this before you enable it
+### Tint, and the rough edge — read this before you enable it
 
-The tint is **hardcoded white**:
+The glow originally shipped **hardcoded white**, using only the strength. That
+is now selectable, defaulting to the texture's own colour
+(`hw_walls.cpp:230-252`):
 
 ```c
-	if (strength > 0.f) state.SetWallGlow(1.f, 1.f, 1.f, strength);   // hw_walls.cpp:230
+	if (gl_texture_wallglow_tint)
+	{
+		float c[3];
+		texture->GetGlowColor(c);
+		state.SetWallGlow(c[0], c[1], c[2], strength);
+	}
+	else state.SetWallGlow(1.f, 1.f, 1.f, strength);
 ```
 
-The shader then adds `white * strength` to the lit colour. **The GLDEFS colour
-is not used for the tint at all — only the strength is read.** At the default
-`strength = 100 %` and `gl_texture_wallglow_intensity = 1.0`, that adds a full
-`1.0` to every channel, i.e. **fullbright**.
+`FGameTexture::GetGlowColor` averages the texture's pixels and **caches the
+result into `GlowColor`**, so this costs one decode per texture on first use
+and nothing afterwards. The GLDEFS `WALLS` branch already calls
+`SetAutoGlowing()`, so `GlowColor` is 0 going in and the average really is
+computed.
 
-Since bare texture names with no `intensity` keyword default to 100, a GLDEFS
-file written before this feature existed will render every listed wall
-near-fullbright. That is a **one-line mod-side GLDEFS edit** (add
+**Three consequences a porter needs to know**, all verified in this tree:
+
+1. **A texture with an *authored* glow colour** — one given an explicit colour
+   by `Glow { Texture <name>, <color> }` — has a non-zero `GlowColor` already,
+   so the tint uses the **authored** colour rather than an average. That is
+   almost certainly what anyone would want, but it is not what "averaged
+   colour" implies.
+2. **`GetGlowColor` clears `GTexf_Glowing` when the average comes out black**,
+   and it does **not** clear `GTexf_WallGlowing`. So a pure-black texture named
+   under `Walls` keeps entering the branch forever and pays
+   `SetWallGlow(0,0,0,strength)` + `ClearWallGlow` on every draw. Visually a
+   no-op; the state churn is permanent, not a one-time cost.
+3. **This moved a cross-path mutation into the draw phase.** Before, only the
+   *flat* renderer ever called `GetGlowColor`, so only it could trigger that
+   flag clear. Now the wall renderer can get there first — on a map where a
+   black texture is listed under both `Flats` and `Walls` but is only ever seen
+   as a wall, `GTexf_Glowing` is now cleared at wall-draw time where previously
+   it might never have been. The end state is identical (a black glow is no
+   glow either way), which is why it was left alone, but it is a genuine
+   cross-path mutation from a render function and worth remembering if flat
+   glow ever misbehaves near a wall-glow texture.
+
+Also expect **a one-frame hitch the first time a glowing wall texture comes
+into view**, because the BGRA decode now happens inside `RenderTexturedWall`.
+The flat path has always had the same characteristic. Both call sites are
+single-threaded draw-list execution, so there is no race.
+
+**The brightness rough edge is separate and is not fixed in the engine.** The
+shader adds `tint * strength` to the lit colour; at `strength = 100 %` and
+`gl_texture_wallglow_intensity = 1.0` that is a full `1.0` per channel, i.e.
+fullbright. Since bare texture names with no `intensity` keyword default to
+100, a GLDEFS file written before this feature existed will render every listed
+wall near-fullbright. That is a **one-line mod-side GLDEFS edit** (add
 `intensity 40` before the bulk of the names, leave the genuinely incandescent
-ones near 100), not an engine change — but a reader will hit it in the first
-five seconds and should know it is expected.
-
-If you would rather it took the texture's colour, the hook is that one line:
-`GetGlowColor()` already gives you the averaged texture colour.
+ones near 100), not an engine change. Taking the texture's colour instead of
+white does soften it considerably on its own — a dark texture averages dark —
+but it does not replace the GLDEFS fix.
 
 ### Order and dependencies
 
@@ -395,8 +437,9 @@ Otherwise standalone.
 |---|---|---|---|
 | `gl_texture_wallglow` | bool | **true** | Master switch. **Default ON** — this feature changes the look of the game the moment it is applied. |
 | `gl_texture_wallglow_intensity` | float | 1.0 | `CUSTOM_CVAR`, clamped to `[0, 4]`. Master scale over the per-texture GLDEFS `intensity`. |
+| `gl_texture_wallglow_tint` | bool | true | `false` = flat white, what this originally shipped with. `true` = the texture's own colour. A cvar rather than a fixed choice because it restyles every wall in a GLDEFS `Walls` block at once. |
 
-Both `CVAR_ARCHIVE | CVAR_GLOBALCONFIG`. No savegame keys.
+All three `CVAR_ARCHIVE | CVAR_GLOBALCONFIG`. No savegame keys.
 
 ### Fork-specific vs upstream-safe
 
@@ -434,8 +477,8 @@ illuminates nothing.
 | file | lines | what changed |
 |---|---|---|
 | `src/common/rendering/hwrenderer/data/buffers.h` | `:30` | New vertex attribute `VATTR_EDGEDIST` (index 9, before `VATTR_MAX`) |
-| `src/common/rendering/hwrenderer/data/flatvertices.h` | `:16`, `:24-25`, `:35`, `:48`, `:51-55` | `#define FLATVERTEX_NO_EDGE 65536.0f`; `FFlatVertex` gains `float edgedist, edgedistall`; both `Set()` overloads initialise them to the sentinel; new `SetEdgeDist(visible, all)` |
-| `src/common/rendering/hwrenderer/data/flatvertices.cpp` | `:99`, `:102` | New format entry (`VFmt_Float2` at `offsetof(FFlatVertex, edgedist)`); `SetFormat(1, 3, …)` → `SetFormat(1, 4, …)` |
+| `src/common/rendering/hwrenderer/data/flatvertices.h` | `:16`, `:24-25`, `:35`, `:48`, `:51-55`, `:57-64`, `:92` | `#define FLATVERTEX_NO_EDGE 65536.0f`; `FFlatVertex` gains `float edgedist, edgedistall`; both `Set()` overloads **and `SetVertex()`** initialise them to the sentinel; new `SetEdgeDist(visible, all)`; `FFlatVertexBuffer::mHighWater` |
+| `src/common/rendering/hwrenderer/data/flatvertices.cpp` | `:36`, `:99`, `:102`, `:161-164`, `:169-187` | New format entry (`VFmt_Float2` at `offsetof(FFlatVertex, edgedist)`); `SetFormat(1, 3, …)` → `SetFormat(1, 4, …)`; watermark update in `AllocVertices`; `CCMD(flatvertexpeak)`; `#include "c_dispatch.h"` |
 | `src/rendering/hwrenderer/hw_vertexbuilder.h` | `:30-32`, `:49-56` | `VertexContainer::positions` parallel array; `AddInteriorVertex(const DVector2&)` |
 | `src/rendering/hwrenderer/hw_vertexbuilder.cpp` | `:74-99` fan rewrite; `:213-311` the whole baking pass; `:334-350` `SetFlatVertex` retyped; `:353-455` `CreateIndexedSectorVerticesLM`; `:457-485` `CreateIndexedSectorVertices` | The bulk of the feature |
 | `src/common/rendering/hwrenderer/data/hw_renderstate.h` | `:77-90` `EFlatGlowShape`; `:246-253` three members; `:265` `mFlatGlowEnabled` bit; `:371-374` reset; `:541-570` setters | State plumbing |
@@ -525,9 +568,19 @@ change is responsible for 64 MB. Both numbers matter and neither is small.
 1. **Halve `BUFFER_SIZE` to 1,000,000.** Saves 40 MB per buffer — **160 MB on
    GLES, 80 MB on desktop** — and costs **no precision at all**. It is a pure
    headroom reduction.
-   **Caveat, stated because it is the honest one: nobody has measured actual
-   peak flat-vertex use on a heavy map.** That measurement is the number that
-   decides whether 1,000,000 is safe. Take it before you ship the halving.
+   **Measure first.** `BUFFER_SIZE` is unchanged in this tree precisely because
+   nobody had the number. There is now a way to get it: `FFlatVertexBuffer`
+   tracks a high-water mark in `AllocVertices` (`flatvertices.cpp:161-164`) and
+
+   ```
+   flatvertexpeak
+   ```
+
+   prints the peak, the cap, the percentage, bytes per vertex and MB per
+   pipeline buffer. Run the heaviest map you have, then decide. The watermark
+   is a deliberately unsynchronised read-compare-write — it is a diagnostic,
+   not a counter the renderer acts on, and it is not worth a lock on the
+   allocation path.
 2. Pack the two distances into 12+12 bits. Saves ~32 MB on GLES, costs
    precision, and is strictly worse than (1).
 
@@ -728,10 +781,10 @@ Ported from `E:\DXR2` @ `bb6988908f` by three lanes.
 | `src/g_level.cpp` | `:36` | `#include <algorithm>` for the over-cap sort |
 | | `:2299-2305` | `FLevelLocals::Mark` — `GC::Mark(b.attachedTo)` per billboard |
 | | `:2332-2333` | `rs_bb_cullradius`, `rs_bb_maxpanels` cvars |
-| | `:2335-2476` | `FindBillboardByID`, `BillboardViewZ`, `RS_InitBillboardZ`, `AddBillboard`, `AddBillboardPersistent`, `UpdateBillboard`, `MoveBillboard`, `RemoveBillboard`, `AttachBillboard` — **see [§11.1](#111-the-zscript-natives-are-a-second-implementation-not-thunks); most of this is dead code** |
-| | `:2478-2521` | `TickBillboards` — **live** |
-| | `:2524-2556` | `GatherVisibleBillboards` — **live** |
-| | `:2566-2620` | `AimBillboard` — **dead**, duplicated in `vmthunks.cpp` |
+| | `:2335-2476` | `FindBillboardByID`, `BillboardViewZ`, `RS_InitBillboardZ`, `AddBillboard`, `AddBillboardPersistent`, `UpdateBillboard`, `MoveBillboard`, `RemoveBillboard`, `AttachBillboard` — **the single implementation.** The VM thunks call straight into these; see [§11.1](#111-the-zscript-natives-were-a-second-implementation-fixed) |
+| | `:2478-2521` | `TickBillboards` |
+| | `:2524-2556` | `GatherVisibleBillboards` |
+| | `:2569-2625` | `AimBillboard` |
 | `src/p_saveg.cpp` | `:916-945` | `FSerializer &Serialize(FSerializer&, const char*, FBillboard&, FBillboard*)` |
 | | `:1029-1041` | `arc("billboards", Billboards)("nextbillboardid", NextBillboardID)` |
 | `src/p_tick.cpp` | `:166-172` | `Level->TickBillboards()` in `P_Ticker` |
@@ -743,9 +796,9 @@ Ported from `E:\DXR2` @ `bb6988908f` by three lanes.
 |---|---|---|
 | `src/common/engine/namedef.h` | `:205` | `xx(GetIndex)` |
 | `src/common/scripting/backend/codegen.cpp` | `:8905` guard, `:8938-8945` case | `TextureID.GetIndex()` as a compiler intrinsic — `x = Self;` with `Self` already retyped to `TypeSInt32`, i.e. **no operation at all** |
-| `src/scripting/vmthunks.cpp` | `:1220-1240` header comment | The signature-discipline rules — read them |
-| | `:1242-1494` | Eight file-static functions + seven `DEFINE_ACTION_FUNCTION_NATIVE` |
-| `wadsrc/static/zscript/doombase.zs` | `:402-438` | `EBillboardPayload`, `EBillboardFlags`, `EBillboardPalette` |
+| `src/scripting/vmthunks.cpp` | `:1222-1241` header comment | The signature-discipline rules — read them |
+| | `:1243-1390` | Seven file-static functions, each a **one-line delegation** to the matching `FLevelLocals` method, + seven `DEFINE_ACTION_FUNCTION_NATIVE`. The statics exist only to unpack the VM's flattened argument layout — **they hold no logic** |
+| `wadsrc/static/zscript/doombase.zs` | `:402-444` | `EBillboardPayload`, `EBillboardFlags` (incl. `BB_VIEWRELATIVEZ = 8`), `EBillboardPalette` |
 | | `:599-642` | Seven `LevelLocals` natives |
 | `wadsrc/static/zscript/engine/base.zs` | `:345` | `native int GetIndex();` on `TextureID` |
 
@@ -979,8 +1032,9 @@ body of work ([§6](#6-feature-d--zscript-glow-api)).
 * **`BBF_VIEWRELATIVEZ` reads `consoleplayer`'s `viewz` inside the playsim
   tick**, and that value is serialized. Believed self-correcting; **not
   proven**, and on a non-primary level it reads the primary level's player.
-  Wants a netgame/hub decision. **See also [§11.2](#112-bbf_viewrelativez-is-non-functional-from-zscript) —
-  it is worse than "unverified".**
+  Wants a netgame/hub decision. (It was also flatly non-functional from ZScript
+  until [§11.2](#112-bbf_viewrelativez-was-non-functional-from-zscript-fixed);
+  it now at least runs, which means it can finally be tested.)
 * **`wipeType` / `wipeProgress` are serialized and completely inert.** Nothing
   sets or reads them. Parity ballast from DXR2; drop them if you are porting
   clean, or keep them if you want savegame parity with this tree.
@@ -1036,7 +1090,14 @@ See [§9](#9-savegame-compatibility).
 | draw path, `BB_TEXTURE` | compiles, **never seen on screen** |
 | draw path, five other payloads | **removed. Draw nothing. Warn once.** |
 | orientation / hinging | **does not exist** |
+| `BBF_VIEWRELATIVEZ` | reachable and named as of [§11.2](#112-bbf_viewrelativez-was-non-functional-from-zscript-fixed)/[§11.3](#113-bbf_viewrelativez-had-no-name-in-zscript-fixed); **still never run** |
 | `AimBillboard` | **never run.** Run the `vm_jit` test first. |
+
+**None of the repairs in [§11](#11-defects-found-and-repaired) have been
+compiled.** They were made without a build, by inspection only, because the
+owner was at the machine. Treat the whole of Feature E as unproven code that
+has now had its known logic defects removed — not as code that has been
+exercised.
 
 ---
 
@@ -1049,6 +1110,7 @@ billboard ones are also `CVAR_GLOBALCONFIG`.
 |---|---|---|---|---|
 | `gl_texture_wallglow` | bool | `true` | B | **yes — changes the look immediately** |
 | `gl_texture_wallglow_intensity` | float | `1.0` | B | (clamped 0–4) |
+| `gl_texture_wallglow_tint` | bool | `true` | B | `false` restores the original flat-white glow |
 | `gl_flatglow` | bool | `false` | C | no |
 | `gl_flatglow_floor` | bool | `true` | C | (gated by master) |
 | `gl_flatglow_ceiling` | bool | `true` | C | (gated by master) |
@@ -1105,8 +1167,8 @@ its remaining lifetime after the load.
 **A view-relative panel's saved `pos.Z` is not authoritative and does not need
 to be** — `TickBillboards` re-anchors it to the *loading* player's own eye on
 the first tic after the load. That is the entire point of the design. (It is
-also, as [§11.2](#112-bbf_viewrelativez-is-non-functional-from-zscript) explains,
-not reachable from ZScript today.)
+also, as [§11.2](#112-bbf_viewrelativez-was-non-functional-from-zscript-fixed)
+explains, unreachable from ZScript until that repair.)
 
 Features A, B, C and D add **no savegame keys** and are savegame-neutral in
 both directions. `PLANEF_GLOWAUTO` rides the existing plane flags word.
@@ -1135,85 +1197,173 @@ For someone merging into a fork that already diverges from `emawind84/gzdoom`.
 
 ---
 
-## 11. Defects found while writing this document
+## 11. Defects found and repaired
 
-These were found by reading the tree against the previous notes. **Nothing has
-been changed** — this section is a report, not a changelog.
+These were found by reading the tree against the previous notes, and then
+fixed. **Every repair in this section was made by inspection only — nothing
+here has been compiled**, because the owner was at the machine and a build was
+off-limits. Each entry says what was wrong, what the fix is, and whether a
+porter has to carry it.
 
-### 11.1 The ZScript natives are a second implementation, not thunks
+### 11.1 The ZScript natives were a second implementation (fixed)
 
-`src/g_level.cpp:2372-2620` defines `FLevelLocals::AddBillboard`,
+`src/g_level.cpp` defined `FLevelLocals::AddBillboard`,
 `AddBillboardPersistent`, `UpdateBillboard`, `MoveBillboard`,
-`RemoveBillboard`, `AttachBillboard`, `AimBillboard` and
-`FindBillboardByID`. Its own header comment says *"The script thunks are thin
-wrappers over these."*
+`RemoveBillboard`, `AttachBillboard`, `AimBillboard` and `FindBillboardByID`.
+Its own header comment claimed *"The script thunks are thin wrappers over
+these."*
 
-**They are not.** `src/scripting/vmthunks.cpp:1242-1494` contains a complete,
-independent, file-static reimplementation of all eight. A tree-wide search
-finds **no caller** for any of the `FLevelLocals::` versions except
-`TickBillboards`, `GatherVisibleBillboards` and `BillboardViewZ` — which *are*
-live.
+**They were not.** `src/scripting/vmthunks.cpp` held a complete, independent,
+file-static reimplementation of all eight, and a tree-wide search found **no
+caller** for any of the `FLevelLocals::` versions except `TickBillboards`,
+`GatherVisibleBillboards` and `BillboardViewZ`. So ~150 lines of `g_level.cpp`
+were dead, and `AimBillboard`'s ray-vs-panel maths existed twice, in two files,
+with nothing keeping them in step.
 
-So roughly 150 lines of `g_level.cpp` are dead code, and `AimBillboard`'s
-~55-line ray-vs-panel maths exists **twice**, in two files, with no mechanism
-keeping them in step.
+**Fix:** the seven statics in `vmthunks.cpp:1243-1390` are now genuine one-line
+delegations. `FindBillboardByID` there is deleted. The `FLevelLocals` methods
+are the single implementation; the statics exist only to unpack the VM's
+flattened argument layout.
 
-**Porting advice:** take one. The `vmthunks.cpp` copies are the ones that
-actually run.
+> **If you port this, do not "simplify" the statics away.** Their parameter
+> lists are the JIT's ABI, not style — see
+> [§7.8](#78-aimbillboard-has-never-been-run). Change bodies, never
+> signatures.
 
-### 11.2 `BBF_VIEWRELATIVEZ` is non-functional from ZScript
+Fixing this fixed 11.2 as a side effect, and surfaced 11.7.
 
-A direct consequence of 11.1. `RS_InitBillboardZ` (`g_level.cpp:2363`) is the
-function that stashes the caller's Z into `viewZOffset` when
-`BBF_VIEWRELATIVEZ` is set. It is called from the three `FLevelLocals::`
-creation paths — **all of which are dead** — and from **nowhere** in
-`vmthunks.cpp`.
+### 11.2 `BBF_VIEWRELATIVEZ` was non-functional from ZScript (fixed)
 
-So on the only reachable path, `viewZOffset` stays at its initialiser of `0.0`.
-A mod that passes flag bit 8 gets a panel pinned to **exactly** the viewer's
-eye height, and the Z it passed is silently discarded on the first tic by
-`TickBillboards`' `bb.pos.Z = viewz + bb.viewZOffset`.
+A direct consequence of 11.1. `RS_InitBillboardZ` (`g_level.cpp:2363`) is what
+stashes the caller's Z into `viewZOffset` when `BBF_VIEWRELATIVEZ` is set. It
+was called only from the three dead `FLevelLocals` creation paths, and from
+nowhere in `vmthunks.cpp`.
 
-`vmthunks.cpp::MoveBillboard` has the same gap — it writes `bb->pos` and does
-not re-derive `viewZOffset`, so moving a view-relative panel loses its Z too.
+So on the only reachable path `viewZOffset` stayed at `0.0`, and a mod passing
+flag bit 8 got a panel pinned to **exactly** eye height with the Z it passed
+silently discarded on the first tic by `TickBillboards`'
+`bb.pos.Z = viewz + bb.viewZOffset`. `MoveBillboard` had the same gap.
 
-This is not "unverified". It is a specific, reproducible wrong behaviour.
+**Fix:** none needed beyond 11.1 — routing the thunks through the `FLevelLocals`
+methods puts `RS_InitBillboardZ` and `MoveBillboard`'s re-anchor back on the
+live path. This is the main reason 11.1 was worth doing.
 
-### 11.3 `BBF_VIEWRELATIVEZ` has no name in ZScript
+### 11.3 `BBF_VIEWRELATIVEZ` had no name in ZScript (fixed)
 
-`doombase.zs:421-426` declares `EBillboardFlags` as `BB_PERSISTENT = 1`,
-`BB_ATTACHED = 2`, `BB_NODEPTHTEST = 4`. **There is no `BB_VIEWRELATIVEZ = 8`,**
-even though the C++ `EBillboardFlags` (`g_levellocals.h:138-144`) has it and
-the header comment on `FBillboard::viewZOffset` describes it as the feature's
-whole point. A mod would have to pass a bare `8`.
+`EBillboardFlags` in `doombase.zs` stopped at `BB_NODEPTHTEST = 4`, even though
+the C++ enum (`g_levellocals.h:138-144`) has a fourth member and
+`FBillboard::viewZOffset`'s comment describes it as the feature's whole point.
+A mod would have had to pass a bare `8`.
 
-### 11.4 `AimBillboard` returns `0`, not `-1`, when it hits a transient
+**Fix:** `BB_VIEWRELATIVEZ = 8` added (`doombase.zs:431`).
 
-Transient billboards are created with `id` left at its initialiser of `0`
-(`FBillboard::id = 0`, documented as *"0 = unassigned"*). `AimBillboard` sets
-`bestId = bb.id` on a hit without checking, so a hit on a transient returns
-`0`, which is neither the documented "no hit" value (`-1`) nor a usable handle
-— `FindBillboardByID(0)` and `RemoveBillboard(0)` both early-out on `id <= 0`.
-`vmthunks.cpp:1466`, and the same line in the dead `g_level.cpp` copy.
+> **11.2 and 11.3 must land together.** 11.3 alone would ship a nameable flag
+> that actively destroys the caller's Z: the bit reaches `FBillboard::flags`
+> through the old thunk, `viewZOffset` stays 0, and the panel snaps to eye
+> height. The flag only becomes useful once creation routes through
+> `RS_InitBillboardZ`.
 
-### 11.5 A commented-out debug dump would now null-deref
+### 11.4 `AimBillboard` returned `0` when it hit a transient (fixed)
 
-`hw_vertexbuilder.cpp:551-568` is a commented-out block that iterates
-`vert.vertices` and calls `v.vertex->fX()`. `AddInteriorVertex` pushes an
+Transients are created with `id` left at its initialiser of `0`, documented as
+*"unassigned"*. The loop set `bestId = bb.id` without checking, so a hit on a
+transient returned `0` — neither the documented no-hit value (`-1`) nor a
+usable handle, since `FindBillboardByID` and `RemoveBillboard` both early-out
+on `id <= 0`.
+
+**Fix:** the loop guard is now
+`if (bb.size <= 0.0 || bb.id <= 0) continue;` (`g_level.cpp:2593`). The call
+exists so a mod can resolve a hit to a row and fire a netevent; a result the
+caller cannot act on is worse than no result.
+
+> **Deliberate asymmetry a porter must know about:** `GatherVisibleBillboards`
+> (`g_level.cpp:2534`) still only checks `size <= 0.0`, so **transients are
+> still drawn — they are just no longer aimable.** The visible consequence is
+> that a click passes through a decorative panel that looks solid. That is the
+> intent (a transient has no handle, so it should not steal a click from a
+> clickable panel behind it), but it is a real behavioural split between the
+> draw path and the aim path and it is not self-evident from either side.
+
+### 11.5 A commented-out debug dump would have null-dereffed (fixed)
+
+`hw_vertexbuilder.cpp` held a commented-out block iterating `vert.vertices` and
+calling `v.vertex->fX()`. `AddInteriorVertex` pushes
 `FQualifiedVertex{ nullptr, -1 }`, so the synthetic centre vertices have a null
-`vertex`. **Harmless today** — the block is inside `/* */` — but anybody who
-uncomments it to debug flat geometry will crash immediately and blame the wrong
-thing.
+`vertex` and anyone uncommenting the block to debug flat geometry would have
+crashed instantly and blamed the wrong thing.
 
-### 11.6 Wall glow ignores the GLDEFS colour
+**Fix:** it now indexes the parallel `vert.positions` array
+(`hw_vertexbuilder.cpp:556-560`), which exists precisely because interior
+vertices have no `vertex_t`. Still commented out; correct if re-enabled.
 
-`hw_walls.cpp:230` hardcodes the tint to white and uses only the strength.
-Documented in [§4](#4-feature-b--wall-texture-glow) as a design consequence
-rather than a bug, but a reader will reasonably expect
-`Glow { Walls { LAVA1 } }` to glow lava-coloured, and it does not — it glows
-white at whatever intensity is configured.
+### 11.6 Wall glow ignored the GLDEFS colour (fixed, behind a cvar)
 
-### 11.7 Corrections to `ENGINE_WORK.md`
+The tint was hardcoded white and only the strength was read, so
+`Glow { Walls { LAVA1 } }` glowed white.
+
+**Fix:** `gl_texture_wallglow_tint` (default `true`) switches between the
+texture's own averaged colour and the original flat white. See
+[§4](#4-feature-b--wall-texture-glow) for the three side effects of calling
+`GetGlowColor` from the wall path — they are not obvious and one of them moves
+a cross-path state mutation into the draw phase.
+
+### 11.7 `AimBillboard` left `uv` uninitialised on a degenerate ray (fixed)
+
+**Found while making the 11.1 repair, and it would have been *introduced* by a
+naive delegation.**
+
+`FLevelLocals::AimBillboard` returned `-1` on a zero-length direction vector
+**without writing `*outUV`**. The old `vmthunks.cpp` copy wrote `(0,0)` there,
+so the behaviour was masked. But the `DEFINE_ACTION_FUNCTION_NATIVE` body
+declares
+
+```c
+	DVector2 uv;
+	int hit = AimBillboard(self, sx, sy, sz, dx, dy, dz, &uv);
+	if (numret > 1) ret[1].SetVector2(uv);
+```
+
+and `TVector2`'s default constructor is `= default` over two bare `vec_t`
+members (`vectors.h:79-83`), i.e. **uninitialised**. So delegating without
+fixing the root would have handed ZScript a garbage uv on any degenerate aim
+vector — a stale VM register under the JIT.
+
+**Fix:** every exit from `FLevelLocals::AimBillboard` now writes `*outUV`
+(`g_level.cpp:2573-2580`). **Carry this if you port `AimBillboard` at all**;
+it is invisible until someone aims with a zero vector, which a script can
+easily do.
+
+### 11.8 `FFlatVertex::SetVertex` left the new fields uninitialised (fixed)
+
+Both `Set()` overloads initialise `edgedist`/`edgedistall` to
+`FLATVERTEX_NO_EDGE`; `SetVertex` did not. **Nothing calls `SetVertex` today**
+— verified tree-wide — so nothing was broken. The risk was forward-looking: the
+next person to reach for it to fill a quad would get uninitialised edge
+distances straight out of mapped GPU memory, showing up as random glow on a
+random surface.
+
+**Fix:** the sentinel is set there too (`flatvertices.h:57-64`). `SetTexCoord`
+is left alone; it only touches `u`/`v` and is not a vertex-initialising call.
+
+### 11.9 `BUFFER_SIZE` could not be sized without a number (instrumented)
+
+Not a defect — a missing measurement, and the thing blocking a free 160 MB.
+See [§5](#5-feature-c--flat-edge-glow). `BUFFER_SIZE` is **unchanged**;
+`flatvertexpeak` now prints what a map actually reaches.
+
+### 11.10 Still open
+
+* **The C++ and ZScript billboard enums remain a matched pair that nothing
+  cross-checks.** 11.3 closed today's gap; it did not add a mechanism. Renumber
+  either side and every mod call site silently changes meaning.
+* **Nothing in this section has been compiled**, and none of Feature E has been
+  run. The `vm_jit 0` / `vm_jit 1` test in
+  [§7.8](#78-aimbillboard-has-never-been-run) is still the first thing to do.
+* The five payload shaders, `FBillboard`'s missing orientation, and the
+  lightmap path not seeing wall glow are all **features to write**, not defects
+  to repair.
+
+### 11.11 Corrections to `ENGINE_WORK.md`
 
 `ENGINE_WORK.md` opens by telling you to doubt it. Doing so found the
 following:
@@ -1227,10 +1377,10 @@ following:
   `:1811-1814`, not `:1658-1659`; the unswapped `ProcessParticle` form is at
   `:1589-1590`, not `:1559-1560`. The *claim* is correct; the anchors are not.
 * **§4's "the script thunks are thin wrappers" reading is wrong** — see
-  [§11.1](#111-the-zscript-natives-are-a-second-implementation-not-thunks).
+  [§11.1](#111-the-zscript-natives-were-a-second-implementation-fixed).
 * **§4's treatment of `BBF_VIEWRELATIVEZ` as merely "believed self-correcting,
   not proven" understates it** — see
-  [§11.2](#112-bbf_viewrelativez-is-non-functional-from-zscript).
+  [§11.2](#112-bbf_viewrelativez-was-non-functional-from-zscript-fixed).
 * **§2's memory figures conflate total with delta.** ~320 MB is the *total*
   flat-vertex-buffer footprint on a 4-buffer GLES config; this change is
   responsible for 64 MB of it. Desktop is 2 buffers, so 160 MB total / +32 MB
@@ -1287,10 +1437,16 @@ porting. It is a mod-side find-and-replace.
 
 ## Closing note
 
-The four features that touch the renderer all **compile, link and boot on GL,
-GLES and Vulkan.** That is the entirety of the automated evidence, and this
-project's own history records repeated cases of "compiles and boots" meaning
-"consistent with itself" rather than "correct".
+The four features that touch the renderer all **compiled, linked and booted on
+GL, GLES and Vulkan** as of the state described in
+[§1](#1-apply-order)–[§10](#10-conflict-risk-per-file). That is the entirety of
+the automated evidence, and this project's own history records repeated cases
+of "compiles and boots" meaning "consistent with itself" rather than "correct".
+
+**The ten repairs in [§11](#11-defects-found-and-repaired) came afterwards and
+have not been through a compiler**, let alone a game. They remove known logic
+defects; they do not add evidence. If you are picking this up, the first
+build after applying it is the first build anyone has done of this exact tree.
 
 If you are integrating this, the order that will waste the least of your time
 is: **Feature A immediately** (it is a boot fix and it is free), then
