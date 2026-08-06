@@ -290,6 +290,18 @@ const FDefaultShader defaultshaders[] =
 	{"Noise Fuzz", "shaders/glsl/fuzz_noise.fp", "shaders/glsl/material_normal.fp", ""},
 	{"Smooth Noise Fuzz", "shaders/glsl/fuzz_smoothnoise.fp", "shaders/glsl/material_normal.fp", ""},
 	{"Software Fuzz", "shaders/glsl/fuzz_software.fp", "shaders/glsl/material_normal.fp", ""},
+	// [GITD-BB] billboard payload shaders. Row order must match the
+	// SHADER_GitdBB* enum in common/textures/textures.h -- HWSprite::
+	// OverrideShader indexes this table positionally.
+	// Every row here needs BOTH a shaders/glsl AND a shaders_gles/glsl copy of
+	// the .fp: the GLES backend substitutes the path prefix and compiles this
+	// whole table at boot, so a missing GLES twin is a fatal I_Error on that
+	// backend even though the GL build is fine.
+	{"GITD BB Panel",  "shaders/glsl/gitd_bb_panel.fp",  "shaders/glsl/material_normal.fp", ""},
+	{"GITD BB Digits", "shaders/glsl/gitd_bb_digits.fp", "shaders/glsl/material_normal.fp", ""},
+	{"GITD BB Glyph",  "shaders/glsl/gitd_bb_glyph.fp",  "shaders/glsl/material_normal.fp", ""},
+	{"GITD BB Ring",   "shaders/glsl/gitd_bb_ring.fp",   "shaders/glsl/material_normal.fp", ""},
+	{"GITD BB Bar",    "shaders/glsl/gitd_bb_bar.fp",    "shaders/glsl/material_normal.fp", ""},
 	{nullptr,nullptr,nullptr,nullptr}
 };
 

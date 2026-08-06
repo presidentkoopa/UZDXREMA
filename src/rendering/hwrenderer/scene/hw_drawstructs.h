@@ -369,6 +369,15 @@ public:
 	FRenderStyle RenderStyle;
 	int OverrideShader;
 
+	// [GITD-BB] set only by ProcessBillboard: isBillboard routes DrawSprite
+	// into loading bbData (the billboard's packed payload int) onto uAddColor
+	// and its colour onto uObjectColor -- the payload shaders unpack from
+	// there, so billboards ride the existing per-draw stream with zero new
+	// uniforms. Both other Process() entry points reset isBillboard, so a
+	// stale true can never leak into a sprite or particle draw.
+	bool isBillboard;
+	int bbData;
+
 	FTranslationID translation;
 	int index;
 	float depth;
@@ -404,6 +413,10 @@ public:
 	void Process(HWDrawInfo *di, AActor* thing,sector_t * sector, area_t in_area, int thruportal = false, bool isSpriteShadow = false);
 	void ProcessParticle(HWDrawInfo *di, particle_t *particle, sector_t *sector, class DVisualThinker *spr);//, int shade, int fakeside)
 	void AdjustVisualThinker(HWDrawInfo *di, DVisualThinker *spr, sector_t *sector);
+
+	// [GITD-BB] a billboard as a real in-scene camera-facing quad: depth-
+	// tested and translucency-sorted through the same lists as sprites.
+	void ProcessBillboard(HWDrawInfo *di, const struct FBillboard *bb, const DVector3 &bpos, sector_t *sector);
 
 	void DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent);
 };

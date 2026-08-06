@@ -98,6 +98,17 @@ CUSTOM_CVAR(Int, gl_fuzztype, 0, CVAR_ARCHIVE)
 	if (self < 0 || self > 8) self = 0;
 }
 
+// [GITD-BB] Radial cull for billboards, in map units. The design is
+// "unlimited panels" -- the live set is not capped in code, so the draw path
+// carries the whole cost of keeping it cheap. ProcessBillboard rejects on a
+// squared-distance compare before it touches a texture or a material, which is
+// what makes a large live set affordable. 0 disables the cull entirely.
+// This is the player-facing knob the panel budget is meant to be tuned with.
+CUSTOM_CVAR(Float, r_billboard_maxdist, 768.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0) self = 0;
+}
+
 //==========================================================================
 //
 // 
@@ -192,6 +203,20 @@ void HWSprite::DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent)
 
 			state.SetObjectColor(finalcol);
 			state.SetAddColor(cursec->AdditiveColors[sector_t::sprites] | 0xff000000);
+		}
+		else if (isBillboard)
+		{
+			// [GITD-BB] a billboard has neither actor nor particle, so cursec is
+			// always null above and this branch is the billboard's only chance to
+			// load its uniforms. The billboard's colour rides uObjectColor
+			// (BB_TEXTURE picks it up through getTexel's modulate; the SDF payload
+			// shaders read it directly) and the packed payload int rides uAddColor,
+			// byte-exact through FVector4PalEntry's /255 -- the payload shaders
+			// reverse it. Safe to borrow: the SDF shaders never call getTexel (the
+			// only place uAddColor is applied as a colour), and both uniforms are
+			// reset to their neutral values at the end of this function.
+			state.SetObjectColor(ThingColor);
+			state.SetAddColor(PalEntry((uint32_t)bbData));
 		}
 		SetColor(state, di->Level, di->lightmode, lightlevel, rel, di->isFullbrightScene(), Colormap, trans);
 	}
@@ -1273,6 +1298,8 @@ void HWSprite::Process(HWDrawInfo *di, AActor* thing, sector_t * sector, area_t 
 	translation = thing->Translation;
 
 	OverrideShader = -1;
+	isBillboard = false;	// [GITD-BB] never let a billboard's uniform routing leak into a sprite
+	bbData = 0;
 	trans = thing->Alpha;
 	hw_styleflags = STYLEHW_Normal;
 
@@ -1453,6 +1480,8 @@ void HWSprite::ProcessParticle(HWDrawInfo *di, particle_t *particle, sector_t *s
 
 	trans = particle->alpha;
 	OverrideShader = 0;
+	isBillboard = false;	// [GITD-BB] see the matching reset in Process()
+	bbData = 0;
 	modelframe = nullptr;
 	texture = nullptr;
 	topclip = LARGE_VALUE;
@@ -1556,6 +1585,12 @@ void HWSprite::ProcessParticle(HWDrawInfo *di, particle_t *particle, sector_t *s
 			{
 				translation = NO_TRANSLATION;
 
+				// [GITD-BB] WARNING: this is NOT the convention to copy. These
+				// two lines, together with z1 = z - scalefac below, draw the
+				// quad's content rotated 180 degrees. It is invisible here
+				// because particles are round. Every path that draws real,
+				// asymmetric content uses the swapped assignment instead --
+				// see the UV / ORIENTATION comment in ProcessBillboard.
 				ul = vt = 0;
 				ur = vb = 1;
 
@@ -1617,8 +1652,226 @@ void HWSprite::ProcessParticle(HWDrawInfo *di, particle_t *particle, sector_t *s
 	rendered_sprites++;
 }
 
+//==========================================================================
+//
+// [GITD-BB] Billboards render as real in-scene camera-facing quads through
+// the SAME translucent draw lists as sprites -- true depth testing AND
+// correct sorting against other translucent geometry, plus native texture
+// binding (BB_TEXTURE takes any FGameTexture, canvas textures included).
+// The SDF payloads (PANEL/DIGITS/GLYPH/RING/BAR) draw through their own
+// payload shaders selected via OverrideShader -- the same per-sprite
+// custom-shader mechanism the fuzz styles use. The quad's own texture stays
+// glPart for those: the payload shaders never sample it, but every backend
+// still wants a real material bound. bb->data and bb->color travel to the
+// shader on uAddColor/uObjectColor, loaded per draw in DrawSprite.
+//
+//==========================================================================
+
+void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVector3 &bpos, sector_t *sector)
+{
+	if (!sector) return;
+
+	const auto &vp = di->Viewpoint;
+
+	// Radial cull, first thing and as cheaply as it can possibly be done.
+	// "Unlimited panels" means the live set is not capped in code, so this
+	// test is the only thing standing between a large live set and the frame
+	// budget: reject before touching a texture, a material or a colormap.
+	// Squared compare -- no sqrt, no DVector3 temporaries.
+	//
+	// Measured against CenterEyePos, NOT Pos, deliberately. hw_entrypoint.cpp
+	// runs the whole scene once per eye, so this function is called twice per
+	// frame in VR; culling against the per-eye position would let a panel sit
+	// inside the radius for one eye and outside it for the other and pop in
+	// only half the headset. CenterEyePos is eye-independent, so both eyes
+	// agree. Everything past this point is paid for twice, at headset
+	// resolution -- the cull radius is the cheapest lever there is.
+	//
+	// NOTE TO WHOEVER OWNS THE DISPATCH LOOP: this rejection is the backstop,
+	// not the whole cull. A caller that resolves a sector per billboard (a
+	// PointInSector BSP descent) before calling us pays that descent for every
+	// panel in the level, per eye, including the ones rejected right here.
+	// Do the same squared-distance test against r_billboard_maxdist in the
+	// dispatch loop BEFORE the sector lookup; this test then only catches
+	// whatever slips through. EXTERN_CVAR(Float, r_billboard_maxdist) is all
+	// that takes.
+	if (r_billboard_maxdist > 0.0f)
+	{
+		const double maxd = r_billboard_maxdist;
+		const double dx = bpos.X - vp.CenterEyePos.X;
+		const double dy = bpos.Y - vp.CenterEyePos.Y;
+		const double dz = bpos.Z - vp.CenterEyePos.Z;
+		if (dx * dx + dy * dy + dz * dz > maxd * maxd) return;
+	}
+
+	// Billboards are UI-grade objects: fullbright by default, so a card is
+	// readable in a dark room. (A future flag bit can opt into sector light.)
+	lightlevel = 255;
+	foglevel = (uint8_t)clamp<short>(sector->lightlevel, 0, 255);
+	Colormap = sector->Colormap;
+	Colormap.ClearColor();
+	fullbright = true;
+
+	trans = 1.0f;
+	isBillboard = true;
+
+	// Which payloads may put bb->data on uAddColor, and which must NOT.
+	//
+	// The SDF payloads unpack it there, and they are safe to do so because they
+	// never call getTexel -- the one place uAddColor is consumed as a colour.
+	// BB_TEXTURE is the opposite case: it draws through the DEFAULT shader,
+	// whose getTexel does `texel.rgb += uAddColor.rgb` (see main.fp), and its
+	// data is a texture index that has already been consumed on the CPU below.
+	// Leaving an index in that uniform adds it to the card as a garbage
+	// additive tint -- a mid-range index lands as a strong blue. So the
+	// texture payload sends a neutral 0 and lets its colour arrive the way
+	// getTexel intends, as the uObjectColor modulate.
+	const bool isTexturePayload = (bb->payload == BB_TEXTURE);
+	bbData = isTexturePayload ? 0 : bb->data;
+
+	switch (bb->payload)
+	{
+	case BB_PANEL:  OverrideShader = SHADER_GitdBBPanel;  break;
+	case BB_DIGITS: OverrideShader = SHADER_GitdBBDigits; break;
+	case BB_GLYPH:  OverrideShader = SHADER_GitdBBGlyph;  break;
+	case BB_RING:   OverrideShader = SHADER_GitdBBRing;   break;
+	case BB_BAR:    OverrideShader = SHADER_GitdBBBar;    break;
+	default:        OverrideShader = 0;                   break; // BB_TEXTURE + unknown payloads: plain textured quad
+	}
+	modelframe = nullptr;
+	texture = nullptr;
+	topclip = LARGE_VALUE;
+	bottomclip = -LARGE_VALUE;
+	index = 0;
+	actor = nullptr;
+	particle = nullptr;
+	lightlist = nullptr;
+	translation = NO_TRANSLATION;
+	RenderStyle = STYLE_Translucent;
+	hw_styleflags = STYLEHW_NoAlphaTest;
+	dynlightindex = -1;
+	polyoffset = false;
+	offx = 0.f;
+	offy = 0.f;
+	Angles = DRotator();
+
+	ThingColor = bb->color;
+	ThingColor.a = 255;
+
+	if (isTexturePayload)
+	{
+		FTextureID tid;
+		tid.SetIndex(bb->data);
+		if (tid.isValid()) texture = TexMan.GetGameTexture(tid, true);
+	}
+	else
+	{
+		// The SDF payload shaders synthesise everything from vTexCoord and
+		// never sample this; it is bound only because every backend wants a
+		// real material on the draw.
+		texture = TexMan.GetGameTexture(TexMan.glPart, false);
+	}
+	if (!texture || !texture->isValid()) return;
+
+	//----------------------------------------------------------------------
+	// UV / ORIENTATION. Read this before changing any of the four assignments
+	// below -- and before "fixing" a mirrored panel anywhere else.
+	//
+	// CreateVertices binds `ul` to v[0]/v[2] and `ur` to v[1]/v[3]. For the
+	// camera-facing quad built below, v[0]/v[2] sit at (x1,y1) -- and (x1,y1)
+	// is screen RIGHT, because screen-right in world XY for a camera looking
+	// along ViewVector is (+ViewVector.Y, -ViewVector.X), which is exactly how
+	// x1/y1 are formed. So the quad's u runs RIGHT-TO-LEFT, and an unmirrored
+	// texture therefore needs the SWAPPED assignment: sprite UR into ul,
+	// sprite UL into ur. Every path in this file that draws a real texture
+	// does precisely that -- see AdjustVisualThinker. Likewise `vt` binds to
+	// z1 and `vb` to z2, and every sprite path builds z1 as the TOP
+	// (Process(): z1 = z - r.top; z2 = z1 - r.height), so z1 is the top here.
+	//
+	// THE TRAP, and it has already cost this project months: ProcessParticle,
+	// a little way above this function, sets
+	//         ul = vt = 0;
+	//         ur = vb = 1;
+	// with z1 = z - scalefac, i.e. z1 BELOW z2. That is the UNSWAPPED
+	// convention on a vertically inverted quad -- it renders content rotated
+	// 180 degrees. It has always been wrong and nobody ever noticed, because
+	// particles are round and a 180-degree-rotated circle is the same circle.
+	// It is four lines long and it looks canonical. It is not canonical.
+	//
+	// Do not copy it for anything that draws real content, and do not
+	// compensate for it downstream: a payload shader that flips u to cancel a
+	// mirrored quad fixes only itself and leaves BB_TEXTURE mirrored, which is
+	// exactly how this bug survived. It is fixed here, once, for every payload.
+	//
+	// THE RULE, because a second in-world panel path is being built alongside
+	// this one and the two will look contradictory: the swap is not universal
+	// and "unswapped" is not universally wrong either. Match the convention of
+	// whoever built the corners you are drawing into.
+	//   * This path hands x1/x2/y1/y2/z1/z2 to HWSprite::CreateVertices, which
+	//     binds `ul` to v[0]/v[2] -- and those sit at (x1,y1), screen RIGHT.
+	//     HWSprite's corner NAMES do not describe its geometry, so a real
+	//     texture must be swapped. That is what :1658 is compensating for.
+	//   * A path that builds and names its own corners honestly does NOT swap.
+	//     hw_decal.cpp is the precedent: dv[UL] is genuinely the left corner
+	//     and takes the left u (:342), with v = 0 on the top corners (:339).
+	//     Unswapped there is correct for the same reason swapped is correct
+	//     here.
+	// ProcessParticle is the counter-example that proves the rule: it is
+	// unswapped while using HWSprite's corners, which is why it is wrong.
+	//----------------------------------------------------------------------
+	if (isTexturePayload)
+	{
+		// GetSpritePositioning(0) is the untrimmed entry: SetupSpriteData
+		// leaves spi[0] at a full 0..1 range and gates every trim/expand
+		// adjustment on i == 1, so a card maps corner to corner and a canvas
+		// texture is not cropped.
+		const auto &spi = texture->GetSpritePositioning(0);
+		vt = spi.GetSpriteVT();
+		vb = spi.GetSpriteVB();
+		ul = spi.GetSpriteUR();
+		ur = spi.GetSpriteUL();
+	}
+	else
+	{
+		// The same orientation, stated numerically. The SDF payloads build
+		// their geometry out of vTexCoord and must not inherit glPart's sprite
+		// rect: s = 0 at screen left, t = 0 at the top.
+		ul = 1.0f; ur = 0.0f;
+		vt = 0.0f; vb = 1.0f;
+	}
+
+	x = (float)bpos.X;
+	y = (float)bpos.Y;
+	z = (float)bpos.Z;
+
+	// bb->size is the FULL edge length of the card in map units, not a half-
+	// extent: the quad spans size/2 either side of the anchor, so size 64
+	// gives a card 64 tall. (Spec requirement 6 -- this was never written down
+	// on DXR2 and nobody could tell which of the two it meant.)
+	const float half = (float)(bb->size * 0.5);
+	const float ps = (float)di->Level->pixelstretch;
+	const float scalefac = half / (float)sqrt(ps);
+
+	const float viewvecX = (float)vp.ViewVector.X * scalefac * ps;
+	const float viewvecY = (float)vp.ViewVector.Y * scalefac;
+
+	// (x1,y1) = screen right, (x2,y2) = screen left, z1 = top, z2 = bottom.
+	x1 = x + viewvecY;
+	x2 = x - viewvecY;
+	y1 = y - viewvecX;
+	y2 = y + viewvecX;
+	z1 = z + scalefac;
+	z2 = z - scalefac;
+
+	// Sorted from the eye-independent centre, for the same reason the cull is.
+	depth = (float)((x - vp.CenterEyePos.X) * vp.TanCos + (y - vp.CenterEyePos.Y) * vp.TanSin);
+
+	PutSprite(di, true);
+	rendered_sprites++;
+}
+
 // [MC] VisualThinkers are to be rendered akin to actor sprites. The reason this whole system
-// is hitching a ride on particle_t is because of the large number of checks with 
+// is hitching a ride on particle_t is because of the large number of checks with
 // HWSprite elsewhere in the draw lists.
 void HWSprite::AdjustVisualThinker(HWDrawInfo* di, DVisualThinker* spr, sector_t* sector)
 {

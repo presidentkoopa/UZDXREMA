@@ -82,6 +82,16 @@ enum MaterialShaderIndex
 	SHADER_NoiseFuzz,
 	SHADER_SmoothNoiseFuzz,
 	SHADER_SoftwareFuzz,
+	// [GITD-BB] billboard payload shaders (SDF, quad-space). Selected per
+	// billboard via HWSprite::OverrideShader, exactly like the fuzz styles
+	// above; bb->data reaches them through uAddColor (see HWSprite::DrawSprite).
+	// These indices are positional -- they must stay in lockstep with the
+	// matching rows of defaultshaders[] in hw_shaderpatcher.cpp.
+	SHADER_GitdBBPanel,
+	SHADER_GitdBBDigits,
+	SHADER_GitdBBGlyph,
+	SHADER_GitdBBRing,
+	SHADER_GitdBBBar,
 	FIRST_USER_SHADER
 };
 
