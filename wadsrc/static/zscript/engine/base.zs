@@ -342,6 +342,7 @@ struct TextureID
 	native bool Exists();
 	native void SetInvalid();
 	native void SetNull();
+	native int GetIndex();	// [GITD-BB] raw index, e.g. billboard BB_TEXTURE data
 }
 
 // 32-bit RGBA color - each component is one byte, or 8-bit

@@ -556,6 +556,58 @@ struct LevelLocals native
 
 	native void SpawnParticle(FSpawnParticleParams p);
 	native VisualThinker SpawnVisualThinker(Class<VisualThinker> type);
+
+	// [GITD-BB] Billboards -- world-anchored, camera-facing panels. A
+	// deliberately SEPARATE primitive with its own list (FLevelLocals::
+	// Billboards): real depth-tested quad geometry, not a particle and not a
+	// sprite. Capability only; payload MEANING (what a card/menu/readout
+	// actually looks like) is a mod-side decision.
+	//
+	// Payload ids (EBillboardPayload, g_levellocals.h):
+	//   0 BB_PANEL   -- rounded-rect backing plate; data byte 0 = corner
+	//                   radius, byte 1 = border width (0 = no border).
+	//                   data 0 = plain sharp-cornered plate.
+	//   1 BB_TEXTURE -- data = TextureID.GetIndex()
+	//   2 BB_DIGITS  -- data = value (bits 0-16, <= 99999 renders) | palette
+	//                   index (bits 17+)
+	//   3 BB_GLYPH   -- data = glyph id (low byte) | palette (second byte)
+	//   4 BB_RING    -- data = progress (low byte, 0-255); clockwise gauge
+	//   5 BB_BAR     -- data = progress (low byte, 0-255); fills left>right
+	// Palette indices (digits + glyph): 0 cyan, 1 gold, 2 red, 3 green,
+	// 4 white, 5 orange, 6 purple, 7 magenta.
+	//
+	// col MODULATES every payload: pass White to show a palette colour or a
+	// texture unaltered. Black makes a billboard invisible -- that is a
+	// colour choice, not a default.
+	//
+	// SIZE IS THE FULL EXTENT, not a half-extent. The panel spans size/2 in
+	// each direction from pos, so size 88 is a card 88 units across, and pos
+	// is its CENTRE (not its bottom edge). This is not a guess: AimBillboard
+	// bounds-checks against +/-(size * 0.5) about pos, so anything else would
+	// make aim disagree with what is drawn.
+	//
+	// flags: bit 0 = persistent, bit 1 = attached (engine-managed, do not set
+	// directly -- use AttachBillboard), bit 2 = no depth test.
+	// lifetime is in SECONDS; <= 0 means permanent. It is meaningless once a
+	// billboard is persistent or attached.
+
+	// Transient, self-expiring, no handle.
+	native void AddBillboard(Vector3 pos, double size, int payload, int data, color col, int flags = 0, double lifetime = 0);
+	// Persistent: lives until RemoveBillboard(id). Returns a handle.
+	native int AddBillboardPersistent(Vector3 pos, double size, int payload, int data, color col, int flags = 0, double lifetime = 0);
+	native void UpdateBillboard(int id, int data, color col);
+	native void MoveBillboard(int id, Vector3 pos);
+	native void RemoveBillboard(int id);
+	// Engine-side follow: repositioned every tic to mo.pos + offset. Dies
+	// with its actor. Returns a handle, or -1 if mo is null.
+	native int AttachBillboard(Actor mo, Vector3 offset, double size, int payload, int data, color col, int flags = 0, double lifetime = 0);
+	// Ray-vs-panel test. Returns (handle or -1, hit uv 0..1 across the panel,
+	// bottom-left origin). uv is what makes a panel CLICKABLE: uv.y -> row
+	// index -> netevent.
+	// NOTE: shipped as a multi-return, not `out Vector2 uv` -- see the C++-side
+	// comment on AimBillboard in vmthunks.cpp for why. Call as:
+	//   int hit; Vector2 uv; [hit, uv] = level.AimBillboard(start, dir);
+	native int, Vector2 AimBillboard(Vector3 start, Vector3 dir);
 }
 
 // a few values of this need to be readable by the play code.
