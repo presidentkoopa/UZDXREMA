@@ -59,6 +59,7 @@
 #include "c_dispatch.h"
 #include "s_music.h"
 #include "texturemanager.h"
+#include "bitmap.h"		// TexMan.GetAverageColor reads a decoded FBitmap; textures.h only forward-declares it.
 #include "v_draw.h"
 
 DVector2 AM_GetPosition();
@@ -100,6 +101,35 @@ DEFINE_ACTION_FUNCTION_NATIVE(_TexMan, SetCameraTextureAspectRatio, SetCameraTex
 	PARAM_BOOL(useTextureRatio);
 	SetCameraTextureAspectRatio(texturename, aspect, useTextureRatio);
 	return 0;
+}
+
+// The average colour of a texture's pixels. This is the same computation that gives a
+// GLDEFS-glowing flat its colour, but it works on any texture, glowing or not, so a
+// caller can take a colour from the artwork instead of inventing one.
+//
+// 'normalize' is averageColor's maxout: 0 gives the plain average, and a positive value
+// scales the brightest channel up to it, which turns a muddy average into a readable
+// hue. 153 is what the engine's own glow path uses.
+//
+// This decodes the texture, so it is a load-time operation and not a per-tic one. It is
+// left uncached on purpose: a cache here would have to decide when to invalidate, and
+// the caller already knows how many distinct textures it cares about.
+static int GetAverageColor(int texid, int normalize)
+{
+	auto tex = TexMan.GameByIndex(texid);
+	if (tex == nullptr) return 0;
+	auto image = tex->GetTexture();
+	if (image == nullptr) return 0;
+	auto buffer = image->GetBgraBitmap(nullptr);
+	return averageColor((uint32_t*)buffer.GetPixels(), buffer.GetWidth() * buffer.GetHeight(), normalize);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(_TexMan, GetAverageColor, GetAverageColor)
+{
+	PARAM_PROLOGUE;
+	PARAM_INT(texid);
+	PARAM_INT(normalize);
+	ACTION_RETURN_INT(GetAverageColor(texid, normalize));
 }
 
 //=====================================================================================
