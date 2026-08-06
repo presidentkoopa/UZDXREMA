@@ -228,8 +228,13 @@ static const char *shaderBindings = R"(
 		int padding2;
 		int padding3;
 
-		// Was 'padding4'. Mirrors StreamData::uWallGlowColor in hw_renderstate.h - keep in step.
+		// These four mirror StreamData in hw_renderstate.h and MUST stay in this
+		// order. uWallGlowColor was 'padding4'; the three uFlatGlow* grow the block
+		// past it. Drift here desyncs std140 silently - no error, just wrong values.
 		vec4 uWallGlowColor;
+		vec4 uFlatGlowColor;
+		vec4 uFlatGlowParms;
+		vec4 uFlatGlowShape;
 	};
 
 	layout(set = 1, binding = 2, std140) uniform StreamUBO {
@@ -341,6 +346,9 @@ static const char *shaderBindings = R"(
 	#define uGlobalFadeDensity data[uDataIndex].uGlobalFadeDensity
 	#define uGlobalFadeGradient data[uDataIndex].uGlobalFadeGradient
 	#define uLightRangeLimit data[uDataIndex].uLightRangeLimit
+	#define uFlatGlowColor data[uDataIndex].uFlatGlowColor
+	#define uFlatGlowParms data[uDataIndex].uFlatGlowParms
+	#define uFlatGlowShape data[uDataIndex].uFlatGlowShape
 
 	#define SUPPORTS_SHADOWMAPS
 	#define VULKAN_COORDINATE_SYSTEM

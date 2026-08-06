@@ -196,6 +196,7 @@ bool FGLRenderState::ApplyShader()
 	flavour.useObjectColor2 = (mStreamData.uObjectColor2.a > 0);
 	flavour.useGlowTopColor = mGlowEnabled && (mStreamData.uGlowTopColor[3] > 0);
 	flavour.useGlowBottomColor = mGlowEnabled && (mStreamData.uGlowBottomColor[3] > 0);
+	flavour.useFlatGlow = mFlatGlowEnabled && (mStreamData.uFlatGlowColor[3] > 0);
 
 	flavour.useColorMap = (mColorMapSpecial >= CM_FIRSTSPECIALCOLORMAP) || (mColorMapFlash != 1);
 
@@ -284,6 +285,14 @@ bool FGLRenderState::ApplyShader()
 		activeShader->cur->muGlowTopPlane.Set(&mStreamData.uGlowTopPlane.X);
 		activeShader->cur->muGlowBottomPlane.Set(&mStreamData.uGlowBottomPlane.X);
 		activeShader->cur->currentglowstate = mGlowEnabled;
+	}
+
+	if (mFlatGlowEnabled || activeShader->cur->currentflatglowstate)
+	{
+		activeShader->cur->muFlatGlowColor.Set(&mStreamData.uFlatGlowColor.X);
+		activeShader->cur->muFlatGlowParms.Set(&mStreamData.uFlatGlowParms.X);
+		activeShader->cur->muFlatGlowShape.Set(&mStreamData.uFlatGlowShape.X);
+		activeShader->cur->currentflatglowstate = mFlatGlowEnabled;
 	}
 
 	if (mGradientEnabled || activeShader->cur->currentgradientstate)

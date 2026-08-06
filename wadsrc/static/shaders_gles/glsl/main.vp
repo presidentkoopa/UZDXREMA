@@ -20,6 +20,11 @@ varying vec3 glowdist;
 varying vec3 gradientdist;
 varying vec4 vWorldNormal;
 varying vec4 vEyeNormal;
+
+#if (DEF_USE_FLAT_GLOW)
+attribute vec2 aEdgeDist;
+varying float vEdgeDist;
+#endif
 #endif
 
 #ifdef NO_CLIPDISTANCE_SUPPORT
@@ -77,7 +82,15 @@ void main()
 			glowdist.y = worldcoord.y - bottomatpoint;
 			glowdist.z = clamp(glowdist.x / (topatpoint - bottomatpoint), 0.0, 1.0);
 		}
-		
+
+		#if (DEF_USE_FLAT_GLOW)
+		// Edge glow on flats. The distance to the nearest boundary was worked out at map
+		// load and baked into the vertex, so all that is left is picking which of the two
+		// answers this mod wants right now. The raw distance is what gets interpolated -
+		// clamping it here instead of in the fragment shader would bend the ramp.
+		vEdgeDist = mix(aEdgeDist.x, aEdgeDist.y, uFlatGlowParms.y);
+		#endif
+
 		if (uObjectColor2.a != 0.0)
 		{
 			float topatpoint = (uGradientTopPlane.w + uGradientTopPlane.x * worldcoord.x + uGradientTopPlane.y * worldcoord.z) * uGradientTopPlane.z;

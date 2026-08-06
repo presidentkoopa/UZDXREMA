@@ -267,6 +267,7 @@ public:
 	bool useObjectColor2;
 	bool useGlowTopColor;
 	bool useGlowBottomColor;
+	bool useFlatGlow;
 	bool useColorMap;
 
 	bool buildLighting;
@@ -338,6 +339,9 @@ public: class ShaderVariantData
 		FBufferedUniformPE muTextureAddColor;
 		FUniform4f muGlowBottomColor;
 		FUniform4f muGlowTopColor;
+		FUniform4f muFlatGlowColor;
+		FUniform4f muFlatGlowParms;
+		FUniform4f muFlatGlowShape;
 		FUniform4f muGlowBottomPlane;
 		FUniform4f muGlowTopPlane;
 		FUniform4f muWallGlowColor;
@@ -364,6 +368,7 @@ public: class ShaderVariantData
 		int texturematrix_index = 0;
 
 		int currentglowstate = 0;
+		int currentflatglowstate = 0;
 		int currentgradientstate = 0;
 		int currentsplitstate = 0;
 		int currentcliplinestate = 0;
@@ -425,6 +430,7 @@ public:
 #endif
 		tag |= (flavour.hasSpotLight & 1) << 23;
 		tag |= (flavour.paletteInterpolate & 1) << 24;
+		tag |= (flavour.useFlatGlow & 1) << 25;
 
 		return tag;
 	}

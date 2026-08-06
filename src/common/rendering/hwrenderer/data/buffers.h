@@ -27,6 +27,7 @@ enum
 	VATTR_LIGHTMAP,	
 	VATTR_BONEWEIGHT,
 	VATTR_BONESELECTOR,
+	VATTR_EDGEDIST,	// flats only: distance from this vertex to the nearest sector boundary (x = boundaries with a visible wall, y = every boundary)
 	VATTR_MAX
 };
 

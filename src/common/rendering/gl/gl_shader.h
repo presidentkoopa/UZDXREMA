@@ -259,6 +259,9 @@ class FShader
 	FUniform4f muGradientTopPlane;
 	FUniform4f muSplitBottomPlane;
 	FUniform4f muSplitTopPlane;
+	FUniform4f muFlatGlowColor;
+	FUniform4f muFlatGlowParms;
+	FUniform4f muFlatGlowShape;
 	FUniform4f muDetailParms;
 	FBufferedUniform1f muInterpolationFactor;
 	FBufferedUniform1f muShadowmapFilter;
@@ -281,6 +284,7 @@ class FShader
 	int texturematrix_index;
 
 	int currentglowstate = 0;
+	int currentflatglowstate = 0;
 	int currentgradientstate = 0;
 	int currentsplitstate = 0;
 	int currentcliplinestate = 0;

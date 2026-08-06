@@ -8,6 +8,7 @@ layout(location = 4) in vec3 gradientdist;
 layout(location = 5) in vec4 vWorldNormal;
 layout(location = 6) in vec4 vEyeNormal;
 layout(location = 9) in vec3 vLightmap;
+layout(location = 10) in float vEdgeDist;
 
 #ifdef NO_CLIPDISTANCE_SUPPORT
 layout(location = 7) in vec4 ClipDistanceA;
@@ -706,6 +707,50 @@ void SetMaterialProps(inout Material material, vec2 texCoord)
 //
 //===========================================================================
 
+//===========================================================================
+//
+// How edge glow on a flat tapers off going inward.
+//
+// A floor is far wider than a wall is tall, so the ramp that suits a wall has a
+// lot more room to travel here - a straight one lands its terminator right out
+// in the open where the eye finds the crease. These give it somewhere to go.
+//
+// d is the distance to the nearest boundary in map units, reach is where the
+// glow has to be gone. t runs 1 at the edge to 0 at the reach. Every shape is
+// worth exactly 1 at the edge and exactly 0 at the reach, so no shape can leave
+// a hard line behind at the far end. The branch is on a uniform, so every
+// fragment in the draw takes the same one.
+//
+//===========================================================================
+
+float flatGlowFalloff(float d, float reach)
+{
+	float t = clamp(1.0 - d / reach, 0.0, 1.0);
+	float u = 1.0 - t;					// 0 at the edge, 1 at the reach
+	float k = max(uFlatGlowParms.x, 0.0001);
+	int shape = int(uFlatGlowParms.w);
+
+	if (shape == 1)			// power
+		return pow(t, k);
+	if (shape == 2)			// smooth, eased at both ends
+		return t * t * (3.0 - 2.0 * t);
+	if (shape == 3)			// inverse square, short core and a long tail
+		return t / (1.0 + k * u * u);
+	if (shape == 4)			// gaussian
+		return t * exp(-k * u * u);
+	if (shape == 5)			// a line inset from the edge instead of glued to it
+	{
+		float x = (d - uFlatGlowShape.x) / max(uFlatGlowShape.y, 0.0001);
+		return max(1.0 - x * x, 0.0) * t;
+	}
+	if (shape == 6)			// rings marching inward, fading out at the reach
+	{
+		float p = fract(d / max(uFlatGlowShape.z, 0.0001));
+		return clamp(1.0 - min(p, 1.0 - p) * 2.0 * k, 0.0, 1.0) * t;
+	}
+	return t;				// linear
+}
+
 vec4 getLightColor(Material material, float fogdist, float fogfactor)
 {
 	vec4 color = vColor;
@@ -739,6 +784,17 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 	if (uGlowBottomColor.a > 0.0 && glowdist.y < uGlowBottomColor.a)
 	{
 		color.rgb += desaturate(uGlowBottomColor * (1.0 - glowdist.y / uGlowBottomColor.a)).rgb;
+	}
+
+	//
+	// handle glowing flat edges - the other half of the seam the walls above already do.
+	// uFlatGlowColor.a is the reach and is only ever non zero while a flat is being drawn,
+	// so nothing else in the scene can pick this up.
+	//
+	if (uFlatGlowColor.a > 0.0 && vEdgeDist < uFlatGlowColor.a)
+	{
+		float t = flatGlowFalloff(vEdgeDist, uFlatGlowColor.a);
+		color.rgb += min(desaturate(uFlatGlowColor * t).rgb, vec3(uFlatGlowParms.z));
 	}
 #endif
 

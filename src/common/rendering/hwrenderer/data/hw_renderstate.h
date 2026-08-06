@@ -74,6 +74,21 @@ enum ECull
 	Cull_CW
 };
 
+// How edge glow on a flat tapers off going inward. A floor is far wider than a wall is
+// tall, so the ramp that suits a wall has a lot more room to travel here and a plain
+// linear one lands its terminator right out in the open where you can see the crease.
+enum EFlatGlowShape
+{
+	FGS_Linear,			// straight ramp, the same shape the wall glow has always used
+	FGS_Power,			// sharpness > 1 pulls it back against the edge, < 1 spreads it out
+	FGS_Smooth,			// eased at both ends, so the far end has no visible terminator
+	FGS_InverseSquare,	// short bright core and a long tail, the way real light behaves
+	FGS_Gaussian,		// soft band hugging the edge, tail set by sharpness
+	FGS_Band,			// a line inset from the edge rather than glued to it
+	FGS_Contour,		// repeating rings marching inward, fading out at the reach
+	FGS_MAX
+};
+
 
 
 struct FStateVec4
@@ -215,12 +230,27 @@ struct StreamData
 	int padding2;
 	int padding3;
 
+	// MERGE NOTE: uWallGlowColor occupies what used to be 'padding4'. The three
+	// uFlatGlow* members below GROW the struct past it. Two lanes independently
+	// claimed padding4 for different effects; both are kept. The mirrored GLSL
+	// declaration in vulkan/shaders/vk_shader.cpp must list all four in THIS ORDER
+	// or std140 desyncs silently -- no error, no crash, just wrong values.
+
 	// rgb = tint, a = strength. Self-illumination for wall textures listed in a GLDEFS
 	// 'Glow { Walls { } }' block. Unrelated to uGlowTop/BottomColor, which are the sector's
 	// floor and ceiling glow landing *on* a wall.
-	// NOTE: this occupies what used to be 'padding4'. The mirrored declaration in
-	// vulkan/shaders/vk_shader.cpp must be kept in step or std140 desyncs silently.
 	FVector4 uWallGlowColor;
+
+	// Edge glow on flats. rgb is the colour already scaled by intensity, a is the reach in
+	// map units - zero means off, which is how every draw that is not a flat stays clear of it.
+	FVector4 uFlatGlowColor;
+	// x = sharpness, the shape's own parameter. y = edge source, 0 = boundaries with a
+	// visible wall .. 1 = every sector boundary. z = cap on the glow contribution.
+	// w = falloff shape, see EFlatGlowShape.
+	FVector4 uFlatGlowParms;
+	// x = inset, where the glow peaks measured out from the edge. y = band half width.
+	// z = contour ring spacing. All in map units. w = unused.
+	FVector4 uFlatGlowShape;
 };
 
 class FRenderState
@@ -234,6 +264,7 @@ protected:
 	uint8_t mTextureMatrixEnabled : 1;
 	uint8_t mSplitEnabled : 1;
 	uint8_t mBrightmapEnabled : 1;
+	uint8_t mFlatGlowEnabled : 1;
 
 	int mLightIndex;
 	int mBoneIndexBase;
@@ -336,6 +367,11 @@ public:
 		mStreamData.uGlobalFadeDensity = 0.001f;
 		mStreamData.uGlobalFadeGradient = 1.5f;
 		mStreamData.uLightRangeLimit = 64;
+
+		mStreamData.uFlatGlowColor = { 0.0f, 0.0f, 0.0f, 0.0f };
+		mStreamData.uFlatGlowParms = { 1.0f, 0.0f, 1.0f, 0.0f };
+		mStreamData.uFlatGlowShape = { 0.0f, 8.0f, 64.0f, 0.0f };
+		mFlatGlowEnabled = false;
 
 		mModelMatrix.loadIdentity();
 		mTextureMatrix.loadIdentity();
@@ -500,6 +536,36 @@ public:
 	void SetNoSoftLightLevel()
 	{
 		 mLightParms[3] = -1.f;
+	}
+
+	// Edge glow on flats. Paint, not light: it is added to the surface it sits on and
+	// illuminates nothing. Reach is in map units and is deliberately not shared with the
+	// wall glow above - 64 up a wall is most of it, 64 across a floor is a trim line.
+	void SetFlatGlow(float r, float g, float b, float reach)
+	{
+		mStreamData.uFlatGlowColor = { r, g, b, reach };
+		mFlatGlowEnabled = reach > 0.f;
+	}
+
+	void SetFlatGlowParams(float sharpness, float edgesource, float cap, int shape)
+	{
+		mStreamData.uFlatGlowParms = { sharpness, edgesource, cap, (float)shape };
+	}
+
+	void SetFlatGlowShape(float inset, float bandwidth, float spacing)
+	{
+		mStreamData.uFlatGlowShape = { inset, bandwidth, spacing, 0.f };
+	}
+
+	void ClearFlatGlow()
+	{
+		mStreamData.uFlatGlowColor = { 0.0f, 0.0f, 0.0f, 0.0f };
+		mFlatGlowEnabled = false;
+	}
+
+	bool GetFlatGlowEnabled() const
+	{
+		return !!mFlatGlowEnabled;
 	}
 
 	void SetGlowPlanes(const FVector4 &tp, const FVector4& bp)
