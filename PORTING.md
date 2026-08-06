@@ -14,14 +14,18 @@ tree and says so.
 * **Base:** `emawind84/gzdoom`, branch `questzdoom` (remote `origin`).
 * **Our work:** `git log origin/questzdoom..questzdoom` — 27 commits,
   43 files, +2348 / −117.
-* **Verification level:** the five features compile, link and boot. That is the
-  entirety of the automated evidence, and per-feature visual confirmation is
-  stated individually and is mostly absent.
-  **The repairs in [§11](#11-defects-found-and-repaired) are newer than that
-  and have NOT been compiled** — they were made by inspection, with builds
-  off-limits. Every file table below describes the tree *including* those
-  repairs, so a reader gets the current state; the untested ones are marked
-  where they land.
+* **Verification level, precisely:**
+  * The five features **compiled, linked and booted** on GL, GLES and Vulkan.
+  * The repairs in [§11](#11-defects-found-and-repaired) came later and have
+    **passed an MSVC front-end pass only** (`cl /Zs`, all six changed
+    translation units, zero errors and zero warnings). That catches syntax and
+    type errors. It does **not** link, does **not** run, and by construction
+    cannot catch a ZScript-to-native signature mismatch — the exact failure
+    mode [§7.8](#78-aimbillboard-has-never-been-run) is about.
+  * Per-feature **visual** confirmation is stated individually and is mostly
+    absent.
+
+  Every file table below describes the tree *including* the repairs.
 
 ---
 
@@ -333,7 +337,8 @@ reaching it.
 
 | file | lines | what changed |
 |---|---|---|
-| `src/common/textures/gametexture.h` | `:66`, `:118-121`, `:266-273` | New flag `GTexf_WallGlowing = 8192`; new field `uint16_t WallGlowStrength = 100`; accessors `isWallGlowing()`, `GetWallGlowStrength()`, `SetWallGlowing(int)` |
+| `src/common/textures/gametexture.h` | `:66-67`, `:118-127`, `:276-283` | New flags `GTexf_WallGlowing = 8192` and `GTexf_WallGlowResolved = 16384`; new fields `uint16_t WallGlowStrength = 100` and `PalEntry WallGlowColor = 0`; accessors `isWallGlowing()`, `GetWallGlowStrength()`, `SetWallGlowing(int)`, `GetWallGlowColor(float*)` |
+| `src/common/textures/gametexture.cpp` | `:297-315` | `FGameTexture::GetWallGlowColor` — the wall glow's own averaged tint, resolved once and cached, touching nothing the flat glow owns |
 | `src/r_data/gldefs.cpp` | `:1130-1155` (`GLDefsParser::ParseGlow`, `WALLS` branch) | New `intensity <percent>` keyword; calls `tex->SetWallGlowing(strength)` alongside the existing `SetAutoGlowing()` |
 | `src/common/rendering/hwrenderer/data/hw_renderstate.h` | `:242` member; `:359` reset; `:518-528` setters | `FVector4 uWallGlowColor` in the old `padding4` slot; `SetWallGlow(r,g,b,strength)` / `ClearWallGlow()` |
 | `src/common/rendering/vulkan/shaders/vk_shader.cpp` | `:231`, `:336` | GLSL mirror of the member + `#define uWallGlowColor` |
@@ -341,7 +346,7 @@ reaching it.
 | `src/common/rendering/gl/gl_renderstate.cpp` | `:147` | `muWallGlowColor.Set(...)` in `ApplyShader` |
 | `src/common/rendering/gles/gles_shader.{h,cpp}` | `h:345`; `cpp:309-310`, `:611` | same for GLES |
 | `src/common/rendering/gles/gles_renderstate.cpp` | `:258` | same for GLES |
-| `src/rendering/hwrenderer/scene/hw_walls.cpp` | `:49-65` cvars; `:230-252` in `RenderTexturedWall`; `:369` | The whole consumer |
+| `src/rendering/hwrenderer/scene/hw_walls.cpp` | `:49-59` cvars; `:224-242` in `RenderTexturedWall`; `:359` | The whole consumer |
 | `wadsrc/static/shaders/glsl/main.fp` | `:800-808` in `getLightColor` | `color.rgb += desaturate(vec4(uWallGlowColor.rgb * uWallGlowColor.a, 1.0)).rgb;` |
 | `wadsrc/static/shaders_gles/glsl/main.fp` | `:477-486` | same, GLES copy |
 
@@ -366,54 +371,55 @@ Commit `4faca0f9f3`.
   given before any `intensity` default to **100**. This matters
   (see below).
 
-### Tint, and the rough edge — read this before you enable it
+### Tint — the wall glow owns its own colour
 
-The glow originally shipped **hardcoded white**, using only the strength. That
-is now selectable, defaulting to the texture's own colour
-(`hw_walls.cpp:230-252`):
+The glow originally shipped **hardcoded white**, using only the strength, so
+`Glow { Walls { LAVA1 } }` glowed white. It now takes the texture's own
+averaged colour, unconditionally (`hw_walls.cpp:224-242`):
 
 ```c
-	if (gl_texture_wallglow_tint)
-	{
-		float c[3];
-		texture->GetGlowColor(c);
-		state.SetWallGlow(c[0], c[1], c[2], strength);
-	}
-	else state.SetWallGlow(1.f, 1.f, 1.f, strength);
+	float c[3];
+	texture->GetWallGlowColor(c);
+	state.SetWallGlow(c[0], c[1], c[2], strength);
 ```
 
-`FGameTexture::GetGlowColor` averages the texture's pixels and **caches the
-result into `GlowColor`**, so this costs one decode per texture on first use
-and nothing afterwards. The GLDEFS `WALLS` branch already calls
-`SetAutoGlowing()`, so `GlowColor` is 0 going in and the average really is
-computed.
+**`GetWallGlowColor` is deliberately not `GetGlowColor`**, and this is the part
+to carry if you port nothing else from this feature.
 
-**Three consequences a porter needs to know**, all verified in this tree:
+`FGameTexture::GetGlowColor` — the flat path's accessor — computes the same
+average, but when it comes out black it **clears `GTexf_Glowing`**, encoding
+"black glow equals nothing". That flag belongs to the *flat* glow. Borrowing
+`GetGlowColor` for walls therefore let a wall, during the draw phase, switch
+off a flat's glow — a cross-path state mutation from a render function, on a
+path only the flat renderer could previously reach.
 
-1. **A texture with an *authored* glow colour** — one given an explicit colour
-   by `Glow { Texture <name>, <color> }` — has a non-zero `GlowColor` already,
-   so the tint uses the **authored** colour rather than an average. That is
-   almost certainly what anyone would want, but it is not what "averaged
-   colour" implies.
-2. **`GetGlowColor` clears `GTexf_Glowing` when the average comes out black**,
-   and it does **not** clear `GTexf_WallGlowing`. So a pure-black texture named
-   under `Walls` keeps entering the branch forever and pays
-   `SetWallGlow(0,0,0,strength)` + `ClearWallGlow` on every draw. Visually a
-   no-op; the state churn is permanent, not a one-time cost.
-3. **This moved a cross-path mutation into the draw phase.** Before, only the
-   *flat* renderer ever called `GetGlowColor`, so only it could trigger that
-   flag clear. Now the wall renderer can get there first — on a map where a
-   black texture is listed under both `Flats` and `Walls` but is only ever seen
-   as a wall, `GTexf_Glowing` is now cleared at wall-draw time where previously
-   it might never have been. The end state is identical (a black glow is no
-   glow either way), which is why it was left alone, but it is a genuine
-   cross-path mutation from a render function and worth remembering if flat
-   glow ever misbehaves near a wall-glow texture.
+Two rules follow, and the implementation exists to satisfy them:
 
-Also expect **a one-frame hitch the first time a glowing wall texture comes
-into view**, because the BGRA decode now happens inside `RenderTexturedWall`.
-The flat path has always had the same characteristic. Both call sites are
-single-threaded draw-list execution, so there is no race.
+* **Black means black.** On a wall, a black average is an additive term of
+  zero. It is a colour, not a reclassification of the texture as non-glowing.
+* **The wall glow touches nothing the flat glow owns.** Same reason
+  `WallGlowStrength` is already separate from `GlowHeight`: Doom's `FIRE*` are
+  listed as both flats and walls, and the two must not interfere.
+
+So wall glow carries its own cached tint (`PalEntry WallGlowColor`,
+`gametexture.h:127`) and its own resolved bit (`GTexf_WallGlowResolved`,
+`:67`). The bit is load-bearing rather than decorative: **black is a legal
+result, so the colour alone cannot say whether it has been computed** — without
+the bit a black texture would re-decode on every single draw.
+
+**Two consequences a porter needs to know:**
+
+1. **An *authored* flat glow colour does not carry over to walls.** A texture
+   given an explicit colour by `Glow { Texture <name>, <color> }` has that
+   colour in `GlowColor`; the wall path never reads `GlowColor`, so it uses the
+   average regardless. That is the price of full independence and it is the
+   right trade — but if you want authored wall tints, the clean way is a
+   `color` keyword in the GLDEFS `WALLS` branch alongside `intensity`, not a
+   read of the flat field.
+2. **Expect a one-frame hitch the first time a glowing wall texture comes into
+   view**, because the BGRA decode happens inside `RenderTexturedWall`. The
+   flat path has always had the same characteristic. Both call sites are
+   single-threaded draw-list execution, so there is no race.
 
 **The brightness rough edge is separate and is not fixed in the engine.** The
 shader adds `tint * strength` to the lit colour; at `strength = 100 %` and
@@ -437,9 +443,14 @@ Otherwise standalone.
 |---|---|---|---|
 | `gl_texture_wallglow` | bool | **true** | Master switch. **Default ON** — this feature changes the look of the game the moment it is applied. |
 | `gl_texture_wallglow_intensity` | float | 1.0 | `CUSTOM_CVAR`, clamped to `[0, 4]`. Master scale over the per-texture GLDEFS `intensity`. |
-| `gl_texture_wallglow_tint` | bool | true | `false` = flat white, what this originally shipped with. `true` = the texture's own colour. A cvar rather than a fixed choice because it restyles every wall in a GLDEFS `Walls` block at once. |
 
-All three `CVAR_ARCHIVE | CVAR_GLOBALCONFIG`. No savegame keys.
+Both `CVAR_ARCHIVE | CVAR_GLOBALCONFIG`. No savegame keys.
+
+There is deliberately **no cvar for the tint.** Taking the texture's colour is
+not a preference, it is the correct reading of data GLDEFS already supplies;
+painting white ignored it. A switch to restore that would be a
+bug-compatibility toggle and a permanent branch in `RenderTexturedWall`, which
+is exactly the cruft a fork exists to remove.
 
 ### Fork-specific vs upstream-safe
 
@@ -1093,9 +1104,8 @@ See [§9](#9-savegame-compatibility).
 | `BBF_VIEWRELATIVEZ` | reachable and named as of [§11.2](#112-bbf_viewrelativez-was-non-functional-from-zscript-fixed)/[§11.3](#113-bbf_viewrelativez-had-no-name-in-zscript-fixed); **still never run** |
 | `AimBillboard` | **never run.** Run the `vm_jit` test first. |
 
-**None of the repairs in [§11](#11-defects-found-and-repaired) have been
-compiled.** They were made without a build, by inspection only, because the
-owner was at the machine. Treat the whole of Feature E as unproven code that
+The repairs in [§11](#11-defects-found-and-repaired) pass an MSVC front-end
+pass and nothing further. Treat the whole of Feature E as unproven code that
 has now had its known logic defects removed — not as code that has been
 exercised.
 
@@ -1110,7 +1120,6 @@ billboard ones are also `CVAR_GLOBALCONFIG`.
 |---|---|---|---|---|
 | `gl_texture_wallglow` | bool | `true` | B | **yes — changes the look immediately** |
 | `gl_texture_wallglow_intensity` | float | `1.0` | B | (clamped 0–4) |
-| `gl_texture_wallglow_tint` | bool | `true` | B | `false` restores the original flat-white glow |
 | `gl_flatglow` | bool | `false` | C | no |
 | `gl_flatglow_floor` | bool | `true` | C | (gated by master) |
 | `gl_flatglow_ceiling` | bool | `true` | C | (gated by master) |
@@ -1200,10 +1209,14 @@ For someone merging into a fork that already diverges from `emawind84/gzdoom`.
 ## 11. Defects found and repaired
 
 These were found by reading the tree against the previous notes, and then
-fixed. **Every repair in this section was made by inspection only — nothing
-here has been compiled**, because the owner was at the machine and a build was
-off-limits. Each entry says what was wrong, what the fix is, and whether a
-porter has to carry it.
+fixed. Each entry says what was wrong, what the fix is, and whether a porter
+has to carry it.
+
+**Verification:** all six changed translation units pass `cl /Zs` — an MSVC
+syntax and semantic pass — with zero errors and zero warnings. A full build was
+off-limits, so **nothing here has been linked or run.** The front-end pass
+cannot see a ZScript-to-native signature mismatch, which is the one failure
+mode 11.1 and 11.7 sit closest to.
 
 ### 11.1 The ZScript natives were a second implementation (fixed)
 
@@ -1296,16 +1309,28 @@ crashed instantly and blamed the wrong thing.
 (`hw_vertexbuilder.cpp:556-560`), which exists precisely because interior
 vertices have no `vertex_t`. Still commented out; correct if re-enabled.
 
-### 11.6 Wall glow ignored the GLDEFS colour (fixed, behind a cvar)
+### 11.6 Wall glow ignored the GLDEFS colour (fixed)
 
 The tint was hardcoded white and only the strength was read, so
 `Glow { Walls { LAVA1 } }` glowed white.
 
-**Fix:** `gl_texture_wallglow_tint` (default `true`) switches between the
-texture's own averaged colour and the original flat white. See
-[§4](#4-feature-b--wall-texture-glow) for the three side effects of calling
-`GetGlowColor` from the wall path — they are not obvious and one of them moves
-a cross-path state mutation into the draw phase.
+**Fix:** the wall path now takes the texture's own averaged colour, through its
+own accessor `FGameTexture::GetWallGlowColor` with its own cache field and
+resolved bit. See [§4](#4-feature-b--wall-texture-glow) for why it does not
+simply call `GetGlowColor`.
+
+**Two false starts are recorded here because both are tempting and both are
+wrong:**
+
+* **A cvar to pick white vs. texture colour.** That is a bug-compatibility
+  toggle dressed as a preference — nobody would *choose* to ignore the colour
+  GLDEFS supplied — and it buys a permanent branch in a hot draw function. If a
+  behaviour was simply wrong, delete it; do not make it configurable.
+* **Reusing `GetGlowColor`.** It clears `GTexf_Glowing` on a black average,
+  encoding "black glow equals nothing". That flag is the flat glow's. Calling
+  it from the wall renderer lets a wall switch a flat's glow off mid-draw, and
+  it silently collapses *black* into *no glow* — which are different things. A
+  black wall glow is an additive zero, and that is a legitimate answer.
 
 ### 11.7 `AimBillboard` left `uv` uninitialised on a degenerate ray (fixed)
 
@@ -1444,9 +1469,10 @@ the automated evidence, and this project's own history records repeated cases
 of "compiles and boots" meaning "consistent with itself" rather than "correct".
 
 **The ten repairs in [§11](#11-defects-found-and-repaired) came afterwards and
-have not been through a compiler**, let alone a game. They remove known logic
-defects; they do not add evidence. If you are picking this up, the first
-build after applying it is the first build anyone has done of this exact tree.
+have only been through an MSVC front-end pass** — clean, but never linked and
+never run. They remove known logic defects; they do not add evidence. If you
+are picking this up, the first real build after applying it is the first anyone
+has done of this exact tree.
 
 If you are integrating this, the order that will waste the least of your time
 is: **Feature A immediately** (it is a boot fix and it is free), then

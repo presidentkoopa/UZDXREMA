@@ -64,6 +64,7 @@ enum EGameTexFlags
 	GTexf_Seen = 2048,						// Set to true when the texture is being used for rendering. Must be cleared manually if the check is needed.
 	GTexf_NoMipmap = 4096,					// Disable mipmapping for this texture
 	GTexf_WallGlowing = 8192,				// Listed in a GLDEFS 'Glow { Walls { } }' block: self-illuminates when drawn as a wall.
+	GTexf_WallGlowResolved = 16384,			// WallGlowColor has been worked out. Needed because black is a legal answer, so the colour alone cannot say whether it was computed.
 };
 
 struct FMaterialLayers
@@ -119,6 +120,11 @@ class FGameTexture
 	// a texture may appear in both a Flats and a Walls glow block (Doom's FIRE* are used as both)
 	// and the flat glow properties must stay untouched.
 	uint16_t WallGlowStrength = 100;
+	// Tint of the wall self-glow, averaged from the image. Separate from GlowColor for the same
+	// reason WallGlowStrength is separate from GlowHeight, and for one more: resolving it must not
+	// run the flat path's "a black average means this texture does not glow" rule. On a wall,
+	// black means black - an additive term of zero - and nothing about the flat glow changes.
+	PalEntry WallGlowColor = 0;
 	PalEntry GlowColor = 0;
 
 	int16_t SkyOffset = 0;
@@ -270,6 +276,11 @@ public:
 	// read by the wall renderer, so textures that are listed as flats as well are unaffected.
 	bool isWallGlowing() const { return !!(flags & GTexf_WallGlowing); }
 	int GetWallGlowStrength() const { return WallGlowStrength; }
+	// The wall glow's tint. Deliberately NOT GetGlowColor: that one clears GTexf_Glowing when the
+	// average comes out black, which is the FLAT path's flag, and a wall has no business switching
+	// a flat's glow off. This resolves once, caches, and mutates nothing outside the wall's own two
+	// fields - so a black texture glows black rather than being quietly reclassified as not glowing.
+	void GetWallGlowColor(float* data);
 	void SetWallGlowing(int strength) { flags |= GTexf_WallGlowing; WallGlowStrength = (uint16_t)strength; }
 	void SetFullbright() { flags |= GTexf_RenderFullbright;  }
 	void SetDisableFullbright(bool on) { if (on) flags |= GTexf_DisableFullbrightSprites; else flags &= ~GTexf_DisableFullbrightSprites; }
