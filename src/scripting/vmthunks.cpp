@@ -1217,6 +1217,278 @@ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetXOffset, SetXOffset)
 	 return numret;
  }
 
+//==========================================================================
+//
+// [GITD-BB] Billboards -- world-anchored, camera-facing panels. A SEPARATE
+// primitive with its own list (FLevelLocals::Billboards) and its own
+// per-frame render cache; it never rides any existing spot list or
+// StreamData. Capability only: payload MEANING is a mod/ZScript call.
+//
+// SIGNATURE DISCIPLINE FOR EVERYTHING BELOW. Argument COUNT and RETURN TYPE
+// are NOT cross-checked between the ZScript declaration and the direct
+// native in a release build -- only argument *types* are, by DirectNativeDesc
+// at C++ compile time. A count or return mismatch does not error, it returns
+// garbage, and only under the JIT (the interpreter runs the
+// DEFINE_ACTION_FUNCTION body instead, so it looks correct). If a billboard
+// call is right with `vm_jit 0` and wrong with `vm_jit 1`, it is a mismatch
+// here, not a logic bug. The mapping the declarations in doombase.zs rely on:
+//   Vector3 -> three doubles      Vector2 (returned) -> trailing DVector2*
+//   color   -> int                Actor   -> AActor*
+// Defaulted ZScript params (flags, lifetime) are materialised by the compiler
+// at the call site, so they still count as real arguments here.
+//
+//==========================================================================
+
+	static FBillboard* FindBillboardByID(FLevelLocals *self, int id)
+	{
+		if (id <= 0) return nullptr;
+		for (auto &b : self->Billboards)
+			if (b.id == id) return &b;
+		return nullptr;
+	}
+
+	// Transient, self-expiring, no handle -- fire-and-forget.
+	static void AddBillboard(FLevelLocals *self, double x, double y, double z, double size, int payload, int data, int color, int flags, double lifetime)
+	{
+		FBillboard bb;
+		bb.pos = DVector3(x, y, z);
+		bb.size = size;
+		bb.payload = payload;
+		bb.data = data;
+		bb.color = PalEntry(color);
+		bb.flags = flags & ~3;   // transient: never persistent(bit0) or attached(bit1), regardless of caller
+		bb.lifetime = lifetime;
+		bb.spawntic = self->maptime;
+		self->Billboards.Push(bb);
+	}
+
+	DEFINE_ACTION_FUNCTION_NATIVE(_LevelLocals, AddBillboard, AddBillboard)
+	{
+		PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+		PARAM_FLOAT(x);
+		PARAM_FLOAT(y);
+		PARAM_FLOAT(z);
+		PARAM_FLOAT(size);
+		PARAM_INT(payload);
+		PARAM_INT(data);
+		PARAM_COLOR(color);
+		PARAM_INT(flags);
+		PARAM_FLOAT(lifetime);
+		AddBillboard(self, x, y, z, size, payload, data, color, flags, lifetime);
+		return 0;
+	}
+
+	// Persistent: lives until RemoveBillboard(). Returns a handle.
+	static int AddBillboardPersistent(FLevelLocals *self, double x, double y, double z, double size, int payload, int data, int color, int flags, double lifetime)
+	{
+		FBillboard bb;
+		bb.id = self->NextBillboardID++;
+		bb.pos = DVector3(x, y, z);
+		bb.size = size;
+		bb.payload = payload;
+		bb.data = data;
+		bb.color = PalEntry(color);
+		bb.flags = (flags & ~2) | 1;   // force persistent(bit0) on, attached(bit1) off
+		bb.lifetime = lifetime;
+		bb.spawntic = self->maptime;
+		self->Billboards.Push(bb);
+		return bb.id;
+	}
+
+	DEFINE_ACTION_FUNCTION_NATIVE(_LevelLocals, AddBillboardPersistent, AddBillboardPersistent)
+	{
+		PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+		PARAM_FLOAT(x);
+		PARAM_FLOAT(y);
+		PARAM_FLOAT(z);
+		PARAM_FLOAT(size);
+		PARAM_INT(payload);
+		PARAM_INT(data);
+		PARAM_COLOR(color);
+		PARAM_INT(flags);
+		PARAM_FLOAT(lifetime);
+		ACTION_RETURN_INT(AddBillboardPersistent(self, x, y, z, size, payload, data, color, flags, lifetime));
+	}
+
+	static void UpdateBillboard(FLevelLocals *self, int id, int data, int color)
+	{
+		FBillboard *bb = FindBillboardByID(self, id);
+		if (bb) { bb->data = data; bb->color = PalEntry(color); }
+	}
+
+	DEFINE_ACTION_FUNCTION_NATIVE(_LevelLocals, UpdateBillboard, UpdateBillboard)
+	{
+		PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+		PARAM_INT(id);
+		PARAM_INT(data);
+		PARAM_COLOR(color);
+		UpdateBillboard(self, id, data, color);
+		return 0;
+	}
+
+	static void MoveBillboard(FLevelLocals *self, int id, double x, double y, double z)
+	{
+		FBillboard *bb = FindBillboardByID(self, id);
+		if (bb) bb->pos = DVector3(x, y, z);
+	}
+
+	DEFINE_ACTION_FUNCTION_NATIVE(_LevelLocals, MoveBillboard, MoveBillboard)
+	{
+		PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+		PARAM_INT(id);
+		PARAM_FLOAT(x);
+		PARAM_FLOAT(y);
+		PARAM_FLOAT(z);
+		MoveBillboard(self, id, x, y, z);
+		return 0;
+	}
+
+	static void RemoveBillboard(FLevelLocals *self, int id)
+	{
+		if (id <= 0) return;
+		for (unsigned i = 0; i < self->Billboards.Size(); i++)
+		{
+			if (self->Billboards[i].id == id) { self->Billboards.Delete(i); return; }
+		}
+	}
+
+	DEFINE_ACTION_FUNCTION_NATIVE(_LevelLocals, RemoveBillboard, RemoveBillboard)
+	{
+		PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+		PARAM_INT(id);
+		RemoveBillboard(self, id);
+		return 0;
+	}
+
+	// Engine-side follow: repositioned every tic to mo->Pos()+offset by the
+	// billboard maintenance pass in p_tick.cpp. Dies with its actor -- see
+	// FBillboard's attachedTo comment in g_levellocals.h.
+	static int AttachBillboard(FLevelLocals *self, AActor *mo, double ox, double oy, double oz, double size, int payload, int data, int color, int flags, double lifetime)
+	{
+		if (!mo) return -1;
+		FBillboard bb;
+		bb.id = self->NextBillboardID++;
+		bb.attachedTo = mo;
+		bb.attachOffset = DVector3(ox, oy, oz);
+		bb.pos = mo->Pos() + bb.attachOffset;
+		bb.size = size;
+		bb.payload = payload;
+		bb.data = data;
+		bb.color = PalEntry(color);
+		bb.flags = (flags & ~1) | 2;   // force attached(bit1) on, persistent(bit0) off
+		bb.lifetime = lifetime;         // kept for reference; the tick pass ignores lifetime while attached
+		bb.spawntic = self->maptime;
+		self->Billboards.Push(bb);
+		return bb.id;
+	}
+
+	DEFINE_ACTION_FUNCTION_NATIVE(_LevelLocals, AttachBillboard, AttachBillboard)
+	{
+		PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+		PARAM_OBJECT(mo, AActor);
+		PARAM_FLOAT(ox);
+		PARAM_FLOAT(oy);
+		PARAM_FLOAT(oz);
+		PARAM_FLOAT(size);
+		PARAM_INT(payload);
+		PARAM_INT(data);
+		PARAM_COLOR(color);
+		PARAM_INT(flags);
+		PARAM_FLOAT(lifetime);
+		ACTION_RETURN_INT(AttachBillboard(self, mo, ox, oy, oz, size, payload, data, color, flags, lifetime));
+	}
+
+	// Ray-vs-panel test against every live billboard (post attachment-
+	// resolution position). The panel's normal points from the billboard
+	// toward the ray origin -- "camera-facing" for whoever is aiming, not
+	// necessarily the render camera. Returns the nearest hit's handle, or -1;
+	// uv maps the hit point to 0..1 across the panel (bottom-left origin).
+	//
+	// bb.size is treated as the FULL extent here (+/- size*0.5 about bb.pos).
+	// The renderer MUST agree or aim will not line up with what is drawn.
+	//
+	// NOTE (deviation from the spec's stated signature, flagged deliberately):
+	// specced as `AimBillboard(start, dir, out Vector2 uv) -> handle`. This
+	// codebase's native thunks use multi-return (ret[0]/ret[1]) for exactly
+	// this shape -- Sector.GetTextureGlow directly above is one -- and there is
+	// no verified true-out-param native precedent to match blind. Shipped as
+	// `int, Vector2 AimBillboard(start, dir)` instead: identical call-site
+	// ergonomics (`[hit, uv] = level.AimBillboard(...)`), verified-correct
+	// return mechanics. The uv is NOT optional -- clickable panels resolve
+	// uv -> row -> netevent, so dropping it removes the point of the call.
+	//
+	// The trailing DVector2* is the JIT's multi-return convention, not a
+	// stylistic choice: jit_call.cpp keeps return 0 in the real return slot
+	// when it is REGT_INT, then passes every later return as a pointer
+	// argument appended after the declared params (jit_call.cpp:477-519), and
+	// reads a Vector2 back as two adjacent doubles (REGT_FLOAT|REGT_MULTIREG2,
+	// jit_call.cpp:562). DVector2 is exactly that pair.
+	static int AimBillboard(FLevelLocals *self, double sx, double sy, double sz, double dx, double dy, double dz, DVector2 *outUV)
+	{
+		DVector3 start(sx, sy, sz);
+		DVector3 dir(dx, dy, dz);
+		double dlen = dir.Length();
+		if (dlen < 1.e-6)
+		{
+			if (outUV) *outUV = DVector2(0, 0);
+			return -1;
+		}
+		dir /= dlen;
+
+		int bestId = -1;
+		double bestT = 1.e30;
+		DVector2 bestUV(0, 0);
+
+		for (auto &bb : self->Billboards)
+		{
+			if (bb.size <= 0.0) continue;
+			DVector3 toBB = bb.pos - start;
+			double toBBLen = toBB.Length();
+			DVector3 normal = toBBLen > 1.e-6 ? -(toBB / toBBLen) : DVector3(0, 1, 0);
+			double denom = normal | dir;
+			if (fabs(denom) < 1.e-6) continue;
+			double t = (toBB | normal) / denom;
+			if (t < 0.0 || t > bestT) continue;
+
+			DVector3 hit = start + dir * t;
+			DVector3 worldUp(0, 0, 1);
+			DVector3 right = (fabs(normal.Z) > 0.999) ? DVector3(1, 0, 0) : (worldUp ^ normal);
+			double rlen = right.Length();
+			if (rlen < 1.e-6) continue;
+			right /= rlen;
+			DVector3 up = (normal ^ right).Unit();
+
+			DVector3 rel = hit - bb.pos;
+			double half = bb.size * 0.5;
+			double lu = rel | right;
+			double lv = rel | up;
+			if (lu < -half || lu > half || lv < -half || lv > half) continue;
+
+			bestT = t;
+			bestId = bb.id;
+			bestUV = DVector2((lu + half) / (half * 2.0), (lv + half) / (half * 2.0));
+		}
+
+		if (outUV) *outUV = bestUV;
+		return bestId;
+	}
+
+	DEFINE_ACTION_FUNCTION_NATIVE(_LevelLocals, AimBillboard, AimBillboard)
+	{
+		PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+		PARAM_FLOAT(sx);
+		PARAM_FLOAT(sy);
+		PARAM_FLOAT(sz);
+		PARAM_FLOAT(dx);
+		PARAM_FLOAT(dy);
+		PARAM_FLOAT(dz);
+		DVector2 uv;
+		int hit = AimBillboard(self, sx, sy, sz, dx, dy, dz, &uv);
+		if (numret > 0) ret[0].SetInt(hit);
+		if (numret > 1) ret[1].SetVector2(uv);
+		return numret;
+	}
+
  static F3DFloor* Get3DFloor(sector_t *self, unsigned int index)
  {
  	 if (index >= self->e->XFloor.ffloors.Size())
