@@ -15,17 +15,25 @@ tree and says so.
 * **Our work:** `git log origin/questzdoom..questzdoom` — 27 commits,
   43 files, +2348 / −117.
 * **Verification level, precisely:**
-  * The five features **compiled, linked and booted** on GL, GLES and Vulkan.
-  * The repairs in [§11](#11-defects-found-and-repaired) came later and have
-    **passed an MSVC front-end pass only** (`cl /Zs`, all six changed
-    translation units, zero errors and zero warnings). That catches syntax and
-    type errors. It does **not** link, does **not** run, and by construction
-    cannot catch a ZScript-to-native signature mismatch — the exact failure
-    mode [§7.8](#78-aimbillboard-has-never-been-run) is about.
-  * Per-feature **visual** confirmation is stated individually and is mostly
-    absent.
+  * The whole tree, **including every repair in
+    [§11](#11-defects-found-and-repaired), compiles and links.** Full CMake
+    build, `RelWithDebInfo`, MSVC x64, exit code 0, producing `qzdoom.exe`.
+    **Zero warnings in any file this work touched.** (The build emits four
+    `C4805` warnings in `playsim/p_map.cpp`, which this fork never modified —
+    they are upstream's.)
+  * **Nothing has been run.** Linking is as far as the evidence goes. In
+    particular that means a ZScript-to-native signature mismatch is still
+    undetected — see [§7.8](#78-aimbillboard-has-never-been-run), which is
+    exactly that failure mode and is not visible to a compiler.
+  * Per-feature **visual** confirmation is stated individually and is
+    **absent**.
 
   Every file table below describes the tree *including* the repairs.
+
+  > **Build it against the right source.** `E:\UZDXREMA\build\rs_build.cmd`
+  > hard-wires `cmake -S ..`, so running it from a worktree compiles the *main*
+  > tree and silently verifies nothing about the worktree's changes. Point
+  > `-S` at the source you actually mean.
 
 ---
 
@@ -840,8 +848,8 @@ Ported from `E:\DXR2` @ `bb6988908f` by three lanes.
 	int      flags;         // EBillboardFlags
 	double   lifetime;      // SECONDS; <= 0 = permanent
 	int      spawntic;      // maptime at creation
-	int      wipeType;      // INERT — nothing sets or reads it
-	double   wipeProgress;  // INERT — nothing sets or reads it
+	//int    wipeType;      // commented out — inert DXR2 parity ballast
+	//double wipeProgress;  // ditto; restore with the p_saveg.cpp pair or they disagree
 	double   viewZOffset;   // BBF_VIEWRELATIVEZ anchor
 	TObjPtr<AActor*> attachedTo = MakeObjPtr<AActor*>(nullptr);
 	DVector3 attachOffset;
@@ -963,8 +971,8 @@ never samples it), and put `bb->data` on `uAddColor` via `bbData`.
 ### 7.7 `FBillboard` HAS NO ORIENTATION
 
 **Verified against the struct.** `FBillboard` is `id`, `pos`, `size`,
-`payload`, `data`, `color`, `flags`, `lifetime`, `spawntic`, `wipeType`,
-`wipeProgress`, `viewZOffset`, `attachedTo`, `attachOffset`.
+`payload`, `data`, `color`, `flags`, `lifetime`, `spawntic`, `viewZOffset`,
+`attachedTo`, `attachOffset`.
 
 **There is no yaw, no pitch, no roll, and no parent or hinge concept.**
 `ProcessBillboard` sets `Angles = DRotator()` (`hw_sprites.cpp:1744`) and
@@ -1046,9 +1054,10 @@ body of work ([§6](#6-feature-d--zscript-glow-api)).
   Wants a netgame/hub decision. (It was also flatly non-functional from ZScript
   until [§11.2](#112-bbf_viewrelativez-was-non-functional-from-zscript-fixed);
   it now at least runs, which means it can finally be tested.)
-* **`wipeType` / `wipeProgress` are serialized and completely inert.** Nothing
-  sets or reads them. Parity ballast from DXR2; drop them if you are porting
-  clean, or keep them if you want savegame parity with this tree.
+* **`wipeType` / `wipeProgress` are gone** — commented out on both the struct
+  and the savegame side. They were inert DXR2 parity ballast that nothing set
+  or read. Kept visible rather than deleted so the absence reads as a decision,
+  and so a reveal effect that wants them later starts from DXR2's names.
 * **`BB_TEXTURE` is not reachable end-to-end.** Its `data` is a texture index
   and `TextureID.GetIndex()` now exists, but **nothing has ever exercised the
   pair.**
@@ -1104,10 +1113,9 @@ See [§9](#9-savegame-compatibility).
 | `BBF_VIEWRELATIVEZ` | reachable and named as of [§11.2](#112-bbf_viewrelativez-was-non-functional-from-zscript-fixed)/[§11.3](#113-bbf_viewrelativez-had-no-name-in-zscript-fixed); **still never run** |
 | `AimBillboard` | **never run.** Run the `vm_jit` test first. |
 
-The repairs in [§11](#11-defects-found-and-repaired) pass an MSVC front-end
-pass and nothing further. Treat the whole of Feature E as unproven code that
-has now had its known logic defects removed — not as code that has been
-exercised.
+The repairs in [§11](#11-defects-found-and-repaired) compile and link and
+nothing further. Treat the whole of Feature E as unproven code that has now had
+its known logic defects removed — not as code that has been exercised.
 
 ---
 
@@ -1154,8 +1162,13 @@ Feature E adds **two keys** to `FLevelLocals::Serialize`
 | `nextbillboardid` | `int` |
 
 `FBillboard` itself serializes fourteen sub-keys: `id`, `pos`, `size`,
-`payload`, `data`, `color`, `flags`, `lifetime`, `spawntic`, `wipetype`,
-`wipeprogress`, `viewzoffset`, `attachedto`, `attachoffset`.
+`payload`, `data`, `color`, `flags`, `lifetime`, `spawntic`, `viewzoffset`,
+`attachedto`, `attachoffset`.
+
+`wipetype` and `wipeprogress` were serialized in an earlier revision of this
+fork and are now commented out on both sides. A save written by that revision
+loads fine — `FSerializer` is key-based and simply ignores keys it is not
+looking for.
 
 **Which direction breaks:**
 
@@ -1212,11 +1225,11 @@ These were found by reading the tree against the previous notes, and then
 fixed. Each entry says what was wrong, what the fix is, and whether a porter
 has to carry it.
 
-**Verification:** all six changed translation units pass `cl /Zs` — an MSVC
-syntax and semantic pass — with zero errors and zero warnings. A full build was
-off-limits, so **nothing here has been linked or run.** The front-end pass
-cannot see a ZScript-to-native signature mismatch, which is the one failure
-mode 11.1 and 11.7 sit closest to.
+**Verification:** every repair below is in a tree that **compiles and links
+clean** — full `RelWithDebInfo` build, exit code 0, no warnings in any changed
+file. **None of it has been run.** A compiler cannot see a ZScript-to-native
+signature mismatch, which is the failure mode 11.1 and 11.7 sit closest to, so
+11.7 in particular is reasoned-correct rather than observed-correct.
 
 ### 11.1 The ZScript natives were a second implementation (fixed)
 
@@ -1468,11 +1481,11 @@ GL, GLES and Vulkan** as of the state described in
 the automated evidence, and this project's own history records repeated cases
 of "compiles and boots" meaning "consistent with itself" rather than "correct".
 
-**The ten repairs in [§11](#11-defects-found-and-repaired) came afterwards and
-have only been through an MSVC front-end pass** — clean, but never linked and
-never run. They remove known logic defects; they do not add evidence. If you
-are picking this up, the first real build after applying it is the first anyone
-has done of this exact tree.
+The repairs in [§11](#11-defects-found-and-repaired) came afterwards, and the
+tree carrying them **compiles and links clean**. That is a real result and it is
+still not the same as working. They remove known logic defects; they do not add
+behavioural evidence, and a compiler cannot see the one failure mode Feature E
+is most exposed to.
 
 If you are integrating this, the order that will waste the least of your time
 is: **Feature A immediately** (it is a boot fix and it is free), then

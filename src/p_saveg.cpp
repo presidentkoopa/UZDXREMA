@@ -934,8 +934,10 @@ FSerializer &Serialize(FSerializer &arc, const char *key, FBillboard &bb, FBillb
 			("flags", bb.flags)
 			("lifetime", bb.lifetime)
 			("spawntic", bb.spawntic)
-			("wipetype", bb.wipeType)
-			("wipeprogress", bb.wipeProgress)
+			// Commented out with the fields themselves in g_levellocals.h -- both
+			// were inert. Restore the pair together or the two will disagree.
+			//("wipetype", bb.wipeType)
+			//("wipeprogress", bb.wipeProgress)
 			("viewzoffset", bb.viewZOffset)
 			("attachedto", bb.attachedTo)
 			("attachoffset", bb.attachOffset)

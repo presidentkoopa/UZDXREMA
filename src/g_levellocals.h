@@ -166,8 +166,15 @@ struct FBillboard
 	int      flags = 0;               // EBillboardFlags
 	double   lifetime = 0.0;          // seconds; <= 0 = permanent. Ignored once persistent or attached.
 	int      spawntic = 0;            // maptime at creation, for transient expiry
-	int      wipeType = 0;            // reveal style; 0 = none/instant
-	double   wipeProgress = 1.0;      // 0..1, how "in" the reveal is
+
+	// Parity ballast carried over from DXR2. Nothing in this tree sets or reads
+	// either one, so they are commented out rather than deleted: kept visible so
+	// the absence reads as a decision, and so a reveal/wipe effect that wants
+	// them later starts from the names DXR2 used. Re-enabling means restoring
+	// the matching pair of lines in p_saveg.cpp's Serialize(FBillboard&) too --
+	// the struct and the savegame have to agree.
+	//int      wipeType = 0;          // reveal style; 0 = none/instant
+	//double   wipeProgress = 1.0;    // 0..1, how "in" the reveal is
 
 	// ---- [R5] Height must NOT be a fixed world offset.
 	// In VR the eye sits at the player's real room-scale height, not the 41
