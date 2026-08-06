@@ -117,6 +117,13 @@ static void SetupFlatGlow(FRenderState &state, sector_t *sector, bool ceiling)
 	{
 		// Shared seam: the corner already has a colour - the one this plane throws onto the
 		// walls around it - so put that same colour on the plane as well.
+		//
+		// CROSS-FILE INVARIANT: top/bottom are deliberately left uninitialised. This is
+		// only safe because ResolvePlaneGlow (p_sectors.cpp) writes glowdata[3] = 0 as its
+		// FIRST statement, before any early return, so the seam[3] guard below is always
+		// reading a written value. If an early return is ever added above that line, this
+		// reads uninitialised stack and produces an intermittent, hardware-dependent wrong
+		// colour. CheckSpriteGlow depends on the same guarantee.
 		float top[4], bottom[4];
 		sector->GetWallGlow(top, bottom);
 		const float *seam = ceiling ? top : bottom;
