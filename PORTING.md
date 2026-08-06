@@ -23,7 +23,7 @@ tree and says so.
     they are upstream's.)
   * **Nothing has been run.** Linking is as far as the evidence goes. In
     particular that means a ZScript-to-native signature mismatch is still
-    undetected — see [§7.8](#78-aimbillboard-has-never-been-run), which is
+    undetected — see [§7.8](#78-aimbillboard-has-never-been-run--and-is-structurally-unusable-for-mod-side-panels), which is
     exactly that failure mode and is not visible to a compiler.
   * Per-feature **visual** confirmation is stated individually and is
     **absent**.
@@ -34,6 +34,15 @@ tree and says so.
   > hard-wires `cmake -S ..`, so running it from a worktree compiles the *main*
   > tree and silently verifies nothing about the worktree's changes. Point
   > `-S` at the source you actually mean.
+
+* **Line numbers are only true against a revision.** Every `file:line` in this
+  document is against `questzdoom` as of this file's most recent commit. They
+  drift the moment anyone inserts above them — this fork's own
+  `TickBillboards()` insert at `p_tick.cpp:171` pushed everything below it down
+  by seven lines, which is exactly how `ENGINE_WORK.md` ended up citing
+  `hw_sprites.cpp:1658` for something that now lives at `:1811`.
+  **The function and symbol names in each row are the durable anchor; treat the
+  number as a hint and grep for the name.**
 
 ---
 
@@ -731,7 +740,7 @@ planes and combines with `|`, not `||`, with a comment saying why
 returned `double` while the ZScript declaration says `color`. The JIT builds
 the direct-call signature from the *ZScript* declaration, so the caller read an
 integer return register the callee never wrote. This is the same class of bug
-that [§7.8](#78-aimbillboard-has-never-been-run) warns about, and it is here
+that [§7.8](#78-aimbillboard-has-never-been-run--and-is-structurally-unusable-for-mod-side-panels) warns about, and it is here
 because **this engine already shipped it once**.
 
 **`GetTextureGlow` asks `isGlowing()` a third time** (`vmthunks.cpp:1195`).
@@ -987,10 +996,39 @@ orientation to `FBillboard` and a relative-transform concept to the API — a
 real feature, not a tweak. Until then the only way to build one is in ZScript
 on `RF_FLATSPRITE` actors.
 
-### 7.8 `AimBillboard` has never been run
+### 7.8 `AimBillboard` has never been run — and is structurally unusable for mod-side panels
 
 **Verified: no call site exists in `src`, `wadsrc`, or anywhere else in the
 tree.** It has been statically checked against `jit_call.cpp` and nothing more.
+
+**"Untested" undersells it.** Three structural mismatches mean it cannot serve
+a panel built the way this project builds panels. All three were hit in
+practice by the panel-interaction lane:
+
+1. **It iterates `FLevelLocals::Billboards`.** Panels built as `RF_FLATSPRITE`
+   actors never register there, so for them it returns `-1` forever regardless
+   of where you aim. Nothing is wrong with the maths; the candidate set is
+   simply empty.
+2. **It treats `bb.size` as a single *square* half-extent** — the bounds test
+   is `|lu|, |lv| <= size * 0.5` on both axes. Real panels are rectangular
+   (40×80 in this project's case), so even a billboard that *did* register
+   would be tested against the wrong shape.
+3. **It derives the normal per call as "facing the ray origin."** That is
+   correct for a camera-facing quad and wrong for fixed hinged wings, which are
+   deliberately *not* camera-facing.
+
+> **The panel lane wrote its own ray/plane intersection instead. That was the
+> correct call, not a shortcut** — and it is worth stating plainly, because the
+> obvious read of "there is a native aim function and the mod didn't use it" is
+> that somebody cut a corner. Three independent mismatches is a different
+> situation from an untrusted function.
+
+Fixing this natively means: registering mod panels in `Billboards` (or widening
+the candidate set), giving `FBillboard` a rectangular extent, and giving it an
+orientation — which is [§7.7](#77-fbillboard-has-no-orientation) again. Until
+then, a mod that wants to click a panel implements its own intersection.
+
+What follows applies if you ever do call it.
 
 The declaration is a multi-return:
 
@@ -1254,7 +1292,7 @@ flattened argument layout.
 
 > **If you port this, do not "simplify" the statics away.** Their parameter
 > lists are the JIT's ABI, not style — see
-> [§7.8](#78-aimbillboard-has-never-been-run). Change bodies, never
+> [§7.8](#78-aimbillboard-has-never-been-run--and-is-structurally-unusable-for-mod-side-panels). Change bodies, never
 > signatures.
 
 Fixing this fixed 11.2 as a side effect, and surfaced 11.7.
@@ -1397,7 +1435,7 @@ See [§5](#5-feature-c--flat-edge-glow). `BUFFER_SIZE` is **unchanged**;
   either side and every mod call site silently changes meaning.
 * **Nothing in this section has been compiled**, and none of Feature E has been
   run. The `vm_jit 0` / `vm_jit 1` test in
-  [§7.8](#78-aimbillboard-has-never-been-run) is still the first thing to do.
+  [§7.8](#78-aimbillboard-has-never-been-run--and-is-structurally-unusable-for-mod-side-panels) is still the first thing to do.
 * The five payload shaders, `FBillboard`'s missing orientation, and the
   lightmap path not seeing wall glow are all **features to write**, not defects
   to repair.

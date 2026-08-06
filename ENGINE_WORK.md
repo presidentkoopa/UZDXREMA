@@ -5,6 +5,15 @@ stale. The source, the compiler and the running game are the authorities.
 When it matters, read the code. When it is a question of scope or intent,
 **ask the owner** — not this file, not a handoff, not another agent.
 
+> **`PORTING.md` supersedes this file wherever they disagree.** It was written
+> later, by reading the tree rather than the notes, and it is machine-checked
+> against `git diff --name-only origin/questzdoom...questzdoom` for coverage.
+> This file is kept because its *reasoning* is still worth reading; its facts
+> have been corrected in place below, each marked **CORRECTED 2026-08-06**.
+>
+> Doubting this file, as instructed above, is what turned up the corrections.
+> That worked. Keep doing it.
+
 Base: fresh clone of `emawind84/gzdoom`, branch `questzdoom`, 2026-08-06.
 Remote: `rsorigin` → `github.com/presidentkoopa/UZDXREMA` (private).
 `origin` is upstream and **cannot be pushed to**.
@@ -80,11 +89,25 @@ guarantee.
 ### Cost, unmitigated
 
 `FFlatVertex` grew 32→40 bytes. `FFlatVertexBuffer::BUFFER_SIZE` is a fixed
-**2,000,000-vertex preallocation** — 80 MB per pipeline buffer, ~320 MB
-across four on GLES. Packing the baked distances to 12+12 bits saves ~32 MB
-and costs precision; **halving BUFFER_SIZE saves ~160 MB and costs nothing.**
-Nobody has measured actual peak flat-vertex use on a heavy map, which is the
-number that decides it.
+**2,000,000-vertex preallocation** — 80 MB per pipeline buffer.
+
+**CORRECTED 2026-08-06 — this paragraph used to quote "~320 MB" as the cost of
+this change. That is the TOTAL, not the delta.** 320 MB is the whole
+flat-vertex footprint on Android/GLES, which runs four pipeline buffers
+(`buffers.h:9`). Desktop runs two (`buffers.h:13`), so 160 MB there. What this
+change actually added is 8 bytes per vertex: **+64 MB on GLES, +32 MB on
+desktop.** Both numbers matter and neither is small, but conflating them
+overstates the damage by 5x.
+
+Packing the baked distances to 12+12 bits saves ~32 MB and costs precision;
+**halving BUFFER_SIZE saves 160 MB on GLES and 80 MB on desktop and costs
+nothing.**
+
+**CORRECTED 2026-08-06 — "nobody has measured" is no longer a reason to
+stall.** `FFlatVertexBuffer` now tracks a high-water mark and the
+`flatvertexpeak` ccmd prints peak, cap, percentage, bytes per vertex and MB per
+buffer. Run it on the heaviest map and the decision makes itself. `BUFFER_SIZE`
+is deliberately still 2,000,000 until someone does.
 
 Also: every subsector carries two extra triangles whether glow is on or off,
 and visible-wall distances are baked at map load — a lift that moves later
@@ -102,10 +125,42 @@ an auto-painted colour cannot leak past it into a renderer.
 **Deprecation flags are RENAMES, not removals** (source of truth is
 `src/scripting/thingdef_properties.cpp`): `+DONTHURTSPECIES` →
 `+DONTHARMCLASS`, `+LOWGRAVITY` → `Gravity 0.125`, `+SHORTMISSILERANGE` →
-`MaxTargetRange 896`. `MISSILEMORE` / `MISSILEEVENMORE` /
-`SHORTMISSILERANGE` **cannot be fixed** — they set native fields with no
-`Property` binding, so the deprecated flag is the only declarative way to
-set them. ~256 permanent warnings. Stop trying.
+`MaxTargetRange 896`.
+
+> ### CORRECTED 2026-08-06 — `MISSILEMORE` / `MISSILEEVENMORE` / `SHORTMISSILERANGE` **CAN** be fixed
+>
+> This section previously read: *"cannot be fixed — they set native fields with
+> no `Property` binding... ~256 permanent warnings. Stop trying."*
+> **Every part of that is false**, and it also contradicted the sentence
+> directly above it, which lists `+SHORTMISSILERANGE → MaxTargetRange 896` as a
+> working rename.
+>
+> The real mapping, every part verified in-tree:
+>
+> | deprecated | replace with |
+> |---|---|
+> | `+MISSILEMORE` | `MissileChanceMult 0.5` |
+> | `+MISSILEEVENMORE` | `MissileChanceMult 0.125` |
+> | both together | `MissileChanceMult 0.0625` |
+> | `+SHORTMISSILERANGE` | `MaxTargetRange 896` |
+>
+> Evidence: `actor.zs:352` declares
+> `property MissileChanceMult: MissileChanceMult;` and `actor.zs:344` declares
+> `property MaxTargetRange: MaxTargetRange;`. `archvile.zs:18` already uses
+> `MaxTargetRange 896`. And the engine's own deprecation string, set at
+> `thingdef_data.cpp:930`, is literally
+> *"Use missilechancemult property instead"* — the engine has been telling us
+> the answer the whole time.
+>
+> The composition rule comes from `HandleDeprecatedFlags`: `MISSILEMORE` alone
+> gives 0.5, `MISSILEEVENMORE` alone gives 0.125, and each checks for the
+> other's value to produce 0.0625 when both are set.
+>
+> **This is the failure this file's own opening paragraph warns about.** A
+> wrong fact, written down confidently, that then instructed everyone not to
+> re-check it — and so protected ~256 warnings for weeks. The same text was
+> copied into `E:\RS_Main\CLAUDE.md`, which loads into every session, and has
+> been corrected there too.
 
 ---
 
@@ -158,13 +213,20 @@ standalone by design.
   `size = 88` is a card 88 tall. Renderer and ray test were checked against
   each other. **Change one, change both.**
 * **`pos` is the panel CENTRE.**
-* **UV convention.** `hw_sprites.cpp` carries two: the swapped form at
-  `:1658-1659` used by everything drawing a real texture, and the unswapped
-  form at `:1559-1560` used only by `ProcessParticle`. **The unswapped one
-  is wrong and invisible, because particles are round.** DXR2's own
-  `ProcessBillboard` used the unswapped form — that is the mirrored-text
-  bug this project has lost the most time to. The rendering lane fixed it at
-  source rather than porting it (commit `5739e27d8f`).
+* **UV convention.** `hw_sprites.cpp` carries two: the **swapped** form used by
+  everything drawing a real texture, and the **unswapped** form used only by
+  `ProcessParticle`. **The unswapped one is wrong and invisible, because
+  particles are round.** DXR2's own `ProcessBillboard` used the unswapped form
+  — that is the mirrored-text bug this project has lost the most time to. The
+  rendering lane fixed it at source rather than porting it (`5739e27d8f`).
+
+  **CORRECTED 2026-08-06 — the line numbers this bullet used to give
+  (`:1658-1659` and `:1559-1560`) were stale and pointed at unrelated code.**
+  Current anchors: swapped at `:1071-1072` (`Process`, unmirrored actor
+  sprites), `:1811-1814` (`ProcessBillboard`) and `:1897-1900`
+  (`AdjustVisualThinker`); unswapped at `:1589-1590` (`ProcessParticle`).
+  **Grep for the function name, not the number** — this file's own numbers
+  drifted, and so will these. `PORTING.md` §2.4 carries the full rule.
 * **ZScript's payload/flag enums in `doombase.zs` and the C++
   `EBillboardPayload` are a matched pair that nothing cross-checks.**
   Renumber either and every mod call site silently changes meaning.
@@ -173,12 +235,24 @@ standalone by design.
 
 * Savegame round-trip, including `TObjPtr<AActor*>` inside `FBillboard`.
 * Hub transitions; the attached-actor-dies path.
-* `BBF_VIEWRELATIVEZ` reads `consoleplayer`'s `viewz` inside the playsim
-  tick and that value is serialized. Believed self-correcting; **not
-  proven**, and on a non-primary level it reads the primary level's player.
-  Wants a netgame/hub decision.
-* `wipeType` / `wipeProgress` are serialized and **completely inert** —
-  nothing sets or reads them. Parity ballast from DXR2.
+* **CORRECTED 2026-08-06 — `BBF_VIEWRELATIVEZ` was not "unverified", it was
+  NON-FUNCTIONAL, and is now fixed.** `vmthunks.cpp` turned out to hold a
+  complete second implementation of the billboard API, and nothing called the
+  `FLevelLocals::` versions. `RS_InitBillboardZ` — which stashes the caller's Z
+  into `viewZOffset` — sat only on that dead path, so `viewZOffset` stayed 0
+  and a mod passing the flag got its panel pinned to **exactly** eye height
+  with the Z it passed silently discarded. `MoveBillboard` had the same gap.
+  The thunks are now genuine one-line delegations, and the flag finally has a
+  ZScript name (`BB_VIEWRELATIVEZ = 8`).
+  It still reads `consoleplayer`'s `viewz` inside the playsim tick and that
+  value is serialized. **Online is out of scope by the owner's decision**, so
+  that is now a stated boundary rather than an open question — on a
+  non-primary level it reads the primary level's player, and that is accepted.
+* `wipeType` / `wipeProgress` were serialized and **completely inert** —
+  nothing set or read them. Parity ballast from DXR2.
+  **CORRECTED 2026-08-06 — now commented out** on both the struct
+  (`g_levellocals.h`) and the savegame side (`p_saveg.cpp`). Kept visible
+  rather than deleted; restore the pair together or they disagree.
 * **`AimBillboard`'s `[hit, uv]` multi-return has never been run.**
   Statically verified against `jit_call.cpp` only. **Argument count and
   return type are NOT cross-checked in a release build** — a mismatch
@@ -187,6 +261,16 @@ standalone by design.
   **The test: run it under `vm_jit 0`, then `vm_jit 1`.** The interpreter
   calls the `DEFINE_ACTION_FUNCTION` body; the JIT calls the direct native.
   **Different answers = signature mismatch.** Do this before trusting any uv.
+
+  **CORRECTED 2026-08-06 — "never been run" undersells it. It cannot work for
+  mod-side panels at all**, for three structural reasons the panel lane hit in
+  practice: it iterates `FLevelLocals::Billboards`, which `RF_FLATSPRITE`
+  panels never register in, so it returns `-1` forever regardless of aim; it
+  bounds-tests `bb.size` as a single **square** half-extent on both axes, while
+  real panels are rectangular; and it derives the normal per call as facing the
+  ray origin, which is right for a camera-facing quad and wrong for fixed
+  hinged wings. The panel lane writing its own ray/plane intersection was the
+  **correct call, not a shortcut.** `PORTING.md` §7.8 has the detail.
 
 ---
 
