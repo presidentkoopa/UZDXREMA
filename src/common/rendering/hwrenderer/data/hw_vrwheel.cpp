@@ -107,10 +107,19 @@ namespace
 		DAngle OpenPitch = nullAngle;
 		int HoveredIndex = -1;
 		bool HoverValid = false;
-		bool TimeControlActive = false;
-		bool TimeControlFrozen = false;
-		double SavedTimeScale = 1.0;
 		TArray<VRWheelEntry> Entries;
+	};
+
+	// [BB] Time control used to live on the one wheel state. With a wheel per
+	// hand it has to be shared and counted: opening the second wheel must not
+	// re-save an already-slowed timescale as if it were the original, and
+	// closing the first must not restore it while the other is still open.
+	struct VRWheelTimeControl
+	{
+		int OpenCount = 0;
+		bool Active = false;
+		bool Frozen = false;
+		double SavedTimeScale = 1.0;
 	};
 
 	struct VRWheelRingLayout
@@ -128,9 +137,19 @@ namespace
 		VRWheelRingLayout Rings[2];
 	};
 
-	VRWheelState GVRWheel;
+	// [BB] One wheel per hand, indexed by VR_MAINHAND / VR_OFFHAND, so both can
+	// be open at once and each is worked by the hand it belongs to. A hand
+	// holds at most one wheel; asking for a second on the same hand replaces
+	// what is there.
+	VRWheelState GVRWheels[2];
+	VRWheelTimeControl GVRWheelTime;
 
-	static void UpdateHover(player_t* player);
+	static VRWheelState& WheelForHand(int hand)
+	{
+		return GVRWheels[hand == VR_OFFHAND ? VR_OFFHAND : VR_MAINHAND];
+	}
+
+	static void UpdateHover(player_t* player, VRWheelState& wheel);
 	static void ReleaseWheelTimeControl();
 	static void MoveWeaponToHand(player_t* player, AActor* weapon, bool targetOffhand)
 	{
@@ -332,6 +351,7 @@ namespace
 		return VR_UseCinematicScreenLayer();
 	}
 
+
 	static bool GetControllerAnchoredCenter(player_t* player, int abstractHand, DVector3& center)
 	{
 		DVector3 handPos;
@@ -378,13 +398,17 @@ namespace
 		return true;
 	}
 
-	static bool GetTouchPoint(player_t* player, DVector3& out)
+	// [BB] A wheel is touched by the hand that opened it. That only works
+	// because the ring parks when it blooms instead of following the wrist --
+	// a ring welded to a wrist moves exactly as fast as the hand reaching for
+	// it, so that hand can never arrive.
+	static bool GetTouchPoint(player_t* player, const VRWheelState& wheel, DVector3& out)
 	{
 		DVector3 unusedDir;
-		return GetHandPose(player, GVRWheel.AnchorHand, out, unusedDir);
+		return GetHandPose(player, wheel.AnchorHand, out, unusedDir);
 	}
 
-	static void CaptureHeadLockedAnchor(const DVector3& center)
+	static void CaptureHeadLockedAnchor(VRWheelState& wheel, const DVector3& center)
 	{
 		DVector3 forward;
 		DVector3 right;
@@ -392,14 +416,14 @@ namespace
 		GetHeadAnchorBasis(forward, right, up);
 
 		const DVector3 offset = center - GetHeadAnchorOrigin();
-		GVRWheel.HeadLocalOffset = {
+		wheel.HeadLocalOffset = {
 			offset.X * right.X + offset.Y * right.Y + offset.Z * right.Z,
 			offset.X * forward.X + offset.Y * forward.Y + offset.Z * forward.Z,
 			offset.X * up.X + offset.Y * up.Y + offset.Z * up.Z
 		};
 	}
 
-	static bool GetHeadLockedCenter(DVector3& center)
+	static bool GetHeadLockedCenter(const VRWheelState& wheel, DVector3& center)
 	{
 		DVector3 forward;
 		DVector3 right;
@@ -407,15 +431,15 @@ namespace
 		GetHeadAnchorBasis(forward, right, up);
 
 		center = GetHeadAnchorOrigin()
-			+ right * GVRWheel.HeadLocalOffset.X
-			+ forward * GVRWheel.HeadLocalOffset.Y
-			+ up * GVRWheel.HeadLocalOffset.Z;
+			+ right * wheel.HeadLocalOffset.X
+			+ forward * wheel.HeadLocalOffset.Y
+			+ up * wheel.HeadLocalOffset.Z;
 		return true;
 	}
 
-	static bool GetWheelLayout(DVector3& center, DVector3& right, DVector3& up, DVector3& forward)
+	static bool GetWheelLayout(const VRWheelState& wheel, DVector3& center, DVector3& right, DVector3& up, DVector3& forward)
 	{
-		if (!GetHeadLockedCenter(center))
+		if (!GetHeadLockedCenter(wheel, center))
 		{
 			return false;
 		}
@@ -680,7 +704,30 @@ namespace
 		return true;
 	}
 
-	static void BuildWeaponEntries(player_t* player, TArray<VRWheelEntry>& out)
+	// [BB] Would MoveWeaponToHand actually take this weapon into this hand?
+	// PlayerPawn::MoveWeaponToHand refuses outright when a weapon is flagged
+	// NoHandSwitch and already belongs to the other hand, so listing it is
+	// listing a dead entry: the wheel would highlight it, play the confirm
+	// sound, and nothing would happen. Mods that never set NoHandSwitch are
+	// untouched by this -- nothing is filtered and both wheels list everything,
+	// exactly as before. Mods that split a weapon per hand (Radiant Silvergun
+	// gives every gun three main-hand and three off-hand identities) get a
+	// wheel per wrist showing only what that wrist can hold.
+	static bool CanHandTakeWeapon(AActor* weapon, bool targetOffhand)
+	{
+		if (weapon == nullptr)
+		{
+			return false;
+		}
+		const int weaponFlags = weapon->IntVar(NAME_WeaponFlags);
+		if (!(weaponFlags & WIF_NOHANDSWITCH))
+		{
+			return true;
+		}
+		return ((weaponFlags & WIF_OFFHANDWEAPON) != 0) == targetOffhand;
+	}
+
+	static void BuildWeaponEntries(player_t* player, TArray<VRWheelEntry>& out, bool targetOffhand)
 	{
 		out.Clear();
 		if (player == nullptr || player->mo == nullptr)
@@ -705,6 +752,10 @@ namespace
 					continue;
 				}
 				if (!IsWeaponAllowedForCurrentPlayerClass(player, weapon))
+				{
+					continue;
+				}
+				if (!CanHandTakeWeapon(weapon, targetOffhand))
 				{
 					continue;
 				}
@@ -736,30 +787,48 @@ namespace
 		}
 	}
 
-	static void RefreshEntries(player_t* player)
+	static void RefreshEntries(player_t* player, VRWheelState& wheel)
 	{
-		if (IsWeaponWheelType(GVRWheel.Type))
+		if (IsWeaponWheelType(wheel.Type))
 		{
-			BuildWeaponEntries(player, GVRWheel.Entries);
+			BuildWeaponEntries(player, wheel.Entries, wheel.Type == EVRWheelType::OffhandWeapon);
 		}
-		else if (GVRWheel.Type == EVRWheelType::Inventory)
+		else if (wheel.Type == EVRWheelType::Inventory)
 		{
-			BuildInventoryEntries(player, GVRWheel.Entries);
+			BuildInventoryEntries(player, wheel.Entries);
 		}
 		else
 		{
-			GVRWheel.Entries.Clear();
+			wheel.Entries.Clear();
 		}
 	}
 
-	static void ResetWheel()
+	static bool IsWheelOpen(const VRWheelState& wheel)
 	{
-		GVRWheel = {};
+		return wheel.Type != EVRWheelType::None;
 	}
 
-	static bool IsWheelOwnerValid(player_t* player)
+	static int OpenWheelCount()
 	{
-		if (GVRWheel.Type == EVRWheelType::None)
+		int count = 0;
+		for (auto& wheel : GVRWheels)
+		{
+			if (IsWheelOpen(wheel))
+			{
+				++count;
+			}
+		}
+		return count;
+	}
+
+	static void ResetWheel(VRWheelState& wheel)
+	{
+		wheel = {};
+	}
+
+	static bool IsWheelOwnerValid(player_t* player, const VRWheelState& wheel)
+	{
+		if (!IsWheelOpen(wheel))
 		{
 			return true;
 		}
@@ -769,18 +838,24 @@ namespace
 			return false;
 		}
 
-		return GVRWheel.Owner == player->mo && GVRWheel.Level == player->mo->Level;
+		return wheel.Owner == player->mo && wheel.Level == player->mo->Level;
 	}
 
 	static void InvalidateWheelIfOwnerChanged(player_t* player)
 	{
-		if (IsWheelOwnerValid(player))
+		for (auto& wheel : GVRWheels)
 		{
-			return;
+			if (IsWheelOwnerValid(player, wheel))
+			{
+				continue;
+			}
+			ResetWheel(wheel);
 		}
-
-		ReleaseWheelTimeControl();
-		ResetWheel();
+		if (OpenWheelCount() == 0)
+		{
+			GVRWheelTime.OpenCount = 0;
+			ReleaseWheelTimeControl();
+		}
 	}
 
 	static void SetGameTimeScale(double scale)
@@ -790,20 +865,30 @@ namespace
 		cvar_set("i_timescale", value.GetChars());
 	}
 
+	// [BB] Counted, because two wheels can be open. Only the first open saves
+	// the real timescale and only the last close restores it -- otherwise the
+	// second wheel would save the already-slowed value as the original and
+	// closing one would leave the world at that speed for good.
 	static void ApplyWheelTimeControl()
 	{
-		if (GVRWheel.TimeControlActive || multiplayer)
+		if (multiplayer)
 		{
 			return;
 		}
 
-		GVRWheel.SavedTimeScale = i_timescale;
-		GVRWheel.TimeControlActive = true;
-		GVRWheel.TimeControlFrozen = false;
+		++GVRWheelTime.OpenCount;
+		if (GVRWheelTime.Active)
+		{
+			return;
+		}
+
+		GVRWheelTime.SavedTimeScale = i_timescale;
+		GVRWheelTime.Active = true;
+		GVRWheelTime.Frozen = false;
 
 		if (vr_wheel_time_slow <= 0.0f)
 		{
-			GVRWheel.TimeControlFrozen = true;
+			GVRWheelTime.Frozen = true;
 			I_FreezeTime(true);
 			return;
 		}
@@ -813,19 +898,23 @@ namespace
 
 	static void ReleaseWheelTimeControl()
 	{
-		if (!GVRWheel.TimeControlActive)
+		if (GVRWheelTime.OpenCount > 0)
+		{
+			--GVRWheelTime.OpenCount;
+		}
+		if (GVRWheelTime.OpenCount > 0 || !GVRWheelTime.Active)
 		{
 			return;
 		}
 
-		if (GVRWheel.TimeControlFrozen)
+		if (GVRWheelTime.Frozen)
 		{
 			I_FreezeTime(false);
 		}
 
-		SetGameTimeScale(GVRWheel.SavedTimeScale);
-		GVRWheel.TimeControlActive = false;
-		GVRWheel.TimeControlFrozen = false;
+		SetGameTimeScale(GVRWheelTime.SavedTimeScale);
+		GVRWheelTime.Active = false;
+		GVRWheelTime.Frozen = false;
 	}
 
 	static void OpenWheel(EVRWheelType type)
@@ -854,49 +943,59 @@ namespace
 			}
 		}
 
-		GVRWheel.Type = type;
-		GVRWheel.AnchorHand = anchorHand;
-		GVRWheel.Owner = player->mo;
-		GVRWheel.Level = player->mo->Level;
-		CaptureHeadLockedAnchor(initialCenter);
-		GetHandAimAngles(player, anchorHand, GVRWheel.OpenYaw, GVRWheel.OpenPitch);
-		GVRWheel.HoveredIndex = -1;
-		GVRWheel.HoverValid = false;
+		// [BB] A hand can only hold one wheel. Opening a second on the same hand
+		// replaces it, and the replaced one gives back its time-control ticket
+		// so the count stays honest.
+		VRWheelState& wheel = WheelForHand(anchorHand);
+		if (IsWheelOpen(wheel))
+		{
+			ResetWheel(wheel);
+			ReleaseWheelTimeControl();
+		}
+
+		wheel.Type = type;
+		wheel.AnchorHand = anchorHand;
+		wheel.Owner = player->mo;
+		wheel.Level = player->mo->Level;
+		CaptureHeadLockedAnchor(wheel, initialCenter);
+		GetHandAimAngles(player, anchorHand, wheel.OpenYaw, wheel.OpenPitch);
+		wheel.HoveredIndex = -1;
+		wheel.HoverValid = false;
 		ApplyWheelTimeControl();
 		if (type == EVRWheelType::Inventory)
 		{
-			GVRWheel.Entries = entries;
+			wheel.Entries = entries;
 		}
 		else
 		{
-			RefreshEntries(player);
+			RefreshEntries(player, wheel);
 		}
 
-		UpdateHover(player);
+		UpdateHover(player, wheel);
 		PlayWheelSound("menu/activate");
-		PlayWheelHaptics(vrmode, GVRWheel.AnchorHand, 0.20f);
+		PlayWheelHaptics(vrmode, wheel.AnchorHand, 0.20f);
 	}
 
-	static void CommitWheelSelection()
+	static void CommitWheelSelection(VRWheelState& wheel)
 	{
 		auto player = &players[consoleplayer];
-		if (!GVRWheel.HoverValid || GVRWheel.HoveredIndex < 0 || GVRWheel.HoveredIndex >= GVRWheel.Entries.Size())
+		if (!wheel.HoverValid || wheel.HoveredIndex < 0 || wheel.HoveredIndex >= wheel.Entries.Size())
 		{
 			return;
 		}
 
-		const auto& entry = GVRWheel.Entries[GVRWheel.HoveredIndex];
+		const auto& entry = wheel.Entries[wheel.HoveredIndex];
 		if (!entry.Selectable || entry.Item == nullptr || player == nullptr || player->mo == nullptr)
 		{
 			return;
 		}
 
-		if (IsWeaponWheelType(GVRWheel.Type))
+		if (IsWeaponWheelType(wheel.Type))
 		{
 			auto weapon = player->mo->FindInventory(entry.Item->GetClass());
 			if (weapon != nullptr)
 			{
-				const bool targetOffhand = GVRWheel.Type == EVRWheelType::OffhandWeapon;
+				const bool targetOffhand = wheel.Type == EVRWheelType::OffhandWeapon;
 				if (multiplayer)
 				{
 					Net_WriteInt8(DEM_ZSC_CMD);
@@ -911,7 +1010,7 @@ namespace
 				}
 			}
 		}
-		else if (GVRWheel.Type == EVRWheelType::Inventory)
+		else if (wheel.Type == EVRWheelType::Inventory)
 		{
 			player->mo->PointerVar<AActor>(NAME_InvSel) = entry.Item;
 			player->inventorytics = 0;
@@ -921,14 +1020,18 @@ namespace
 
 	static void CloseWheel(EVRWheelType type)
 	{
-		if (GVRWheel.Type != type)
+		for (auto& wheel : GVRWheels)
 		{
+			if (wheel.Type != type)
+			{
+				continue;
+			}
+			CommitWheelSelection(wheel);
+			ResetWheel(wheel);
+			ReleaseWheelTimeControl();
+			PlayWheelSound("menu/clear");
 			return;
 		}
-		CommitWheelSelection();
-		ReleaseWheelTimeControl();
-		PlayWheelSound("menu/clear");
-		ResetWheel();
 	}
 
 	static void GetIconQuadSize(FGameTexture* texture, float maxSize, float& outWidth, float& outHeight)
@@ -1215,7 +1318,7 @@ namespace
 		return a.X * b.X + a.Y * b.Y + a.Z * b.Z;
 	}
 
-	static int GetAimRingIndex(player_t* player, const VRWheelLayoutInfo& layout, const DVector3& center, const DVector3& wheelRight, const DVector3& wheelUp)
+	static int GetAimRingIndex(player_t* player, const VRWheelState& wheel, const VRWheelLayoutInfo& layout, const DVector3& center, const DVector3& wheelRight, const DVector3& wheelUp)
 	{
 		if (layout.RingCount <= 1)
 		{
@@ -1223,7 +1326,7 @@ namespace
 		}
 
 		DVector3 touchPoint;
-		if (!GetTouchPoint(player, touchPoint))
+		if (!GetTouchPoint(player, wheel, touchPoint))
 		{
 			return 0;
 		}
@@ -1236,11 +1339,11 @@ namespace
 		return radialDistance <= switchRadius ? 0 : 1;
 	}
 
-	static void UpdateHover(player_t* player)
+	static void UpdateHover(player_t* player, VRWheelState& wheel)
 	{
-		GVRWheel.HoveredIndex = -1;
-		GVRWheel.HoverValid = false;
-		if (player == nullptr || player->mo == nullptr || GVRWheel.Entries.Size() == 0)
+		wheel.HoveredIndex = -1;
+		wheel.HoverValid = false;
+		if (player == nullptr || player->mo == nullptr || wheel.Entries.Size() == 0)
 		{
 			return;
 		}
@@ -1257,18 +1360,18 @@ namespace
 			DVector3 wheelRight;
 			DVector3 wheelUp;
 			DVector3 wheelForward;
-			if (!GetWheelLayout(center, wheelRight, wheelUp, wheelForward))
+			if (!GetWheelLayout(wheel, center, wheelRight, wheelUp, wheelForward))
 			{
 				return;
 			}
 
 			DVector3 touchPoint;
-			if (!GetTouchPoint(player, touchPoint))
+			if (!GetTouchPoint(player, wheel, touchPoint))
 			{
 				return;
 			}
 
-			const int count = GVRWheel.Entries.Size();
+			const int count = wheel.Entries.Size();
 			const VRWheelLayoutInfo layout = BuildWheelLayoutInfo(count);
 
 			int hoveredIndex = -1;
@@ -1300,19 +1403,19 @@ namespace
 
 			if (hoveredIndex >= 0)
 			{
-				GVRWheel.HoveredIndex = hoveredIndex;
-				GVRWheel.HoverValid = GVRWheel.Entries[hoveredIndex].Selectable;
+				wheel.HoveredIndex = hoveredIndex;
+				wheel.HoverValid = wheel.Entries[hoveredIndex].Selectable;
 			}
 			return;
 		}
 
 		DAngle aimYaw;
 		DAngle aimPitch;
-		GetHandAimAngles(player, GVRWheel.AnchorHand, aimYaw, aimPitch);
+		GetHandAimAngles(player, wheel.AnchorHand, aimYaw, aimPitch);
 
 		const double selectAngle = max(5.0f, (float)vr_wheel_select_angle);
-		double x = sin((aimYaw - GVRWheel.OpenYaw).Radians()) / sin(DAngle::fromDeg(selectAngle).Radians());
-		double y = (aimPitch - GVRWheel.OpenPitch).Degrees() / selectAngle;
+		double x = sin((aimYaw - wheel.OpenYaw).Radians()) / sin(DAngle::fromDeg(selectAngle).Radians());
+		double y = (aimPitch - wheel.OpenPitch).Degrees() / selectAngle;
 		const double len = sqrt(x * x + y * y);
 		if (len > 1.0)
 		{
@@ -1325,25 +1428,25 @@ namespace
 			return;
 		}
 
-		const VRWheelLayoutInfo layout = BuildWheelLayoutInfo(GVRWheel.Entries.Size());
+		const VRWheelLayoutInfo layout = BuildWheelLayoutInfo(wheel.Entries.Size());
 		DVector3 center;
 		DVector3 wheelRight;
 		DVector3 wheelUp;
 		DVector3 wheelForward;
-		const bool hasWheelLayout = GetWheelLayout(center, wheelRight, wheelUp, wheelForward);
+		const bool hasWheelLayout = GetWheelLayout(wheel, center, wheelRight, wheelUp, wheelForward);
 		double angle = atan2(y, x) - M_PI * 0.5;
 		if (angle < 0.0) angle += 2.0 * M_PI;
-		const int ringIndex = hasWheelLayout ? GetAimRingIndex(player, layout, center, wheelRight, wheelUp) : (layout.RingCount > 1 && len >= 0.75 ? 1 : 0);
+		const int ringIndex = hasWheelLayout ? GetAimRingIndex(player, wheel, layout, center, wheelRight, wheelUp) : (layout.RingCount > 1 && len >= 0.75 ? 1 : 0);
 		const VRWheelRingLayout& ring = layout.Rings[ringIndex];
 		const double ringAngle = angle - ring.AngleOffset;
 		const double normalizedAngle = ringAngle < 0.0 ? ringAngle + 2.0 * M_PI : ringAngle;
 		const double slice = (2.0 * M_PI) / double(max(1, ring.Count));
 		const int localHover = int(normalizedAngle / slice) % max(1, ring.Count);
 		const int hover = ring.StartIndex + localHover;
-		if (hover >= 0 && hover < GVRWheel.Entries.Size())
+		if (hover >= 0 && hover < wheel.Entries.Size())
 		{
-			GVRWheel.HoveredIndex = hover;
-			GVRWheel.HoverValid = GVRWheel.Entries[hover].Selectable;
+			wheel.HoveredIndex = hover;
+			wheel.HoverValid = wheel.Entries[hover].Selectable;
 		}
 	}
 
@@ -1381,13 +1484,17 @@ void VRWheel_CloseInventory()
 
 void VRWheel_Reset()
 {
+	for (auto& wheel : GVRWheels)
+	{
+		ResetWheel(wheel);
+	}
+	GVRWheelTime.OpenCount = 0;
 	ReleaseWheelTimeControl();
-	ResetWheel();
 }
 
 bool VRWheel_IsActive()
 {
-	return GVRWheel.Type != EVRWheelType::None;
+	return OpenWheelCount() > 0;
 }
 
 bool VRWheel_ShouldSuppressGameplayInput()
@@ -1397,26 +1504,158 @@ bool VRWheel_ShouldSuppressGameplayInput()
 
 bool VRWheel_ShouldSuppressWeaponHand(int hand)
 {
-	return vr_wheel_hide_hand_weapon && VRWheel_IsActive() && GVRWheel.AnchorHand == hand;
+	if (!vr_wheel_hide_hand_weapon || hand != VR_MAINHAND && hand != VR_OFFHAND)
+	{
+		return false;
+	}
+	return IsWheelOpen(WheelForHand(hand));
 }
 
+// [BB] Reports the main hand's wheel when it has one, otherwise the off hand's.
+// With two wheels open there is no single transform to hand back, and every
+// caller of this wants one -- so it answers for a wheel rather than pretending
+// to answer for both.
 bool VRWheel_GetTransform(VSMatrix& out)
 {
-	if (!VRWheel_IsActive())
+	VRWheelState* active = nullptr;
+	for (auto& wheel : GVRWheels)
+	{
+		if (IsWheelOpen(wheel))
+		{
+			active = &wheel;
+			break;
+		}
+	}
+	if (active == nullptr)
 	{
 		return false;
 	}
 
 	DVector3 center;
-	if (!GetHeadLockedCenter(center))
+	if (!GetHeadLockedCenter(*active, center))
 	{
 		return false;
 	}
 
 	out.loadIdentity();
 	out.translate((FLOATTYPE)center.X, (FLOATTYPE)center.Z, (FLOATTYPE)center.Y);
-	GVRWheel.Transform = out;
+	active->Transform = out;
 	return true;
+}
+
+// [BB] One wheel's worth of drawing. Split out of VRWheel_Draw so the public
+// entry point can run it once per open wheel -- the guards above it are about
+// the frame, not about any particular wheel.
+static void DrawOneWheel(HWDrawInfo* di, FRenderState& state, const VRMode* vrmode, player_t* player, VRWheelState& wheel)
+{
+	RefreshEntries(player, wheel);
+	UpdateHover(player, wheel);
+	if (wheel.Entries.Size() == 0)
+	{
+		return;
+	}
+
+	DVector3 center;
+	DVector3 wheelRight;
+	DVector3 wheelUp;
+	DVector3 wheelForward;
+	if (!GetWheelLayout(wheel, center, wheelRight, wheelUp, wheelForward))
+	{
+		return;
+	}
+
+	const int count = wheel.Entries.Size();
+	const VRWheelLayoutInfo layout = BuildWheelLayoutInfo(count);
+	const float maxIconSize = layout.RingCount > 1
+		? max(layout.Rings[0].IconSize, layout.Rings[1].IconSize)
+		: layout.Rings[0].IconSize;
+	const float touchIndicatorRadius = (maxIconSize * 1.45f) * 0.25f;
+	const float centerIndicatorRadius = maxIconSize * 0.38f;
+	const float outerIndicatorRadius = centerIndicatorRadius * 1.85f;
+	const float outerIndicatorInnerRadius = centerIndicatorRadius * 1.20f;
+	const PalEntry bgColor = PalEntry(MAKEARGB(128,
+		RPART(vr_wheel_icon_bg_color),
+		GPART(vr_wheel_icon_bg_color),
+		BPART(vr_wheel_icon_bg_color)));
+	const PalEntry selectedBgColor = PalEntry(MAKEARGB(160,
+		RPART(vr_wheel_icon_select_color),
+		GPART(vr_wheel_icon_select_color),
+		BPART(vr_wheel_icon_select_color)));
+	const PalEntry disabledBgColor = PalEntry(MAKEARGB(160,
+		RPART(vr_wheel_icon_disable_color),
+		GPART(vr_wheel_icon_disable_color),
+		BPART(vr_wheel_icon_disable_color)));
+
+	if (!UseCinemaWheelOverride() && vr_wheel_selection_type == 0)
+	{
+		DVector3 touchPoint;
+		if (GetTouchPoint(player, wheel, touchPoint))
+		{
+			DrawWorldDisc(di, state, touchPoint, wheelRight, wheelUp, touchIndicatorRadius, selectedBgColor);
+		}
+	}
+	else if (layout.RingCount > 1)
+	{
+		const int ringIndex = GetAimRingIndex(player, wheel, layout, center, wheelRight, wheelUp);
+		const PalEntry innerColor = ringIndex == 0 ? selectedBgColor : bgColor;
+		const PalEntry outerColor = ringIndex == 1 ? selectedBgColor : bgColor;
+		DrawWorldDisc(di, state, center, wheelRight, wheelUp, outerIndicatorRadius, outerColor);
+		DrawWorldDisc(di, state, center, wheelRight, wheelUp, outerIndicatorInnerRadius, bgColor);
+		DrawWorldDisc(di, state, center, wheelRight, wheelUp, centerIndicatorRadius, innerColor);
+	}
+
+	for (int i = 0; i < count; ++i)
+	{
+		const auto& entry = wheel.Entries[i];
+		int localIndex = -1;
+		const auto* ring = FindRingForEntry(layout, i, localIndex);
+		if (ring == nullptr)
+		{
+			continue;
+		}
+
+		const float iconSize = ring->IconSize;
+		const float backdropSize = iconSize * 1.45f;
+		const double angle = GetWheelEntryAngle(*ring, localIndex);
+		const DVector3 iconCenter = center
+			+ wheelRight * (cos(angle) * ring->Radius)
+			+ wheelUp * (sin(angle) * ring->Radius);
+
+		PalEntry iconColor = entry.Selectable ? PalEntry(235, 255, 255, 255) : PalEntry(115, 180, 180, 180);
+		if (i == wheel.HoveredIndex)
+		{
+			iconColor = PalEntry(255, 255, 255, 255);
+		}
+
+		float iconWidth = iconSize;
+		float iconHeight = iconSize;
+		GetIconQuadSize(entry.Icon, iconSize, iconWidth, iconHeight);
+
+		const PalEntry backdropColor = i == wheel.HoveredIndex
+			? selectedBgColor
+			: (entry.Selectable ? bgColor : disabledBgColor);
+		DrawWorldDisc(di, state, iconCenter, wheelRight, wheelUp, backdropSize * 0.50f, backdropColor);
+		if (entry.ModelFrame != nullptr)
+		{
+			DrawWheelModel(di, state, entry, iconCenter, wheelForward, iconSize);
+		}
+		else
+		{
+			DrawWorldQuad(di, state, iconCenter, wheelRight, wheelUp, iconWidth, iconHeight, entry.Icon, iconColor, true, true);
+		}
+	}
+
+	state.EnableTexture(true);
+	state.EnableBrightmap(true);
+	state.SetRenderStyle(STYLE_Translucent);
+	state.SetTextureMode(TM_NORMAL);
+	state.ResetColor();
+	state.SetObjectColor(0xffffffff);
+	state.SetAddColor(0);
+	state.AlphaFunc(Alpha_GEqual, gl_mask_sprite_threshold);
+	state.EnableModelMatrix(false);
+	state.EnableDepthTest(true);
+	state.SetDepthMask(true);
 }
 
 void VRWheel_Draw(HWDrawInfo* di, FRenderState& state)
@@ -1445,117 +1684,11 @@ void VRWheel_Draw(HWDrawInfo* di, FRenderState& state)
 		return;
 	}
 
-	if (!VRWheel_IsActive())
+	for (auto& wheel : GVRWheels)
 	{
-		return;
-	}
-
-	RefreshEntries(player);
-	UpdateHover(player);
-	if (GVRWheel.Entries.Size() == 0)
-	{
-		return;
-	}
-
-	DVector3 center;
-	DVector3 wheelRight;
-	DVector3 wheelUp;
-	DVector3 wheelForward;
-	if (!GetWheelLayout(center, wheelRight, wheelUp, wheelForward))
-	{
-		return;
-	}
-
-	const int count = GVRWheel.Entries.Size();
-	const VRWheelLayoutInfo layout = BuildWheelLayoutInfo(count);
-	const float maxIconSize = layout.RingCount > 1
-		? max(layout.Rings[0].IconSize, layout.Rings[1].IconSize)
-		: layout.Rings[0].IconSize;
-	const float touchIndicatorRadius = (maxIconSize * 1.45f) * 0.25f;
-	const float centerIndicatorRadius = maxIconSize * 0.38f;
-	const float outerIndicatorRadius = centerIndicatorRadius * 1.85f;
-	const float outerIndicatorInnerRadius = centerIndicatorRadius * 1.20f;
-	const PalEntry bgColor = PalEntry(MAKEARGB(128,
-		RPART(vr_wheel_icon_bg_color),
-		GPART(vr_wheel_icon_bg_color),
-		BPART(vr_wheel_icon_bg_color)));
-	const PalEntry selectedBgColor = PalEntry(MAKEARGB(160,
-		RPART(vr_wheel_icon_select_color),
-		GPART(vr_wheel_icon_select_color),
-		BPART(vr_wheel_icon_select_color)));
-	const PalEntry disabledBgColor = PalEntry(MAKEARGB(160,
-		RPART(vr_wheel_icon_disable_color),
-		GPART(vr_wheel_icon_disable_color),
-		BPART(vr_wheel_icon_disable_color)));
-
-	if (!UseCinemaWheelOverride() && vr_wheel_selection_type == 0)
-	{
-		DVector3 touchPoint;
-		if (GetTouchPoint(player, touchPoint))
+		if (IsWheelOpen(wheel))
 		{
-			DrawWorldDisc(di, state, touchPoint, wheelRight, wheelUp, touchIndicatorRadius, selectedBgColor);
+			DrawOneWheel(di, state, vrmode, player, wheel);
 		}
 	}
-	else if (layout.RingCount > 1)
-	{
-		const int ringIndex = GetAimRingIndex(player, layout, center, wheelRight, wheelUp);
-		const PalEntry innerColor = ringIndex == 0 ? selectedBgColor : bgColor;
-		const PalEntry outerColor = ringIndex == 1 ? selectedBgColor : bgColor;
-		DrawWorldDisc(di, state, center, wheelRight, wheelUp, outerIndicatorRadius, outerColor);
-		DrawWorldDisc(di, state, center, wheelRight, wheelUp, outerIndicatorInnerRadius, bgColor);
-		DrawWorldDisc(di, state, center, wheelRight, wheelUp, centerIndicatorRadius, innerColor);
-	}
-
-	for (int i = 0; i < count; ++i)
-	{
-		const auto& entry = GVRWheel.Entries[i];
-		int localIndex = -1;
-		const auto* ring = FindRingForEntry(layout, i, localIndex);
-		if (ring == nullptr)
-		{
-			continue;
-		}
-
-		const float iconSize = ring->IconSize;
-		const float backdropSize = iconSize * 1.45f;
-		const double angle = GetWheelEntryAngle(*ring, localIndex);
-		const DVector3 iconCenter = center
-			+ wheelRight * (cos(angle) * ring->Radius)
-			+ wheelUp * (sin(angle) * ring->Radius);
-
-		PalEntry iconColor = entry.Selectable ? PalEntry(235, 255, 255, 255) : PalEntry(115, 180, 180, 180);
-		if (i == GVRWheel.HoveredIndex)
-		{
-			iconColor = PalEntry(255, 255, 255, 255);
-		}
-
-		float iconWidth = iconSize;
-		float iconHeight = iconSize;
-		GetIconQuadSize(entry.Icon, iconSize, iconWidth, iconHeight);
-
-		const PalEntry backdropColor = i == GVRWheel.HoveredIndex
-			? selectedBgColor
-			: (entry.Selectable ? bgColor : disabledBgColor);
-		DrawWorldDisc(di, state, iconCenter, wheelRight, wheelUp, backdropSize * 0.50f, backdropColor);
-		if (entry.ModelFrame != nullptr)
-		{
-			DrawWheelModel(di, state, entry, iconCenter, wheelForward, iconSize);
-		}
-		else
-		{
-			DrawWorldQuad(di, state, iconCenter, wheelRight, wheelUp, iconWidth, iconHeight, entry.Icon, iconColor, true, true);
-		}
-	}
-
-	state.EnableTexture(true);
-	state.EnableBrightmap(true);
-	state.SetRenderStyle(STYLE_Translucent);
-	state.SetTextureMode(TM_NORMAL);
-	state.ResetColor();
-	state.SetObjectColor(0xffffffff);
-	state.SetAddColor(0);
-	state.AlphaFunc(Alpha_GEqual, gl_mask_sprite_threshold);
-	state.EnableModelMatrix(false);
-	state.EnableDepthTest(true);
-	state.SetDepthMask(true);
 }
