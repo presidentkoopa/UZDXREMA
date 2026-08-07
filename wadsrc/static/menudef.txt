@@ -3098,6 +3098,10 @@ OptionMenu VRWeaponWheelOptions protected
 	Slider "$VRWHEELMNU_AIM_SELECT_ANGLE", 				"vr_wheel_select_angle", 10.0, 90.0, 0.5, 1, vr_wheel_selection_type
 	Slider "$VRWHEELMNU_AIM_SELECT_DEADZONE", 			"vr_wheel_deadzone", 0.1, 5.0, 0.1, 1, vr_wheel_selection_type
 	Slider "Thumbstick deadzone", 						"vr_wheel_stick_deadzone", 0.05, 0.95, 0.05, 2
+	StaticText ""
+	Slider "Wheel follows wrist", 						"vr_wheel_leash", 0.0, 3.0, 0.1, 1
+	StaticText "0 parks the wheel where it appeared. Above 0 it holds", "Brown"
+	StaticText "still until your hand pulls past its edge, then follows.", "Brown"
 	
 	StaticText ""
 	StaticText "$VRWHEELMNU_OTHER_OPTIONS", gold
@@ -3116,7 +3120,7 @@ OptionMenu VRWeaponWheelOptions protected
 	Slider "$VRWHEELMNU_MODEL_ICON_Z_OFFSET", 			"vr_wheel_icon_model_zoffset", -100.0, 100.0, 1.0, 0, vr_wheel_icon_load_model
 	StaticText ""
 
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_wheel_icon_bg_color vr_wheel_icon_select_color vr_wheel_icon_scale vr_wheel_radius vr_wheel_distance vr_wheel_xoffset vr_wheel_yoffset vr_wheel_weapon_all vr_wheel_hide_other_class_weapons vr_wheel_switch_hands vr_wheel_info vr_wheel_info_scale vr_wheel_info_bg_color vr_wheel_selection_type vr_wheel_select_angle vr_wheel_deadzone vr_wheel_stick_deadzone vr_wheel_sound vr_wheel_hide_hand_weapon vr_wheel_icon_load_model vr_wheel_icon_model_scale vr_wheel_icon_model_yaw vr_wheel_icon_model_xoffset vr_wheel_icon_model_zoffset"
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_wheel_icon_bg_color vr_wheel_icon_select_color vr_wheel_icon_scale vr_wheel_radius vr_wheel_distance vr_wheel_xoffset vr_wheel_yoffset vr_wheel_weapon_all vr_wheel_hide_other_class_weapons vr_wheel_switch_hands vr_wheel_info vr_wheel_info_scale vr_wheel_info_bg_color vr_wheel_selection_type vr_wheel_select_angle vr_wheel_deadzone vr_wheel_stick_deadzone vr_wheel_leash vr_wheel_sound vr_wheel_hide_hand_weapon vr_wheel_icon_load_model vr_wheel_icon_model_scale vr_wheel_icon_model_yaw vr_wheel_icon_model_xoffset vr_wheel_icon_model_zoffset"
 }
 
 OptionMenu VRHitscanTracerOptions protected

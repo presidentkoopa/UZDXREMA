@@ -90,6 +90,22 @@ CVAR(Int, vr_wheel_selection_type, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // icon a resting thumb happens to lean toward.
 CVAR(Float, vr_wheel_stick_deadzone, 0.45f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
+// [BB] Wrist leash. 0 parks the ring where it bloomed, which is the original
+// behaviour. Above 0 the ring stays perfectly still until the hand pulls past
+// its edge, then gets dragged along.
+//
+// A leash rather than a chase, and the difference is not a detail. A ring that
+// follows at a speed limit, or on a spring, cannot hold a selection: standing
+// still to aim is exactly the condition under which the ring catches up, so the
+// hover you were about to commit slides out from under your hand. With a dead
+// region there is no motion at all inside it, so hover is as stable as a parked
+// wheel and the rule stays legible -- the ring stays put until you drag it.
+//
+// Scales the radius that puts every icon in reach with the ring dead still, so
+// 1.0 means "exactly far enough" and it survives changes to wheel radius and
+// icon scale.
+CVAR(Float, vr_wheel_leash, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
 // [BB] Info panel for the entry under the hand. 0 off, 1 in the ring's hub,
 // 2 outside the ring on the side away from the body.
 //
@@ -185,6 +201,7 @@ namespace
 	}
 
 	static void UpdateHover(player_t* player, VRWheelState& wheel);
+	static VRWheelLayoutInfo BuildWheelLayoutInfo(int count);
 	static void AnnounceWheelClosed(EVRWheelType type, int anchorHand);
 	static void PlayWheelHaptics(const VRMode* vrmode, int hand, float intensity);
 	static void MoveWeaponToHand(player_t* player, AActor* weapon, bool targetOffhand)
@@ -471,6 +488,58 @@ namespace
 			+ forward * wheel.HeadLocalOffset.Y
 			+ up * wheel.HeadLocalOffset.Z;
 		return true;
+	}
+
+	// [BB] Drag the ring's head-local anchor if the wrist has left the leash.
+	// Runs in head-local space because that is the frame the anchor already lives
+	// in, so no conversion is needed and locomotion stays solved by the existing
+	// head-lock.
+	static void UpdateWheelLeash(player_t* player, VRWheelState& wheel)
+	{
+		const float leashScale = vr_wheel_leash;
+		if (leashScale <= 0.0f || wheel.Entries.Size() == 0)
+		{
+			return;
+		}
+
+		DVector3 handPos;
+		DVector3 handDir;
+		if (!GetHandPose(player, wheel.AnchorHand, handPos, handDir))
+		{
+			return;
+		}
+
+		// Reach far enough that the outermost icon is grabbable without the ring
+		// having to move at all -- the radius plus half a backdrop plus the touch
+		// slack UpdateHover allows.
+		const VRWheelLayoutInfo layout = BuildWheelLayoutInfo(wheel.Entries.Size());
+		const VRWheelRingLayout& outer = layout.Rings[max(0, layout.RingCount - 1)];
+		const double leash = (outer.Radius + (outer.IconSize * 1.45) * 0.75 + 1.0) * leashScale;
+		if (leash <= 0.0)
+		{
+			return;
+		}
+
+		DVector3 forward;
+		DVector3 right;
+		DVector3 up;
+		GetHeadAnchorBasis(forward, right, up);
+		const DVector3 offset = handPos - GetHeadAnchorOrigin();
+		const DVector3 wristLocal = {
+			offset.X * right.X + offset.Y * right.Y + offset.Z * right.Z,
+			offset.X * forward.X + offset.Y * forward.Y + offset.Z * forward.Z,
+			offset.X * up.X + offset.Y * up.Y + offset.Z * up.Z
+		};
+
+		DVector3 delta = wheel.HeadLocalOffset - wristLocal;
+		const double distance = delta.Length();
+		if (distance <= leash || distance <= 1e-6)
+		{
+			return;
+		}
+
+		delta /= distance;
+		wheel.HeadLocalOffset = wristLocal + delta * leash;
 	}
 
 	static bool GetWheelLayout(const VRWheelState& wheel, DVector3& center, DVector3& right, DVector3& up, DVector3& forward)
@@ -1610,6 +1679,35 @@ namespace
 
 	// [BB] Renamed from UpdateHover: the wrapper below is what callers use, and
 	// it is the one that reports a change in hover to the player.
+	// [BB] The inverse of GetWheelEntryAngle: which entry lies in the direction
+	// (dirX, dirY), with +Y up and +X right in the ring's own plane.
+	//
+	// This has to be derived from the layout rather than written out again.
+	// GetWheelEntryAngle places entry i at (pi/2 - slice*i + offset), so index 0
+	// sits at twelve o'clock and indices run CLOCKWISE. Binning a direction with
+	// int(angle / slice) walks counter-clockwise instead, which mirrors the wheel:
+	// point at three o'clock, select the icon drawn at nine. The aim mode did
+	// exactly that, and the stick mode reproduced it before this.
+	//
+	// Rounds to the nearest entry rather than flooring, so each icon owns the arc
+	// centred on it -- which is what the drawn wheel looks like it means.
+	static int RingIndexForDirection(const VRWheelRingLayout& ring, double dirX, double dirY)
+	{
+		if (ring.Count <= 0)
+		{
+			return -1;
+		}
+
+		const double twoPi = 2.0 * M_PI;
+		const double slice = twoPi / double(ring.Count);
+		// slice * i, recovered from the angle the layout would have produced.
+		double sliceOffsets = (M_PI * 0.5) + ring.AngleOffset - atan2(dirY, dirX);
+		sliceOffsets = fmod(fmod(sliceOffsets, twoPi) + twoPi, twoPi);
+
+		const int localIndex = int((sliceOffsets + slice * 0.5) / slice) % ring.Count;
+		return ring.StartIndex + localIndex;
+	}
+
 	static bool UseStickSelection()
 	{
 		return !UseCinemaWheelOverride() && vr_wheel_selection_type == 2;
@@ -1650,20 +1748,13 @@ namespace
 			return false;
 		}
 
-		// atan2(y, x) with screen-up as +y, matched to GetWheelEntryAngle's
-		// convention so the icon under the stick is the icon that lights up.
-		double angle = atan2((double)stickY, (double)stickX) - ring.AngleOffset;
-		const double twoPi = 2.0 * M_PI;
-		angle = fmod(fmod(angle, twoPi) + twoPi, twoPi);
-
-		const double slice = twoPi / double(ring.Count);
-		const int localIndex = int((angle + slice * 0.5) / slice) % ring.Count;
-		outIndex = ring.StartIndex + localIndex;
+		outIndex = RingIndexForDirection(ring, (double)stickX, (double)stickY);
 		return outIndex >= 0;
 	}
 
 	static void SolveHover(player_t* player, VRWheelState& wheel)
 	{
+		UpdateWheelLeash(player, wheel);
 		const int previousHover = wheel.HoveredIndex;
 		const bool previousValid = wheel.HoverValid;
 		wheel.HoveredIndex = -1;
@@ -1778,16 +1869,10 @@ namespace
 		DVector3 wheelUp;
 		DVector3 wheelForward;
 		const bool hasWheelLayout = GetWheelLayout(wheel, center, wheelRight, wheelUp, wheelForward);
-		double angle = atan2(y, x) - M_PI * 0.5;
-		if (angle < 0.0) angle += 2.0 * M_PI;
 		const int ringIndex = hasWheelLayout ? GetAimRingIndex(player, wheel, layout, center, wheelRight, wheelUp) : (layout.RingCount > 1 && len >= 0.75 ? 1 : 0);
 		const VRWheelRingLayout& ring = layout.Rings[ringIndex];
-		const double ringAngle = angle - ring.AngleOffset;
-		const double normalizedAngle = ringAngle < 0.0 ? ringAngle + 2.0 * M_PI : ringAngle;
-		const double slice = (2.0 * M_PI) / double(max(1, ring.Count));
-		const int localHover = int(normalizedAngle / slice) % max(1, ring.Count);
-		const int hover = ring.StartIndex + localHover;
-		if (hover >= 0 && hover < wheel.Entries.Size())
+		const int hover = RingIndexForDirection(ring, x, y);
+		if (hover >= 0 && hover < (int)wheel.Entries.Size())
 		{
 			wheel.HoveredIndex = hover;
 			wheel.HoverValid = wheel.Entries[hover].Selectable;
