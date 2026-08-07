@@ -335,6 +335,10 @@ struct TextureID
 	native bool Exists();
 	native void SetInvalid();
 	native void SetNull();
+	// The handle as a plain int, for APIs that take one -- billboards want
+	// this for their texture payload. A TextureID already is its index, so
+	// this costs nothing.
+	native int GetIndex();
 }
 
 // 32-bit RGBA color - each component is one byte, or 8-bit

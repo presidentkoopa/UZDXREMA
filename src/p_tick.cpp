@@ -39,6 +39,8 @@
 #include "actorinlines.h"
 #include "g_game.h"
 #include "i_interface.h"
+#include "c_dispatch.h"
+#include "texturemanager.h"
 
 extern gamestate_t wipegamestate;
 extern uint8_t globalfreeze, globalchangefreeze;
@@ -115,6 +117,91 @@ void FLevelLocals::TickBillboards()
 			}
 		}
 	}
+}
+
+//==========================================================================
+//
+// [BB] bb_spawn -- put a billboard in front of the player and look at it.
+//
+// A diagnostic, not a feature. Everything about a billboard that can only be
+// judged by eye -- whether the size is sane, whether the tilt leans the way
+// the documentation claims, whether the texture comes out mirrored -- needs
+// one on screen to answer, and this is the shortest path to that.
+//
+//   bb_spawn [texture] [width] [height] [tilt] [facing]
+//
+// Defaults to a texture every IWAD has, so it draws something without
+// needing a mod loaded.
+//
+//==========================================================================
+
+CCMD(bb_spawn)
+{
+	if (gamestate != GS_LEVEL || players[consoleplayer].mo == nullptr)
+	{
+		Printf("bb_spawn: not in a level\n");
+		return;
+	}
+
+	AActor *pmo = players[consoleplayer].mo;
+	auto Level = pmo->Level;
+
+	const char *texname = (argv.argc() > 1) ? argv[1] : "STARTAN2";
+	double w      = (argv.argc() > 2) ? atof(argv[2]) : 64.0;
+	double h      = (argv.argc() > 3) ? atof(argv[3]) : 64.0;
+	double tilt   = (argv.argc() > 4) ? atof(argv[4]) : 0.0;
+	int    facing = (argv.argc() > 5) ? atoi(argv[5]) : BBF_FIXED;
+
+	FTextureID tid = TexMan.CheckForTexture(texname, ETextureType::Any);
+	if (!tid.isValid())
+	{
+		Printf("bb_spawn: no texture '%s'\n", texname);
+		return;
+	}
+
+	// 96 units ahead at eye height, and turned to face back at the player, so
+	// a FIXED billboard is readable where it lands instead of edge-on.
+	DAngle ang = pmo->Angles.Yaw;
+	DVector3 where = pmo->Pos()
+		+ DVector3(ang.Cos() * 96.0, ang.Sin() * 96.0, pmo->Height * 0.7);
+
+	FBillboard bb;
+	bb.id = Level->NextBillboardID++;
+	bb.pos = where;
+	bb.width = w;
+	bb.height = h;
+	bb.yaw = (ang + DAngle::fromDeg(180)).Degrees();
+	bb.tilt = tilt;
+	bb.facing = facing;
+	bb.payload = BB_TEXTURE;
+	bb.data = tid.GetIndex();
+	bb.color = 0xFFFFFF;
+	bb.alpha = 1.0;
+	bb.flags = BBFL_PERSISTENT;
+	bb.spawntic = Level->maptime;
+	Level->Billboards.Push(bb);
+
+	Printf("bb_spawn: id %d, '%s', %g x %g, tilt %g, facing %d (%d live)\n",
+		bb.id, texname, w, h, tilt, facing, Level->Billboards.Size());
+}
+
+//==========================================================================
+//
+// [BB] bb_clear -- remove every billboard. The companion to bb_spawn.
+//
+//==========================================================================
+
+CCMD(bb_clear)
+{
+	if (gamestate != GS_LEVEL || players[consoleplayer].mo == nullptr)
+	{
+		Printf("bb_clear: not in a level\n");
+		return;
+	}
+	auto Level = players[consoleplayer].mo->Level;
+	unsigned n = Level->Billboards.Size();
+	Level->Billboards.Clear();
+	Printf("bb_clear: removed %u\n", n);
 }
 
 //

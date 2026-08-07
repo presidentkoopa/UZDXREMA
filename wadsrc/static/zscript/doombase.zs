@@ -533,6 +533,37 @@ struct LevelLocals native
 	native clearscope int ActorOnLineSide(Actor mo, Line l) const;
 	native clearscope int BoxOnLineSide(Vector2 pos, double radius, Line l) const;
 
+	// [BB] Names for the billboard payloads, facing modes and flags below.
+	// These mirror EBillboardPayload / EBillboardFacing / EBillboardFlags in
+	// g_levellocals.h. They live here so callers are not obliged to invent
+	// their own copies of the same numbers, which is how two sets of
+	// constants for one thing start drifting apart.
+	enum EBillboardPayload
+	{
+		BB_PANEL   = 0,		// rounded-rect backing
+		BB_TEXTURE = 1,		// any texture; data = TextureID.GetIndex()
+		BB_DIGITS  = 2,
+		BB_GLYPH   = 3,
+		BB_RING    = 4,
+		BB_BAR     = 5,
+	}
+
+	enum EBillboardFacing
+	{
+		BBF_FIXED     = 0,	// use my own yaw and tilt
+		BBF_CAMERAYAW = 1,	// turn to the viewer, stay upright
+		BBF_CAMERA    = 2,	// turn to the viewer including tilt
+	}
+
+	enum EBillboardFlags
+	{
+		BBFL_PERSISTENT  = 1,
+		BBFL_ATTACHED    = 2,
+		BBFL_NODEPTH     = 4,
+		BBFL_VIEWLOCKED  = 8,
+		BBFL_FOLLOWANGLE = 16,
+	}
+
 	// [BB] Billboards -- world-anchored oriented quads, the native backing
 	// for in-world panels. Extent is per-axis and orientation is explicit,
 	// because a quad that always turns to the camera cannot be hinged to

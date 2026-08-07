@@ -8927,7 +8927,8 @@ FxExpression *FxMemberFunctionCall::Resolve(FCompileContext& ctx)
 	}
 	else if (Self->ValueType == TypeTextureID || (ctx.Version >= MakeVersion(4, 14, 1) && (Self->ValueType == TypeTranslationID)))
 	{
-		if (MethodName == NAME_IsValid || MethodName == NAME_IsNull || MethodName == NAME_Exists || MethodName == NAME_SetInvalid || MethodName == NAME_SetNull)
+		if (MethodName == NAME_IsValid || MethodName == NAME_IsNull || MethodName == NAME_Exists || MethodName == NAME_SetInvalid || MethodName == NAME_SetNull
+			|| MethodName == NAME_GetIndex)
 		{
 			if (ArgList.Size() > 0)
 			{
@@ -8950,6 +8951,15 @@ FxExpression *FxMemberFunctionCall::Resolve(FCompileContext& ctx)
 
 			case NAME_Exists:
 				x = new FxCompareRel(TK_Geq, Self, new FxConstant(0, ScriptPosition));
+				break;
+
+			// [BB] A TextureID already IS its index -- the handle is the
+			// integer. This exists so script can hand a texture to anything
+			// taking a plain int, which billboards do for their texture
+			// payload. Self has been retyped to int just above, so the
+			// identity is the whole implementation.
+			case NAME_GetIndex:
+				x = Self;
 				break;
 
 			case NAME_SetInvalid:
