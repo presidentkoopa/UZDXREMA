@@ -7,7 +7,7 @@ When it matters, read the code. When it is a question of scope or intent,
 
 > **`PORTING.md` supersedes this file wherever they disagree.** It was written
 > later, by reading the tree rather than the notes, and it is machine-checked
-> against `git diff --name-only origin/questzdoom...questzdoom` for coverage.
+> against `git diff --name-only origin/questzdoom...main` for coverage.
 > This file is kept because its *reasoning* is still worth reading; its facts
 > have been corrected in place below, each marked **CORRECTED 2026-08-06**.
 >
@@ -15,7 +15,9 @@ When it matters, read the code. When it is a question of scope or intent,
 > That worked. Keep doing it.
 
 Base: fresh clone of `emawind84/gzdoom`, branch `questzdoom`, 2026-08-06.
-Remote: `rsorigin` → `github.com/presidentkoopa/UZDXREMA` (private).
+Remote: `rsorigin` → `github.com/presidentkoopa/UZDXREMA` — **public since
+2026-08-06**, default branch `main`. `questzdoom` is *upstream's* branch name,
+not ours; the fork's branch was renamed so nobody has to care what we forked.
 `origin` is upstream and **cannot be pushed to**.
 
 **NOTHING BELOW HAS BEEN LOOKED AT ON SCREEN.** Everything compiles, links

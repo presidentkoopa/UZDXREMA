@@ -12,7 +12,8 @@ oversold; where the tree and the previous notes disagree, this file follows the
 tree and says so.
 
 * **Base:** `emawind84/gzdoom`, branch `questzdoom` (remote `origin`).
-* **Our work:** `git log origin/questzdoom..questzdoom` — 27 commits,
+* **Our work:** `git log origin/questzdoom..main` — the fork's branch is
+  `main`; `questzdoom` is *upstream's* branch name. 27 commits,
   43 files, +2348 / −117.
 * **Verification level, precisely:**
   * The whole tree, **including every repair in
@@ -36,7 +37,7 @@ tree and says so.
   > `-S` at the source you actually mean.
 
 * **Line numbers are only true against a revision.** Every `file:line` in this
-  document is against `questzdoom` as of this file's most recent commit. They
+  document is against `main` as of this file's most recent commit. They
   drift the moment anyone inserts above them — this fork's own
   `TickBillboards()` insert at `p_tick.cpp:171` pushed everything below it down
   by seven lines, which is exactly how `ENGINE_WORK.md` ended up citing
@@ -1474,7 +1475,7 @@ following:
 ## 12. Complete file manifest
 
 Every file this fork changes, and which feature owns it. `git diff --name-only
-origin/questzdoom...questzdoom` produces exactly this list — 45 entries, 43 of
+origin/questzdoom...main` produces exactly this list — 45 entries, 43 of
 them code and data, 2 documentation. If you are cherry-picking a feature, take
 its rows plus every **shared** row.
 
