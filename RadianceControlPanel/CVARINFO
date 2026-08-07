@@ -1,0 +1,56 @@
+// GlowInTheDark -- ZScript rebuild.
+// Names match the original's intent, not its spelling: the 2021 cvarinfo
+// used color_redd / color_greenn / color_bluee for the floor set.
+
+server bool gitd_enabled     = true;   // master switch
+server int  gitd_height      = 64;     // how far the glow reaches, in map units. The original declared this and never used it.
+server bool gitd_skip_liquid = true;   // leave liquid-terrain planes alone entirely
+
+// Where a room's colour comes from. Replaces the old gitd_fixed bool.
+//   0 = random per room (what the 2021 original did)
+//   1 = the one fixed colour set below
+//   2 = the average of the flat's own pixels, via TexMan.GetAverageColor
+server int gitd_colour_source = 0;
+
+// Who outranks whom. These drive the engine's glow-authority API directly:
+// Sector.SetGlowColorAuto / SetGlowColor / IsGlowAuthored / GetTextureGlow.
+server bool gitd_respect_textures = true;   // paint as a fallback, so GLDEFS Glow{Flats{}} colours survive
+server bool gitd_respect_mapper   = true;   // never paint over glow the map itself authored
+server bool gitd_unify_reach      = false;  // keep a texture's own colour but stretch it to gitd_height
+
+server int gitd_ceiling_r = 135;
+server int gitd_ceiling_g = 135;
+server int gitd_ceiling_b = 135;
+
+server int gitd_floor_r = 135;
+server int gitd_floor_g = 135;
+server int gitd_floor_b = 135;
+
+
+// ---------------------------------------------------------------------------
+// In-world panels (RS_36) -- NOTHING TO DECLARE HERE, DELIBERATELY.
+//
+// rs_bb_maxpanels and rs_bb_cullradius are declared by the engine in C++
+// (g_level.cpp) because the cull that reads them runs engine-side, per frame.
+// MENUDEF drives them by name. Declaring them here as well would collide with
+// the native cvars, so don't -- this note exists so the absence reads as a
+// decision rather than an oversight.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Glowing wall textures and edge glow on floors -- ALSO NOTHING TO DECLARE.
+//
+// Same rule, same reason. Both effects run inside the renderer, so the engine
+// owns their cvars:
+//
+//   gl_texture_wallglow, gl_texture_wallglow_intensity
+//       hw_walls.cpp -- honours the GLDEFS Glow { Walls { } } block
+//
+//   gl_flatglow, _floor, _ceiling, _reach, _intensity, _shape, _sharpness,
+//   _inset, _bandwidth, _spacing, _edges, _color, _colormode, _cap,
+//   _pulse, _pulse_depth
+//       hw_flats.cpp -- edge glow, sixteen knobs, master switch off by default
+//
+// MENUDEF reaches all of them by name. There is no gitd_* mirror and there
+// should not be one: two cvars for one setting is how they drift apart.
+// ---------------------------------------------------------------------------

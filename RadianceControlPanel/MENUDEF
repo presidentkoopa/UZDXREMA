@@ -1,0 +1,234 @@
+OptionValue "GITDColourMode"
+{
+	0, "Random per room"
+	1, "One fixed colour"
+	2, "From the flat itself"
+}
+
+OptionMenu "GlowInTheDarkOptions"
+{
+	Title "Glow in the Dark"
+	StaticText ""
+	Option "Glow",					"gitd_enabled", "OnOff"
+	Slider "Glow reach",			"gitd_height", 0, 256, 8, 0, "gitd_enabled"
+	StaticText "0 = off", darkgray
+	StaticText ""
+	StaticText "What we may paint over", gold
+	StaticText ""
+	Option "Keep flat glow",		"gitd_respect_textures", "OnOff", "gitd_enabled"
+	StaticText "Nukage, lava and blood keep their own colour", darkgray
+	Option "Keep mapper's glow",	"gitd_respect_mapper", "OnOff", "gitd_enabled"
+	StaticText "Rooms the map itself lit are left alone", darkgray
+	Option "Leave liquids alone",	"gitd_skip_liquid", "OnOff", "gitd_enabled"
+	StaticText "No glow at all on liquid floors", darkgray
+	Option "One reach for all",		"gitd_unify_reach", "OnOff", "gitd_respect_textures"
+	StaticText "Flats glow their own colour at your reach", darkgray
+	StaticText ""
+	StaticText "Colour", gold
+	StaticText ""
+	Option "Source",				"gitd_colour_source", "GITDColourMode", "gitd_enabled"
+	StaticText "'From the flat' averages each floor's own pixels", darkgray
+	StaticText ""
+	StaticText "Used by 'One fixed colour' only", darkgray
+	StaticText "Ceiling"
+	Slider "Red",					"gitd_ceiling_r", 0, 255, 15, 0, "gitd_enabled"
+	Slider "Green",					"gitd_ceiling_g", 0, 255, 15, 0, "gitd_enabled"
+	Slider "Blue",					"gitd_ceiling_b", 0, 255, 15, 0, "gitd_enabled"
+	StaticText ""
+	StaticText "Floor"
+	Slider "Red",					"gitd_floor_r", 0, 255, 15, 0, "gitd_enabled"
+	Slider "Green",					"gitd_floor_g", 0, 255, 15, 0, "gitd_enabled"
+	Slider "Blue",					"gitd_floor_b", 0, 255, 15, 0, "gitd_enabled"
+}
+
+// ---------------------------------------------------------------------------
+// In-world panels (RS_36). Camera-facing cards drawn in the world -- the first
+// use is the stat card beside a dropped weapon.
+//
+// Both cvars below are declared by the ENGINE, not by this mod's CVARINFO.
+// Do not add them there: a mod redeclaring a native cvar collides with it.
+// ---------------------------------------------------------------------------
+
+OptionValue "RadiancePanelCap"
+{
+	0,   "Unlimited"
+	4,   "4"
+	8,   "8"
+	16,  "16"
+	32,  "32"
+	64,  "64"
+	128, "128"
+}
+
+OptionMenu "RadiancePanelOptions"
+{
+	Title "In-World Panels"
+	StaticText ""
+	StaticText "Cards drawn in the world, facing you", darkgray
+	StaticText ""
+	StaticText "Budget", gold
+	StaticText ""
+	Option "Most cards at once",	"rs_bb_maxpanels", "RadiancePanelCap"
+	StaticText "Over budget, the furthest cards go first", darkgray
+	StaticText ""
+	Slider "Card distance",			"rs_bb_cullradius", 0, 4096, 128, 0
+	StaticText "0 = no distance limit", darkgray
+	StaticText ""
+	StaticText "Past that distance a drop still shows its", darkgray
+	StaticText "glow and light -- only the card is skipped,", darkgray
+	StaticText "so raising this costs nothing until you", darkgray
+	StaticText "are close enough to read one", darkgray
+}
+
+// ---------------------------------------------------------------------------
+// Glowing wall textures. The engine has always read a Glow { Walls { } } block
+// out of GLDEFS and then thrown it away; it finally honours it.
+//
+// Engine cvars, like the panel ones below. Not in this mod's CVARINFO.
+// ---------------------------------------------------------------------------
+
+OptionMenu "RadianceWallGlowOptions"
+{
+	Title "Glowing Wall Textures"
+	StaticText ""
+	StaticText "Lava, fire and slime light themselves instead", darkgray
+	StaticText "of waiting for a floor to light them", darkgray
+	StaticText ""
+	Option "Glowing wall textures",	"gl_texture_wallglow", "OnOff"
+	Slider "Brightness",			"gl_texture_wallglow_intensity", 0, 4, 0.1, 1, "gl_texture_wallglow"
+	StaticText "Scales what GLDEFS already asked for", darkgray
+	StaticText ""
+	StaticText "Each texture glows its own colour, averaged", darkgray
+	StaticText "from its own pixels -- lava orange, slime green", darkgray
+	StaticText ""
+	StaticText "Everything washed out?", gold
+	StaticText "A texture with no strength in GLDEFS defaults", darkgray
+	StaticText "to full. That is a one-line GLDEFS fix on the", darkgray
+	StaticText "mod side, not a setting here -- turn this down", darkgray
+	StaticText "to live with it in the meantime.", darkgray
+}
+
+// ---------------------------------------------------------------------------
+// Edge glow on floors and ceilings. Reverse ambient occlusion: AO darkens
+// where surfaces meet, this brightens the same places.
+//
+// NOT the same thing as Glow in the Dark above, and the menu says so, because
+// both make floors glow and confusing them wastes an evening. GITD paints a
+// glow COLOUR onto a sector, which then rises up the surrounding WALLS -- the
+// floor itself never changes. This lights the floor SURFACE, inward from its
+// own edges. They stack; neither needs the other.
+// ---------------------------------------------------------------------------
+
+OptionValue "RadianceEdgeShape"
+{
+	0, "Straight ramp"
+	1, "Curved"
+	2, "Soft at both ends"
+	3, "Bright core, long tail"
+	4, "Soft band"
+	5, "A line inset from the edge"
+	6, "Rings marching inward"
+}
+
+OptionValue "RadianceEdgeColour"
+{
+	0, "The colour set here"
+	1, "The seam's colour, or this one"
+	2, "The seam's colour only"
+}
+
+OptionValue "RadianceEdgeSource"
+{
+	0.0, "Walls you can see"
+	1.0, "Every sector seam"
+}
+
+OptionMenu "RadianceEdgeGlowOptions"
+{
+	Title "Edge Glow on Floors"
+	StaticText ""
+	StaticText "Floors and ceilings lit inward from their own", darkgray
+	StaticText "edges -- every step, lip and corner outlined", darkgray
+	StaticText ""
+	StaticText "Not 'Glow in the Dark': that one colours a", darkgray
+	StaticText "sector and the glow climbs the walls. This", darkgray
+	StaticText "lights the floor itself. Both can be on.", darkgray
+	StaticText ""
+	Option "Edge glow",				"gl_flatglow", "OnOff"
+	Option "On floors",				"gl_flatglow_floor", "OnOff", "gl_flatglow"
+	Option "On ceilings",			"gl_flatglow_ceiling", "OnOff", "gl_flatglow"
+	StaticText ""
+	StaticText "Size and strength", gold
+	StaticText ""
+	Slider "Reach",					"gl_flatglow_reach", 0, 256, 4, 0, "gl_flatglow"
+	StaticText "How far in from the edge, in map units.", darkgray
+	StaticText "A floor is wide -- 32 is a trim line, not a wash", darkgray
+	Slider "Brightness",			"gl_flatglow_intensity", 0, 4, 0.1, 1, "gl_flatglow"
+	Slider "Brightness limit",		"gl_flatglow_cap", 0, 1, 0.05, 2, "gl_flatglow"
+	StaticText "Two edges meeting would otherwise blow out", darkgray
+	StaticText "to a flat white patch in the corner", darkgray
+	StaticText ""
+	StaticText "Which edges count", gold
+	StaticText ""
+	Option "Count",					"gl_flatglow_edges", "RadianceEdgeSource", "gl_flatglow"
+	StaticText "Mappers chop one room into several sectors.", darkgray
+	StaticText "'Every seam' traces those invisible splits", darkgray
+	StaticText "across open floor -- that is the grid look,", darkgray
+	StaticText "and it is wanted, not a fault.", darkgray
+	StaticText ""
+	StaticText "The engine blends between the two, so any", darkgray
+	StaticText "gl_flatglow_edges between 0 and 1 works from", darkgray
+	StaticText "the console. This menu offers the two ends.", darkgray
+	StaticText ""
+	StaticText "Shape of the falloff", gold
+	StaticText ""
+	Option "Shape",					"gl_flatglow_shape", "RadianceEdgeShape", "gl_flatglow"
+	StaticText "A straight ramp ends where you can see it end.", darkgray
+	StaticText "The curves give it somewhere to go.", darkgray
+	Slider "Shape amount",			"gl_flatglow_sharpness", 0.1, 8, 0.1, 1, "gl_flatglow"
+	StaticText "Ignored by 'Straight ramp' and 'Soft at both ends'", darkgray
+	StaticText ""
+	StaticText "Used by 'A line inset from the edge'", darkgray
+	Slider "Line distance",			"gl_flatglow_inset", 0, 128, 2, 0, "gl_flatglow"
+	Slider "Line width",			"gl_flatglow_bandwidth", 1, 64, 1, 0, "gl_flatglow"
+	StaticText ""
+	StaticText "Used by 'Rings marching inward'", darkgray
+	Slider "Ring spacing",			"gl_flatglow_spacing", 4, 256, 4, 0, "gl_flatglow"
+	StaticText ""
+	StaticText "Colour", gold
+	StaticText ""
+	Option "Source",				"gl_flatglow_colormode", "RadianceEdgeColour", "gl_flatglow"
+	ColorPicker "Colour",			"gl_flatglow_color", "gl_flatglow"
+	StaticText "'The seam's colour' takes what the sector", darkgray
+	StaticText "already throws at the walls, so a nukage", darkgray
+	StaticText "floor comes out green on its own", darkgray
+	StaticText ""
+	StaticText "Movement", gold
+	StaticText ""
+	Slider "Pulse rate",			"gl_flatglow_pulse", 0, 4, 0.1, 1, "gl_flatglow"
+	StaticText "In beats per second. 0 = does not move", darkgray
+	Slider "Pulse depth",			"gl_flatglow_pulse_depth", 0, 1, 0.05, 2, "gl_flatglow"
+	StaticText "Both must be above zero for anything to breathe", darkgray
+}
+
+// ---------------------------------------------------------------------------
+// The panel itself. Every fork feature hangs off this one hub rather than
+// adding a top-level Options entry each, so the whole thing moves as a unit
+// when it folds into Radiance Silvergun Options -- one AddOptionMenu to
+// repoint, not one per tenant.
+// ---------------------------------------------------------------------------
+
+OptionMenu "RadianceControlPanel"
+{
+	Title "Radiance Control Panel"
+	StaticText ""
+	Submenu "Glow in the Dark",		"GlowInTheDarkOptions"
+	Submenu "Glowing Wall Textures","RadianceWallGlowOptions"
+	Submenu "Edge Glow on Floors",	"RadianceEdgeGlowOptions"
+	Submenu "In-World Panels",		"RadiancePanelOptions"
+}
+
+AddOptionMenu "OptionsMenu"
+{
+	Submenu "Radiance Control Panel", "RadianceControlPanel"
+}

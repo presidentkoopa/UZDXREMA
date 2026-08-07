@@ -1,0 +1,5 @@
+// The handler does nothing unless it is registered here.
+gameinfo
+{
+	AddEventHandlers = "GITD_Handler"
+}
