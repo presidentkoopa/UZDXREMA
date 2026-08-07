@@ -83,7 +83,8 @@ CVAR(Float, vr_wheel_icon_model_yaw, -135.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_icon_model_xoffset, -40.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_icon_model_zoffset, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_select_angle, 30.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-// 0 touch, 1 aim, 2 thumbstick.
+// 0 touch, 1 aim (relative to the pose the wheel opened at), 2 thumbstick,
+// 3 pointer -- a ray from the hand, struck against the wheel's own plane.
 CVAR(Int, vr_wheel_selection_type, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // How far the stick must leave centre before it points at anything. Below this
 // the ring keeps whatever was already chosen rather than snapping to whichever
@@ -105,6 +106,12 @@ CVAR(Float, vr_wheel_stick_deadzone, 0.45f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // 1.0 means "exactly far enough" and it survives changes to wheel radius and
 // icon scale.
 CVAR(Float, vr_wheel_leash, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+// [BB] Draw a mark where the pointer meets the wheel. The beam itself stays
+// invisible -- a line drawn from the hand to the ring is mostly in the way of
+// the thing it is pointing at -- but landing a ray on a plane with no feedback
+// at all is aiming blind, so the point of contact is shown.
+CVAR(Bool, vr_wheel_pointer_dot, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 // [BB] Info panel for the entry under the hand. 0 off, 1 in the ring's hub,
 // 2 outside the ring on the side away from the body.
@@ -1708,6 +1715,75 @@ namespace
 		return ring.StartIndex + localIndex;
 	}
 
+	static bool UsePointerSelection()
+	{
+		return !UseCinemaWheelOverride() && vr_wheel_selection_type == 3;
+	}
+
+	// [BB] Where the hand is pointing, struck against the plane the wheel is
+	// drawn on.
+	//
+	// This is absolute where the aim mode is relative. Aim measures how far the
+	// pose has turned from wherever it happened to be when the wheel opened, so
+	// the same physical gesture means different things depending on how you were
+	// standing; a ray hitting a plane means the icon it lands on and nothing
+	// else. It also stops caring how fast the wheel moves -- pointing is angular,
+	// so a hand outrunning a leashed ring still lands where it is aimed, which a
+	// reach cannot do.
+	static bool GetPointerHit(player_t* player, const VRWheelState& wheel, const DVector3& center,
+		const DVector3& forward, DVector3& outHit)
+	{
+		DVector3 origin;
+		if (!GetLocalControllerPose(wheel.AnchorHand, origin))
+		{
+			if (player == nullptr || player->mo == nullptr)
+			{
+				return false;
+			}
+			origin = (wheel.AnchorHand == VR_OFFHAND) ? player->mo->OffhandPos : player->mo->AttackPos;
+		}
+
+		DAngle aimYaw = nullAngle;
+		DAngle aimPitch = nullAngle;
+		GetHandAimAngles(player, wheel.AnchorHand, aimYaw, aimPitch);
+		const DVector3 direction = AngleToVector(aimYaw, aimPitch);
+
+		const double denominator = direction | forward;
+		if (fabs(denominator) < 1e-6)
+		{
+			// Pointing along the plane rather than at it; there is no crossing.
+			return false;
+		}
+
+		const double distance = ((center - origin) | forward) / denominator;
+		if (distance <= 0.0)
+		{
+			// The plane is behind the hand.
+			return false;
+		}
+
+		outHit = origin + direction * distance;
+		return true;
+	}
+
+	// Which ring the hit landed on: whichever ring's radius it is nearest, so the
+	// gap between two rings resolves to the closer one instead of nothing.
+	static int RingIndexForRadius(const VRWheelLayoutInfo& layout, double radius)
+	{
+		int best = 0;
+		double bestDistance = DBL_MAX;
+		for (int i = 0; i < layout.RingCount; ++i)
+		{
+			const double d = fabs(radius - (double)layout.Rings[i].Radius);
+			if (d < bestDistance)
+			{
+				bestDistance = d;
+				best = i;
+			}
+		}
+		return best;
+	}
+
 	static bool UseStickSelection()
 	{
 		return !UseCinemaWheelOverride() && vr_wheel_selection_type == 2;
@@ -1767,6 +1843,34 @@ namespace
 		auto vrmode = VRMode::GetVRModeCached(true);
 		if (vrmode == nullptr || !vrmode->IsVR())
 		{
+			return;
+		}
+
+		if (UsePointerSelection())
+		{
+			DVector3 center;
+			DVector3 wheelRight;
+			DVector3 wheelUp;
+			DVector3 wheelForward;
+			DVector3 hit;
+			if (!GetWheelLayout(wheel, center, wheelRight, wheelUp, wheelForward)
+				|| !GetPointerHit(player, wheel, center, wheelForward, hit))
+			{
+				return;
+			}
+
+			const DVector3 planar = hit - center;
+			const double planeX = planar | wheelRight;
+			const double planeY = planar | wheelUp;
+			const VRWheelLayoutInfo layout = BuildWheelLayoutInfo(wheel.Entries.Size());
+			const VRWheelRingLayout& ring = layout.Rings[RingIndexForRadius(layout, sqrt(planeX * planeX + planeY * planeY))];
+
+			const int hover = RingIndexForDirection(ring, planeX, planeY);
+			if (hover >= 0 && hover < (int)wheel.Entries.Size())
+			{
+				wheel.HoveredIndex = hover;
+				wheel.HoverValid = wheel.Entries[hover].Selectable;
+			}
 			return;
 		}
 
@@ -2066,6 +2170,17 @@ static void DrawOneWheel(HWDrawInfo* di, FRenderState& state, const VRMode* vrmo
 		if (GetTouchPoint(player, wheel, touchPoint))
 		{
 			DrawWorldDisc(di, state, touchPoint, wheelRight, wheelUp, touchIndicatorRadius, selectedBgColor);
+		}
+	}
+	else if (UsePointerSelection() && vr_wheel_pointer_dot)
+	{
+		// [BB] The beam stays invisible; only where it lands is drawn. Nudged
+		// toward the viewer off the wheel's own plane so it does not fight the
+		// backdrop it sits exactly on top of.
+		DVector3 hit;
+		if (GetPointerHit(player, wheel, center, wheelForward, hit))
+		{
+			DrawWorldDisc(di, state, hit + wheelForward * 0.05, wheelRight, wheelUp, touchIndicatorRadius * 0.6f, selectedBgColor);
 		}
 	}
 	else if (layout.RingCount > 1)
