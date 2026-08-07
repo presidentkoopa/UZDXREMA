@@ -2334,6 +2334,105 @@ void FLevelLocals::Mark()
 CVAR(Float, rs_bb_cullradius, 1024.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, rs_bb_maxpanels, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
+//==========================================================================
+//
+// [RS36-BB] What is actually live, right now.
+//
+// A billboard that does not appear has failed at one of three places, and
+// they need completely different fixes: it was never created, it was created
+// and the radial cull rejected it, or it survived the cull and the draw path
+// dropped it. Nothing else distinguishes those from the player's chair -- all
+// three look identical, which is a blank space where a panel should be.
+//
+// So this prints the store itself. If the list is empty the mod never called
+// the API. If an entry is listed CULLED, the panel exists and rs_bb_cullradius
+// is hiding it. If entries are listed VISIBLE and you still see nothing, the
+// failure is in the renderer and not in anything a script did.
+//
+// It also resolves BB_TEXTURE's data back into a real texture, because that
+// round trip -- TextureID.GetIndex() in ZScript, SetIndex() in C++ -- has
+// never been exercised end to end, and a texture index that does not resolve
+// draws exactly nothing with no error anywhere.
+//
+//==========================================================================
+
+CCMD(bb_list)
+{
+	FLevelLocals *lev = primaryLevel;
+	if (lev == nullptr)
+	{
+		Printf("no level\n");
+		return;
+	}
+
+	const unsigned count = lev->Billboards.Size();
+	Printf("%u billboard(s) live. cullradius=%.0f maxpanels=%d\n",
+		count, (float)rs_bb_cullradius, (int)rs_bb_maxpanels);
+
+	if (count == 0)
+	{
+		Printf(TEXTCOLOR_ORANGE "  The store is empty: nothing has called AddBillboard,\n");
+		Printf(TEXTCOLOR_ORANGE "  AddBillboardPersistent or AttachBillboard. The failure is\n");
+		Printf(TEXTCOLOR_ORANGE "  script-side, before the renderer is ever reached.\n");
+		return;
+	}
+
+	// Same viewpoint the dispatcher culls against, so VISIBLE/CULLED below
+	// says what the renderer will actually decide, not an approximation.
+	DVector3 viewpos(0, 0, 0);
+	bool haveview = false;
+	if (consoleplayer >= 0 && consoleplayer < MAXPLAYERS && lev->PlayerInGame(consoleplayer))
+	{
+		const player_t *p = lev->Players[consoleplayer];
+		if (p != nullptr && p->mo != nullptr)
+		{
+			viewpos = p->mo->Pos();
+			haveview = true;
+		}
+	}
+
+	const double radius = rs_bb_cullradius;
+	const double radiusSq = radius > 0.0 ? radius * radius : 0.0;
+
+	for (unsigned i = 0; i < count; i++)
+	{
+		const FBillboard &b = lev->Billboards[i];
+
+		const char *state = "VISIBLE";
+		double dist = 0.0;
+		if (!haveview) state = "?";
+		else
+		{
+			dist = (b.pos - viewpos).Length();
+			if (b.size <= 0.0) state = TEXTCOLOR_RED "ZEROSIZE" TEXTCOLOR_NORMAL;
+			else if (radiusSq > 0.0 && dist * dist > radiusSq) state = TEXTCOLOR_ORANGE "CULLED" TEXTCOLOR_NORMAL;
+		}
+
+		Printf("  [%u] id=%d payload=%d size=%.1f flags=%d pos=(%.0f,%.0f,%.0f) dist=%.0f %s\n",
+			i, b.id, b.payload, b.size, b.flags, b.pos.X, b.pos.Y, b.pos.Z, dist, state);
+
+		if (b.payload != BB_TEXTURE)
+		{
+			Printf(TEXTCOLOR_ORANGE "        payload %d has no renderer; only BB_TEXTURE (1) draws\n", b.payload);
+			continue;
+		}
+
+		// The round trip that has never been proven.
+		FTextureID tid;
+		tid.SetIndex(b.data);
+		FGameTexture *tex = tid.isValid() ? TexMan.GetGameTexture(tid, true) : nullptr;
+		if (tex == nullptr || !tex->isValid())
+		{
+			Printf(TEXTCOLOR_RED "        data=%d does NOT resolve to a texture -- nothing can draw\n", b.data);
+		}
+		else
+		{
+			Printf("        data=%d -> '%s' %dx%d\n", b.data, tex->GetName().GetChars(),
+				(int)tex->GetDisplayWidth(), (int)tex->GetDisplayHeight());
+		}
+	}
+}
+
 FBillboard *FLevelLocals::FindBillboardByID(int id)
 {
 	if (id <= 0) return nullptr;
