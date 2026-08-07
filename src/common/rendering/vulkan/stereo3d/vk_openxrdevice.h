@@ -15,6 +15,23 @@ namespace s3d {
 bool OpenXRInputDeviceAvailable();
 bool OpenXROnHandIsRight();
 
+// [BB] Raw per-hand thumbstick, addressed by abstract hand (VR_MAINHAND /
+// VR_OFFHAND) rather than by physical side, so callers do not have to repeat
+// the handedness swap that Vibrate's channel argument needs.
+//
+// The device already reads both sticks per hand every frame as full-precision
+// Vector2f, then splits them by ROLE: the movement hand's pair reaches game
+// code as remote_movementForward/Sideways, while the turn hand contributes only
+// its X, accumulated into snapTurn, and its Y is discarded outright. Anything
+// wanting both sticks -- an in-world menu with a ring per hand -- cannot be
+// built from what escapes. This returns the values before that split.
+//
+// Untouched by the deadzone and response curve applied on the movement path, so
+// a caller gets to choose its own; a menu wants a different feel from walking.
+// Returns false when not in OpenXR VR or the hand has no tracked stick, leaving
+// x and y alone.
+bool OpenXR_GetThumbstick(int abstractHand, float& x, float& y);
+
 class VKOpenXRDeviceEyePose : public VREyeInfo
 {
 public:
@@ -87,6 +104,9 @@ public:
 	virtual bool GetTeleportLocation(DVector3 &out) const override;
 	virtual void Vibrate(float duration, int channel, float intensity) const override;
 	virtual bool GetBenchmarkInfo(VRBenchmarkInfo& out) const override;
+	// [BB] physicalHand is 0 = left, 1 = right, matching the input arrays and
+	// Vibrate's channel -- not the abstract main/off indexing.
+	bool GetThumbstickState(int physicalHand, float& x, float& y) const;
 
     // Vulkan specific multiview setup
     void InitializeMultiview() const;

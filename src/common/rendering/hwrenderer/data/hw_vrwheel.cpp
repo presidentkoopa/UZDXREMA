@@ -150,6 +150,7 @@ namespace
 
 	static void UpdateHover(player_t* player, VRWheelState& wheel);
 	static void AnnounceWheelClosed(EVRWheelType type, int anchorHand);
+	static void PlayWheelHaptics(const VRMode* vrmode, int hand, float intensity);
 	static void MoveWeaponToHand(player_t* player, AActor* weapon, bool targetOffhand)
 	{
 		if (player == nullptr || player->mo == nullptr || weapon == nullptr)
@@ -1321,7 +1322,9 @@ namespace
 		return radialDistance <= switchRadius ? 0 : 1;
 	}
 
-	static void UpdateHover(player_t* player, VRWheelState& wheel)
+	// [BB] Renamed from UpdateHover: the wrapper below is what callers use, and
+	// it is the one that reports a change in hover to the player.
+	static void SolveHover(player_t* player, VRWheelState& wheel)
 	{
 		wheel.HoveredIndex = -1;
 		wheel.HoverValid = false;
@@ -1430,6 +1433,28 @@ namespace
 			wheel.HoveredIndex = hover;
 			wheel.HoverValid = wheel.Entries[hover].Selectable;
 		}
+	}
+
+	// [BB] Tell the player the highlight moved. Until now haptics fired exactly
+	// once, in OpenWheel, and nothing at all marked a change of hover -- so the
+	// only way to know which weapon was about to be committed was to look
+	// straight at the ring. A short pulse on acquire means the hand can be
+	// checked by feel while the eyes stay on whatever is trying to kill you,
+	// which is the whole reason to pick a weapon without opening a menu.
+	//
+	// Fires on acquire, not on loss: leaving an icon is already reported by the
+	// icon it moves on to, and buzzing on the way out doubles every crossing.
+	static void UpdateHover(player_t* player, VRWheelState& wheel)
+	{
+		const int previousHover = wheel.HoveredIndex;
+		SolveHover(player, wheel);
+		if (wheel.HoveredIndex == previousHover || wheel.HoveredIndex < 0)
+		{
+			return;
+		}
+
+		PlayWheelSound(wheel.HoverValid ? "menu/cursor" : "menu/invalid");
+		PlayWheelHaptics(VRMode::GetVRModeCached(true), wheel.AnchorHand, wheel.HoverValid ? 0.35f : 0.12f);
 	}
 
 }

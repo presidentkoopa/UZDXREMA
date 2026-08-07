@@ -1566,9 +1566,31 @@ bool OpenXROnHandIsRight()
 	return GetMainHandIndex() == 1;
 }
 
+bool OpenXR_GetThumbstick(int abstractHand, float& x, float& y)
+{
+	const auto* mode = dynamic_cast<const VKOpenXRDeviceMode*>(VRMode::GetVRModeCached(true));
+	if (mode == nullptr)
+	{
+		return false;
+	}
+	const int physicalHand = (abstractHand == 1) ? GetOffHandIndex() : GetMainHandIndex();
+	return mode->GetThumbstickState(physicalHand, x, y);
+}
+
 bool VKOpenXRDeviceMode::HasActiveInputSession() const
 {
 	return isOpenXRReady && isSessionRunning && xrSession != XR_NULL_HANDLE;
+}
+
+bool VKOpenXRDeviceMode::GetThumbstickState(int physicalHand, float& x, float& y) const
+{
+	if (physicalHand < 0 || physicalHand > 1 || !HasActiveInputSession())
+	{
+		return false;
+	}
+	x = xrLastThumbstickState[physicalHand].x;
+	y = xrLastThumbstickState[physicalHand].y;
+	return true;
 }
 
 static void DisableOpenXRModeForCurrentRun(const char* reason)
