@@ -333,7 +333,8 @@ struct ExtractUniforms
 	FVector2 Scale;
 	FVector2 Offset;
 	float Threshold;
-	float padding0, padding1, padding2;
+	float Knee;
+	float padding0, padding1;
 
 	static std::vector<UniformFieldDesc> Desc()
 	{
@@ -342,9 +343,9 @@ struct ExtractUniforms
 			{ "Scale", UniformType::Vec2, offsetof(ExtractUniforms, Scale) },
 			{ "Offset", UniformType::Vec2, offsetof(ExtractUniforms, Offset) },
 			{ "Threshold", UniformType::Float, offsetof(ExtractUniforms, Threshold) },
+			{ "Knee", UniformType::Float, offsetof(ExtractUniforms, Knee) },
 			{ "padding0", UniformType::Float, offsetof(ExtractUniforms, padding0) },
-			{ "padding1", UniformType::Float, offsetof(ExtractUniforms, padding1) },
-			{ "padding2", UniformType::Float, offsetof(ExtractUniforms, padding2) }
+			{ "padding1", UniformType::Float, offsetof(ExtractUniforms, padding1) }
 		};
 	}
 };
@@ -437,6 +438,25 @@ private:
 
 /////////////////////////////////////////////////////////////////////////////
 
+// [BB] The combine pass doubles as the downscale step, so these must be set
+// neutral (tint 1,1,1 and no fringing) during downscaling and only carry real
+// values on the final combine -- otherwise the tint would be applied once per
+// level and compound.
+struct BloomCombineUniforms
+{
+	FVector3 Tint;
+	float Chromatic;
+
+	static std::vector<UniformFieldDesc> Desc()
+	{
+		return
+		{
+			{ "Tint", UniformType::Vec3, offsetof(BloomCombineUniforms, Tint) },
+			{ "Chromatic", UniformType::Float, offsetof(BloomCombineUniforms, Chromatic) }
+		};
+	}
+};
+
 enum { NumBloomLevels = 4 };
 
 class PPBlurLevel
@@ -464,7 +484,7 @@ private:
 	int lastWidth = 0;
 	int lastHeight = 0;
 
-	PPShader BloomCombine = { "shaders/pp/bloomcombine.fp", "", {} };
+	PPShader BloomCombine = { "shaders/pp/bloomcombine.fp", "", BloomCombineUniforms::Desc() };
 	PPShader BloomExtract = { "shaders/pp/bloomextract.fp", "", ExtractUniforms::Desc() };
 	PPShader BlurVertical = { "shaders/pp/blur.fp", "#define BLUR_VERTICAL\n", BlurUniforms::Desc() };
 	PPShader BlurHorizontal = { "shaders/pp/blur.fp", "#define BLUR_HORIZONTAL\n", BlurUniforms::Desc() };

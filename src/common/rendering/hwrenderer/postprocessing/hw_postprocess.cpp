@@ -115,6 +115,7 @@ void PPBloom::RenderBloom(PPRenderState *renderstate, int sceneWidth, int sceneH
 	extractUniforms.Scale = screen->SceneScale();
 	extractUniforms.Offset = screen->SceneOffset();
 	extractUniforms.Threshold = gl_bloom_threshold;
+	extractUniforms.Knee = gl_bloom_knee;
 
 	auto &level0 = levels[0];
 
@@ -130,8 +131,22 @@ void PPBloom::RenderBloom(PPRenderState *renderstate, int sceneWidth, int sceneH
 	renderstate->Draw();
 
 	const float blurAmount = gl_bloom_amount;
-	BlurUniforms blurUniforms;
-	ComputeBlurSamples(7, blurAmount, blurUniforms.SampleWeights);
+
+	// [BB] Anamorphic. The blur is already two passes -- one horizontal, one
+	// vertical -- so widening only the horizontal one costs nothing and gives
+	// the sideways streak of an anamorphic lens.
+	float hAmount = blurAmount;
+	float vAmount = blurAmount;
+	if (gl_bloom_anamorphic) hAmount = blurAmount * gl_bloom_anamorphic_ratio;
+
+	BlurUniforms hBlurUniforms, vBlurUniforms;
+	ComputeBlurSamples(7, hAmount, hBlurUniforms.SampleWeights);
+	ComputeBlurSamples(7, vAmount, vBlurUniforms.SampleWeights);
+
+	// Neutral for the downscale steps, which share this shader.
+	BloomCombineUniforms plainCombine;
+	plainCombine.Tint = FVector3(1.0f, 1.0f, 1.0f);
+	plainCombine.Chromatic = 0.0f;
 
 	// Blur and downscale:
 	for (int i = 0; i < NumBloomLevels - 1; i++)
@@ -139,13 +154,13 @@ void PPBloom::RenderBloom(PPRenderState *renderstate, int sceneWidth, int sceneH
 		auto &blevel = levels[i];
 		auto &next = levels[i + 1];
 
-		BlurStep(renderstate, blurUniforms, blevel.VTexture, blevel.HTexture, blevel.Viewport, false);
-		BlurStep(renderstate, blurUniforms, blevel.HTexture, blevel.VTexture, blevel.Viewport, true);
+		BlurStep(renderstate, hBlurUniforms, blevel.VTexture, blevel.HTexture, blevel.Viewport, false);
+		BlurStep(renderstate, vBlurUniforms, blevel.HTexture, blevel.VTexture, blevel.Viewport, true);
 
 		// Linear downscale:
 		renderstate->Clear();
 		renderstate->Shader = &BloomCombine;
-		renderstate->Uniforms.Clear();
+		renderstate->Uniforms.Set(plainCombine);
 		renderstate->Viewport = next.Viewport;
 		renderstate->SetInputTexture(0, &blevel.VTexture, PPFilterMode::Linear);
 		renderstate->SetOutputTexture(&next.VTexture);
@@ -159,13 +174,13 @@ void PPBloom::RenderBloom(PPRenderState *renderstate, int sceneWidth, int sceneH
 		auto &blevel = levels[i];
 		auto &next = levels[i - 1];
 
-		BlurStep(renderstate, blurUniforms, blevel.VTexture, blevel.HTexture, blevel.Viewport, false);
-		BlurStep(renderstate, blurUniforms, blevel.HTexture, blevel.VTexture, blevel.Viewport, true);
+		BlurStep(renderstate, hBlurUniforms, blevel.VTexture, blevel.HTexture, blevel.Viewport, false);
+		BlurStep(renderstate, vBlurUniforms, blevel.HTexture, blevel.VTexture, blevel.Viewport, true);
 
 		// Linear upscale:
 		renderstate->Clear();
 		renderstate->Shader = &BloomCombine;
-		renderstate->Uniforms.Clear();
+		renderstate->Uniforms.Set(plainCombine);
 		renderstate->Viewport = next.Viewport;
 		renderstate->SetInputTexture(0, &blevel.VTexture, PPFilterMode::Linear);
 		renderstate->SetOutputTexture(&next.VTexture);
@@ -173,13 +188,18 @@ void PPBloom::RenderBloom(PPRenderState *renderstate, int sceneWidth, int sceneH
 		renderstate->Draw();
 	}
 
-	BlurStep(renderstate, blurUniforms, level0.VTexture, level0.HTexture, level0.Viewport, false);
-	BlurStep(renderstate, blurUniforms, level0.HTexture, level0.VTexture, level0.Viewport, true);
+	BlurStep(renderstate, hBlurUniforms, level0.VTexture, level0.HTexture, level0.Viewport, false);
+	BlurStep(renderstate, vBlurUniforms, level0.HTexture, level0.VTexture, level0.Viewport, true);
 
-	// Add bloom back to scene texture:
+	// Add bloom back to scene texture. This is the ONLY place tint and
+	// fringing apply -- every earlier use of this shader was a downscale.
+	BloomCombineUniforms finalCombine;
+	finalCombine.Tint = FVector3(gl_bloom_tint_r, gl_bloom_tint_g, gl_bloom_tint_b);
+	finalCombine.Chromatic = gl_bloom_chromatic;
+
 	renderstate->Clear();
 	renderstate->Shader = &BloomCombine;
-	renderstate->Uniforms.Clear();
+	renderstate->Uniforms.Set(finalCombine);
 	renderstate->Viewport = screen->mSceneViewport;
 	renderstate->SetInputTexture(0, &level0.VTexture, PPFilterMode::Linear);
 	renderstate->SetOutputCurrent();
@@ -217,10 +237,16 @@ void PPBloom::RenderBlur(PPRenderState *renderstate, int sceneWidth, int sceneHe
 
 	auto &level0 = levels[0];
 
+	// Shares BloomCombine, so it needs the same neutral uniforms -- this path
+	// is a plain blur and wants no tint or fringing at all.
+	BloomCombineUniforms plainCombine;
+	plainCombine.Tint = FVector3(1.0f, 1.0f, 1.0f);
+	plainCombine.Chromatic = 0.0f;
+
 	// Grab the area we want to bloom:
 	renderstate->Clear();
 	renderstate->Shader = &BloomCombine;
-	renderstate->Uniforms.Clear();
+	renderstate->Uniforms.Set(plainCombine);
 	renderstate->Viewport = level0.Viewport;
 	renderstate->SetInputCurrent(0, PPFilterMode::Linear);
 	renderstate->SetOutputTexture(&level0.VTexture);
@@ -242,7 +268,7 @@ void PPBloom::RenderBlur(PPRenderState *renderstate, int sceneWidth, int sceneHe
 		// Linear downscale:
 		renderstate->Clear();
 		renderstate->Shader = &BloomCombine;
-		renderstate->Uniforms.Clear();
+		renderstate->Uniforms.Set(plainCombine);
 		renderstate->Viewport = next.Viewport;
 		renderstate->SetInputTexture(0, &blevel.VTexture, PPFilterMode::Linear);
 		renderstate->SetOutputTexture(&next.VTexture);
@@ -262,7 +288,7 @@ void PPBloom::RenderBlur(PPRenderState *renderstate, int sceneWidth, int sceneHe
 		// Linear upscale:
 		renderstate->Clear();
 		renderstate->Shader = &BloomCombine;
-		renderstate->Uniforms.Clear();
+		renderstate->Uniforms.Set(plainCombine);
 		renderstate->Viewport = next.Viewport;
 		renderstate->SetInputTexture(0, &blevel.VTexture, PPFilterMode::Linear);
 		renderstate->SetOutputTexture(&next.VTexture);

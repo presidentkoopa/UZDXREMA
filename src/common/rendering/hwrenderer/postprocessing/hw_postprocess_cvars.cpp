@@ -44,6 +44,40 @@ CUSTOM_CVAR(Float, gl_bloom_threshold, 1.0f, CVAR_ARCHIVE)
 	if (self > 4.0f) self = 4.0f;
 }
 
+// [BB] Soft knee. A hard threshold makes things POP in and out of blooming
+// as they cross it, which is constant and obvious when glow is pulsing or a
+// beam is sweeping. This rolls the transition over a range instead, so bloom
+// eases in rather than snapping on. 0 is the old hard cutoff.
+CUSTOM_CVAR(Float, gl_bloom_knee, 0.5f, CVAR_ARCHIVE)
+{
+	if (self < 0.0f) self = 0.0f;
+	if (self > 8.0f) self = 8.0f;
+}
+
+// [BB] Anamorphic: blur wider horizontally than vertically, so bright things
+// streak sideways the way they do through an anamorphic lens. Free, because
+// the blur already runs as separate horizontal and vertical passes -- this
+// only gives them different amounts.
+CVAR(Bool, gl_bloom_anamorphic, false, CVAR_ARCHIVE)
+CUSTOM_CVAR(Float, gl_bloom_anamorphic_ratio, 3.0f, CVAR_ARCHIVE)
+{
+	if (self < 1.0f) self = 1.0f;
+	if (self > 16.0f) self = 16.0f;
+}
+
+// [BB] Bloom tint and chromatic fringing. Tint colours the bloom
+// independently of what produced it; fringing offsets the colour channels
+// radially so bright edges break up toward the screen edges, the way light
+// through glass does.
+CVAR(Float, gl_bloom_tint_r, 1.0f, CVAR_ARCHIVE)
+CVAR(Float, gl_bloom_tint_g, 1.0f, CVAR_ARCHIVE)
+CVAR(Float, gl_bloom_tint_b, 1.0f, CVAR_ARCHIVE)
+CUSTOM_CVAR(Float, gl_bloom_chromatic, 0.0f, CVAR_ARCHIVE)
+{
+	if (self < 0.0f) self = 0.0f;
+	if (self > 0.1f) self = 0.1f;
+}
+
 CVAR(Float, gl_exposure_scale, 1.3f, CVAR_ARCHIVE)
 CVAR(Float, gl_exposure_min, 0.35f, CVAR_ARCHIVE)
 CVAR(Float, gl_exposure_base, 0.35f, CVAR_ARCHIVE)
