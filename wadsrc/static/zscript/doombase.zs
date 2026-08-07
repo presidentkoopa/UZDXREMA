@@ -619,7 +619,7 @@ struct LevelLocals native
 	// faded to nothing by outer. falloff shapes the fade along the length --
 	// 1 linear, higher concentrates the light near the lens. Publish it each
 	// tic while the light is on; clear it when off, which costs nothing.
-	native void SetVolumetricBeam(Vector3 pos, Vector3 dir, color col, double inner, double outer, double length, double density, double falloff);
+	native void SetVolumetricBeam(Vector3 pos, Vector3 dir, color col, double inner, double outer, double length, double density, double falloff, double dust = 0, double dustScale = 0.04, double dustDrift = 0);
 	native void ClearVolumetricBeam();
 
 	// [BB] Sweep -- up to eight thin bands of light travelling through the

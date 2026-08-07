@@ -23,6 +23,37 @@ layout(binding=0) uniform sampler2D DepthTexture;
 // and one you cannot.
 // ============================================================================
 
+// ---------------------------------------------------------------------------
+// Value noise, 3D. Cheap enough to afford once per march step.
+// ---------------------------------------------------------------------------
+
+float hash13(vec3 p)
+{
+	p = fract(p * 0.1031);
+	p += dot(p, p.zyx + 31.32);
+	return fract((p.x + p.y) * p.z);
+}
+
+float valueNoise(vec3 p)
+{
+	vec3 i = floor(p);
+	vec3 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);   // smoothstep, so cells blend instead of blocking
+
+	return mix(
+		mix(mix(hash13(i + vec3(0,0,0)), hash13(i + vec3(1,0,0)), f.x),
+		    mix(hash13(i + vec3(0,1,0)), hash13(i + vec3(1,1,0)), f.x), f.y),
+		mix(mix(hash13(i + vec3(0,0,1)), hash13(i + vec3(1,0,1)), f.x),
+		    mix(hash13(i + vec3(0,1,1)), hash13(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+
+// Two octaves. One reads as smooth blobs; two gives the finer grain that
+// makes it look like motes rather than fog.
+float dustNoise(vec3 p)
+{
+	return valueNoise(p) * 0.65 + valueNoise(p * 2.7) * 0.35;
+}
+
 void main()
 {
 	// Scene depth for this pixel: how far along the ray the world is. The
@@ -114,7 +145,25 @@ void main()
 				float axial = 1.0 - clamp(dist / BeamLength, 0.0, 1.0);
 				axial = pow(axial, Falloff);
 
-				accum += radial * axial;
+				float contrib = radial * axial;
+
+				// Dust. Sampled in WORLD space, not beam space, and that is
+				// the whole trick: dust hangs in the room, it does not travel
+				// with the torch. Sample it relative to the beam and the
+				// motes slide along with the cone as you sweep, which reads
+				// instantly as fake. World space means sweeping the beam
+				// reveals different dust, the way it should.
+				if (DustAmount > 0.0)
+				{
+					vec3 worldP = (ViewToWorld * vec4(p, 1.0)).xyz;
+					worldP.y -= DustTime * DustDrift;   // slow settle
+					float d = dustNoise(worldP * DustScale);
+					// Never fully dark: dust thickens the beam in places, it
+					// does not punch holes through it.
+					contrib *= mix(1.0, d, clamp(DustAmount, 0.0, 1.0));
+				}
+
+				accum += contrib;
 			}
 		}
 

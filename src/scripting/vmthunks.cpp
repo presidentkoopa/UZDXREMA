@@ -3009,9 +3009,13 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, RemoveBillboard, RemoveBillboard)
 // -- 1 is linear, higher concentrates the light near the lens.
 static void SetVolumetricBeam(FLevelLocals *self, double px, double py, double pz,
 	double dx, double dy, double dz, int color,
-	double inner, double outer, double length, double density, double falloff)
+	double inner, double outer, double length, double density, double falloff,
+	double dust, double dustScale, double dustDrift)
 {
 	self->VolBeamActive = true;
+	self->VolBeamDust = dust;
+	self->VolBeamDustScale = dustScale;
+	self->VolBeamDustDrift = dustDrift;
 	self->VolBeamPos = DVector3(px, py, pz);
 	DVector3 d(dx, dy, dz);
 	double len = d.Length();
@@ -3035,7 +3039,10 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetVolumetricBeam, SetVolumetricBeam
 	PARAM_FLOAT(length);
 	PARAM_FLOAT(density);
 	PARAM_FLOAT(falloff);
-	SetVolumetricBeam(self, px, py, pz, dx, dy, dz, color, inner, outer, length, density, falloff);
+	PARAM_FLOAT(dust);
+	PARAM_FLOAT(dustScale);
+	PARAM_FLOAT(dustDrift);
+	SetVolumetricBeam(self, px, py, pz, dx, dy, dz, color, inner, outer, length, density, falloff, dust, dustScale, dustDrift);
 	return 0;
 }
 

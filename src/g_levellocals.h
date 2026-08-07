@@ -817,6 +817,9 @@ public:
 	double VolBeamLength = 1024.0;
 	double VolBeamDensity = 1.0;
 	double VolBeamFalloff = 1.5;
+	double VolBeamDust = 0.0;      // 0 = clean beam, 1 = heavily mottled
+	double VolBeamDustScale = 0.04;// higher = finer motes
+	double VolBeamDustDrift = 0.0; // world units per second the dust settles
 
 	// Up to eight bands travel at once, so a train of them can chase each
 	// other with their own colours and spacing.

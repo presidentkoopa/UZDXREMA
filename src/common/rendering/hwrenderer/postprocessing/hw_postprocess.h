@@ -381,7 +381,12 @@ struct VolumetricBeamUniforms
 	float Density;
 	float Falloff;
 	int StepCount;
-	float padding0, padding1, padding2;
+	float DustAmount;
+	float DustScale;
+	float DustDrift;
+	float DustTime;
+	float padding0;
+	float ViewToWorld[16];   // plain floats: VSMatrix is not visible in this header
 
 	static std::vector<UniformFieldDesc> Desc()
 	{
@@ -397,9 +402,12 @@ struct VolumetricBeamUniforms
 			{ "Density", UniformType::Float, offsetof(VolumetricBeamUniforms, Density) },
 			{ "Falloff", UniformType::Float, offsetof(VolumetricBeamUniforms, Falloff) },
 			{ "StepCount", UniformType::Int, offsetof(VolumetricBeamUniforms, StepCount) },
+			{ "DustAmount", UniformType::Float, offsetof(VolumetricBeamUniforms, DustAmount) },
+			{ "DustScale", UniformType::Float, offsetof(VolumetricBeamUniforms, DustScale) },
+			{ "DustDrift", UniformType::Float, offsetof(VolumetricBeamUniforms, DustDrift) },
+			{ "DustTime", UniformType::Float, offsetof(VolumetricBeamUniforms, DustTime) },
 			{ "padding0", UniformType::Float, offsetof(VolumetricBeamUniforms, padding0) },
-			{ "padding1", UniformType::Float, offsetof(VolumetricBeamUniforms, padding1) },
-			{ "padding2", UniformType::Float, offsetof(VolumetricBeamUniforms, padding2) },
+			{ "ViewToWorld", UniformType::Mat4, offsetof(VolumetricBeamUniforms, ViewToWorld) },
 		};
 	}
 };

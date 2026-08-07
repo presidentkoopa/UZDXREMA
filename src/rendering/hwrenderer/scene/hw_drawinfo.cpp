@@ -490,6 +490,17 @@ void HWDrawInfo::SetupVolumetricBeam()
 
 	u.StepCount = clamp((int)vol_beam_quality, 8, 64);
 
+	// Dust is sampled in world space, so the shader needs a way back out of
+	// view space. Without this the motes would ride along with the camera.
+	u.DustAmount = (float)Level->VolBeamDust;
+	u.DustScale = (float)Level->VolBeamDustScale;
+	u.DustDrift = (float)Level->VolBeamDustDrift;
+	u.DustTime = (float)(screen->FrameTime * 0.001);
+
+	VSMatrix inv;
+	if (!VPUniforms.mViewMatrix.inverseMatrix(inv)) inv.loadIdentity();
+	memcpy(u.ViewToWorld, inv.get(), sizeof(float) * 16);
+
 	hw_postprocess.volbeam.SetBeam(u);
 }
 
