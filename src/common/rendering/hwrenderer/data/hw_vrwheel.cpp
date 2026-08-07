@@ -85,6 +85,17 @@ CVAR(Float, vr_wheel_icon_model_zoffset, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_select_angle, 30.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, vr_wheel_selection_type, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
+// [BB] Info panel for the entry under the hand. 0 off, 1 in the ring's hub,
+// 2 outside the ring on the side away from the body.
+//
+// Both placements exist because they fail in opposite ways. The hub is where
+// the eye already is and needs no extra room, but it sits under the reaching
+// hand and a crowded inner ring can reach it. Beside is always legible and
+// never occluded, but it costs view space and has to pick a side.
+CVAR(Int, vr_wheel_info, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_wheel_info_scale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Color, vr_wheel_info_bg_color, (int)MAKEARGB(190, 12, 12, 14), CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
 void RenderFrameModels(FModelRenderer* renderer, FLevelLocals* Level, const FSpriteModelFrame* smf, const FState* curState, const int curTics, FTranslationID translation, AActor* actor);
 
 namespace
@@ -872,6 +883,68 @@ namespace
 		}
 	}
 
+	// [BB] Ask the mod what to say about this entry. Empty means "you decide",
+	// which is the default the base PlayerPawn returns -- so an unmodded game
+	// falls through to the engine's own tag-and-ammo readout below rather than
+	// showing a blank panel.
+	static FString GetScriptedEntryInfo(player_t* player, AActor* item, int hand)
+	{
+		FString result;
+		if (player == nullptr || player->mo == nullptr || item == nullptr)
+		{
+			return result;
+		}
+
+		IFVIRTUALPTRNAME(player->mo, NAME_PlayerPawn, GetVRWheelInfo)
+		{
+			VMValue param[] = { player->mo, item, hand };
+			VMReturn ret(&result);
+			VMCall(func, param, 3, &ret, 1);
+		}
+		return result;
+	}
+
+	// The engine's own answer, used when no mod supplies one. Deliberately thin:
+	// the name and what it is loaded with are the only things the engine can
+	// state about a weapon without inventing them.
+	static FString BuildFallbackEntryInfo(player_t* player, AActor* item, bool owned)
+	{
+		FString result;
+		if (item == nullptr)
+		{
+			return result;
+		}
+
+		result = item->GetTag();
+		if (!owned)
+		{
+			result += "\nNOT CARRIED";
+			return result;
+		}
+
+		if (!item->GetClass()->IsDescendantOf(NAME_Weapon))
+		{
+			const int amount = item->IntVar(NAME_Amount);
+			if (amount > 1)
+			{
+				result.AppendFormat("\nx%d", amount);
+			}
+			return result;
+		}
+
+		auto ammo1 = item->PointerVar<AActor>(NAME_Ammo1);
+		auto ammo2 = item->PointerVar<AActor>(NAME_Ammo2);
+		if (ammo1 != nullptr)
+		{
+			result.AppendFormat("\n%d / %d", ammo1->IntVar(NAME_Amount), ammo1->IntVar(NAME_MaxAmount));
+		}
+		if (ammo2 != nullptr && ammo2 != ammo1)
+		{
+			result.AppendFormat("\n%d / %d", ammo2->IntVar(NAME_Amount), ammo2->IntVar(NAME_MaxAmount));
+		}
+		return result;
+	}
+
 	static int WheelTypeToEventArg(EVRWheelType type)
 	{
 		switch (type)
@@ -1087,6 +1160,138 @@ namespace
 		}
 	}
 
+	// [BB] Text in the world, built from font glyphs as quads, because the wheel
+	// draws real geometry and the screen-space text routines have nowhere to put
+	// their output here. One quad per character, advancing along `right`.
+	//
+	// Sized in map units: glyphHeight is what one line occupies, and each glyph's
+	// width comes from the font so proportional fonts stay proportional.
+	static void DrawWorldQuad(HWDrawInfo* di, FRenderState& state, const DVector3& center, const DVector3& right, const DVector3& up, float width, float height, FGameTexture* texture, PalEntry color, bool textured, bool rotate180 = false);
+
+	static float MeasureWorldText(FFont* font, const char* text, float glyphHeight)
+	{
+		if (font == nullptr || text == nullptr)
+		{
+			return 0.0f;
+		}
+		const float unitsPerPixel = glyphHeight / (float)max(1, font->GetHeight());
+		return (float)font->StringWidth(text) * unitsPerPixel;
+	}
+
+	// Draws one line, centred on `center`. Returns nothing; callers lay out lines
+	// themselves so they can mix sizes.
+	static void DrawWorldTextLine(HWDrawInfo* di, FRenderState& state, const DVector3& center, const DVector3& right, const DVector3& up, float glyphHeight, FFont* font, const char* text, PalEntry color)
+	{
+		if (di == nullptr || font == nullptr || text == nullptr || *text == 0 || glyphHeight <= 0.0f)
+		{
+			return;
+		}
+
+		const float unitsPerPixel = glyphHeight / (float)max(1, font->GetHeight());
+		const float totalWidth = MeasureWorldText(font, text, glyphHeight);
+
+		// Walk from the left edge so the line ends up centred.
+		double penOffset = -0.5 * (double)totalWidth;
+		for (const uint8_t* c = (const uint8_t*)text; *c != 0; ++c)
+		{
+			int charWidthPixels = 0;
+			FGameTexture* glyph = font->GetChar((int)*c, CR_UNTRANSLATED, &charWidthPixels);
+			const float advance = (float)charWidthPixels * unitsPerPixel;
+			if (glyph != nullptr && advance > 0.0f)
+			{
+				// The glyph texture can be wider than its advance (kerning slack),
+				// so draw at the texture's own aspect rather than the advance.
+				const float glyphWidth = (float)glyph->GetDisplayWidth() * unitsPerPixel;
+				const float glyphDrawHeight = (float)glyph->GetDisplayHeight() * unitsPerPixel;
+				const DVector3 glyphCenter = center + right * (penOffset + advance * 0.5);
+				DrawWorldQuad(di, state, glyphCenter, right, up, glyphWidth, glyphDrawHeight, glyph, color, true);
+			}
+			penOffset += advance;
+		}
+	}
+
+	static void DrawWheelInfoPanel(HWDrawInfo* di, FRenderState& state, player_t* player, const VRWheelState& wheel,
+		const VRWheelLayoutInfo& layout, const DVector3& center, const DVector3& right, const DVector3& up)
+	{
+		if (vr_wheel_info <= 0 || wheel.HoveredIndex < 0 || wheel.HoveredIndex >= (int)wheel.Entries.Size())
+		{
+			return;
+		}
+
+		const auto& entry = wheel.Entries[wheel.HoveredIndex];
+		if (entry.Item == nullptr)
+		{
+			return;
+		}
+
+		FString info = GetScriptedEntryInfo(player, entry.Item, wheel.AnchorHand);
+		if (info.IsEmpty())
+		{
+			info = BuildFallbackEntryInfo(player, entry.Item, entry.Owned);
+		}
+		if (info.IsEmpty())
+		{
+			return;
+		}
+
+		FFont* font = SmallFont;
+		if (font == nullptr)
+		{
+			return;
+		}
+
+		TArray<FString> lines;
+		info.Split(lines, "\n");
+		if (lines.Size() == 0)
+		{
+			return;
+		}
+
+		const float scale = clamp<float>(vr_wheel_info_scale, 0.2f, 4.0f);
+		const float bodyHeight = max(0.6f, layout.Rings[0].IconSize * 0.30f) * scale;
+		const float headingHeight = bodyHeight * 1.35f;
+		const float linePad = bodyHeight * 0.35f;
+
+		float widest = 0.0f;
+		float totalHeight = 0.0f;
+		for (unsigned i = 0; i < lines.Size(); ++i)
+		{
+			const float h = (i == 0) ? headingHeight : bodyHeight;
+			widest = max(widest, MeasureWorldText(font, lines[i].GetChars(), h));
+			totalHeight += h + (i + 1 < lines.Size() ? linePad : 0.0f);
+		}
+		if (widest <= 0.0f || totalHeight <= 0.0f)
+		{
+			return;
+		}
+
+		// [BB] Placement. Hub sits at the ring centre. Beside pushes out past the
+		// outermost ring, away from the body -- which is the opposite side to the
+		// hand holding the wheel, so the panel never lands where that arm is.
+		DVector3 panelCenter = center;
+		if (vr_wheel_info >= 2)
+		{
+			const auto& outer = layout.Rings[max(0, layout.RingCount - 1)];
+			const double clearance = outer.Radius + (outer.IconSize * 1.45) * 0.5 + widest * 0.5 + bodyHeight;
+			const double side = (wheel.AnchorHand == VR_MAINHAND) ? -1.0 : 1.0;
+			panelCenter = center + right * (clearance * side);
+		}
+
+		const float padding = bodyHeight * 0.9f;
+		DrawWorldQuad(di, state, panelCenter, right, up, widest + padding * 2.0f, totalHeight + padding * 2.0f,
+			nullptr, PalEntry(vr_wheel_info_bg_color), false);
+
+		double penY = totalHeight * 0.5;
+		for (unsigned i = 0; i < lines.Size(); ++i)
+		{
+			const float h = (i == 0) ? headingHeight : bodyHeight;
+			penY -= h * 0.5;
+			const PalEntry lineColor = (i == 0) ? PalEntry(255, 255, 255, 255) : PalEntry(255, 190, 190, 190);
+			DrawWorldTextLine(di, state, panelCenter + up * penY, right, up, h, font, lines[i].GetChars(), lineColor);
+			penY -= h * 0.5 + linePad;
+		}
+	}
+
 	static void DrawWorldDisc(HWDrawInfo* di, FRenderState& state, const DVector3& center, const DVector3& right, const DVector3& up, float radius, PalEntry color)
 	{
 		if (di == nullptr || radius <= 0.0f)
@@ -1132,7 +1337,7 @@ namespace
 		state.Draw(DT_TriangleFan, vert.second, Segments + 2);
 	}
 
-	static void DrawWorldQuad(HWDrawInfo* di, FRenderState& state, const DVector3& center, const DVector3& right, const DVector3& up, float width, float height, FGameTexture* texture, PalEntry color, bool textured, bool rotate180 = false)
+	static void DrawWorldQuad(HWDrawInfo* di, FRenderState& state, const DVector3& center, const DVector3& right, const DVector3& up, float width, float height, FGameTexture* texture, PalEntry color, bool textured, bool rotate180)
 	{
 		if (di == nullptr || width <= 0.0f || height <= 0.0f)
 		{
@@ -1714,6 +1919,11 @@ static void DrawOneWheel(HWDrawInfo* di, FRenderState& state, const VRMode* vrmo
 			DrawWorldQuad(di, state, iconCenter, wheelRight, wheelUp, iconWidth, iconHeight, entry.Icon, iconColor, true, true);
 		}
 	}
+
+	// [BB] Last, so it draws over the icons rather than under them -- depth
+	// testing is off for all of this, so order is the only thing deciding what
+	// wins, and a panel half-hidden behind an icon is worse than no panel.
+	DrawWheelInfoPanel(di, state, player, wheel, layout, center, wheelRight, wheelUp);
 
 	state.EnableTexture(true);
 	state.EnableBrightmap(true);
