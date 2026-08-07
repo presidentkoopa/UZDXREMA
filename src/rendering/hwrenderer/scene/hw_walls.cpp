@@ -272,6 +272,12 @@ void HWWall::RenderTexturedWall(HWWallDispatcher*di, FRenderState &state, int rf
 	{
 		state.EnableGlow(true);
 		state.SetGlowParams(topglowcolor, bottomglowcolor);
+		// [BB] Falloff shape and intensity, matching flat-edge glow.
+		state.SetGlowFalloffIntensity(
+			frontsector->GetGlowFalloff(sector_t::ceiling),
+			frontsector->GetGlowIntensity(sector_t::ceiling) > 0.f ? frontsector->GetGlowIntensity(sector_t::ceiling) : 1.0f,
+			frontsector->GetGlowFalloff(sector_t::floor),
+			frontsector->GetGlowIntensity(sector_t::floor) > 0.f ? frontsector->GetGlowIntensity(sector_t::floor) : 1.0f);
 		SetGlowPlanes(state, frontsector->ceilingplane, frontsector->floorplane);
 	}
 	state.SetMaterial(texture, UF_Texture, 0, flags & 3, NO_TRANSLATION, -1);

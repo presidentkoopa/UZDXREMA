@@ -195,6 +195,13 @@ struct StreamData
 	FVector4 uGlowBottomPlane;
 	FVector4 uGlowBottomColor;
 
+	// [BB] Falloff shape and intensity for wall glow, matching flat-edge
+	// glow below.
+	int uGlowTopFalloff;
+	int uGlowBottomFalloff;
+	float uGlowTopIntensity;
+	float uGlowBottomIntensity;
+
 	// [BB] Flat-edge glow: rgb + reach (alpha), and up to 64 of the sector's
 	// linedef endpoints so the fragment shader can find distance to the
 	// nearest edge per pixel.
@@ -324,6 +331,10 @@ public:
 		mStreamData.uVertexColor = { 1.0f, 1.0f, 1.0f, 1.0f };
 		mStreamData.uGlowTopColor = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uGlowBottomColor = { 0.0f, 0.0f, 0.0f, 0.0f };
+		mStreamData.uGlowTopFalloff = 0;
+		mStreamData.uGlowBottomFalloff = 0;
+		mStreamData.uGlowTopIntensity = 1.0f;
+		mStreamData.uGlowBottomIntensity = 1.0f;
 		mStreamData.uGlowTopPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uGlowBottomPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uFlatGlowColor = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -491,6 +502,17 @@ public:
 	{
 		mStreamData.uGlowTopColor = { t[0], t[1], t[2], t[3] };
 		mStreamData.uGlowBottomColor = { b[0], b[1], b[2], b[3] };
+	}
+
+	// [BB] Falloff shape and intensity for wall glow. Kept separate from
+	// SetGlowParams above rather than widening its signature, so nothing
+	// that already calls it needs to change.
+	void SetGlowFalloffIntensity(int topFalloff, float topIntensity, int bottomFalloff, float bottomIntensity)
+	{
+		mStreamData.uGlowTopFalloff = topFalloff;
+		mStreamData.uGlowTopIntensity = topIntensity;
+		mStreamData.uGlowBottomFalloff = bottomFalloff;
+		mStreamData.uGlowBottomIntensity = bottomIntensity;
 	}
 
 	// [BB] Flat-edge glow: rgb + reach, a falloff curve, and up to 64 of the

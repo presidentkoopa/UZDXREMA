@@ -254,6 +254,10 @@ class FShader
 	FUniform4f muGlowTopColor;
 	FUniform4f muGlowBottomPlane;
 	FUniform4f muGlowTopPlane;
+	FBufferedUniform1i muGlowTopFalloff;
+	FBufferedUniform1i muGlowBottomFalloff;
+	FBufferedUniform1f muGlowTopIntensity;
+	FBufferedUniform1f muGlowBottomIntensity;
 	FUniform4f muFlatGlowColor;
 	FBufferedUniform1i muFlatGlowFalloff;
 	FBufferedUniform1i muFlatGlowLineCount;

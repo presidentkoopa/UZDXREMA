@@ -263,6 +263,10 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 		uniform vec4 uGlowTopColor;
 		uniform vec4 uGlowBottomPlane;
 		uniform vec4 uGlowBottomColor;
+		uniform int uGlowTopFalloff;
+		uniform int uGlowBottomFalloff;
+		uniform float uGlowTopIntensity;
+		uniform float uGlowBottomIntensity;
 
 		// [BB] Flat-edge glow: floors/ceilings glow inward from their own edges
 		uniform vec4 uFlatGlowColor;
@@ -616,6 +620,10 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 	muGlowTopColor.Init(hShader, "uGlowTopColor");
 	muGlowBottomPlane.Init(hShader, "uGlowBottomPlane");
 	muGlowTopPlane.Init(hShader, "uGlowTopPlane");
+	muGlowTopFalloff.Init(hShader, "uGlowTopFalloff");
+	muGlowBottomFalloff.Init(hShader, "uGlowBottomFalloff");
+	muGlowTopIntensity.Init(hShader, "uGlowTopIntensity");
+	muGlowBottomIntensity.Init(hShader, "uGlowBottomIntensity");
 	muFlatGlowColor.Init(hShader, "uFlatGlowColor");
 	muFlatGlowFalloff.Init(hShader, "uFlatGlowFalloff");
 	muFlatGlowLineCount.Init(hShader, "uFlatGlowLineCount");

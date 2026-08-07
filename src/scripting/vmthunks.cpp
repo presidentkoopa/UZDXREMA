@@ -1222,6 +1222,60 @@ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetXOffset, SetXOffset)
 	 return 0;
  }
 
+ // [BB] Falloff shape and intensity for wall glow, matching what flat-edge
+ // glow already exposes -- wf/wc now carry the same spec as fg/cg.
+ static void SetGlowFalloff(sector_t *self, int pos, int o)
+ {
+	 self->SetGlowFalloff(pos, o);
+ }
+
+ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetGlowFalloff, SetGlowFalloff)
+ {
+	 PARAM_SELF_STRUCT_PROLOGUE(sector_t);
+	 PARAM_INT(pos);
+	 PARAM_INT(o);
+	 self->SetGlowFalloff(pos, o);
+	 return 0;
+ }
+
+ static void SetGlowIntensity(sector_t *self, int pos, double o)
+ {
+	 self->SetGlowIntensity(pos, float(o));
+ }
+
+ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetGlowIntensity, SetGlowIntensity)
+ {
+	 PARAM_SELF_STRUCT_PROLOGUE(sector_t);
+	 PARAM_INT(pos);
+	 PARAM_FLOAT(o);
+	 self->SetGlowIntensity(pos, float(o));
+	 return 0;
+ }
+
+ static int GetGlowFalloff(sector_t *self, int pos)
+ {
+	 return self->GetGlowFalloff(pos);
+ }
+
+ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, GetGlowFalloff, GetGlowFalloff)
+ {
+	 PARAM_SELF_STRUCT_PROLOGUE(sector_t);
+	 PARAM_INT(pos);
+	 ACTION_RETURN_INT(self->GetGlowFalloff(pos));
+ }
+
+ static double GetGlowIntensity(sector_t *self, int pos)
+ {
+	 return self->GetGlowIntensity(pos);
+ }
+
+ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, GetGlowIntensity, GetGlowIntensity)
+ {
+	 PARAM_SELF_STRUCT_PROLOGUE(sector_t);
+	 PARAM_INT(pos);
+	 ACTION_RETURN_FLOAT(self->GetGlowIntensity(pos));
+ }
+
  static F3DFloor* Get3DFloor(sector_t *self, unsigned int index)
  {
  	 if (index >= self->e->XFloor.ffloors.Size())

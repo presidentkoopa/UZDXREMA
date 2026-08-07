@@ -159,6 +159,10 @@ bool FGLRenderState::ApplyShader()
 		activeShader->muGlowBottomColor.Set(&mStreamData.uGlowBottomColor.X);
 		activeShader->muGlowTopPlane.Set(&mStreamData.uGlowTopPlane.X);
 		activeShader->muGlowBottomPlane.Set(&mStreamData.uGlowBottomPlane.X);
+		activeShader->muGlowTopFalloff.Set(mStreamData.uGlowTopFalloff);
+		activeShader->muGlowBottomFalloff.Set(mStreamData.uGlowBottomFalloff);
+		activeShader->muGlowTopIntensity.Set(mStreamData.uGlowTopIntensity);
+		activeShader->muGlowBottomIntensity.Set(mStreamData.uGlowBottomIntensity);
 		activeShader->currentglowstate = mGlowEnabled;
 	}
 

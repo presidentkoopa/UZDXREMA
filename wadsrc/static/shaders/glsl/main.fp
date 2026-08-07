@@ -744,11 +744,23 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 	//
 	if (uGlowTopColor.a > 0.0 && glowdist.x < uGlowTopColor.a)
 	{
-		color.rgb += desaturate(uGlowTopColor * (1.0 - glowdist.x / uGlowTopColor.a)).rgb;
+		float topfrac = glowdist.x / uGlowTopColor.a;
+		float topatten;
+		if (uGlowTopFalloff == 0)      topatten = 1.0 - topfrac;
+		else if (uGlowTopFalloff == 1) topatten = 1.0 - topfrac * topfrac;
+		else if (uGlowTopFalloff == 2) topatten = 1.0 - sqrt(topfrac);
+		else                            topatten = exp(-topfrac * 3.0);
+		color.rgb += desaturate(vec4(uGlowTopColor.rgb * topatten * uGlowTopIntensity, 1.0)).rgb;
 	}
 	if (uGlowBottomColor.a > 0.0 && glowdist.y < uGlowBottomColor.a)
 	{
-		color.rgb += desaturate(uGlowBottomColor * (1.0 - glowdist.y / uGlowBottomColor.a)).rgb;
+		float botfrac = glowdist.y / uGlowBottomColor.a;
+		float botatten;
+		if (uGlowBottomFalloff == 0)      botatten = 1.0 - botfrac;
+		else if (uGlowBottomFalloff == 1) botatten = 1.0 - botfrac * botfrac;
+		else if (uGlowBottomFalloff == 2) botatten = 1.0 - sqrt(botfrac);
+		else                                botatten = exp(-botfrac * 3.0);
+		color.rgb += desaturate(vec4(uGlowBottomColor.rgb * botatten * uGlowBottomIntensity, 1.0)).rgb;
 	}
 
 	//

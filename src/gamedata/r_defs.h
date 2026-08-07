@@ -673,6 +673,8 @@ struct sector_t
 		double TexZ;
 		PalEntry GlowColor;
 		float GlowHeight;
+		int GlowFalloff;      // 0 linear, 1 quadratic, 2 sqrt, 3 exponential -- see FlatGlowFalloff below
+		float GlowIntensity;  // multiplier, 0.0-2.0+ -- see FlatGlowIntensity below
 
 		// [BB] Flat-edge glow: the plane's OWN surface glows inward from its
 		// linedef edges, fading with distance from the wall. Separate from
@@ -979,6 +981,13 @@ public:
 	{
 		planes[pos].GlowHeight = height;
 	}
+
+	// [BB] Falloff shape and intensity for wall glow, matching what
+	// flat-edge glow already has -- see FlatGlowFalloff/Intensity below.
+	void SetGlowFalloff(int pos, int falloff) { planes[pos].GlowFalloff = falloff; }
+	int GetGlowFalloff(int pos) { return planes[pos].GlowFalloff; }
+	void SetGlowIntensity(int pos, float inten) { planes[pos].GlowIntensity = inten; }
+	float GetGlowIntensity(int pos) { return planes[pos].GlowIntensity; }
 
 	void SetGlowColor(int pos, PalEntry color)
 	{

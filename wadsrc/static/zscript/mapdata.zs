@@ -556,6 +556,14 @@ struct Sector native play
 	native void SetGlowHeight(int pos, double height);
 	native void SetGlowColor(int pos, color color);
 
+	// [BB] Falloff shape and intensity for wall glow -- wf/wc now carry the
+	// same spec as fg/cg below: color, coverage (SetGlowHeight, above),
+	// falloff, intensity.
+	native void SetGlowFalloff(int pos, int falloff);
+	native void SetGlowIntensity(int pos, double intensity);
+	native clearscope int GetGlowFalloff(int pos) const;
+	native clearscope double GetGlowIntensity(int pos) const;
+
 	// [BB] Flat-edge glow: this plane's OWN surface, glowing inward from its
 	// edges -- separate from SetGlowColor above, which only ever reaches
 	// the wall, never the floor or ceiling itself. pos = Sector.floor or
