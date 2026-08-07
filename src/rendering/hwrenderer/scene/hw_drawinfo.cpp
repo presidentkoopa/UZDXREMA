@@ -25,6 +25,7 @@
 **
 */
 
+#include <algorithm>
 #include "a_sharedglobal.h"
 #include "r_utility.h"
 #include "r_sky.h"
@@ -613,11 +614,38 @@ HWDecal *HWDrawInfo::AddDecal(bool onmirror)
 //
 //-----------------------------------------------------------------------------
 
+CVAR(Int, rs_bb_maxpanels, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)		// 0 = unlimited
+CVAR(Float, rs_bb_cullradius, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)	// 0 = no distance limit
+
 void HWDrawInfo::DispatchBillboards()
 {
 	if (!Level || Level->Billboards.Size() == 0) return;
 
 	const auto &vp = Viewpoint;
+
+	// Under a budget, the nearest billboards win. Distance is measured
+	// squared and only compared, never rooted -- and the far ones are the
+	// ones nobody can read anyway, so dropping those first is both the
+	// cheapest and the least noticeable thing to do.
+	const double cullR = rs_bb_cullradius;
+	const double cullR2 = cullR * cullR;
+	const int budget = rs_bb_maxpanels;
+
+	double keepDist2 = FLT_MAX;
+	if (budget > 0 && (int)Level->Billboards.Size() > budget)
+	{
+		TArray<double> dists;
+		dists.Reserve(Level->Billboards.Size());
+		unsigned n = 0;
+		for (auto &bb : Level->Billboards)
+		{
+			DVector3 probe = (bb.flags & BBFL_VIEWLOCKED) ? vp.Pos : bb.pos;
+			dists[n++] = (probe - vp.Pos).LengthSquared();
+		}
+		TArray<double> sorted = dists;
+		std::sort(sorted.begin(), sorted.end());
+		keepDist2 = sorted[budget - 1];
+	}
 
 	for (auto &bb : Level->Billboards)
 	{
@@ -646,6 +674,16 @@ void HWDrawInfo::DispatchBillboards()
 		// Remember where it landed so the aim and touch queries test against
 		// what was actually drawn.
 		bb.drawPos = bpos;
+
+		// View-locked panels are never culled: they are welded to the eye, so
+		// distance to them is meaningless and losing one to a budget would
+		// read as the UI vanishing.
+		if (!(bb.flags & BBFL_VIEWLOCKED))
+		{
+			double d2 = (bpos - vp.Pos).LengthSquared();
+			if (cullR2 > 0.0 && d2 > cullR2) continue;
+			if (d2 > keepDist2) continue;
+		}
 
 		auto sector = Level->PointInSector(bpos.XY());
 		if (!sector) continue;

@@ -91,6 +91,13 @@ EXTERN_CVAR(Bool, gl_texture_thread_models)
 // of a rebuild, the same way the panel code handles its pitch bias.
 CVAR(Bool, bb_flipu, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
+// [BB] Global presentation adjustments, applied to every billboard as it is
+// drawn. These exist because the right value for each is a matter of taste
+// and of headset, and neither is knowable from here -- comfortable card size
+// and the tilt that makes a panel look upright both differ per person.
+CVAR(Float, bb_scale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, bb_tiltbias, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
 CVAR(Bool, gl_usecolorblending, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, gl_sprite_blend, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR(Int, gl_spriteclip, -1, CVAR_ARCHIVE)
@@ -1888,8 +1895,9 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 	y = (float)bpos.Y;
 	z = (float)bpos.Z;
 
-	double halfw = bb->width * 0.5;
-	double halfh = bb->height * 0.5;
+	double gscale = max((double)bb_scale, 0.01);
+	double halfw = bb->width * 0.5 * gscale;
+	double halfh = bb->height * 0.5 * gscale;
 
 	// Resolve orientation. Facing is a mode, not the definition of the
 	// primitive: BBF_FIXED honours the stored yaw/tilt verbatim, which is
@@ -1931,7 +1939,7 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 	//   up    U tilts toward -F, so positive tilt leans the TOP toward
 	//           the viewer rather than away
 	double yawRad = useYaw * (M_PI / 180.0);
-	double tiltRad = useTilt * (M_PI / 180.0);
+	double tiltRad = (useTilt + bb_tiltbias) * (M_PI / 180.0);
 	double cy = cos(yawRad), sy = sin(yawRad);
 	double ct = cos(tiltRad), st = sin(tiltRad);
 
