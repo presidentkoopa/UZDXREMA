@@ -106,6 +106,85 @@ typedef TMap<FName, int> FDialogueMap;				// maps actor class names to dialogue 
 typedef TMap<int, FUDMFKeys> FUDMFKeyMap;
 class DIntermissionController;
 
+// [BB] What a billboard draws. The shader owns the shapes; what a payload
+// number MEANS in a given card or readout is a mod/ZScript decision.
+enum EBillboardPayload
+{
+	BB_PANEL   = 0,  // rounded-rect backing; data byte0 = corner radius, byte1 = border width
+	BB_TEXTURE = 1,  // arbitrary TextureID on the quad; data = TextureID.GetIndex()
+	BB_DIGITS  = 2,  // SDF digits; data = value (bits 0-16) | palette (bits 17+)
+	BB_GLYPH   = 3,  // SDF glyph; data = id (low byte) | palette (second byte)
+	BB_RING    = 4,  // progress ring; data = progress (low byte, 0-255) | style bits above
+	BB_BAR     = 5,  // progress bar; data = progress (low byte, 0-255) | style bits above
+};
+
+// [BB] How a billboard decides which way it points. Facing is a MODE, not
+// the definition of the primitive: a quad that always turns to the camera
+// cannot be hinged to another at a fixed angle, because once both turn
+// independently the angle between them stops meaning anything and a hinged
+// assembly collapses into parallel planes. Hinge solving stays in ZScript;
+// the engine only ever consumes the yaw/tilt it is handed.
+enum EBillboardFacing
+{
+	BBF_FIXED      = 0,  // use my own yaw/tilt verbatim
+	BBF_CAMERAYAW  = 1,  // turn to the viewer, stay upright (tilt preserved)
+	BBF_CAMERA     = 2,  // turn to the viewer including tilt
+};
+
+// [BB] Billboard flag bits.
+enum EBillboardFlags
+{
+	BBFL_PERSISTENT = 1,  // lives until RemoveBillboard(); ignores lifetime
+	BBFL_ATTACHED   = 2,  // follows attachedTo; dies when that actor does
+	BBFL_NODEPTH    = 4,  // skip depth test; draws over world geometry
+	BBFL_VIEWLOCKED = 8,  // pos is an offset from the viewer, not a world point
+	BBFL_FOLLOWANGLE = 16, // attached only: yaw is relative to the actor's facing, so faces turn with it
+};
+
+// [BB] A world-anchored quad: real depth-tested geometry, not a HUD overlay
+// and not a surface-shader term. Extent is per-axis (width/height) rather
+// than one radius because these back rectangular panels, and orientation is
+// stored in design space -- mYaw is which way the face points, mTilt is how
+// far the top leans, 0 being vertical. Converting that to whatever the
+// renderer wants is the draw path's job, not the caller's.
+//
+// Lifetime is one of three: transient (expires by lifetime), persistent
+// (until removed), or attached (until its actor dies). See
+// FLevelLocals::TickBillboards().
+struct FBillboard
+{
+	int      id = 0;               // handle for Update/Move/Remove; 0 = transient, no handle issued
+	DVector3 pos;                  // world position; recomputed each tic while attached
+	double   width = 32.0;
+	double   height = 32.0;
+	double   yaw = 0.0;            // design space: which way the face points
+	double   tilt = 0.0;           // design space: 0 = vertical, + leans the top toward the viewer
+	int      facing = BBF_FIXED;   // EBillboardFacing
+	int      payload = 0;          // EBillboardPayload
+	int      data = 0;             // payload-specific packed int
+	PalEntry color;
+	double   alpha = 1.0;          // 0 = invisible, 1 = opaque; the fade handle
+	int      flags = 0;            // EBillboardFlags
+	double   lifetime = 0.0;       // seconds; <= 0 = permanent. Moot once persistent/attached.
+	int      spawntic = 0;         // level.maptime at creation, for transient expiry
+
+	// A raw AActor* would dangle across a GC sweep. TObjPtr does not, and
+	// does not itself keep the actor alive -- "attached billboards die with
+	// their actor" means exactly that: once this resolves null the billboard
+	// is dropped, never the other way round.
+	TObjPtr<AActor*> attachedTo;
+	DVector3 attachOffset;
+
+	// Where this actually ended up last time it was drawn. View-locked
+	// billboards have no fixed world position -- theirs is resolved per
+	// frame against the interpolated viewpoint -- so aiming and touching
+	// have to test against what was drawn rather than against pos, or the
+	// pointer would disagree with what the player sees. Written by the
+	// renderer, read by the aim/touch queries; not serialized, since the
+	// first frame after a load rewrites it.
+	DVector3 drawPos;
+};
+
 struct FLevelLocals
 {
 	void *level;
@@ -706,6 +785,12 @@ public:
 
 	FDynamicLight *lights;
 	DVisualThinker* VisualThinkerHead = nullptr;
+
+	// [BB] Billboards: world-anchored oriented quads backing the in-world
+	// panel system. Set-and-forget, unlike anything rebuilt per tic.
+	TArray<FBillboard> Billboards;
+	int NextBillboardID = 1;
+	void TickBillboards();
 
 	// links to global game objects
 	TArray<TObjPtr<AActor *>> CorpseQueue;

@@ -2552,6 +2552,450 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, Vec3Diff, Vec3Diff)
 	ACTION_RETURN_VEC3(VecDiff(self, DVector3(x1, y1, z1), DVector3(x2, y2, z2)));
 }
 
+//==========================================================================
+//
+// [BB] Billboards -- world-anchored oriented quads.
+//
+// The API here is deliberately the one the ZScript panel layer already
+// exposes, so swapping a script-side panel over to the native primitive
+// does not touch a single caller. Orientation arrives already solved:
+// hinge geometry is a script concern, and the engine only consumes the
+// yaw/tilt it is handed.
+//
+//==========================================================================
+
+// [BB] Where a billboard really is right now. View-locked ones have no fixed
+// world position -- theirs is an offset from the viewer, resolved by the
+// renderer each frame -- so queries have to use what was last drawn or the
+// pointer disagrees with what the player sees. Everything else just uses pos.
+// Before a billboard's first frame drawPos is still zero, so fall back.
+static inline const DVector3 &BillboardWorldPos(const FBillboard &bb)
+{
+	if ((bb.flags & BBFL_VIEWLOCKED) && !bb.drawPos.isZero()) return bb.drawPos;
+	return bb.pos;
+}
+
+static FBillboard *FindBillboardByID(FLevelLocals *self, int id)
+{
+	if (id <= 0) return nullptr;
+	for (auto &b : self->Billboards)
+	{
+		if (b.id == id) return &b;
+	}
+	return nullptr;
+}
+
+static void FillBillboard(FLevelLocals *self, FBillboard &bb, const DVector3 &pos, double w, double h,
+	double yaw, double tilt, int facing, int payload, int data, int color, int flags, double lifetime)
+{
+	bb.pos = pos;
+	bb.width = w;
+	bb.height = h;
+	bb.yaw = yaw;
+	bb.tilt = tilt;
+	bb.facing = facing;
+	bb.payload = payload;
+	bb.data = data;
+	bb.color = (PalEntry)color;
+	bb.flags = flags;
+	bb.lifetime = lifetime;
+	bb.spawntic = self->maptime;
+}
+
+// Transient: no handle issued, expires by lifetime. Cheapest form -- use it
+// for anything you will never need to address again.
+static void AddBillboard(FLevelLocals *self, double x, double y, double z, double w, double h,
+	double yaw, double tilt, int facing, int payload, int data, int color, int flags, double lifetime)
+{
+	FBillboard bb;
+	FillBillboard(self, bb, DVector3(x, y, z), w, h, yaw, tilt, facing, payload, data, color,
+		flags & ~(BBFL_PERSISTENT | BBFL_ATTACHED), lifetime);
+	self->Billboards.Push(bb);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, AddBillboard, AddBillboard)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(x); PARAM_FLOAT(y); PARAM_FLOAT(z);
+	PARAM_FLOAT(w); PARAM_FLOAT(h);
+	PARAM_FLOAT(yaw); PARAM_FLOAT(tilt);
+	PARAM_INT(facing);
+	PARAM_INT(payload);
+	PARAM_INT(data);
+	PARAM_COLOR(color);
+	PARAM_INT(flags);
+	PARAM_FLOAT(lifetime);
+	AddBillboard(self, x, y, z, w, h, yaw, tilt, facing, payload, data, color, flags, lifetime);
+	return 0;
+}
+
+// Persistent: lives until RemoveBillboard(). Returns the handle.
+static int AddBillboardPersistent(FLevelLocals *self, double x, double y, double z, double w, double h,
+	double yaw, double tilt, int facing, int payload, int data, int color, int flags, double lifetime)
+{
+	FBillboard bb;
+	bb.id = self->NextBillboardID++;
+	FillBillboard(self, bb, DVector3(x, y, z), w, h, yaw, tilt, facing, payload, data, color,
+		(flags | BBFL_PERSISTENT) & ~BBFL_ATTACHED, lifetime);
+	self->Billboards.Push(bb);
+	return bb.id;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, AddBillboardPersistent, AddBillboardPersistent)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(x); PARAM_FLOAT(y); PARAM_FLOAT(z);
+	PARAM_FLOAT(w); PARAM_FLOAT(h);
+	PARAM_FLOAT(yaw); PARAM_FLOAT(tilt);
+	PARAM_INT(facing);
+	PARAM_INT(payload);
+	PARAM_INT(data);
+	PARAM_COLOR(color);
+	PARAM_INT(flags);
+	PARAM_FLOAT(lifetime);
+	ACTION_RETURN_INT(AddBillboardPersistent(self, x, y, z, w, h, yaw, tilt, facing, payload, data, color, flags, lifetime));
+}
+
+// Attached: follows an actor at a fixed offset and dies with it. Returns
+// the handle. Lifetime is ignored -- the actor decides when this ends.
+static int AttachBillboard(FLevelLocals *self, AActor *mo, double ox, double oy, double oz,
+	double w, double h, double yaw, double tilt, int facing, int payload, int data, int color, int flags)
+{
+	if (mo == nullptr) return 0;
+	FBillboard bb;
+	bb.id = self->NextBillboardID++;
+	FillBillboard(self, bb, mo->Pos() + DVector3(ox, oy, oz), w, h, yaw, tilt, facing, payload, data, color,
+		(flags | BBFL_ATTACHED) & ~BBFL_PERSISTENT, 0.0);
+	bb.attachedTo = mo;
+	bb.attachOffset = DVector3(ox, oy, oz);
+	self->Billboards.Push(bb);
+	return bb.id;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, AttachBillboard, AttachBillboard)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_OBJECT(mo, AActor);
+	PARAM_FLOAT(ox); PARAM_FLOAT(oy); PARAM_FLOAT(oz);
+	PARAM_FLOAT(w); PARAM_FLOAT(h);
+	PARAM_FLOAT(yaw); PARAM_FLOAT(tilt);
+	PARAM_INT(facing);
+	PARAM_INT(payload);
+	PARAM_INT(data);
+	PARAM_COLOR(color);
+	PARAM_INT(flags);
+	ACTION_RETURN_INT(AttachBillboard(self, mo, ox, oy, oz, w, h, yaw, tilt, facing, payload, data, color, flags));
+}
+
+static void UpdateBillboard(FLevelLocals *self, int id, int data, int color)
+{
+	FBillboard *bb = FindBillboardByID(self, id);
+	if (bb == nullptr) return;
+	bb->data = data;
+	bb->color = (PalEntry)color;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, UpdateBillboard, UpdateBillboard)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(id);
+	PARAM_INT(data);
+	PARAM_COLOR(color);
+	UpdateBillboard(self, id, data, color);
+	return 0;
+}
+
+static void MoveBillboard(FLevelLocals *self, int id, double x, double y, double z)
+{
+	FBillboard *bb = FindBillboardByID(self, id);
+	if (bb == nullptr) return;
+	bb->pos = DVector3(x, y, z);
+	// An explicit move on an attached billboard retargets the offset rather
+	// than the position, or the next tic would simply undo it.
+	if ((bb->flags & BBFL_ATTACHED) && bb->attachedTo != nullptr)
+	{
+		bb->attachOffset = bb->pos - bb->attachedTo->Pos();
+	}
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, MoveBillboard, MoveBillboard)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(id);
+	PARAM_FLOAT(x); PARAM_FLOAT(y); PARAM_FLOAT(z);
+	MoveBillboard(self, id, x, y, z);
+	return 0;
+}
+
+// Reorienting is separate from moving because hinged assemblies re-solve
+// orientation far more often than they change position.
+static void OrientBillboard(FLevelLocals *self, int id, double yaw, double tilt, int facing)
+{
+	FBillboard *bb = FindBillboardByID(self, id);
+	if (bb == nullptr) return;
+	bb->yaw = yaw;
+	bb->tilt = tilt;
+	bb->facing = facing;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, OrientBillboard, OrientBillboard)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(id);
+	PARAM_FLOAT(yaw); PARAM_FLOAT(tilt);
+	PARAM_INT(facing);
+	OrientBillboard(self, id, yaw, tilt, facing);
+	return 0;
+}
+
+static void ResizeBillboard(FLevelLocals *self, int id, double w, double h)
+{
+	FBillboard *bb = FindBillboardByID(self, id);
+	if (bb == nullptr) return;
+	bb->width = w;
+	bb->height = h;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ResizeBillboard, ResizeBillboard)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(id);
+	PARAM_FLOAT(w); PARAM_FLOAT(h);
+	ResizeBillboard(self, id, w, h);
+	return 0;
+}
+
+// Fading is separate from UpdateBillboard because a fade runs every tic
+// while data and colour change rarely, and a spawn/despawn on radius reads
+// better with a short fade than with a pop.
+static void SetBillboardAlpha(FLevelLocals *self, int id, double alpha)
+{
+	FBillboard *bb = FindBillboardByID(self, id);
+	if (bb == nullptr) return;
+	bb->alpha = clamp(alpha, 0.0, 1.0);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetBillboardAlpha, SetBillboardAlpha)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(id);
+	PARAM_FLOAT(alpha);
+	SetBillboardAlpha(self, id, alpha);
+	return 0;
+}
+
+static void RemoveBillboard(FLevelLocals *self, int id)
+{
+	if (id <= 0) return;
+	for (unsigned i = 0; i < self->Billboards.Size(); i++)
+	{
+		if (self->Billboards[i].id == id)
+		{
+			self->Billboards.Delete(i);
+			return;
+		}
+	}
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, RemoveBillboard, RemoveBillboard)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(id);
+	RemoveBillboard(self, id);
+	return 0;
+}
+
+// [BB] Ray versus billboard. Returns the id of the nearest billboard the ray
+// crosses and where on its face it landed, as 0..1 across and down -- so a
+// caller gets back the same UV the shader sees and can decide what was
+// clicked without knowing anything about world geometry.
+//
+// Camera-facing billboards are tested against the orientation they would be
+// drawn with, using the supplied ray origin as the eye. A pointer and a
+// viewpoint are not the same thing in VR, but they are the same thing often
+// enough that testing against the drawn orientation is what a player expects.
+//
+// Returns 0 and (0,0) on a miss.
+static int AimBillboard(FLevelLocals *self, double sx, double sy, double sz,
+	double dx, double dy, double dz, double maxDist, DVector2 *uvOut)
+{
+	DVector3 start(sx, sy, sz);
+	DVector3 dir(dx, dy, dz);
+
+	double dlen = dir.Length();
+	if (dlen <= 0.0) { if (uvOut) *uvOut = DVector2(0, 0); return 0; }
+	dir /= dlen;
+
+	int bestID = 0;
+	double bestT = maxDist > 0.0 ? maxDist : FLT_MAX;
+	DVector2 bestUV(0, 0);
+
+	for (auto &bb : self->Billboards)
+	{
+		if (bb.id == 0) continue;	// transients carry no handle, so a hit could not be reported
+
+		double useYaw = bb.yaw;
+		double useTilt = bb.tilt;
+		if ((bb.flags & BBFL_FOLLOWANGLE) && (bb.flags & BBFL_ATTACHED) && bb.attachedTo != nullptr)
+		{
+			useYaw += bb.attachedTo->Angles.Yaw.Degrees();
+		}
+		if (bb.facing == BBF_CAMERAYAW || bb.facing == BBF_CAMERA)
+		{
+			const DVector3 &bpos = BillboardWorldPos(bb);
+			double ex = start.X - bpos.X;
+			double ey = start.Y - bpos.Y;
+			useYaw = atan2(ey, ex) * (180.0 / M_PI);
+			if (bb.facing == BBF_CAMERA)
+			{
+				double ez = start.Z - bpos.Z;
+				useTilt = atan2(ez, sqrt(ex * ex + ey * ey)) * (180.0 / M_PI);
+			}
+		}
+
+		double yawRad = useYaw * (M_PI / 180.0);
+		double tiltRad = useTilt * (M_PI / 180.0);
+		double cy = cos(yawRad), sy2 = sin(yawRad);
+		double ct = cos(tiltRad), st = sin(tiltRad);
+
+		// Must match ProcessBillboard's convention exactly, or the pointer
+		// lands somewhere other than where the player sees the panel.
+		DVector3 right(sy2, -cy, 0.0);
+		DVector3 up(-cy * st, -sy2 * st, ct);
+		DVector3 normal = right ^ up;		// face normal
+
+		double denom = normal | dir;
+		if (fabs(denom) < EQUAL_EPSILON) continue;	// parallel to the face
+
+		double t = (normal | (BillboardWorldPos(bb) - start)) / denom;
+		if (t <= 0.0 || t >= bestT) continue;		// behind the ray, or farther than a hit we already have
+
+		DVector3 hit = start + dir * t;
+		DVector3 rel = hit - BillboardWorldPos(bb);
+
+		double across = rel | right;
+		double down = rel | up;
+		double halfw = bb.width * 0.5;
+		double halfh = bb.height * 0.5;
+		if (fabs(across) > halfw || fabs(down) > halfh) continue;	// outside the quad
+
+		bestT = t;
+		bestID = bb.id;
+		// Match the drawn UV: u runs left to right, v runs top to bottom.
+		bestUV = DVector2((across + halfw) / bb.width, (halfh - down) / bb.height);
+	}
+
+	if (uvOut) *uvOut = bestUV;
+	return bestID;
+}
+
+// [BB] Point versus billboard -- the touch case. Same geometry as the aim
+// ray, but tested from a position rather than along a direction, so a tracked
+// fingertip or controller tip can drive a panel directly.
+//
+// Returns the nearest billboard whose face the point sits within maxRange of
+// AND within the bounds of, along with the same 0..1 UV the aim ray reports
+// and the distance to the surface. Distance is the useful part: hover can
+// track it as a hand approaches and the press can fire on contact, which is
+// what makes touch feel like touch rather than a switch.
+//
+// Camera-facing billboards resolve their orientation against the touching
+// point, matching how AimBillboard treats its ray origin.
+//
+// Returns 0 on a miss.
+static int TouchBillboard(FLevelLocals *self, double px, double py, double pz,
+	double maxRange, DVector2 *uvOut, double *distOut)
+{
+	DVector3 p(px, py, pz);
+
+	int bestID = 0;
+	double bestDist = maxRange > 0.0 ? maxRange : FLT_MAX;
+	DVector2 bestUV(0, 0);
+
+	for (auto &bb : self->Billboards)
+	{
+		if (bb.id == 0) continue;	// transients carry no handle, so a hit could not be reported
+
+		double useYaw = bb.yaw;
+		double useTilt = bb.tilt;
+		if ((bb.flags & BBFL_FOLLOWANGLE) && (bb.flags & BBFL_ATTACHED) && bb.attachedTo != nullptr)
+		{
+			useYaw += bb.attachedTo->Angles.Yaw.Degrees();
+		}
+		if (bb.facing == BBF_CAMERAYAW || bb.facing == BBF_CAMERA)
+		{
+			const DVector3 &bpos2 = BillboardWorldPos(bb);
+			double ex = p.X - bpos2.X;
+			double ey = p.Y - bpos2.Y;
+			useYaw = atan2(ey, ex) * (180.0 / M_PI);
+			if (bb.facing == BBF_CAMERA)
+			{
+				double ez = p.Z - bpos2.Z;
+				useTilt = atan2(ez, sqrt(ex * ex + ey * ey)) * (180.0 / M_PI);
+			}
+		}
+
+		double yawRad = useYaw * (M_PI / 180.0);
+		double tiltRad = useTilt * (M_PI / 180.0);
+		double cy = cos(yawRad), sy2 = sin(yawRad);
+		double ct = cos(tiltRad), st = sin(tiltRad);
+
+		// Must match ProcessBillboard's convention exactly, or the pointer
+		// lands somewhere other than where the player sees the panel.
+		DVector3 right(sy2, -cy, 0.0);
+		DVector3 up(-cy * st, -sy2 * st, ct);
+		DVector3 normal = right ^ up;
+
+		DVector3 rel = p - BillboardWorldPos(bb);
+
+		// Distance to the plane, unsigned: a finger behind a panel is still
+		// touching it as far as the player is concerned.
+		double dist = fabs(normal | rel);
+		if (dist >= bestDist) continue;
+
+		double across = rel | right;
+		double down = rel | up;
+		double halfw = bb.width * 0.5;
+		double halfh = bb.height * 0.5;
+		if (fabs(across) > halfw || fabs(down) > halfh) continue;
+
+		bestDist = dist;
+		bestID = bb.id;
+		bestUV = DVector2((across + halfw) / bb.width, (halfh - down) / bb.height);
+	}
+
+	if (uvOut) *uvOut = bestUV;
+	if (distOut) *distOut = (bestID != 0) ? bestDist : 0.0;
+	return bestID;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, TouchBillboard, TouchBillboard)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(px); PARAM_FLOAT(py); PARAM_FLOAT(pz);
+	PARAM_FLOAT(maxRange);
+	DVector2 uv;
+	double dist = 0.0;
+	int id = TouchBillboard(self, px, py, pz, maxRange, &uv, &dist);
+	if (numret > 0) ret[0].SetInt(id);
+	if (numret > 1) ret[1].SetVector2(uv);
+	if (numret > 2) ret[2].SetFloat(dist);
+	return min(numret, 3);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, AimBillboard, AimBillboard)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(sx); PARAM_FLOAT(sy); PARAM_FLOAT(sz);
+	PARAM_FLOAT(dx); PARAM_FLOAT(dy); PARAM_FLOAT(dz);
+	PARAM_FLOAT(maxDist);
+	DVector2 uv;
+	int id = AimBillboard(self, sx, sy, sz, dx, dy, dz, maxDist, &uv);
+	if (numret > 0) ret[0].SetInt(id);
+	if (numret > 1) ret[1].SetVector2(uv);
+	return min(numret, 2);
+}
+
 DEFINE_ACTION_FUNCTION(FLevelLocals, GetDisplacement)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);

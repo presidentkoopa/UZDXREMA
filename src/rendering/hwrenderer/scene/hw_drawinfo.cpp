@@ -603,6 +603,58 @@ HWDecal *HWDrawInfo::AddDecal(bool onmirror)
 //
 //-----------------------------------------------------------------------------
 
+//-----------------------------------------------------------------------------
+//
+// [BB] DispatchBillboards
+//
+// Every live billboard becomes a quad in the draw lists. Attached ones read
+// their actor's INTERPOLATED position here rather than the ticked one, so
+// they track smoothly at render framerate instead of stepping at 35Hz.
+//
+//-----------------------------------------------------------------------------
+
+void HWDrawInfo::DispatchBillboards()
+{
+	if (!Level || Level->Billboards.Size() == 0) return;
+
+	const auto &vp = Viewpoint;
+
+	for (auto &bb : Level->Billboards)
+	{
+		DVector3 bpos = bb.pos;
+
+		if (bb.flags & BBFL_VIEWLOCKED)
+		{
+			// pos is an offset from the viewer, not a world point: X ahead,
+			// Y to the right, Z up. Resolved here rather than in script
+			// because script runs at tic rate and the view does not -- a
+			// head-locked panel repositioned at 35Hz lags and snaps against
+			// head movement, which is exactly the thing that makes people
+			// ill. Doing it against the render viewpoint keeps it welded.
+			double yawRad = vp.Angles.Yaw.Radians();
+			double cy = cos(yawRad), sy = sin(yawRad);
+			bpos = vp.Pos
+				+ DVector3(cy, sy, 0.0) * bb.pos.X		// ahead
+				+ DVector3(-sy, cy, 0.0) * bb.pos.Y		// right
+				+ DVector3(0.0, 0.0, 1.0) * bb.pos.Z;	// up
+		}
+		else if ((bb.flags & BBFL_ATTACHED) && bb.attachedTo != nullptr)
+		{
+			bpos = bb.attachedTo->InterpolatedPosition(Viewpoint.TicFrac) + bb.attachOffset;
+		}
+
+		// Remember where it landed so the aim and touch queries test against
+		// what was actually drawn.
+		bb.drawPos = bpos;
+
+		auto sector = Level->PointInSector(bpos.XY());
+		if (!sector) continue;
+
+		HWSprite sprite;
+		sprite.ProcessBillboard(this, &bb, bpos, sector);
+	}
+}
+
 void HWDrawInfo::CreateScene(bool drawpsprites)
 {
 	const auto &vp = Viewpoint;
@@ -629,6 +681,10 @@ void HWDrawInfo::CreateScene(bool drawpsprites)
 	screen->mLights->Map();
 
 	RenderBSP(Level->HeadNode(), drawpsprites);
+
+	// [BB] billboards join the scene here -- after the BSP walk has filled
+	// the draw lists, before the vertex buffer unmaps below.
+	DispatchBillboards();
 
 	// And now the crappy hacks that have to be done to avoid rendering anomalies.
 	// These cannot be multithreaded when the time comes because all these depend

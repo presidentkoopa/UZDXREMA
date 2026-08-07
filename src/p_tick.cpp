@@ -72,6 +72,51 @@ bool P_CheckTickerPaused ()
 	return false;
 }
 
+//==========================================================================
+//
+// [BB] FLevelLocals::TickBillboards
+//
+// Billboards are set-and-forget, so this is maintenance rather than a
+// rebuild: make attached ones follow, drop the ones whose actor has gone,
+// and expire transients. Runs once per game tic, not per rendered frame,
+// so lifetime means the same thing regardless of framerate.
+//
+// Iterates backwards because entries are deleted in place.
+//
+//==========================================================================
+
+void FLevelLocals::TickBillboards()
+{
+	for (int bi = (int)Billboards.Size() - 1; bi >= 0; bi--)
+	{
+		auto &bb = Billboards[bi];
+
+		if (bb.flags & BBFL_ATTACHED)
+		{
+			// Attached billboards die with their actor -- and only ever in
+			// that direction. Resolving null here means the actor was
+			// destroyed and swept, so the billboard goes; it never keeps
+			// the actor alive to avoid the question.
+			if (bb.attachedTo == nullptr)
+			{
+				Billboards.Delete(bi);
+				continue;
+			}
+			bb.pos = bb.attachedTo->Pos() + bb.attachOffset;
+			continue;	// attachment overrides lifetime entirely
+		}
+
+		if (!(bb.flags & BBFL_PERSISTENT) && bb.lifetime > 0.0)
+		{
+			double ageSec = (maptime - bb.spawntic) / (double)TICRATE;
+			if (ageSec >= bb.lifetime)
+			{
+				Billboards.Delete(bi);
+			}
+		}
+	}
+}
+
 //
 // P_Ticker
 //
@@ -162,6 +207,8 @@ void P_Ticker (void)
 		}
 
 		P_ThinkParticles(Level);	// [RH] make the particles think
+
+		Level->TickBillboards();	// [BB] follow attachments, expire transients
 
 		for (i = 0; i < MAXPLAYERS; i++)
 			if (Level->PlayerInGame(i))

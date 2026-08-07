@@ -533,6 +533,53 @@ struct LevelLocals native
 	native clearscope int ActorOnLineSide(Actor mo, Line l) const;
 	native clearscope int BoxOnLineSide(Vector2 pos, double radius, Line l) const;
 
+	// [BB] Billboards -- world-anchored oriented quads, the native backing
+	// for in-world panels. Extent is per-axis and orientation is explicit,
+	// because a quad that always turns to the camera cannot be hinged to
+	// another at a fixed angle: once both turn independently the angle
+	// between them stops meaning anything. Hinge solving stays in script;
+	// pass the yaw/tilt you already worked out.
+	//
+	// yaw  = which way the face points
+	// tilt = 0 is vertical, positive leans the top toward the viewer
+	// facing: 0 = use my own orientation, 1 = turn to viewer but stay
+	//         upright, 2 = turn to viewer including tilt
+	// payload: 0 = panel, 1 = texture (data = TextureID.GetIndex()),
+	//          2 = digits, 3 = glyph, 4 = ring, 5 = bar
+	// flags: 1 = persistent, 2 = attached, 4 = no depth test,
+	//        8 = view-locked (pos becomes an offset from the viewer:
+	//            X ahead, Y right, Z up). Resolved at render rate, so a
+	//            HUD-locked panel stays welded to the view instead of
+	//            lagging and snapping the way a script-moved one would.
+	//       16 = follow angle (attached only: yaw becomes relative to the
+	//            actor's facing, so faces turn with it)
+	//
+	// Transient -- expires by lifetime, no handle issued.
+	native void AddBillboard(Vector3 pos, double w, double h, double yaw, double tilt, int facing, int payload, int data, color col, int flags = 0, double lifetime = 0);
+	// Persistent -- lives until RemoveBillboard(id). Returns a handle.
+	native int AddBillboardPersistent(Vector3 pos, double w, double h, double yaw, double tilt, int facing, int payload, int data, color col, int flags = 0, double lifetime = 0);
+	// Attached -- follows mo at offset and dies with it. Returns a handle.
+	native int AttachBillboard(Actor mo, Vector3 offset, double w, double h, double yaw, double tilt, int facing, int payload, int data, color col, int flags = 0);
+	native void UpdateBillboard(int id, int data, color col);
+	native void MoveBillboard(int id, Vector3 pos);
+	native void OrientBillboard(int id, double yaw, double tilt, int facing);
+	native void ResizeBillboard(int id, double w, double h);
+	// 0 = invisible, 1 = opaque. Separate from UpdateBillboard because a fade
+	// runs every tic while data and colour rarely change.
+	native void SetBillboardAlpha(int id, double alpha);
+	native void RemoveBillboard(int id);
+	// Ray versus billboard. Returns the nearest one the ray crosses and where
+	// on its face it landed, as 0..1 across and down -- the same UV the shader
+	// sees. Returns 0 on a miss. maxDist <= 0 means unlimited. Call as:
+	//   int hit; Vector2 uv; [hit, uv] = level.AimBillboard(start, dir);
+	native int, Vector2 AimBillboard(Vector3 start, Vector3 dir, double maxDist = 0);
+	// Point versus billboard -- the touch case. Returns the nearest billboard
+	// the point is within maxRange of and inside the bounds of, its UV, and
+	// the distance to the surface. Drive hover off the distance and fire the
+	// press on contact. Returns 0 on a miss. Call as:
+	//   int hit; Vector2 uv; double d; [hit, uv, d] = level.TouchBillboard(handPos, 8);
+	native int, Vector2, double TouchBillboard(Vector3 point, double maxRange = 0);
+
 	native String GetChecksum() const;
 
 	native void ChangeSky(TextureID sky1, TextureID sky2 );

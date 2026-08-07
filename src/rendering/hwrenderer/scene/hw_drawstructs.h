@@ -394,6 +394,14 @@ public:
 	TArray<lightlist_t> *lightlist;
 	DRotator Angles;
 
+	// [BB] Billboards carry their four corners already solved, because their
+	// orientation comes from stored yaw/tilt rather than from an actor's
+	// renderflags -- the sprite paths below all key off actor/particle, and a
+	// billboard has neither. CalculateVertices hands these straight back.
+	bool isBillboard = false;
+	bool bbNoDepth = false;		// draw over world geometry instead of being occluded by it
+	FVector3 bbVerts[4];
+
 	void SplitSprite(HWDrawInfo *di, sector_t * frontsector, bool translucent);
 	void PerformSpriteClipAdjustment(AActor *thing, const DVector2 &thingpos, float spriteheight);
 	bool CalculateVertices(HWDrawInfo *di, FVector3 *v, DVector3 *vp);
@@ -404,6 +412,10 @@ public:
 	void PutSprite(HWDrawInfo *di, bool translucent);
 	void Process(HWDrawInfo *di, AActor* thing,sector_t * sector, area_t in_area, int thruportal = false, bool isSpriteShadow = false);
 	void ProcessParticle(HWDrawInfo *di, particle_t *particle, sector_t *sector, class DVisualThinker *spr);//, int shade, int fakeside)
+
+	// [BB] a billboard as a real in-scene quad: depth-tested and
+	// translucency-sorted through the same lists as sprites.
+	void ProcessBillboard(HWDrawInfo *di, const struct FBillboard *bb, const DVector3 &bpos, sector_t *sector);
 	void AdjustVisualThinker(HWDrawInfo *di, DVisualThinker *spr, sector_t *sector);
 
 	void DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent);

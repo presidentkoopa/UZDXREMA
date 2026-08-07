@@ -72,6 +72,39 @@ EXTERN_CVAR(Bool, save_formatted)
 //
 //==========================================================================
 
+//============================================================================
+//
+// [BB] Billboards are level state rather than thinkers, so they serialize
+// with the level. Unlike the line_t overload below, def is always null here
+// -- TArray elements get no per-element default -- so it is never touched.
+//
+//============================================================================
+
+FSerializer &Serialize(FSerializer &arc, const char *key, FBillboard &bb, FBillboard *def)
+{
+	if (arc.BeginObject(key))
+	{
+		arc("id", bb.id)
+			("pos", bb.pos)
+			("width", bb.width)
+			("height", bb.height)
+			("yaw", bb.yaw)
+			("tilt", bb.tilt)
+			("facing", bb.facing)
+			("payload", bb.payload)
+			("data", bb.data)
+			("color", bb.color)
+			("alpha", bb.alpha)
+			("flags", bb.flags)
+			("lifetime", bb.lifetime)
+			("spawntic", bb.spawntic)
+			("attachedto", bb.attachedTo)
+			("attachoffset", bb.attachOffset)
+			.EndObject();
+	}
+	return arc;
+}
+
 FSerializer &Serialize(FSerializer &arc, const char *key, line_t &line, line_t *def)
 {
 	if (arc.BeginObject(key))
@@ -993,6 +1026,16 @@ void FLevelLocals::Serialize(FSerializer &arc, bool hubload)
 		("automap", automap)
 		("interpolator", interpolator)
 		("frozenstate", frozenstate);
+
+	// [BB] All billboards travel, not just the persistent ones: maptime is
+	// saved above, so a transient's spawntic stays meaningful and it resumes
+	// its remaining lifetime after the load rather than restarting it.
+	// attachedTo rides the object table, so a pointer whose actor did not
+	// survive loads as null and the next tic's maintenance drops that
+	// billboard exactly as it would have done live. NextBillboardID travels
+	// so handles stay unique across a load.
+	arc("billboards", Billboards)
+		("nextbillboardid", NextBillboardID);
 
 
 	// Hub transitions must keep the current total time

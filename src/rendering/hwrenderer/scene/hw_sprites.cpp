@@ -83,6 +83,14 @@ EXTERN_CVAR(Bool, gl_texture_thread_models)
 //
 //==========================================================================
 
+// [BB] Which way a billboard's texture runs across its face. The basis
+// vectors follow the panel system's documented convention (right is
+// (sin y, -cos y, 0)), but handedness bugs of this kind are invisible until
+// something with text on it renders backwards -- and this has bitten the
+// project before. A cvar makes it a five-second fix in the headset instead
+// of a rebuild, the same way the panel code handles its pitch bias.
+CVAR(Bool, bb_flipu, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
 CVAR(Bool, gl_usecolorblending, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, gl_sprite_blend, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR(Int, gl_spriteclip, -1, CVAR_ARCHIVE)
@@ -306,8 +314,20 @@ void HWSprite::DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent)
 			{
 				state.SetDepthBias(-1, -128);
 			}
+			// [BB] A no-depth billboard draws over the world rather than
+			// being occluded by it. This is what a HUD-locked panel needs:
+			// welded to the view, it would otherwise be sliced in half every
+			// time the player backs into a wall.
+			if (isBillboard && bbNoDepth)
+			{
+				state.SetDepthFunc(DF_Always);
+			}
 			state.SetLightIndex(-1);
 			state.Draw(DT_TriangleStrip, vertexindex, 4);
+			if (isBillboard && bbNoDepth)
+			{
+				state.SetDepthFunc(DF_LEqual);
+			}
 
 			if (foglayer)
 			{
@@ -382,6 +402,18 @@ void HandleSpriteOffsets(Matrix3x4 *mat, const FRotator *HW, FVector2 *offset, b
 bool HWSprite::CalculateVertices(HWDrawInfo* di, FVector3* v, DVector3* vp)
 {
 	float pixelstretch = di->Level->pixelstretch;
+
+	// [BB] Billboards solved their own corners in ProcessBillboard, from an
+	// explicit yaw/tilt rather than from actor renderflags. Nothing below
+	// applies to them.
+	if (isBillboard)
+	{
+		v[0] = bbVerts[0];
+		v[1] = bbVerts[1];
+		v[2] = bbVerts[2];
+		v[3] = bbVerts[3];
+		return false;
+	}
 
 	FVector3 center = FVector3((x1 + x2) * 0.5, (y1 + y2) * 0.5, (z1 + z2) * 0.5);
 	const auto& HWAngles = di->Viewpoint.HWAngles;
@@ -793,6 +825,8 @@ void HWSprite::Process(HWDrawInfo *di, AActor* thing, sector_t * sector, area_t 
 {
 	sector_t rs;
 	sector_t * rendersector;
+
+	isBillboard = false;	// [BB] never inherit a previous use's billboard state
 
 	if (thing == nullptr)
 		return;
@@ -1602,6 +1636,8 @@ void HWSprite::ProcessParticle(HWDrawInfo *di, particle_t *particle, sector_t *s
 	if (spr && !spr->ValidTexture())
 		return;
 
+	isBillboard = false;	// [BB] never inherit a previous use's billboard state
+
 	lightlevel = hw_ClampLight(spr ? spr->GetLightLevel(sector) : sector->GetSpriteLight());
 	foglevel = (uint8_t)clamp<short>(sector->lightlevel, 0, 255);
 
@@ -1783,8 +1819,159 @@ void HWSprite::ProcessParticle(HWDrawInfo *di, particle_t *particle, sector_t *s
 	rendered_sprites++;
 }
 
+//==========================================================================
+//
+// [BB] ProcessBillboard
+//
+// A billboard becomes a real quad in the translucent draw lists, so it is
+// depth-tested and distance-sorted against the rest of the scene exactly
+// like a sprite -- it goes through the same HWSprite machinery.
+//
+// Billboards are UI-grade: fullbright, so a panel stays readable in a dark
+// room rather than disappearing into it.
+//
+// Extent is per-axis. The quad is built camera-facing here; freely oriented
+// billboards need the rotation-matrix path the flat sprites use, which is a
+// separate piece of work.
+//
+//==========================================================================
+
+void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVector3 &bpos, sector_t *sector)
+{
+	if (!sector || !bb) return;
+
+	lightlevel = 255;
+	foglevel = (uint8_t)clamp<short>(sector->lightlevel, 0, 255);
+	Colormap = sector->Colormap;
+	Colormap.ClearColor();
+	fullbright = true;
+
+	trans = (float)clamp(bb->alpha, 0.0, 1.0);
+	if (trans <= 0.f) return;	// fully faded out: nothing to submit
+	OverrideShader = 0;
+	modelframe = nullptr;
+	texture = nullptr;
+	topclip = LARGE_VALUE;
+	bottomclip = -LARGE_VALUE;
+	index = 0;
+	actor = nullptr;
+	particle = nullptr;
+	lightlist = nullptr;
+	translation = NO_TRANSLATION;
+	RenderStyle = STYLE_Translucent;
+	hw_styleflags = STYLEHW_NoAlphaTest;
+	dynlightindex = -1;
+	polyoffset = false;
+	offx = 0.f;
+	offy = 0.f;
+	Angles = DRotator();
+
+	ThingColor = bb->color;
+	ThingColor.a = 255;
+
+	// Only the textured payload draws for now; the rest wait on their shaders.
+	FTextureID tid;
+	tid.SetIndex(bb->data);
+	if (bb->payload == BB_TEXTURE && tid.isValid())
+	{
+		texture = TexMan.GetGameTexture(tid, true);
+	}
+	if (!texture || !texture->isValid()) return;
+
+	vt = 0;
+	vb = 1;
+	ul = bb_flipu ? 1 : 0;
+	ur = bb_flipu ? 0 : 1;
+
+	const auto &vp = di->Viewpoint;
+	x = (float)bpos.X;
+	y = (float)bpos.Y;
+	z = (float)bpos.Z;
+
+	double halfw = bb->width * 0.5;
+	double halfh = bb->height * 0.5;
+
+	// Resolve orientation. Facing is a mode, not the definition of the
+	// primitive: BBF_FIXED honours the stored yaw/tilt verbatim, which is
+	// what lets two panels hold a fixed angle to each other. The camera
+	// modes only substitute a yaw (and for BBF_CAMERA a tilt) computed from
+	// where the viewer actually is.
+	double useYaw = bb->yaw;
+	double useTilt = bb->tilt;
+
+	// An attached billboard can hold its yaw relative to the actor it rides,
+	// so a thing that turns takes its faces with it instead of sliding around
+	// still pointing whichever way it was born facing.
+	if ((bb->flags & BBFL_FOLLOWANGLE) && (bb->flags & BBFL_ATTACHED) && bb->attachedTo != nullptr)
+	{
+		useYaw += bb->attachedTo->Angles.Yaw.Degrees();
+	}
+
+	if (bb->facing == BBF_CAMERAYAW || bb->facing == BBF_CAMERA)
+	{
+		double dx = vp.Pos.X - bpos.X;
+		double dy = vp.Pos.Y - bpos.Y;
+		useYaw = atan2(dy, dx) * (180.0 / M_PI);
+
+		if (bb->facing == BBF_CAMERA)
+		{
+			double dz = vp.Pos.Z - bpos.Z;
+			double flat = sqrt(dx * dx + dy * dy);
+			useTilt = atan2(dz, flat) * (180.0 / M_PI);
+		}
+	}
+
+	// Design space to world vectors. This convention is fixed, not a
+	// preference -- getting right the wrong way round draws every panel
+	// mirrored, which is subtle enough to survive a long time before
+	// anyone notices the text reads backwards:
+	//
+	//   face  F = ( cos y,  sin y, 0)
+	//   right R = ( sin y, -cos y, 0)   viewer's right
+	//   up    U tilts toward -F, so positive tilt leans the TOP toward
+	//           the viewer rather than away
+	double yawRad = useYaw * (M_PI / 180.0);
+	double tiltRad = useTilt * (M_PI / 180.0);
+	double cy = cos(yawRad), sy = sin(yawRad);
+	double ct = cos(tiltRad), st = sin(tiltRad);
+
+	DVector3 right(sy, -cy, 0.0);
+	DVector3 up(-cy * st, -sy * st, ct);
+
+	DVector3 rw = right * halfw;
+	DVector3 uh = up * halfh;
+
+	DVector3 tl = bpos - rw + uh;
+	DVector3 tr = bpos + rw + uh;
+	DVector3 bl = bpos - rw - uh;
+	DVector3 br = bpos + rw - uh;
+
+	// Vertex components are (worldX, worldZ, worldY); corner order must match
+	// the UV assignment in CreateVertices.
+	bbVerts[0] = FVector3((float)tl.X, (float)tl.Z, (float)tl.Y);
+	bbVerts[1] = FVector3((float)tr.X, (float)tr.Z, (float)tr.Y);
+	bbVerts[2] = FVector3((float)bl.X, (float)bl.Z, (float)bl.Y);
+	bbVerts[3] = FVector3((float)br.X, (float)br.Z, (float)br.Y);
+	isBillboard = true;
+	bbNoDepth = (bb->flags & BBFL_NODEPTH) != 0;
+
+	// The draw lists still sort and clip against these, so give them the
+	// quad's actual bounds rather than leaving them at the bare centre.
+	x1 = (float)min(min(tl.X, tr.X), min(bl.X, br.X));
+	x2 = (float)max(max(tl.X, tr.X), max(bl.X, br.X));
+	y1 = (float)min(min(tl.Y, tr.Y), min(bl.Y, br.Y));
+	y2 = (float)max(max(tl.Y, tr.Y), max(bl.Y, br.Y));
+	z1 = (float)min(min(tl.Z, tr.Z), min(bl.Z, br.Z));
+	z2 = (float)max(max(tl.Z, tr.Z), max(bl.Z, br.Z));
+
+	depth = (float)((x - vp.Pos.X) * vp.TanCos + (y - vp.Pos.Y) * vp.TanSin);
+
+	PutSprite(di, true);
+	rendered_sprites++;
+}
+
 // [MC] VisualThinkers are to be rendered akin to actor sprites. The reason this whole system
-// is hitching a ride on particle_t is because of the large number of checks with 
+// is hitching a ride on particle_t is because of the large number of checks with
 // HWSprite elsewhere in the draw lists.
 void HWSprite::AdjustVisualThinker(HWDrawInfo* di, DVisualThinker* spr, sector_t* sector)
 {
