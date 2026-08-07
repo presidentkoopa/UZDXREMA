@@ -876,16 +876,20 @@ void DrawLaserSightWorld(FRenderState& state)
 		return;
 	}
 
-	if (vr_laser_hide_on_wheel && VRWheel_IsActive())
-	{
-		return;
-	}
-
 	player_t* player = &players[consoleplayer];
 
 	auto drawHand = [&state](player_t* player, bool offhand, bool allowPointer, bool allowBeamToggle)
 	{
 		if (player == nullptr || player->mo == nullptr || !player->mo->OverrideAttackPosDir)
+		{
+			return;
+		}
+
+		// [BB] Hide this hand's laser only when this hand is the one holding a
+		// wheel. It used to hide both on any open wheel, so a ring on one hand
+		// blinded the other -- which matters more now that the other hand can
+		// still shoot.
+		if (vr_laser_hide_on_wheel && VRWheel_ShouldSuppressHandInput(offhand ? VR_OFFHAND : VR_MAINHAND))
 		{
 			return;
 		}

@@ -1049,10 +1049,17 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 	if (buttonMap.ButtonDown(Button_ShowScores))	cmd->ucmd.buttons |= BT_SHOWSCORES;
 	if (speed) cmd->ucmd.buttons |= BT_RUN;
 
-	if (VRWheel_ShouldSuppressGameplayInput())
+	// [BB] Per hand, not globally. A wheel on one hand used to strip both hands'
+	// fire and reload, so opening the main-hand ring disarmed the off hand as
+	// well -- which defeats the whole point of a ring per hand. The hand holding
+	// a ring loses its buttons; the other one keeps playing.
+	if (VRWheel_ShouldSuppressHandInput(VR_MAINHAND))
 	{
-		cmd->ucmd.buttons &= ~(BT_ATTACK | BT_ALTATTACK | BT_USE | BT_RELOAD | BT_MAINHANDRELOAD |
-			BT_OFFHANDRELOAD | BT_OFFHANDATTACK | BT_OFFHANDALTATTACK);
+		cmd->ucmd.buttons &= ~(BT_ATTACK | BT_ALTATTACK | BT_USE | BT_RELOAD | BT_MAINHANDRELOAD);
+	}
+	if (VRWheel_ShouldSuppressHandInput(VR_OFFHAND))
+	{
+		cmd->ucmd.buttons &= ~(BT_OFFHANDRELOAD | BT_OFFHANDATTACK | BT_OFFHANDALTATTACK);
 	}
 
 	// Handle joysticks/game controllers.

@@ -13,6 +13,9 @@ void VRWheel_CloseInventory();
 void VRWheel_Reset();
 bool VRWheel_IsActive();
 bool VRWheel_ShouldSuppressGameplayInput();
+// True when the given hand is the one holding a wheel. The other hand is still
+// playing the game and must keep its trigger, its reload and its laser.
+bool VRWheel_ShouldSuppressHandInput(int hand);
 bool VRWheel_ShouldSuppressWeaponHand(int hand);
 void VRWheel_Draw(HWDrawInfo* di, FRenderState& state);
 bool VRWheel_GetTransform(VSMatrix& out);

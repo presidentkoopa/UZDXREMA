@@ -99,7 +99,22 @@ namespace
 
 	struct VRWheelEntry
 	{
+		// [BB] Item is for building this entry and nothing else -- never
+		// dereference it after RefreshEntries has returned. Entries survive across
+		// frames, nothing here is visible to the garbage collector, and the refresh
+		// stops running long before the entry is used: VRWheel_Draw bails above it
+		// while the player is dead, while a menu or the console is up, and while
+		// the automap screen layer is showing, but the bind release that commits
+		// the selection does not care about any of that. So a hovered actor can be
+		// destroyed and collected in the gap, and committing would read freed
+		// memory.
+		//
+		// ItemClass is what commit uses instead. A PClassActor lives for the
+		// process, so re-finding the real actor through it at the moment of use is
+		// always safe, and if the player no longer has the thing the lookup simply
+		// fails.
 		AActor* Item = nullptr;
+		PClassActor* ItemClass = nullptr;
 		FGameTexture* Icon = nullptr;
 		FSpriteModelFrame* ModelFrame = nullptr;
 		FState* ModelState = nullptr;
@@ -646,6 +661,7 @@ namespace
 
 		VRWheelEntry entry;
 		entry.Item = item;
+		entry.ItemClass = item->GetClass();
 		entry.Icon = icon;
 		entry.ModelFrame = modelFrame;
 		entry.ModelState = modelState;
@@ -914,14 +930,31 @@ namespace
 			return;
 		}
 
+		// [BB] Build first and refuse to open on nothing, for every wheel type
+		// rather than only for inventory. An open wheel takes the trigger away --
+		// g_game.cpp masks attack, use and reload while any wheel is live -- so an
+		// empty one leaves the player unable to shoot or open a door while staring
+		// at no icons, recovering only when they let go of a bind they cannot see
+		// a reason to be holding.
+		//
+		// Weapon wheels used to be exempt because they were assumed never to come
+		// back empty. CanHandTakeWeapon broke that assumption: a mod that gives
+		// each hand its own weapon identities has a genuinely empty wheel for the
+		// hand holding none of them, which is exactly the mod this filter was
+		// written for.
 		TArray<VRWheelEntry> entries;
 		if (type == EVRWheelType::Inventory)
 		{
 			BuildInventoryEntries(player, entries);
-			if (entries.Size() == 0)
-			{
-				return;
-			}
+		}
+		else
+		{
+			BuildWeaponEntries(player, entries, type == EVRWheelType::OffhandWeapon);
+		}
+		if (entries.Size() == 0)
+		{
+			PlayWheelSound("menu/invalid");
+			return;
 		}
 
 		// [BB] A hand can only hold one wheel. Opening a second on the same hand
@@ -943,14 +976,7 @@ namespace
 		GetHandAimAngles(player, anchorHand, wheel.OpenYaw, wheel.OpenPitch);
 		wheel.HoveredIndex = -1;
 		wheel.HoverValid = false;
-		if (type == EVRWheelType::Inventory)
-		{
-			wheel.Entries = entries;
-		}
-		else
-		{
-			RefreshEntries(player, wheel);
-		}
+		wheel.Entries = entries;
 
 		UpdateHover(player, wheel);
 		PlayWheelSound("menu/activate");
@@ -967,14 +993,14 @@ namespace
 		}
 
 		const auto& entry = wheel.Entries[wheel.HoveredIndex];
-		if (!entry.Selectable || entry.Item == nullptr || player == nullptr || player->mo == nullptr)
+		if (!entry.Selectable || entry.ItemClass == nullptr || player == nullptr || player->mo == nullptr)
 		{
 			return;
 		}
 
 		if (IsWeaponWheelType(wheel.Type))
 		{
-			auto weapon = player->mo->FindInventory(entry.Item->GetClass());
+			auto weapon = player->mo->FindInventory(entry.ItemClass);
 			if (weapon != nullptr)
 			{
 				const bool targetOffhand = wheel.Type == EVRWheelType::OffhandWeapon;
@@ -994,14 +1020,37 @@ namespace
 		}
 		else if (wheel.Type == EVRWheelType::Inventory)
 		{
-			player->mo->PointerVar<AActor>(NAME_InvSel) = entry.Item;
-			player->inventorytics = 0;
-			SendItemUse = entry.Item;
+			// [BB] Re-find rather than trusting the stored pointer, for the reason
+			// spelled out on VRWheelEntry. A miss means the item is gone, which is
+			// a no-op rather than a use of nothing.
+			auto item = player->mo->FindInventory(entry.ItemClass);
+			if (item != nullptr)
+			{
+				player->mo->PointerVar<AActor>(NAME_InvSel) = item;
+				player->inventorytics = 0;
+				SendItemUse = item;
+			}
 		}
 	}
 
+	// [BB] Two wheels can legitimately hold the same type -- bind the inventory
+	// wheel to two keys and flip vr_wheel_switch_hands between presses and both
+	// hands end up holding one. Closing "the first one found" then commits the
+	// wrong wheel, so this closes the one on the hand that type prefers now, and
+	// only falls back to a scan if that hand is holding something else.
 	static void CloseWheel(EVRWheelType type)
 	{
+		VRWheelState& preferred = WheelForHand(GetPreferredAnchorHand(type));
+		if (preferred.Type == type)
+		{
+			const int closedHand = preferred.AnchorHand;
+			CommitWheelSelection(preferred);
+			ResetWheel(preferred);
+			PlayWheelSound("menu/clear");
+			AnnounceWheelClosed(type, closedHand);
+			return;
+		}
+
 		for (auto& wheel : GVRWheels)
 		{
 			if (wheel.Type != type)
@@ -1508,6 +1557,19 @@ bool VRWheel_IsActive()
 bool VRWheel_ShouldSuppressGameplayInput()
 {
 	return VRWheel_IsActive();
+}
+
+// [BB] The point of a wheel per hand is that the other hand keeps playing. A
+// hand busy holding a ring should lose its trigger; a hand doing nothing of the
+// sort should not. Callers that genuinely have no hand to name -- the weapon
+// cycling commands, for instance -- still ask VRWheel_ShouldSuppressGameplayInput.
+bool VRWheel_ShouldSuppressHandInput(int hand)
+{
+	if (hand != VR_MAINHAND && hand != VR_OFFHAND)
+	{
+		return VRWheel_IsActive();
+	}
+	return IsWheelOpen(WheelForHand(hand));
 }
 
 bool VRWheel_ShouldSuppressWeaponHand(int hand)
