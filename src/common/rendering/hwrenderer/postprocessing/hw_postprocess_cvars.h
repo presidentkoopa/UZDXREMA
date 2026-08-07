@@ -25,6 +25,7 @@ public:
 //==========================================================================
 EXTERN_CVAR(Bool, gl_bloom)
 EXTERN_CVAR(Float, gl_bloom_amount)
+EXTERN_CVAR(Float, gl_bloom_threshold)
 EXTERN_CVAR(Float, gl_exposure_scale)
 EXTERN_CVAR(Float, gl_exposure_min)
 EXTERN_CVAR(Float, gl_exposure_base)

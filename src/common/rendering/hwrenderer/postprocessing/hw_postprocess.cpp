@@ -114,6 +114,7 @@ void PPBloom::RenderBloom(PPRenderState *renderstate, int sceneWidth, int sceneH
 	ExtractUniforms extractUniforms;
 	extractUniforms.Scale = screen->SceneScale();
 	extractUniforms.Offset = screen->SceneOffset();
+	extractUniforms.Threshold = gl_bloom_threshold;
 
 	auto &level0 = levels[0];
 

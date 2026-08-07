@@ -33,6 +33,17 @@ CUSTOM_CVAR(Float, gl_bloom_amount, 1.4f, CVAR_ARCHIVE)
 	if (self < 0.1f) self = 0.1f;
 }
 
+// [BB] How bright a pixel must be before it blooms. This was hardcoded at
+// 1.0, which meant only pixels that had already blown past full white could
+// glow -- fine for a muzzle flash, useless for anything trying to read as
+// emissive at a sane brightness. Lowering it lets glow bloom without being
+// driven to absurd intensities first.
+CUSTOM_CVAR(Float, gl_bloom_threshold, 1.0f, CVAR_ARCHIVE)
+{
+	if (self < 0.05f) self = 0.05f;
+	if (self > 4.0f) self = 4.0f;
+}
+
 CVAR(Float, gl_exposure_scale, 1.3f, CVAR_ARCHIVE)
 CVAR(Float, gl_exposure_min, 0.35f, CVAR_ARCHIVE)
 CVAR(Float, gl_exposure_base, 0.35f, CVAR_ARCHIVE)

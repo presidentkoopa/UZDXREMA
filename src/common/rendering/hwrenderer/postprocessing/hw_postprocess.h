@@ -332,13 +332,19 @@ struct ExtractUniforms
 {
 	FVector2 Scale;
 	FVector2 Offset;
+	float Threshold;
+	float padding0, padding1, padding2;
 
 	static std::vector<UniformFieldDesc> Desc()
 	{
 		return
 		{
 			{ "Scale", UniformType::Vec2, offsetof(ExtractUniforms, Scale) },
-			{ "Offset", UniformType::Vec2, offsetof(ExtractUniforms, Offset) }
+			{ "Offset", UniformType::Vec2, offsetof(ExtractUniforms, Offset) },
+			{ "Threshold", UniformType::Float, offsetof(ExtractUniforms, Threshold) },
+			{ "padding0", UniformType::Float, offsetof(ExtractUniforms, padding0) },
+			{ "padding1", UniformType::Float, offsetof(ExtractUniforms, padding1) },
+			{ "padding2", UniformType::Float, offsetof(ExtractUniforms, padding2) }
 		};
 	}
 };
