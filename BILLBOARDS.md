@@ -74,14 +74,19 @@ marker under a monster wants the flag off.
 ```
 0  BB_PANEL     rounded-rect backing
 1  BB_TEXTURE   any TextureID on the quad; data = TextureID.GetIndex()
-2  BB_DIGITS    SDF digits
-3  BB_GLYPH     SDF glyph
+2  BB_DIGITS    a row of digits; data = value | palette
+3  BB_GLYPH     a single glyph; data = id | palette
 4  BB_RING      progress ring
 5  BB_BAR       progress bar
 ```
 
-**Only `BB_TEXTURE` draws.** The rest are enumerated but wait on their shaders.
-A billboard with an undrawn payload is silently skipped.
+**All five draw.** They are not shaders and never needed to be: a payload
+emits as many textured quads as its shape wants -- a bar is a track and a
+fill, a number is a row of glyphs -- and the quad-building work was already
+done. Offsets are in half-extents of the parent, so 1.0 is its edge and a
+payload never needs to know where in the world it sits. Every sub-quad takes
+depth from the billboard's centre rather than its own, so one panel sorts as
+one object and a fill cannot land behind its own track.
 
 The texture route is not a stopgap: point `data` at a canvas texture and paint
 it from ZScript, and the billboard is whatever you painted.
@@ -210,8 +215,10 @@ and losing one to a budget would read as the interface vanishing.
 
 ## Not done
 
-**SDF payloads.** Five of the six payloads need shaders. The longer aim is
-building whole objects out of SDFs, so this is not merely cosmetic.
+**SDF payloads.** The five non-texture payloads now draw as quads rather than
+as signed-distance fields. True SDFs remain interesting for building whole
+objects out of shapes rather than out of geometry, but nothing is blocked on
+them -- that is a different feature, not a missing half of this one.
 
 **Collision.** Billboards are render-only. You fall through one. Doom's
 collision model has no place for an arbitrary oriented quad, so this is a real
