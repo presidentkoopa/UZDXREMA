@@ -1166,7 +1166,7 @@ namespace
 	//
 	// Sized in map units: glyphHeight is what one line occupies, and each glyph's
 	// width comes from the font so proportional fonts stay proportional.
-	static void DrawWorldQuad(HWDrawInfo* di, FRenderState& state, const DVector3& center, const DVector3& right, const DVector3& up, float width, float height, FGameTexture* texture, PalEntry color, bool textured, bool rotate180 = false);
+	static void DrawWorldQuad(HWDrawInfo* di, FRenderState& state, const DVector3& center, const DVector3& right, const DVector3& up, float width, float height, FGameTexture* texture, PalEntry color, bool textured, bool rotate180 = false, FTranslationID translation = NO_TRANSLATION);
 
 	static float MeasureWorldText(FFont* font, const char* text, float glyphHeight)
 	{
@@ -1175,12 +1175,13 @@ namespace
 			return 0.0f;
 		}
 		const float unitsPerPixel = glyphHeight / (float)max(1, font->GetHeight());
+		// StringWidth already skips colour escapes, so this matches what draws.
 		return (float)font->StringWidth(text) * unitsPerPixel;
 	}
 
 	// Draws one line, centred on `center`. Returns nothing; callers lay out lines
 	// themselves so they can mix sizes.
-	static void DrawWorldTextLine(HWDrawInfo* di, FRenderState& state, const DVector3& center, const DVector3& right, const DVector3& up, float glyphHeight, FFont* font, const char* text, PalEntry color)
+	static void DrawWorldTextLine(HWDrawInfo* di, FRenderState& state, const DVector3& center, const DVector3& right, const DVector3& up, float glyphHeight, FFont* font, const char* text, EColorRange baseColor)
 	{
 		if (di == nullptr || font == nullptr || text == nullptr || *text == 0 || glyphHeight <= 0.0f)
 		{
@@ -1190,12 +1191,32 @@ namespace
 		const float unitsPerPixel = glyphHeight / (float)max(1, font->GetHeight());
 		const float totalWidth = MeasureWorldText(font, text, glyphHeight);
 
+		EColorRange activeColor = baseColor;
+		FTranslationID translation = font->GetColorTranslation(activeColor);
+
 		// Walk from the left edge so the line ends up centred.
 		double penOffset = -0.5 * (double)totalWidth;
-		for (const uint8_t* c = (const uint8_t*)text; *c != 0; ++c)
+		const uint8_t* c = (const uint8_t*)text;
+		while (*c != 0)
 		{
+			// [BB] Honour \c colour escapes rather than drawing them. A mod that
+			// puts rarity on the name expects the name to be that colour, and the
+			// alternative is the escape appearing as literal characters in the
+			// middle of the word.
+			if (*c == TEXTCOLOR_ESCAPE)
+			{
+				++c;
+				const EColorRange parsed = V_ParseFontColor(c, CR_UNTRANSLATED, CR_YELLOW);
+				if (parsed != CR_UNDEFINED)
+				{
+					activeColor = (parsed == CR_UNTRANSLATED) ? baseColor : parsed;
+					translation = font->GetColorTranslation(activeColor);
+				}
+				continue;
+			}
+
 			int charWidthPixels = 0;
-			FGameTexture* glyph = font->GetChar((int)*c, CR_UNTRANSLATED, &charWidthPixels);
+			FGameTexture* glyph = font->GetChar((int)*c, activeColor, &charWidthPixels);
 			const float advance = (float)charWidthPixels * unitsPerPixel;
 			if (glyph != nullptr && advance > 0.0f)
 			{
@@ -1204,9 +1225,10 @@ namespace
 				const float glyphWidth = (float)glyph->GetDisplayWidth() * unitsPerPixel;
 				const float glyphDrawHeight = (float)glyph->GetDisplayHeight() * unitsPerPixel;
 				const DVector3 glyphCenter = center + right * (penOffset + advance * 0.5);
-				DrawWorldQuad(di, state, glyphCenter, right, up, glyphWidth, glyphDrawHeight, glyph, color, true);
+				DrawWorldQuad(di, state, glyphCenter, right, up, glyphWidth, glyphDrawHeight, glyph, PalEntry(255, 255, 255, 255), true, false, translation);
 			}
 			penOffset += advance;
+			++c;
 		}
 	}
 
@@ -1286,7 +1308,7 @@ namespace
 		{
 			const float h = (i == 0) ? headingHeight : bodyHeight;
 			penY -= h * 0.5;
-			const PalEntry lineColor = (i == 0) ? PalEntry(255, 255, 255, 255) : PalEntry(255, 190, 190, 190);
+			const EColorRange lineColor = (i == 0) ? CR_WHITE : CR_GRAY;
 			DrawWorldTextLine(di, state, panelCenter + up * penY, right, up, h, font, lines[i].GetChars(), lineColor);
 			penY -= h * 0.5 + linePad;
 		}
@@ -1337,7 +1359,7 @@ namespace
 		state.Draw(DT_TriangleFan, vert.second, Segments + 2);
 	}
 
-	static void DrawWorldQuad(HWDrawInfo* di, FRenderState& state, const DVector3& center, const DVector3& right, const DVector3& up, float width, float height, FGameTexture* texture, PalEntry color, bool textured, bool rotate180)
+	static void DrawWorldQuad(HWDrawInfo* di, FRenderState& state, const DVector3& center, const DVector3& right, const DVector3& up, float width, float height, FGameTexture* texture, PalEntry color, bool textured, bool rotate180, FTranslationID translation)
 	{
 		if (di == nullptr || width <= 0.0f || height <= 0.0f)
 		{
@@ -1379,7 +1401,7 @@ namespace
 		{
 			state.SetColorAlpha(0xffffff, color.a / 255.0f, 0);
 			state.EnableTexture(true);
-			state.SetMaterial(texture, UF_Texture, 0, CLAMP_XY_NOMIP, 0, -1);
+			state.SetMaterial(texture, UF_Texture, 0, CLAMP_XY_NOMIP, translation, -1);
 		}
 		else
 		{
