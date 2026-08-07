@@ -43,6 +43,7 @@
 #include "models.h"
 #include "vectors.h"
 #include "texturemanager.h"
+#include "v_font.h"
 #include "basics.h"
 
 #include "hw_models.h"
@@ -1828,6 +1829,143 @@ void HWSprite::ProcessParticle(HWDrawInfo *di, particle_t *particle, sector_t *s
 
 //==========================================================================
 //
+//==========================================================================
+//
+// [BB] Billboard payloads
+//
+// What a billboard draws on itself. Only BB_TEXTURE used to draw; the rest
+// were declared and left waiting on shaders that were never written, so a
+// panel asking for one got an invisible quad and no error.
+//
+// They do not need shaders. A payload is allowed to emit more than one quad,
+// so a bar is a track and a fill, and a number is a row of glyphs -- ordinary
+// textured quads, sorted by the sprite lists like everything else. The two
+// genuinely shape-shaped payloads come from three small generated graphics
+// (bbwhite, bbpanel, bbring) tinted by the billboard's colour.
+//
+// The cost of a texture instead of a shader, stated plainly: a rounded plate
+// stretched to a non-square billboard has its corner radius stretched with it,
+// and a ring's thickness is fixed by the artwork rather than settable. Both are
+// worth it to have all five payloads working today rather than none.
+//
+//==========================================================================
+
+static FGameTexture* GetBillboardShape(const char* name)
+{
+	FTextureID id = TexMan.CheckForTexture(name, ETextureType::Any);
+	if (!id.isValid()) return nullptr;
+	return TexMan.GetGameTexture(id, true);
+}
+
+// The glyph row shared by BB_DIGITS and BB_GLYPH. Laid out across the
+// billboard's width at its own aspect, centred, so a number fills the panel it
+// was given rather than sitting at some arbitrary pixel size.
+static void EmitBillboardGlyphs(const char* text, double halfw, double halfh, PalEntry tint,
+	const std::function<void(double, double, double, double, FGameTexture*, PalEntry)>& emit)
+{
+	if (text == nullptr || *text == 0) return;
+	FFont* font = SmallFont;
+	if (font == nullptr) return;
+
+	const int fontHeight = max(1, font->GetHeight());
+	int totalPixels = 0;
+	for (const uint8_t* c = (const uint8_t*)text; *c != 0; ++c)
+	{
+		totalPixels += font->GetCharWidth((int)*c);
+	}
+	if (totalPixels <= 0) return;
+
+	// Fit to whichever axis runs out first, so a long number shrinks to fit
+	// rather than running off the ends of its own panel.
+	const double byWidth = (halfw * 2.0) / (double)totalPixels;
+	const double byHeight = (halfh * 2.0) / (double)fontHeight;
+	const double unitsPerPixel = min(byWidth, byHeight);
+
+	double pen = -(totalPixels * unitsPerPixel) * 0.5;
+	for (const uint8_t* c = (const uint8_t*)text; *c != 0; ++c)
+	{
+		int charWidth = 0;
+		FGameTexture* glyph = font->GetChar((int)*c, CR_UNTRANSLATED, &charWidth);
+		const double advance = charWidth * unitsPerPixel;
+		if (glyph != nullptr && advance > 0.0)
+		{
+			const double gw = glyph->GetDisplayWidth() * unitsPerPixel;
+			const double gh = glyph->GetDisplayHeight() * unitsPerPixel;
+			emit((pen + advance * 0.5) / halfw, 0.0, gw * 0.5, gh * 0.5, glyph, tint);
+		}
+		pen += advance;
+	}
+}
+
+void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double halfw, double halfh,
+	const std::function<void(double, double, double, double, FGameTexture*, PalEntry)>& emit)
+{
+	const PalEntry tint = bb->color;
+
+	switch (bb->payload)
+	{
+	case BB_TEXTURE:
+	{
+		FTextureID tid;
+		tid.SetIndex(bb->data);
+		if (!tid.isValid()) return;
+		emit(0.0, 0.0, halfw, halfh, TexMan.GetGameTexture(tid, true), tint);
+		return;
+	}
+
+	case BB_PANEL:
+		emit(0.0, 0.0, halfw, halfh, GetBillboardShape("bbpanel"), tint);
+		return;
+
+	case BB_RING:
+		emit(0.0, 0.0, halfw, halfh, GetBillboardShape("bbring"), tint);
+		return;
+
+	case BB_BAR:
+	{
+		// data is fill percent, 0..100. The track is the same white plate at a
+		// quarter alpha's worth of darkening rather than a second graphic, so a
+		// bar is always exactly two quads whatever it is showing.
+		FGameTexture* white = GetBillboardShape("bbwhite");
+		if (white == nullptr) return;
+
+		PalEntry track = tint;
+		track.r = (uint8_t)(track.r / 4);
+		track.g = (uint8_t)(track.g / 4);
+		track.b = (uint8_t)(track.b / 4);
+		emit(0.0, 0.0, halfw, halfh, white, track);
+
+		const double fill = clamp(bb->data, 0, 100) / 100.0;
+		if (fill <= 0.0) return;
+
+		// Grows from the left edge, so the filled part stays put and only its
+		// right end moves -- a bar whose centre slid around would be unreadable
+		// at a glance, which is the only way these are ever read.
+		const double fillHalf = halfw * fill;
+		emit(-(1.0 - fill), 0.0, fillHalf, halfh, white, tint);
+		return;
+	}
+
+	case BB_DIGITS:
+	{
+		char buffer[24];
+		mysnprintf(buffer, countof(buffer), "%d", bb->data);
+		EmitBillboardGlyphs(buffer, halfw, halfh, tint, emit);
+		return;
+	}
+
+	case BB_GLYPH:
+	{
+		const char text[2] = { (char)clamp(bb->data, 1, 255), 0 };
+		EmitBillboardGlyphs(text, halfw, halfh, tint, emit);
+		return;
+	}
+
+	default:
+		return;
+	}
+}
+
 // [BB] ProcessBillboard
 //
 // A billboard becomes a real quad in the translucent draw lists, so it is
@@ -1875,15 +2013,6 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 
 	ThingColor = bb->color;
 	ThingColor.a = 255;
-
-	// Only the textured payload draws for now; the rest wait on their shaders.
-	FTextureID tid;
-	tid.SetIndex(bb->data);
-	if (bb->payload == BB_TEXTURE && tid.isValid())
-	{
-		texture = TexMan.GetGameTexture(tid, true);
-	}
-	if (!texture || !texture->isValid()) return;
 
 	vt = 0;
 	vb = 1;
@@ -1954,28 +2083,61 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 	DVector3 bl = bpos - rw - uh;
 	DVector3 br = bpos + rw - uh;
 
-	// Vertex components are (worldX, worldZ, worldY); corner order must match
-	// the UV assignment in CreateVertices.
-	bbVerts[0] = FVector3((float)tl.X, (float)tl.Z, (float)tl.Y);
-	bbVerts[1] = FVector3((float)tr.X, (float)tr.Z, (float)tr.Y);
-	bbVerts[2] = FVector3((float)bl.X, (float)bl.Z, (float)bl.Y);
-	bbVerts[3] = FVector3((float)br.X, (float)br.Z, (float)br.Y);
 	isBillboard = true;
 	bbNoDepth = (bb->flags & BBFL_NODEPTH) != 0;
 
-	// The draw lists still sort and clip against these, so give them the
-	// quad's actual bounds rather than leaving them at the bare centre.
-	x1 = (float)min(min(tl.X, tr.X), min(bl.X, br.X));
-	x2 = (float)max(max(tl.X, tr.X), max(bl.X, br.X));
-	y1 = (float)min(min(tl.Y, tr.Y), min(bl.Y, br.Y));
-	y2 = (float)max(max(tl.Y, tr.Y), max(bl.Y, br.Y));
-	z1 = (float)min(min(tl.Z, tr.Z), min(bl.Z, br.Z));
-	z2 = (float)max(max(tl.Z, tr.Z), max(bl.Z, br.Z));
+	// [BB] Submit one quad. A payload is free to call this more than once --
+	// which is the whole reason the payloads below need no shaders. A bar is a
+	// track and a fill; a number is a row of glyphs. Each is an ordinary
+	// textured quad in the place the payload wants it, and the sprite lists
+	// sort them like anything else.
+	//
+	// Offsets are in the billboard's own design space: +offRight is toward its
+	// right edge, +offUp toward its top, both measured in half-extents so that
+	// 1.0 is the edge.
+	auto emitQuad = [&](double offRight, double offUp, double halfWidth, double halfHeight,
+		FGameTexture* tex, PalEntry tint) -> void
+	{
+		if (tex == nullptr || !tex->isValid() || halfWidth <= 0.0 || halfHeight <= 0.0) return;
 
-	depth = (float)((x - vp.Pos.X) * vp.TanCos + (y - vp.Pos.Y) * vp.TanSin);
+		texture = tex;
+		ThingColor = tint;
+		ThingColor.a = 255;
 
-	PutSprite(di, true);
-	rendered_sprites++;
+		const DVector3 centre = bpos + right * (offRight * halfw) + up * (offUp * halfh);
+		const DVector3 qr = right * halfWidth;
+		const DVector3 qu = up * halfHeight;
+		const DVector3 qtl = centre - qr + qu;
+		const DVector3 qtr = centre + qr + qu;
+		const DVector3 qbl = centre - qr - qu;
+		const DVector3 qbr = centre + qr - qu;
+
+		// Vertex components are (worldX, worldZ, worldY); corner order must
+		// match the UV assignment in CreateVertices.
+		bbVerts[0] = FVector3((float)qtl.X, (float)qtl.Z, (float)qtl.Y);
+		bbVerts[1] = FVector3((float)qtr.X, (float)qtr.Z, (float)qtr.Y);
+		bbVerts[2] = FVector3((float)qbl.X, (float)qbl.Z, (float)qbl.Y);
+		bbVerts[3] = FVector3((float)qbr.X, (float)qbr.Z, (float)qbr.Y);
+
+		// The draw lists still sort and clip against these, so give them the
+		// quad's actual bounds rather than leaving them at the bare centre.
+		x1 = (float)min(min(qtl.X, qtr.X), min(qbl.X, qbr.X));
+		x2 = (float)max(max(qtl.X, qtr.X), max(qbl.X, qbr.X));
+		y1 = (float)min(min(qtl.Y, qtr.Y), min(qbl.Y, qbr.Y));
+		y2 = (float)max(max(qtl.Y, qtr.Y), max(qbl.Y, qbr.Y));
+		z1 = (float)min(min(qtl.Z, qtr.Z), min(qbl.Z, qbr.Z));
+		z2 = (float)max(max(qtl.Z, qtr.Z), max(qbl.Z, qbr.Z));
+
+		// Depth from the billboard's own centre, not the sub-quad's, so every
+		// piece of one panel sorts as one object and the fill cannot land
+		// behind its own track.
+		depth = (float)((x - vp.Pos.X) * vp.TanCos + (y - vp.Pos.Y) * vp.TanSin);
+
+		PutSprite(di, true);
+		rendered_sprites++;
+	};
+
+	EmitBillboardPayload(di, bb, halfw, halfh, emitQuad);
 }
 
 // [MC] VisualThinkers are to be rendered akin to actor sprites. The reason this whole system

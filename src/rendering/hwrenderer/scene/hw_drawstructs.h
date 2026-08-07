@@ -4,6 +4,7 @@
 // One wall segment in the draw list
 //
 //==========================================================================
+#include <functional>
 #include "r_defs.h"
 #include "renderstyle.h"
 #include "textures.h"
@@ -416,6 +417,13 @@ public:
 	// [BB] a billboard as a real in-scene quad: depth-tested and
 	// translucency-sorted through the same lists as sprites.
 	void ProcessBillboard(HWDrawInfo *di, const struct FBillboard *bb, const DVector3 &bpos, sector_t *sector);
+	// [BB] What a billboard draws on itself. Takes a callback rather than
+	// drawing directly because a payload may emit several quads -- a bar is a
+	// track and a fill, a number is a row of glyphs -- and that is what lets
+	// every payload work without a shader. Offsets are in half-extents of the
+	// parent billboard, so 1.0 is its edge.
+	void EmitBillboardPayload(HWDrawInfo* di, const struct FBillboard* bb, double halfw, double halfh,
+		const std::function<void(double, double, double, double, FGameTexture*, PalEntry)>& emit);
 	void AdjustVisualThinker(HWDrawInfo *di, DVisualThinker *spr, sector_t *sector);
 
 	void DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent);
