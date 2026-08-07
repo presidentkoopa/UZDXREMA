@@ -268,10 +268,11 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 		uniform float uGlowTopIntensity;
 		uniform float uGlowBottomIntensity;
 
-		// [BB] Sweep: a world-space band of light across every surface
-		uniform vec4 uSweepColor;
+		// [BB] Sweep: up to eight world-space bands across every surface
 		uniform vec4 uSweepOrigin;
-		uniform vec4 uSweepParams;
+		uniform vec4 uSweepBands[8];
+		uniform vec4 uSweepColors[8];
+		uniform int uSweepCount;
 
 		// [BB] Flat-edge glow: floors/ceilings glow inward from their own edges
 		uniform vec4 uFlatGlowColor;
@@ -629,9 +630,10 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 	muGlowBottomFalloff.Init(hShader, "uGlowBottomFalloff");
 	muGlowTopIntensity.Init(hShader, "uGlowTopIntensity");
 	muGlowBottomIntensity.Init(hShader, "uGlowBottomIntensity");
-	muSweepColor.Init(hShader, "uSweepColor");
 	muSweepOrigin.Init(hShader, "uSweepOrigin");
-	muSweepParams.Init(hShader, "uSweepParams");
+	muSweepCount.Init(hShader, "uSweepCount");
+	muSweepBandsLoc = glGetUniformLocation(hShader, "uSweepBands");
+	muSweepColorsLoc = glGetUniformLocation(hShader, "uSweepColors");
 	muFlatGlowColor.Init(hShader, "uFlatGlowColor");
 	muFlatGlowFalloff.Init(hShader, "uFlatGlowFalloff");
 	muFlatGlowLineCount.Init(hShader, "uFlatGlowLineCount");

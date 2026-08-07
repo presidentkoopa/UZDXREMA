@@ -2999,48 +2999,64 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, RemoveBillboard, RemoveBillboard)
 	return 0;
 }
 
-// [BB] Sweep -- a thin band of light at a fixed distance from an origin,
-// measured in world space and tested on every surface, so it wraps across
-// floor, wall and ceiling as one continuous band.
+// [BB] Sweep -- up to eight thin bands of light travelling through the world,
+// each tested per pixel against world position on every surface, so they wrap
+// across floor, wall and ceiling as continuous unbroken lines.
 //
 //   mode 0 off
-//        1 cylinder from origin -- a ring expanding outward across a room
-//        2 plane along X        -- a bar sweeping east/west down a corridor
+//        1 cylinder from origin -- rings expanding outward across a room
+//        2 plane along X        -- bars sweeping east/west down a corridor
 //        3 plane along Y        -- the same, north/south
-//        4 sphere from origin   -- a shell, so the band rises as it expands
+//        4 sphere from origin   -- shells, so a band rises as it expands
 //
-// Drive radius from script each tic: grow it for a ping, oscillate it for a
-// sweep back and forth.
-static void SetSweep(FLevelLocals *self, int mode, double x, double y, double z,
-	double radius, double thickness, double softness, int color, double intensity)
+// Set the origin and count once, then each band's own position and colour.
+// Script drives the radii each tic: grow them for a ping, oscillate for a
+// sweep, stagger them for a train chasing itself.
+static void SetSweepOrigin(FLevelLocals *self, int mode, double x, double y, double z, int count)
 {
 	self->SweepMode = mode;
 	self->SweepOrigin = DVector3(x, y, z);
-	self->SweepRadius = radius;
-	self->SweepThickness = thickness;
-	self->SweepSoftness = softness;
-	self->SweepColor = (PalEntry)color;
-	self->SweepIntensity = intensity;
+	self->SweepCount = clamp(count, 0, FLevelLocals::MAX_SWEEP_BANDS);
 }
 
-DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetSweep, SetSweep)
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetSweepOrigin, SetSweepOrigin)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
 	PARAM_INT(mode);
 	PARAM_FLOAT(x); PARAM_FLOAT(y); PARAM_FLOAT(z);
+	PARAM_INT(count);
+	SetSweepOrigin(self, mode, x, y, z, count);
+	return 0;
+}
+
+static void SetSweepBand(FLevelLocals *self, int index, double radius,
+	double thickness, double softness, int color, double intensity)
+{
+	if (index < 0 || index >= FLevelLocals::MAX_SWEEP_BANDS) return;
+	self->SweepRadius[index] = radius;
+	self->SweepThickness[index] = thickness;
+	self->SweepSoftness[index] = softness;
+	self->SweepColor[index] = (PalEntry)color;
+	self->SweepIntensity[index] = intensity;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetSweepBand, SetSweepBand)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(index);
 	PARAM_FLOAT(radius);
 	PARAM_FLOAT(thickness);
 	PARAM_FLOAT(softness);
 	PARAM_COLOR(color);
 	PARAM_FLOAT(intensity);
-	SetSweep(self, mode, x, y, z, radius, thickness, softness, color, intensity);
+	SetSweepBand(self, index, radius, thickness, softness, color, intensity);
 	return 0;
 }
 
 static void ClearSweep(FLevelLocals *self)
 {
 	self->SweepMode = 0;
-	self->SweepColor = 0;
+	self->SweepCount = 0;
 }
 
 DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearSweep, ClearSweep)

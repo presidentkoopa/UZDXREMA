@@ -805,13 +805,17 @@ public:
 	//
 	// mode: 0 off, 1 cylinder from origin, 2 plane along X, 3 plane along Y,
 	//       4 sphere from origin
+	// Up to eight bands travel at once, so a train of them can chase each
+	// other with their own colours and spacing.
+	static const int MAX_SWEEP_BANDS = 8;
 	int SweepMode = 0;
 	DVector3 SweepOrigin;
-	double SweepRadius = 0.0;     // where the band currently sits
-	double SweepThickness = 8.0;  // how wide the band is, in map units
-	double SweepSoftness = 1.0;   // 1 = linear edge, higher = tighter core
-	PalEntry SweepColor;
-	double SweepIntensity = 1.0;
+	int SweepCount = 0;
+	double SweepRadius[MAX_SWEEP_BANDS] = {};     // where each band sits
+	double SweepThickness[MAX_SWEEP_BANDS] = {};  // band width, map units
+	double SweepSoftness[MAX_SWEEP_BANDS] = {};   // 1 linear, higher = tighter core
+	PalEntry SweepColor[MAX_SWEEP_BANDS] = {};
+	double SweepIntensity[MAX_SWEEP_BANDS] = {};
 
 	// links to global game objects
 	TArray<TObjPtr<AActor *>> CorpseQueue;

@@ -807,8 +807,10 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 	// draws an unbroken rectangle around a corridor. Nothing here knows or
 	// cares what kind of surface it is shading, which is the entire trick.
 	//
-	if (uSweepColor.a > 0.0 && uSweepOrigin.w > 0.5)
+	if (uSweepCount > 0 && uSweepOrigin.w > 0.5)
 	{
+		// Distance is computed once and every band tests against it, so a
+		// train of eight costs barely more than one.
 		int smode = int(uSweepOrigin.w);
 		float sdist;
 		if (smode == 1)      sdist = length(pixelpos.xz - uSweepOrigin.xz);   // cylinder
@@ -816,13 +818,20 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 		else if (smode == 3) sdist = abs(pixelpos.z - uSweepOrigin.z);        // plane along Y
 		else                 sdist = length(pixelpos.xyz - uSweepOrigin.xyz); // sphere
 
-		float band = abs(sdist - uSweepParams.x);
-		float thick = max(uSweepParams.y, 0.001);
-		if (band < thick)
+		for (int sb = 0; sb < 8; sb++)
 		{
-			float satten = 1.0 - band / thick;
-			satten = pow(satten, max(uSweepParams.z, 0.01));
-			color.rgb += desaturate(vec4(uSweepColor.rgb * satten * uSweepColor.a, 1.0)).rgb;
+			if (sb >= uSweepCount) break;
+			vec4 sband = uSweepBands[sb];
+			if (sband.w <= 0.0) continue;
+
+			float band = abs(sdist - sband.x);
+			float thick = max(sband.y, 0.001);
+			if (band < thick)
+			{
+				float satten = pow(1.0 - band / thick, max(sband.z, 0.01));
+				vec4 scol = uSweepColors[sb];
+				color.rgb += desaturate(vec4(scol.rgb * satten * scol.a, 1.0)).rgb;
+			}
 		}
 	}
 #endif

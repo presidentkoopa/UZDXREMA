@@ -202,11 +202,16 @@ struct StreamData
 	float uGlowTopIntensity;
 	float uGlowBottomIntensity;
 
-	// [BB] Sweep: a world-space band of light that wraps across every
-	// surface. rgb + intensity; origin xyz + mode; radius/thickness/softness.
-	FVector4 uSweepColor;
+	// [BB] Sweep: up to eight world-space bands of light that wrap across
+	// every surface. Origin xyz + mode is shared; each band carries its own
+	// radius/thickness/softness and its own colour + intensity.
 	FVector4 uSweepOrigin;
-	FVector4 uSweepParams;
+	FVector4 uSweepBands[8];   // radius, thickness, softness, active
+	FVector4 uSweepColors[8];  // r, g, b, intensity
+	int uSweepCount;
+	int uSweepPad0;
+	int uSweepPad1;
+	int uSweepPad2;
 
 	// [BB] Flat-edge glow: rgb + reach (alpha), and up to 64 of the sector's
 	// linedef endpoints so the fragment shader can find distance to the
@@ -343,9 +348,8 @@ public:
 		mStreamData.uGlowBottomIntensity = 1.0f;
 		mStreamData.uGlowTopPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uGlowBottomPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
-		mStreamData.uSweepColor = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uSweepOrigin = { 0.0f, 0.0f, 0.0f, 0.0f };
-		mStreamData.uSweepParams = { 0.0f, 0.0f, 1.0f, 0.0f };
+		mStreamData.uSweepCount = 0;
 		mStreamData.uFlatGlowColor = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uFlatGlowFalloff = 0;
 		mStreamData.uFlatGlowLineCount = 0;
@@ -527,19 +531,24 @@ public:
 	// [BB] Sweep: one world-space band applied to every surface. Set once
 	// per frame rather than per draw -- it is a property of the world, not
 	// of any sector or wall.
-	void SetSweepParams(int mode, float ox, float oy, float oz,
-		float radius, float thickness, float softness,
+	void SetSweepOrigin(int mode, float ox, float oy, float oz, int count)
+	{
+		mStreamData.uSweepOrigin = { ox, oy, oz, (float)mode };
+		mStreamData.uSweepCount = count;
+	}
+
+	void SetSweepBand(int i, float radius, float thickness, float softness,
 		float r, float g, float b, float intensity)
 	{
-		mStreamData.uSweepColor = { r, g, b, intensity };
-		mStreamData.uSweepOrigin = { ox, oy, oz, (float)mode };
-		mStreamData.uSweepParams = { radius, thickness, softness, 0.0f };
+		if (i < 0 || i >= 8) return;
+		mStreamData.uSweepBands[i] = { radius, thickness, softness, 1.0f };
+		mStreamData.uSweepColors[i] = { r, g, b, intensity };
 	}
 
 	void ClearSweep()
 	{
-		mStreamData.uSweepColor = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uSweepOrigin = { 0.0f, 0.0f, 0.0f, 0.0f };
+		mStreamData.uSweepCount = 0;
 	}
 
 	// [BB] Flat-edge glow: rgb + reach, a falloff curve, and up to 64 of the
@@ -557,9 +566,8 @@ public:
 
 	void ClearFlatGlow()
 	{
-		mStreamData.uSweepColor = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uSweepOrigin = { 0.0f, 0.0f, 0.0f, 0.0f };
-		mStreamData.uSweepParams = { 0.0f, 0.0f, 1.0f, 0.0f };
+		mStreamData.uSweepCount = 0;
 		mStreamData.uFlatGlowColor = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uFlatGlowFalloff = 0;
 		mStreamData.uFlatGlowLineCount = 0;

@@ -762,13 +762,18 @@ void HWDrawInfo::RenderScene(FRenderState &state)
 	// world-space band, not a property of any sector or surface, so every
 	// draw that follows inherits it and the band stays continuous across
 	// floor, wall and ceiling without any of them coordinating.
-	if (Level != nullptr && Level->SweepMode > 0 && Level->SweepColor.a > 0)
+	if (Level != nullptr && Level->SweepMode > 0 && Level->SweepCount > 0)
 	{
-		state.SetSweepParams(Level->SweepMode,
-			(float)Level->SweepOrigin.X, (float)Level->SweepOrigin.Z, (float)Level->SweepOrigin.Y,
-			(float)Level->SweepRadius, (float)Level->SweepThickness, (float)Level->SweepSoftness,
-			Level->SweepColor.r / 255.f, Level->SweepColor.g / 255.f, Level->SweepColor.b / 255.f,
-			(float)Level->SweepIntensity);
+		int n = min(Level->SweepCount, FLevelLocals::MAX_SWEEP_BANDS);
+		state.SetSweepOrigin(Level->SweepMode,
+			(float)Level->SweepOrigin.X, (float)Level->SweepOrigin.Z, (float)Level->SweepOrigin.Y, n);
+		for (int i = 0; i < n; i++)
+		{
+			state.SetSweepBand(i,
+				(float)Level->SweepRadius[i], (float)Level->SweepThickness[i], (float)Level->SweepSoftness[i],
+				Level->SweepColor[i].r / 255.f, Level->SweepColor[i].g / 255.f, Level->SweepColor[i].b / 255.f,
+				(float)Level->SweepIntensity[i]);
+		}
 	}
 	else
 	{

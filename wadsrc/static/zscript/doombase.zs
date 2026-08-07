@@ -611,22 +611,23 @@ struct LevelLocals native
 	//   int hit; Vector2 uv; double d; [hit, uv, d] = level.TouchBillboard(handPos, 8);
 	native int, Vector2, double TouchBillboard(Vector3 point, double maxRange = 0);
 
-	// [BB] Sweep -- a thin band of light at a fixed distance from an origin,
-	// measured in world space and tested on every surface, so it wraps across
-	// floor, wall and ceiling as one continuous band. Nothing per-sector can
-	// do this: a sector's glow is uniform across that sector, while this is
-	// per-pixel in world space.
+	// [BB] Sweep -- up to eight thin bands of light travelling through the
+	// world, each tested per pixel against world position on every surface,
+	// so they wrap across floor, wall and ceiling as continuous unbroken
+	// lines. Nothing per-sector can do this: a sector's glow is uniform
+	// across that sector, while this is per-pixel in world space.
 	//
 	//   mode 0 off
-	//        1 cylinder from origin -- a ring expanding outward across a room
-	//        2 plane along X        -- a bar sweeping east/west down a corridor
+	//        1 cylinder from origin -- rings expanding outward across a room
+	//        2 plane along X        -- bars sweeping east/west down a corridor
 	//        3 plane along Y        -- the same, north/south
-	//        4 sphere from origin   -- a shell, so the band rises as it grows
+	//        4 sphere from origin   -- shells, so a band rises as it expands
 	//
-	// Drive radius each tic: grow it for a ping, oscillate it for a sweep.
-	// thickness is the band's width in map units; softness above 1 tightens
-	// its core into a harder line.
-	native void SetSweep(int mode, Vector3 origin, double radius, double thickness, double softness, color col, double intensity);
+	// Set the origin and how many bands are live, then each band's position
+	// and colour. Drive the radii each tic: grow them for a ping, oscillate
+	// for a sweep, stagger them for a train chasing itself down a corridor.
+	native void SetSweepOrigin(int mode, Vector3 origin, int count);
+	native void SetSweepBand(int index, double radius, double thickness, double softness, color col, double intensity);
 	native void ClearSweep();
 
 	native String GetChecksum() const;
