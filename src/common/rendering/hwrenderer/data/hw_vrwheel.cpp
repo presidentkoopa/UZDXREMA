@@ -83,7 +83,12 @@ CVAR(Float, vr_wheel_icon_model_yaw, -135.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_icon_model_xoffset, -40.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_icon_model_zoffset, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_select_angle, 30.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// 0 touch, 1 aim, 2 thumbstick.
 CVAR(Int, vr_wheel_selection_type, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// How far the stick must leave centre before it points at anything. Below this
+// the ring keeps whatever was already chosen rather than snapping to whichever
+// icon a resting thumb happens to lean toward.
+CVAR(Float, vr_wheel_stick_deadzone, 0.45f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 // [BB] Info panel for the entry under the hand. 0 off, 1 in the ring's hub,
 // 2 outside the ring on the side away from the body.
@@ -95,6 +100,11 @@ CVAR(Int, vr_wheel_selection_type, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Int, vr_wheel_info, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_info_scale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Color, vr_wheel_info_bg_color, (int)MAKEARGB(190, 12, 12, 14), CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+// [BB] Declared rather than included: vk_openxrdevice.h pulls in the OpenXR and
+// Vulkan SDK headers, and this file needs one function out of it.
+namespace s3d { bool OpenXR_GetThumbstick(int abstractHand, float& x, float& y); }
+using s3d::OpenXR_GetThumbstick;
 
 void RenderFrameModels(FModelRenderer* renderer, FLevelLocals* Level, const FSpriteModelFrame* smf, const FState* curState, const int curTics, FTranslationID translation, AActor* actor);
 
@@ -1600,8 +1610,62 @@ namespace
 
 	// [BB] Renamed from UpdateHover: the wrapper below is what callers use, and
 	// it is the one that reports a change in hover to the player.
+	static bool UseStickSelection()
+	{
+		return !UseCinemaWheelOverride() && vr_wheel_selection_type == 2;
+	}
+
+	// [BB] Point the ring with the thumbstick of the hand that owns it.
+	//
+	// The direction is absolute, not accumulated: where the stick points is which
+	// icon is chosen, so the same physical thumb position always means the same
+	// weapon. That is the property a stick has and a reach does not -- it can be
+	// learned and then performed without looking.
+	//
+	// Holding past the deadzone keeps the choice; releasing to centre leaves the
+	// last one standing rather than clearing it, so letting go of the stick and
+	// then the bind still commits what was chosen.
+	static bool SolveStickHover(VRWheelState& wheel, const VRWheelLayoutInfo& layout, int& outIndex)
+	{
+		float stickX = 0.0f;
+		float stickY = 0.0f;
+		if (!OpenXR_GetThumbstick(wheel.AnchorHand, stickX, stickY))
+		{
+			return false;
+		}
+
+		const float deadzone = clamp<float>(vr_wheel_stick_deadzone, 0.05f, 0.95f);
+		const float magnitude = sqrtf(stickX * stickX + stickY * stickY);
+		if (magnitude < deadzone)
+		{
+			return false;
+		}
+
+		// Push past the deadzone selects the outer ring when there is one, so the
+		// two rings are reachable without a second control.
+		const int ringIndex = (layout.RingCount > 1 && magnitude >= 0.85f) ? 1 : 0;
+		const VRWheelRingLayout& ring = layout.Rings[ringIndex];
+		if (ring.Count <= 0)
+		{
+			return false;
+		}
+
+		// atan2(y, x) with screen-up as +y, matched to GetWheelEntryAngle's
+		// convention so the icon under the stick is the icon that lights up.
+		double angle = atan2((double)stickY, (double)stickX) - ring.AngleOffset;
+		const double twoPi = 2.0 * M_PI;
+		angle = fmod(fmod(angle, twoPi) + twoPi, twoPi);
+
+		const double slice = twoPi / double(ring.Count);
+		const int localIndex = int((angle + slice * 0.5) / slice) % ring.Count;
+		outIndex = ring.StartIndex + localIndex;
+		return outIndex >= 0;
+	}
+
 	static void SolveHover(player_t* player, VRWheelState& wheel)
 	{
+		const int previousHover = wheel.HoveredIndex;
+		const bool previousValid = wheel.HoverValid;
 		wheel.HoveredIndex = -1;
 		wheel.HoverValid = false;
 		if (player == nullptr || player->mo == nullptr || wheel.Entries.Size() == 0)
@@ -1612,6 +1676,25 @@ namespace
 		auto vrmode = VRMode::GetVRModeCached(true);
 		if (vrmode == nullptr || !vrmode->IsVR())
 		{
+			return;
+		}
+
+		if (UseStickSelection())
+		{
+			const VRWheelLayoutInfo layout = BuildWheelLayoutInfo(wheel.Entries.Size());
+			int stickIndex = -1;
+			if (SolveStickHover(wheel, layout, stickIndex) && stickIndex < (int)wheel.Entries.Size())
+			{
+				wheel.HoveredIndex = stickIndex;
+				wheel.HoverValid = wheel.Entries[stickIndex].Selectable;
+			}
+			else if (previousHover >= 0 && previousHover < (int)wheel.Entries.Size())
+			{
+				// Thumb back at centre. Keep the pick rather than dropping it, so
+				// releasing the stick and then the bind still commits.
+				wheel.HoveredIndex = previousHover;
+				wheel.HoverValid = previousValid;
+			}
 			return;
 		}
 
@@ -1790,6 +1873,15 @@ bool VRWheel_ShouldSuppressGameplayInput()
 // hand busy holding a ring should lose its trigger; a hand doing nothing of the
 // sort should not. Callers that genuinely have no hand to name -- the weapon
 // cycling commands, for instance -- still ask VRWheel_ShouldSuppressGameplayInput.
+bool VRWheel_ShouldSuppressStickMove()
+{
+	if (!UseStickSelection())
+	{
+		return false;
+	}
+	return OpenWheelCount() > 0;
+}
+
 bool VRWheel_ShouldSuppressHandInput(int hand)
 {
 	if (hand != VR_MAINHAND && hand != VR_OFFHAND)

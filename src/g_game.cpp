@@ -1108,7 +1108,13 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 		float pitch = 0;
 		float roll = 0;
 		VR_GetMove(&joyforward, &joyside, &hmdforward, &hmdside, &dummy, &yaw, &pitch, &roll);
-		if (!vr_teleport || !multiplayer)
+		// [BB] A stick driving a wheel must not also drive the legs. Suppressing
+		// the buttons was never enough: the locomotion stick keeps feeding this
+		// path while a wheel is open, so selecting with the thumb would walk the
+		// player at the same time. Head-driven movement is left alone -- leaning
+		// is posture, not input, and freezing it in place would be its own kind
+		// of wrong.
+		if ((!vr_teleport || !multiplayer) && !VRWheel_ShouldSuppressStickMove())
 		{
 			VR_ApplyStickMove(forwardmove[speed], sidemove[speed], joyforward, joyside, forward, side);
 		}
