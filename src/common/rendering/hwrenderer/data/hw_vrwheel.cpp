@@ -85,7 +85,16 @@ CVAR(Float, vr_wheel_icon_model_zoffset, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_select_angle, 30.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // 0 touch, 1 aim (relative to the pose the wheel opened at), 2 thumbstick,
 // 3 pointer -- a ray from the hand, struck against the wheel's own plane.
-CVAR(Int, vr_wheel_selection_type, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+//
+// Pointer is the default. Touch held the spot because it was the only mode
+// that existed, and it is the weakest of the four: it asks the hand to arrive
+// at a 4cm target it cannot feel, it is measured against OpenXR's AIM pose
+// rather than the grip pose so the tested point sits out past the knuckles,
+// and it breaks outright the moment the wheel moves, because a reach is
+// positional and the icons are what moved. Pointing is angular, so none of
+// that applies -- it lands where it is aimed however far away the ring is and
+// however fast it is drifting.
+CVAR(Int, vr_wheel_selection_type, 3, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // How far the stick must leave centre before it points at anything. Below this
 // the ring keeps whatever was already chosen rather than snapping to whichever
 // icon a resting thumb happens to lean toward.
