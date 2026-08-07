@@ -792,6 +792,27 @@ public:
 	int NextBillboardID = 1;
 	void TickBillboards();
 
+	// [BB] Sweep: a thin band of light at a fixed distance from an origin,
+	// measured in WORLD space and tested on every surface. Because the test
+	// is world-space rather than per-surface, the band wraps continuously
+	// across floor, wall and ceiling on its own -- a cylinder expanding from
+	// a point slices all three at the same radius, and a plane travelling
+	// down a corridor draws an unbroken rectangle around it.
+	//
+	// This is not a sector property and deliberately not one of the four
+	// lanes: it is a single world-space overlay, so it costs one set of
+	// uniforms per frame rather than anything per sector.
+	//
+	// mode: 0 off, 1 cylinder from origin, 2 plane along X, 3 plane along Y,
+	//       4 sphere from origin
+	int SweepMode = 0;
+	DVector3 SweepOrigin;
+	double SweepRadius = 0.0;     // where the band currently sits
+	double SweepThickness = 8.0;  // how wide the band is, in map units
+	double SweepSoftness = 1.0;   // 1 = linear edge, higher = tighter core
+	PalEntry SweepColor;
+	double SweepIntensity = 1.0;
+
 	// links to global game objects
 	TArray<TObjPtr<AActor *>> CorpseQueue;
 	TObjPtr<DFraggleThinker *> FraggleScriptThinker = MakeObjPtr<DFraggleThinker*>(nullptr);

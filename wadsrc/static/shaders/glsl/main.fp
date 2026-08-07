@@ -798,6 +798,33 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 			color.rgb += desaturate(vec4(uFlatGlowColor.rgb * atten, 1.0)).rgb;
 		}
 	}
+
+	//
+	// [BB] sweep: a thin band of light at a fixed distance from an origin,
+	// measured in world space. Because the distance is world-space and this
+	// runs on every surface, the band wraps across floor, wall and ceiling
+	// by itself -- a cylinder cuts all three at the same radius, a plane
+	// draws an unbroken rectangle around a corridor. Nothing here knows or
+	// cares what kind of surface it is shading, which is the entire trick.
+	//
+	if (uSweepColor.a > 0.0 && uSweepOrigin.w > 0.5)
+	{
+		int smode = int(uSweepOrigin.w);
+		float sdist;
+		if (smode == 1)      sdist = length(pixelpos.xz - uSweepOrigin.xz);   // cylinder
+		else if (smode == 2) sdist = abs(pixelpos.x - uSweepOrigin.x);        // plane along X
+		else if (smode == 3) sdist = abs(pixelpos.z - uSweepOrigin.z);        // plane along Y
+		else                 sdist = length(pixelpos.xyz - uSweepOrigin.xyz); // sphere
+
+		float band = abs(sdist - uSweepParams.x);
+		float thick = max(uSweepParams.y, 0.001);
+		if (band < thick)
+		{
+			float satten = 1.0 - band / thick;
+			satten = pow(satten, max(uSweepParams.z, 0.01));
+			color.rgb += desaturate(vec4(uSweepColor.rgb * satten * uSweepColor.a, 1.0)).rgb;
+		}
+	}
 #endif
 	color = min(color, 1.0);
 

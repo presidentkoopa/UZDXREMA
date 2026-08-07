@@ -166,6 +166,12 @@ bool FGLRenderState::ApplyShader()
 		activeShader->currentglowstate = mGlowEnabled;
 	}
 
+	// [BB] Sweep. Unconditional, same reasoning as flat glow below: the
+	// shader gates on uSweepColor.a, so clearing has to actually reach it.
+	activeShader->muSweepColor.Set(&mStreamData.uSweepColor.X);
+	activeShader->muSweepOrigin.Set(&mStreamData.uSweepOrigin.X);
+	activeShader->muSweepParams.Set(&mStreamData.uSweepParams.X);
+
 	// [BB] Flat-edge glow. No enable/disable caching -- uFlatGlowColor.a > 0
 	// is the gate the shader itself checks, so an unconditional upload here
 	// is what ClearFlatGlow() (setting alpha back to 0) actually relies on.

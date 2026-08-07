@@ -202,6 +202,12 @@ struct StreamData
 	float uGlowTopIntensity;
 	float uGlowBottomIntensity;
 
+	// [BB] Sweep: a world-space band of light that wraps across every
+	// surface. rgb + intensity; origin xyz + mode; radius/thickness/softness.
+	FVector4 uSweepColor;
+	FVector4 uSweepOrigin;
+	FVector4 uSweepParams;
+
 	// [BB] Flat-edge glow: rgb + reach (alpha), and up to 64 of the sector's
 	// linedef endpoints so the fragment shader can find distance to the
 	// nearest edge per pixel.
@@ -337,6 +343,9 @@ public:
 		mStreamData.uGlowBottomIntensity = 1.0f;
 		mStreamData.uGlowTopPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uGlowBottomPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
+		mStreamData.uSweepColor = { 0.0f, 0.0f, 0.0f, 0.0f };
+		mStreamData.uSweepOrigin = { 0.0f, 0.0f, 0.0f, 0.0f };
+		mStreamData.uSweepParams = { 0.0f, 0.0f, 1.0f, 0.0f };
 		mStreamData.uFlatGlowColor = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uFlatGlowFalloff = 0;
 		mStreamData.uFlatGlowLineCount = 0;
@@ -515,6 +524,24 @@ public:
 		mStreamData.uGlowBottomIntensity = bottomIntensity;
 	}
 
+	// [BB] Sweep: one world-space band applied to every surface. Set once
+	// per frame rather than per draw -- it is a property of the world, not
+	// of any sector or wall.
+	void SetSweepParams(int mode, float ox, float oy, float oz,
+		float radius, float thickness, float softness,
+		float r, float g, float b, float intensity)
+	{
+		mStreamData.uSweepColor = { r, g, b, intensity };
+		mStreamData.uSweepOrigin = { ox, oy, oz, (float)mode };
+		mStreamData.uSweepParams = { radius, thickness, softness, 0.0f };
+	}
+
+	void ClearSweep()
+	{
+		mStreamData.uSweepColor = { 0.0f, 0.0f, 0.0f, 0.0f };
+		mStreamData.uSweepOrigin = { 0.0f, 0.0f, 0.0f, 0.0f };
+	}
+
 	// [BB] Flat-edge glow: rgb + reach, a falloff curve, and up to 64 of the
 	// sector's linedef endpoints for the shader's per-pixel distance check.
 	void SetFlatGlowParams(float r, float g, float b, float reach, int falloff, int lineCount, const FVector4* lines)
@@ -530,6 +557,9 @@ public:
 
 	void ClearFlatGlow()
 	{
+		mStreamData.uSweepColor = { 0.0f, 0.0f, 0.0f, 0.0f };
+		mStreamData.uSweepOrigin = { 0.0f, 0.0f, 0.0f, 0.0f };
+		mStreamData.uSweepParams = { 0.0f, 0.0f, 1.0f, 0.0f };
 		mStreamData.uFlatGlowColor = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uFlatGlowFalloff = 0;
 		mStreamData.uFlatGlowLineCount = 0;

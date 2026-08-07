@@ -611,6 +611,24 @@ struct LevelLocals native
 	//   int hit; Vector2 uv; double d; [hit, uv, d] = level.TouchBillboard(handPos, 8);
 	native int, Vector2, double TouchBillboard(Vector3 point, double maxRange = 0);
 
+	// [BB] Sweep -- a thin band of light at a fixed distance from an origin,
+	// measured in world space and tested on every surface, so it wraps across
+	// floor, wall and ceiling as one continuous band. Nothing per-sector can
+	// do this: a sector's glow is uniform across that sector, while this is
+	// per-pixel in world space.
+	//
+	//   mode 0 off
+	//        1 cylinder from origin -- a ring expanding outward across a room
+	//        2 plane along X        -- a bar sweeping east/west down a corridor
+	//        3 plane along Y        -- the same, north/south
+	//        4 sphere from origin   -- a shell, so the band rises as it grows
+	//
+	// Drive radius each tic: grow it for a ping, oscillate it for a sweep.
+	// thickness is the band's width in map units; softness above 1 tightens
+	// its core into a harder line.
+	native void SetSweep(int mode, Vector3 origin, double radius, double thickness, double softness, color col, double intensity);
+	native void ClearSweep();
+
 	native String GetChecksum() const;
 
 	native void ChangeSky(TextureID sky1, TextureID sky2 );

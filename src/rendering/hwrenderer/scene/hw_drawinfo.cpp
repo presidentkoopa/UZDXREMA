@@ -758,6 +758,23 @@ void HWDrawInfo::RenderScene(FRenderState &state)
 
 	state.SetDepthMask(true);
 
+	// [BB] Sweep: set once for the whole scene rather than per draw. It is a
+	// world-space band, not a property of any sector or surface, so every
+	// draw that follows inherits it and the band stays continuous across
+	// floor, wall and ceiling without any of them coordinating.
+	if (Level != nullptr && Level->SweepMode > 0 && Level->SweepColor.a > 0)
+	{
+		state.SetSweepParams(Level->SweepMode,
+			(float)Level->SweepOrigin.X, (float)Level->SweepOrigin.Z, (float)Level->SweepOrigin.Y,
+			(float)Level->SweepRadius, (float)Level->SweepThickness, (float)Level->SweepSoftness,
+			Level->SweepColor.r / 255.f, Level->SweepColor.g / 255.f, Level->SweepColor.b / 255.f,
+			(float)Level->SweepIntensity);
+	}
+	else
+	{
+		state.ClearSweep();
+	}
+
 	state.EnableFog(true);
 	state.SetRenderStyle(STYLE_Source);
 
