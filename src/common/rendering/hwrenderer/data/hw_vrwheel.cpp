@@ -18,6 +18,8 @@
 #include "common/rendering/hwrenderer/data/hw_renderstate.h"
 #include "common/rendering/hwrenderer/data/hw_viewpointbuffer.h"
 #include "common/utility/i_time.h"
+#include "events.h"
+#include "g_levellocals.h"
 #include "g_statusbar/sbar.h"
 #include "sound/s_doomsound.h"
 #include "vm.h"
@@ -32,7 +34,6 @@
 #include "r_utility.h"
 
 EXTERN_CVAR(Int, vr_control_scheme)
-EXTERN_CVAR(Float, i_timescale)
 EXTERN_CVAR(Float, gl_mask_sprite_threshold)
 
 CVAR(Bool, vr_wheel_weapon_all, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -46,21 +47,32 @@ CVAR(Color, vr_wheel_icon_bg_color, (int)MAKEARGB(128, 63, 63, 63), CVAR_ARCHIVE
 CVAR(Color, vr_wheel_icon_select_color, (int)MAKEARGB(160, 255, 208, 0), CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Color, vr_wheel_icon_disable_color, (int)MAKEARGB(160, 96, 16, 16), CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_distance, 0.05f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CUSTOM_CVAR(Float, vr_wheel_time_slow, 0.3f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-{
-	if (self < 0.0f)
-	{
-		self = 0.0f;
-	}
-	else if (self > 1.0f)
-	{
-		self = 1.0f;
-	}
-	else if (self > 0.0f && self < 0.1f)
-	{
-		self = 0.1f;
-	}
-}
+
+// [BB] The wheel no longer slows time itself. It announces that a wheel opened
+// or closed and leaves the decision to whoever is listening, because "what
+// should time do while I pick a weapon" is a gameplay question and the engine
+// is the wrong place to answer it -- a mod that already owns time (Bullet-Time-X
+// and its adrenaline meter, a freeze mod, nothing at all) would have to fight
+// the engine for control otherwise.
+//
+// Both events are netevents, so they arrive in ZScript's NetworkProcess, which
+// is where mods of this kind already listen. Arguments are:
+//   arg1  wheel type   1 = main weapon, 2 = offhand weapon, 3 = inventory
+//   arg2  anchor hand  0 = main hand, 1 = off hand
+//   arg3  how many wheels are open after this change
+// arg3 is what a listener uses to avoid double-triggering: act when it becomes
+// 1 on open and when it reaches 0 on close, and two rings behave like one.
+CVAR(String, vr_wheel_event_open, "vrwheel_open", CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(String, vr_wheel_event_close, "vrwheel_close", CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+// [BB] Convenience hook for a time mod that wants poking directly instead of
+// through a shim. Empty means "send nothing". Set vr_wheel_time_event to
+// "bt_activate" and stock Bullet-Time-X 4.3.3 responds -- though note that its
+// KEYCONF exposes no matching stop event and it spends adrenaline, so the off
+// event is provided for mods that do have one rather than because BT-X does.
+// Fired only on the first open and the last close.
+CVAR(String, vr_wheel_time_event, "", CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(String, vr_wheel_time_event_off, "", CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_xoffset, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_yoffset, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_radius, 8.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -110,18 +122,6 @@ namespace
 		TArray<VRWheelEntry> Entries;
 	};
 
-	// [BB] Time control used to live on the one wheel state. With a wheel per
-	// hand it has to be shared and counted: opening the second wheel must not
-	// re-save an already-slowed timescale as if it were the original, and
-	// closing the first must not restore it while the other is still open.
-	struct VRWheelTimeControl
-	{
-		int OpenCount = 0;
-		bool Active = false;
-		bool Frozen = false;
-		double SavedTimeScale = 1.0;
-	};
-
 	struct VRWheelRingLayout
 	{
 		int StartIndex = 0;
@@ -142,7 +142,6 @@ namespace
 	// holds at most one wheel; asking for a second on the same hand replaces
 	// what is there.
 	VRWheelState GVRWheels[2];
-	VRWheelTimeControl GVRWheelTime;
 
 	static VRWheelState& WheelForHand(int hand)
 	{
@@ -150,7 +149,7 @@ namespace
 	}
 
 	static void UpdateHover(player_t* player, VRWheelState& wheel);
-	static void ReleaseWheelTimeControl();
+	static void AnnounceWheelClosed(EVRWheelType type, int anchorHand);
 	static void MoveWeaponToHand(player_t* player, AActor* weapon, bool targetOffhand)
 	{
 		if (player == nullptr || player->mo == nullptr || weapon == nullptr)
@@ -849,72 +848,53 @@ namespace
 			{
 				continue;
 			}
+			const EVRWheelType droppedType = wheel.Type;
+			const int droppedHand = wheel.AnchorHand;
 			ResetWheel(wheel);
-		}
-		if (OpenWheelCount() == 0)
-		{
-			GVRWheelTime.OpenCount = 0;
-			ReleaseWheelTimeControl();
+			AnnounceWheelClosed(droppedType, droppedHand);
 		}
 	}
 
-	static void SetGameTimeScale(double scale)
+	static int WheelTypeToEventArg(EVRWheelType type)
 	{
-		FString value;
-		value.Format("%g", scale);
-		cvar_set("i_timescale", value.GetChars());
+		switch (type)
+		{
+		case EVRWheelType::MainWeapon:		return 1;
+		case EVRWheelType::OffhandWeapon:	return 2;
+		case EVRWheelType::Inventory:		return 3;
+		default:							return 0;
+		}
 	}
 
-	// [BB] Counted, because two wheels can be open. Only the first open saves
-	// the real timescale and only the last close restores it -- otherwise the
-	// second wheel would save the already-slowed value as the original and
-	// closing one would leave the world at that speed for good.
-	static void ApplyWheelTimeControl()
+	static void SendWheelEvent(const char* name, EVRWheelType type, int anchorHand, int openCount)
 	{
-		if (multiplayer)
+		if (name == nullptr || *name == '\0' || primaryLevel == nullptr || primaryLevel->localEventManager == nullptr)
 		{
 			return;
 		}
-
-		++GVRWheelTime.OpenCount;
-		if (GVRWheelTime.Active)
-		{
-			return;
-		}
-
-		GVRWheelTime.SavedTimeScale = i_timescale;
-		GVRWheelTime.Active = true;
-		GVRWheelTime.Frozen = false;
-
-		if (vr_wheel_time_slow <= 0.0f)
-		{
-			GVRWheelTime.Frozen = true;
-			I_FreezeTime(true);
-			return;
-		}
-
-		SetGameTimeScale(vr_wheel_time_slow);
+		primaryLevel->localEventManager->SendNetworkEvent(name, WheelTypeToEventArg(type), anchorHand, openCount, false);
 	}
 
-	static void ReleaseWheelTimeControl()
+	// [BB] Announce, do not act. Called after the wheel array has already been
+	// updated, so OpenWheelCount() is the count the listener should see.
+	static void AnnounceWheelOpened(EVRWheelType type, int anchorHand)
 	{
-		if (GVRWheelTime.OpenCount > 0)
+		const int openCount = OpenWheelCount();
+		SendWheelEvent(vr_wheel_event_open, type, anchorHand, openCount);
+		if (openCount == 1)
 		{
-			--GVRWheelTime.OpenCount;
+			SendWheelEvent(vr_wheel_time_event, type, anchorHand, openCount);
 		}
-		if (GVRWheelTime.OpenCount > 0 || !GVRWheelTime.Active)
-		{
-			return;
-		}
+	}
 
-		if (GVRWheelTime.Frozen)
+	static void AnnounceWheelClosed(EVRWheelType type, int anchorHand)
+	{
+		const int openCount = OpenWheelCount();
+		SendWheelEvent(vr_wheel_event_close, type, anchorHand, openCount);
+		if (openCount == 0)
 		{
-			I_FreezeTime(false);
+			SendWheelEvent(vr_wheel_time_event_off, type, anchorHand, openCount);
 		}
-
-		SetGameTimeScale(GVRWheelTime.SavedTimeScale);
-		GVRWheelTime.Active = false;
-		GVRWheelTime.Frozen = false;
 	}
 
 	static void OpenWheel(EVRWheelType type)
@@ -944,13 +924,14 @@ namespace
 		}
 
 		// [BB] A hand can only hold one wheel. Opening a second on the same hand
-		// replaces it, and the replaced one gives back its time-control ticket
-		// so the count stays honest.
+		// replaces it, and the replaced one is announced as closed so a listener
+		// never sees an open it will not get a close for.
 		VRWheelState& wheel = WheelForHand(anchorHand);
 		if (IsWheelOpen(wheel))
 		{
+			const EVRWheelType replacedType = wheel.Type;
 			ResetWheel(wheel);
-			ReleaseWheelTimeControl();
+			AnnounceWheelClosed(replacedType, anchorHand);
 		}
 
 		wheel.Type = type;
@@ -961,7 +942,6 @@ namespace
 		GetHandAimAngles(player, anchorHand, wheel.OpenYaw, wheel.OpenPitch);
 		wheel.HoveredIndex = -1;
 		wheel.HoverValid = false;
-		ApplyWheelTimeControl();
 		if (type == EVRWheelType::Inventory)
 		{
 			wheel.Entries = entries;
@@ -974,6 +954,7 @@ namespace
 		UpdateHover(player, wheel);
 		PlayWheelSound("menu/activate");
 		PlayWheelHaptics(vrmode, wheel.AnchorHand, 0.20f);
+		AnnounceWheelOpened(type, anchorHand);
 	}
 
 	static void CommitWheelSelection(VRWheelState& wheel)
@@ -1026,10 +1007,11 @@ namespace
 			{
 				continue;
 			}
+			const int closedHand = wheel.AnchorHand;
 			CommitWheelSelection(wheel);
 			ResetWheel(wheel);
-			ReleaseWheelTimeControl();
 			PlayWheelSound("menu/clear");
+			AnnounceWheelClosed(type, closedHand);
 			return;
 		}
 	}
@@ -1486,10 +1468,11 @@ void VRWheel_Reset()
 {
 	for (auto& wheel : GVRWheels)
 	{
+		const EVRWheelType droppedType = wheel.Type;
+		const int droppedHand = wheel.AnchorHand;
 		ResetWheel(wheel);
+		AnnounceWheelClosed(droppedType, droppedHand);
 	}
-	GVRWheelTime.OpenCount = 0;
-	ReleaseWheelTimeControl();
 }
 
 bool VRWheel_IsActive()
