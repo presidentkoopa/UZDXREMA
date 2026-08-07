@@ -27,7 +27,11 @@
 // CVARs
 //
 //==========================================================================
-CVAR(Bool, gl_bloom, false, CVAR_ARCHIVE);
+// [BB] On by default in this fork. Stock GZDoom ships it off, which is a
+// reasonable default for vanilla Doom and the wrong one here -- the glow
+// system relies on bloom to read as emissive rather than as paint, so
+// shipping it off means shipping the headline feature broken.
+CVAR(Bool, gl_bloom, true, CVAR_ARCHIVE);
 CUSTOM_CVAR(Float, gl_bloom_amount, 1.4f, CVAR_ARCHIVE)
 {
 	if (self < 0.1f) self = 0.1f;
