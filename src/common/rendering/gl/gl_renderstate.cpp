@@ -162,6 +162,17 @@ bool FGLRenderState::ApplyShader()
 		activeShader->currentglowstate = mGlowEnabled;
 	}
 
+	// [BB] Flat-edge glow. No enable/disable caching -- uFlatGlowColor.a > 0
+	// is the gate the shader itself checks, so an unconditional upload here
+	// is what ClearFlatGlow() (setting alpha back to 0) actually relies on.
+	activeShader->muFlatGlowColor.Set(&mStreamData.uFlatGlowColor.X);
+	activeShader->muFlatGlowFalloff.Set(mStreamData.uFlatGlowFalloff);
+	activeShader->muFlatGlowLineCount.Set(mStreamData.uFlatGlowLineCount);
+	if (mStreamData.uFlatGlowLineCount > 0 && activeShader->muFlatGlowLinesLoc >= 0)
+	{
+		glUniform4fv(activeShader->muFlatGlowLinesLoc, mStreamData.uFlatGlowLineCount, &mStreamData.uFlatGlowLines[0].X);
+	}
+
 	if (mGradientEnabled || activeShader->currentgradientstate)
 	{
 		activeShader->muObjectColor2.Set(mStreamData.uObjectColor2);

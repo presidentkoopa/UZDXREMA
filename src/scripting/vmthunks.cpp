@@ -548,6 +548,89 @@ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetXOffset, SetXOffset)
 	 return 0;
  }
 
+ // [BB] Flat-edge glow -- the plane's own surface, glowing inward from its
+ // edges. Separate from SetGlowColor above, which only ever reaches the
+ // wall, never the flat itself.
+ static void SetFlatGlowColor(sector_t *self, int pos, int o)
+ {
+	 self->SetFlatGlowColor(pos, o);
+ }
+
+ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetFlatGlowColor, SetFlatGlowColor)
+ {
+	 PARAM_SELF_STRUCT_PROLOGUE(sector_t);
+	 PARAM_INT(pos);
+	 PARAM_COLOR(o);
+	 self->SetFlatGlowColor(pos, o);
+	 return 0;
+ }
+
+ static void SetFlatGlowHeight(sector_t *self, int pos, double o)
+ {
+	 self->SetFlatGlowHeight(pos, float(o));
+ }
+
+ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetFlatGlowHeight, SetFlatGlowHeight)
+ {
+	 PARAM_SELF_STRUCT_PROLOGUE(sector_t);
+	 PARAM_INT(pos);
+	 PARAM_FLOAT(o);
+	 self->SetFlatGlowHeight(pos, float(o));
+	 return 0;
+ }
+
+ static void SetFlatGlowFalloff(sector_t *self, int pos, int o)
+ {
+	 self->SetFlatGlowFalloff(pos, o);
+ }
+
+ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetFlatGlowFalloff, SetFlatGlowFalloff)
+ {
+	 PARAM_SELF_STRUCT_PROLOGUE(sector_t);
+	 PARAM_INT(pos);
+	 PARAM_INT(o);
+	 self->SetFlatGlowFalloff(pos, o);
+	 return 0;
+ }
+
+ static void SetFlatGlowIntensity(sector_t *self, int pos, double o)
+ {
+	 self->SetFlatGlowIntensity(pos, float(o));
+ }
+
+ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetFlatGlowIntensity, SetFlatGlowIntensity)
+ {
+	 PARAM_SELF_STRUCT_PROLOGUE(sector_t);
+	 PARAM_INT(pos);
+	 PARAM_FLOAT(o);
+	 self->SetFlatGlowIntensity(pos, float(o));
+	 return 0;
+ }
+
+ static int GetFlatGlowColor(sector_t *self, int pos)
+ {
+	 return self->GetFlatGlowColor(pos);
+ }
+
+ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, GetFlatGlowColor, GetFlatGlowColor)
+ {
+	 PARAM_SELF_STRUCT_PROLOGUE(sector_t);
+	 PARAM_INT(pos);
+	 ACTION_RETURN_INT(self->GetFlatGlowColor(pos));
+ }
+
+ static double GetFlatGlowHeight(sector_t *self, int pos)
+ {
+	 return self->GetFlatGlowHeight(pos);
+ }
+
+ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, GetFlatGlowHeight, GetFlatGlowHeight)
+ {
+	 PARAM_SELF_STRUCT_PROLOGUE(sector_t);
+	 PARAM_INT(pos);
+	 ACTION_RETURN_FLOAT(self->GetFlatGlowHeight(pos));
+ }
+
  static void AddXOffset(sector_t *self, int pos, double o)
  {
 	 self->AddXOffset(pos, o);
@@ -1341,6 +1424,63 @@ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetXOffset, SetXOffset)
  // side_t exports 
  //
  //===========================================================================
+
+ // [BB] A wall's own ceiling glow and floor glow -- same names, same
+ // Sector.floor/Sector.ceiling position argument as Sector.SetGlowColor,
+ // just called on the wall instead of the room. Unset (alpha 0) means the
+ // wall keeps showing its sector's glow, same as before; these only change
+ // anything once something actually calls the setter.
+ static void SetSideGlowColor(side_t *self, int pos, int o)
+ {
+	 self->SetGlowColor(pos, o);
+ }
+
+ DEFINE_ACTION_FUNCTION_NATIVE(_Side, SetGlowColor, SetSideGlowColor)
+ {
+	 PARAM_SELF_STRUCT_PROLOGUE(side_t);
+	 PARAM_INT(pos);
+	 PARAM_COLOR(o);
+	 self->SetGlowColor(pos, o);
+	 return 0;
+ }
+
+ static void SetSideGlowHeight(side_t *self, int pos, double height)
+ {
+	 self->SetGlowHeight(pos, (float)height);
+ }
+
+ DEFINE_ACTION_FUNCTION_NATIVE(_Side, SetGlowHeight, SetSideGlowHeight)
+ {
+	 PARAM_SELF_STRUCT_PROLOGUE(side_t);
+	 PARAM_INT(pos);
+	 PARAM_FLOAT(height);
+	 self->SetGlowHeight(pos, (float)height);
+	 return 0;
+ }
+
+ static int GetSideGlowColor(side_t *self, int pos)
+ {
+	 return self->GetGlowColor(pos);
+ }
+
+ DEFINE_ACTION_FUNCTION_NATIVE(_Side, GetGlowColor, GetSideGlowColor)
+ {
+	 PARAM_SELF_STRUCT_PROLOGUE(side_t);
+	 PARAM_INT(pos);
+	 ACTION_RETURN_INT(self->GetGlowColor(pos));
+ }
+
+ static double GetSideGlowHeight(side_t *self, int pos)
+ {
+	 return self->GetGlowHeight(pos);
+ }
+
+ DEFINE_ACTION_FUNCTION_NATIVE(_Side, GetGlowHeight, GetSideGlowHeight)
+ {
+	 PARAM_SELF_STRUCT_PROLOGUE(side_t);
+	 PARAM_INT(pos);
+	 ACTION_RETURN_FLOAT(self->GetGlowHeight(pos));
+ }
 
  static int GetSideTexture(side_t *self, int which)
  {

@@ -195,6 +195,16 @@ struct StreamData
 	FVector4 uGlowBottomPlane;
 	FVector4 uGlowBottomColor;
 
+	// [BB] Flat-edge glow: rgb + reach (alpha), and up to 64 of the sector's
+	// linedef endpoints so the fragment shader can find distance to the
+	// nearest edge per pixel.
+	FVector4 uFlatGlowColor;
+	int uFlatGlowFalloff;
+	int uFlatGlowLineCount;
+	int uFlatGlowPad1;
+	int uFlatGlowPad2;
+	FVector4 uFlatGlowLines[64];
+
 	FVector4 uGradientTopPlane;
 	FVector4 uGradientBottomPlane;
 
@@ -316,6 +326,9 @@ public:
 		mStreamData.uGlowBottomColor = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uGlowTopPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uGlowBottomPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
+		mStreamData.uFlatGlowColor = { 0.0f, 0.0f, 0.0f, 0.0f };
+		mStreamData.uFlatGlowFalloff = 0;
+		mStreamData.uFlatGlowLineCount = 0;
 		mStreamData.uGradientTopPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uGradientBottomPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uSplitTopPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -478,6 +491,26 @@ public:
 	{
 		mStreamData.uGlowTopColor = { t[0], t[1], t[2], t[3] };
 		mStreamData.uGlowBottomColor = { b[0], b[1], b[2], b[3] };
+	}
+
+	// [BB] Flat-edge glow: rgb + reach, a falloff curve, and up to 64 of the
+	// sector's linedef endpoints for the shader's per-pixel distance check.
+	void SetFlatGlowParams(float r, float g, float b, float reach, int falloff, int lineCount, const FVector4* lines)
+	{
+		mStreamData.uFlatGlowColor = { r, g, b, reach };
+		mStreamData.uFlatGlowFalloff = falloff;
+		mStreamData.uFlatGlowLineCount = lineCount;
+		for (int i = 0; i < lineCount; i++)
+		{
+			mStreamData.uFlatGlowLines[i] = lines[i];
+		}
+	}
+
+	void ClearFlatGlow()
+	{
+		mStreamData.uFlatGlowColor = { 0.0f, 0.0f, 0.0f, 0.0f };
+		mStreamData.uFlatGlowFalloff = 0;
+		mStreamData.uFlatGlowLineCount = 0;
 	}
 
 	void SetSoftLightLevel(int llevel, int blendfactor = 0)

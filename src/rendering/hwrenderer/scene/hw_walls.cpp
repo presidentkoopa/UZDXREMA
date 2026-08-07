@@ -39,6 +39,44 @@
 #include "hw_lighting.h"
 #include "hwrenderer/scene/hw_drawinfo.h"
 
+//==========================================================================
+//
+// [BB] Wall-top and wall-bottom glow, as their own channel.
+//
+// A wall's glow used to be nothing but a copy of its sector's ceiling and
+// floor glow -- there was no way to set one without the other changing too.
+// This lets a wall carry its own top and bottom glow instead, falling back
+// to the sector's values exactly as before when a wall never sets one, so
+// existing content sees no change at all.
+//
+//==========================================================================
+
+static bool ApplyWallOwnGlow(side_t *sidedef, float *topglowcolor, float *bottomglowcolor)
+{
+	if (sidedef == nullptr) return false;
+	bool changed = false;
+
+	PalEntry ceilGlow = sidedef->GetGlowColor(sector_t::ceiling);
+	if (ceilGlow.a > 0)
+	{
+		topglowcolor[0] = ceilGlow.r / 255.f;
+		topglowcolor[1] = ceilGlow.g / 255.f;
+		topglowcolor[2] = ceilGlow.b / 255.f;
+		topglowcolor[3] = (float)sidedef->GetGlowHeight(sector_t::ceiling);
+		changed = true;
+	}
+	PalEntry floorGlow = sidedef->GetGlowColor(sector_t::floor);
+	if (floorGlow.a > 0)
+	{
+		bottomglowcolor[0] = floorGlow.r / 255.f;
+		bottomglowcolor[1] = floorGlow.g / 255.f;
+		bottomglowcolor[2] = floorGlow.b / 255.f;
+		bottomglowcolor[3] = (float)sidedef->GetGlowHeight(sector_t::floor);
+		changed = true;
+	}
+	return changed;
+}
+
 struct FWallLightCandidate
 {
 	FDynamicLight *Light;
@@ -2353,6 +2391,7 @@ void HWWall::Process(HWWallDispatcher *di, seg_t *seg, sector_t * frontsector, s
 
 
 	if (frontsector->GetWallGlow(topglowcolor, bottomglowcolor)) flags |= HWF_GLOW;
+	if (ApplyWallOwnGlow(seg->sidedef, topglowcolor, bottomglowcolor)) flags |= HWF_GLOW;
 
 	zfloor[0] = ffh1 = segfront->floorplane.ZatPoint(v1);
 	zfloor[1] = ffh2 = segfront->floorplane.ZatPoint(v2);
@@ -2737,6 +2776,7 @@ void HWWall::ProcessLowerMiniseg(HWWallDispatcher *di, seg_t *seg, sector_t * fr
 		Colormap = frontsector->Colormap;
 
 		if (frontsector->GetWallGlow(topglowcolor, bottomglowcolor)) flags |= HWF_GLOW;
+		if (ApplyWallOwnGlow(seg->sidedef, topglowcolor, bottomglowcolor)) flags |= HWF_GLOW;
 		dynlightindex = -1;
 
 		zfloor[0] = zfloor[1] = ffh;

@@ -673,6 +673,17 @@ struct sector_t
 		double TexZ;
 		PalEntry GlowColor;
 		float GlowHeight;
+
+		// [BB] Flat-edge glow: the plane's OWN surface glows inward from its
+		// linedef edges, fading with distance from the wall. Separate from
+		// GlowColor above -- that one never touches the flat itself, only
+		// the wall (see sector_t::GetWallGlow). This is the piece that was
+		// missing: a floor or ceiling that visibly glows on its own face.
+		PalEntry FlatGlowColor;
+		float FlatGlowHeight;      // reach inward from the nearest edge, in map units
+		int FlatGlowFalloff;       // 0 linear, 1 quadratic, 2 sqrt, 3 exponential
+		float FlatGlowIntensity;   // multiplier, 0.0-2.0+
+
 		FTextureID Texture;
 		TextureManipulation TextureFx;
 		FTextureID skytexture[2];
@@ -974,6 +985,16 @@ public:
 		planes[pos].GlowColor = color;
 	}
 
+	// [BB] Flat-edge glow accessors -- see FlatGlowColor above.
+	void SetFlatGlowColor(int pos, PalEntry color) { planes[pos].FlatGlowColor = color; }
+	PalEntry GetFlatGlowColor(int pos) { return planes[pos].FlatGlowColor; }
+	void SetFlatGlowHeight(int pos, float height) { planes[pos].FlatGlowHeight = height; }
+	float GetFlatGlowHeight(int pos) { return planes[pos].FlatGlowHeight; }
+	void SetFlatGlowFalloff(int pos, int falloff) { planes[pos].FlatGlowFalloff = falloff; }
+	int GetFlatGlowFalloff(int pos) { return planes[pos].FlatGlowFalloff; }
+	void SetFlatGlowIntensity(int pos, float inten) { planes[pos].FlatGlowIntensity = inten; }
+	float GetFlatGlowIntensity(int pos) { return planes[pos].FlatGlowIntensity; }
+
 	FTextureID GetTexture(int pos) const
 	{
 		return planes[pos].Texture;
@@ -1207,6 +1228,21 @@ enum
 
 struct side_t
 {
+	// Ceiling glow and floor glow, same as sector_t's above -- same names,
+	// same [floor]/[ceiling] indexing (sector_t::floor / sector_t::ceiling),
+	// same meaning. The only thing new is WHERE it lives: a sector's glow
+	// applies to every wall in the room; a wall's own glow applies to just
+	// that wall, and only once something actually sets it. Unset (alpha 0)
+	// means the wall keeps showing its sector's glow, exactly as before --
+	// nothing here changes anything until a wall is given its own.
+	struct sglow { PalEntry GlowColor; float GlowHeight = 0.f; };
+	sglow glow[2];
+
+	double GetGlowHeight(int pos) { return glow[pos].GlowHeight; }
+	PalEntry GetGlowColor(int pos) { return glow[pos].GlowColor; }
+	void SetGlowHeight(int pos, float height) { glow[pos].GlowHeight = height; }
+	void SetGlowColor(int pos, PalEntry color) { glow[pos].GlowColor = color; }
+
 	enum ETexpart
 	{
 		top=0,

@@ -404,6 +404,35 @@ void HWFlat::DrawFlat(HWDrawInfo *di, FRenderState &state, bool translucent)
 	state.ApplyTextureManipulation(TextureFx);
 	if (plane.plane.dithertransflag) state.SetEffect(EFF_DITHERTRANS);
 
+	// [BB] Flat-edge glow: this plane's own surface, glowing inward from its
+	// linedef edges. Separate from the standard wall-bleed glow above --
+	// that one never reaches the flat itself.
+	{
+		int planeIdx = ceiling ? sector_t::ceiling : sector_t::floor;
+		auto &sp = sector->planes[planeIdx];
+		if (sp.FlatGlowColor.a > 0 && sp.FlatGlowHeight > 0.f)
+		{
+			float r = sp.FlatGlowColor.r / 255.f;
+			float g = sp.FlatGlowColor.g / 255.f;
+			float b = sp.FlatGlowColor.b / 255.f;
+			float reach = sp.FlatGlowHeight * (sp.FlatGlowIntensity > 0.f ? sp.FlatGlowIntensity : 1.f);
+			int count = (int)sector->Lines.Size();
+			if (count > 64) count = 64;
+			FVector4 lines[64];
+			for (int i = 0; i < count; i++)
+			{
+				auto ln = sector->Lines[i];
+				lines[i] = { (float)ln->v1->fX(), (float)ln->v1->fY(),
+				             (float)ln->v2->fX(), (float)ln->v2->fY() };
+			}
+			state.SetFlatGlowParams(r, g, b, reach, sp.FlatGlowFalloff, count, lines);
+		}
+		else
+		{
+			state.ClearFlatGlow();
+		}
+	}
+
 	if (hacktype & SSRF_PLANEHACK)
 	{
 		DrawOtherPlanes(di, state);

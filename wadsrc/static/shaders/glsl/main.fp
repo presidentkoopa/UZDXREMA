@@ -750,6 +750,42 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 	{
 		color.rgb += desaturate(uGlowBottomColor * (1.0 - glowdist.y / uGlowBottomColor.a)).rgb;
 	}
+
+	//
+	// [BB] flat-edge glow: floors/ceilings glow inward from their own
+	// linedef edges. Unlike the wall glow above, this tints the flat's OWN
+	// pixels, not a nearby wall's.
+	//
+	if (uFlatGlowColor.a > 0.0 && uFlatGlowLineCount > 0)
+	{
+		vec2 pixXZ = pixelpos.xz;
+		float minDist = 999999.0;
+
+		for (int i = 0; i < uFlatGlowLineCount; i++)
+		{
+			vec4 seg = uFlatGlowLines[i];
+			vec2 a = seg.xy;
+			vec2 b = seg.zw;
+			vec2 ab = b - a;
+			vec2 ap = pixXZ - a;
+			float t = clamp(dot(ap, ab) / max(dot(ab, ab), 0.001), 0.0, 1.0);
+			float d = length(ap - ab * t);
+			minDist = min(minDist, d);
+		}
+
+		float reach = uFlatGlowColor.a;
+		if (minDist < reach)
+		{
+			float frac = minDist / reach;
+			float atten;
+			if (uFlatGlowFalloff == 0)      atten = 1.0 - frac;
+			else if (uFlatGlowFalloff == 1) atten = 1.0 - frac * frac;
+			else if (uFlatGlowFalloff == 2) atten = 1.0 - sqrt(frac);
+			else                             atten = exp(-frac * 3.0);
+
+			color.rgb += desaturate(vec4(uFlatGlowColor.rgb * atten, 1.0)).rgb;
+		}
+	}
 #endif
 	color = min(color, 1.0);
 

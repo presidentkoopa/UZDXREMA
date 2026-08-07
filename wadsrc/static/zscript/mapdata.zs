@@ -135,6 +135,19 @@ struct Side native play
 	native clearscope int GetTextureFlags(int tier) const;
 	native void ChangeTextureFlags(int tier, int And, int Or);
 	native void SetSpecialColor(int tier, int position, Color scolor, bool useowncolor = true);
+
+	// [BB] A wall's own ceiling glow and floor glow: same names, same
+	// Sector.floor/Sector.ceiling position argument as Sector.SetGlowColor
+	// below -- just set on the wall instead of the room. What a sector's
+	// ceiling/floor glow actually shows up as is color on the wall near
+	// that seam; the floor and ceiling surfaces never tint themselves. This
+	// lets one wall differ from its own sector's glow. Never called,
+	// nothing changes -- the wall keeps showing its sector's colors exactly
+	// as before.
+	native void SetGlowColor(int pos, color scolor);
+	native void SetGlowHeight(int pos, double height);
+	native clearscope color GetGlowColor(int pos) const;
+	native clearscope double GetGlowHeight(int pos) const;
 	native clearscope Color GetAdditiveColor(int tier) const;
 	native void SetAdditiveColor(int tier, Color color);
 	native void EnableAdditiveColor(int tier, bool enable);
@@ -542,6 +555,21 @@ struct Sector native play
 	native clearscope color GetGlowColor(int pos) const;
 	native void SetGlowHeight(int pos, double height);
 	native void SetGlowColor(int pos, color color);
+
+	// [BB] Flat-edge glow: this plane's OWN surface, glowing inward from its
+	// edges -- separate from SetGlowColor above, which only ever reaches
+	// the wall, never the floor or ceiling itself. pos = Sector.floor or
+	// Sector.ceiling, same as SetGlowColor.
+	//   height    reach inward from the nearest edge, in map units
+	//   falloff   0 linear, 1 quadratic, 2 sqrt, 3 exponential
+	//   intensity multiplier, 0.0-2.0+
+	native void SetFlatGlowColor(int pos, color color);
+	native void SetFlatGlowHeight(int pos, double height);
+	native void SetFlatGlowFalloff(int pos, int falloff);
+	native void SetFlatGlowIntensity(int pos, double intensity);
+	native clearscope color GetFlatGlowColor(int pos) const;
+	native clearscope double GetFlatGlowHeight(int pos) const;
+
 	native void SetSpecialColor(int pos, color color);
 	native void SetAdditiveColor(int pos, Color color);
 	native void SetColorization(int tier, Name cname);
