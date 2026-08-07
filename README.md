@@ -1,3 +1,65 @@
+# UZDXREMA — a QZDoom/GZDoom fork with engine changes
+
+**This repository is a fork of [`emawind84/gzdoom`](https://github.com/emawind84/gzdoom)
+(branch `questzdoom`) carrying renderer and scripting changes to the engine
+itself.** It is not a mod, a texture pack, or a config. The C++ is modified.
+
+## If you only want the engine changes — read [`PORTING.md`](PORTING.md)
+
+**[`PORTING.md`](PORTING.md) documents every C++ change in this fork so another
+GZDoom/QZDoom fork can implement them without reverse-engineering a diff.**
+That is what it is for. It is written for a stranger, not for us.
+
+It covers, per feature rather than per commit:
+
+* **what it does**, in two sentences;
+* **every file touched**, with function names and line ranges, plus a manifest
+  of all 45 changed files mapped to the feature that owns each;
+* **why** — especially where the obvious approach was rejected, which is the
+  part no diff can tell you;
+* **the order things must be applied in**, because some of it will not compile
+  otherwise;
+* **new cvars, new savegame keys**, and which direction they break;
+* **what will conflict** with a fork that has already diverged.
+
+The five features are: a two-character fix for a hard boot crash in upstream's
+language data; wall texture glow (GLDEFS `Glow { Walls { } }` was parsed and
+never consumed by any renderer); edge glow on floors and ceilings; a ZScript
+glow-authority API; and in-world billboard panels.
+
+### Read the condition notes before budgeting time
+
+`PORTING.md` marks what is unproven, and a lot of it is. Some features are
+finished and on by default. Others compile, link, and have never been looked at
+on a screen. The billboard feature in particular is **partial** — only one of
+its six payload types renders anything, and panels cannot be rotated. All of
+that is stated where it applies rather than buried, because a porting document
+that oversells what works is worse than none.
+
+## Layout
+
+| path | what |
+|---|---|
+| [`PORTING.md`](PORTING.md) | **the engine changes, for other forks** |
+| [`ENGINE_WORK.md`](ENGINE_WORK.md) | earlier status notes, corrected in place; `PORTING.md` wins where they disagree |
+| `src/`, `wadsrc/` | the engine, as upstream lays it out |
+| `RadianceControlPanel/` | the companion mod that gives the new cvars a menu — **not built into the exe** |
+
+The engine ships **no menus** for anything it adds. Every new cvar is
+console-only until something supplies a menu, which is what
+`RadianceControlPanel/` is for. If you port a feature, plan to supply your own.
+
+## Licence
+
+**GPL v3**, unchanged from upstream — see below. This fork adds no licence
+terms and removes none. If you take code from here, the same terms apply.
+
+---
+
+# Upstream README (QuestZDoom / GZDoom)
+
+*Everything below is upstream's and is preserved for attribution and licensing.*
+
 # QuestZDoom fork of LZDoom for Oculus Quest VR port!
 
 [![Build Status](https://github.com/emawind84/gzdoom/actions/workflows/continuous_integration.yml/badge.svg?branch=questzdoom)](https://github.com/emawind84/gzdoom/actions/workflows/continuous_integration.yml)
