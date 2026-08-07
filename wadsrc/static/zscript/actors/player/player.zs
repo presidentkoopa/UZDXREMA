@@ -2565,6 +2565,33 @@ class PlayerPawn : Actor
 
 	//===========================================================================
 	//
+	// GetVRWheelInfo
+	//
+	// What the VR wheel's info panel should say about the entry currently under
+	// the player's hand. Return newline-separated lines; the first is treated as
+	// the heading and drawn larger.
+	//
+	// This is a hook rather than something the engine works out because the
+	// interesting facts are not the engine's to know. A mod that rolls each
+	// weapon its own damage, rarity, condition and upgrades holds all of that in
+	// script, and an engine-side readout could only ever show the class defaults
+	// -- identical for six copies of a gun that are deliberately not identical.
+	//
+	// hand is 0 for the main hand and 1 for the off hand, so a mod that tracks a
+	// weapon per hand can say which copy this is.
+	//
+	// Return the empty string to let the engine draw its own fallback (the tag
+	// and ammo counts). Returning "" is not an error and is the default.
+	//
+	//===========================================================================
+
+	virtual String GetVRWheelInfo(Inventory item, int hand)
+	{
+		return "";
+	}
+
+	//===========================================================================
+	//
 	// FindMostRecentWeapon
 	//
 	// Locates the slot and index for the most recently selected weapon. If the

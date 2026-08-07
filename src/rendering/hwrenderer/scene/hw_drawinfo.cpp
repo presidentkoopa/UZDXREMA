@@ -34,6 +34,7 @@
 #include "hw_fakeflat.h"
 #include "hw_portal.h"
 #include "hw_renderstate.h"
+#include "hwrenderer/postprocessing/hw_postprocess.h"
 #include "hw_drawinfo.h"
 #include "po_man.h"
 #include "models.h"
@@ -67,6 +68,11 @@ CVAR(Float, gl_mask_threshold, 0.5f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, gl_mask_sprite_threshold, 0.5f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Bool, gl_coronas, true, CVAR_ARCHIVE);
+
+// [BB] How many samples the volumetric beam takes along each pixel's ray.
+// The single knob that trades beam quality for framerate: fewer steps means
+// coarser haze, not a dimmer beam, because the march normalises by count.
+CVAR(Int, vol_beam_quality, 24, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 
 sector_t * hw_FakeFlat(sector_t * sec, sector_t * dest, area_t in_area, bool back);
 
@@ -425,6 +431,68 @@ angle_t HWDrawInfo::FrustumAngle()
 //
 //-----------------------------------------------------------------------------
 
+
+//-----------------------------------------------------------------------------
+//
+// [BB] Resolve the volumetric beam from world space into view space.
+//
+// Done per scene draw rather than once per frame, and that is the point: each
+// eye and each portal view builds its own view matrix, so resolving here
+// means stereo and portals are correct without the shader or the script
+// knowing either exists.
+//
+// Vertex positions in this engine are (mapX, height, mapY) -- GL convention,
+// Y up -- so the world point is swizzled before the matrix is applied.
+//
+//-----------------------------------------------------------------------------
+
+void HWDrawInfo::SetupVolumetricBeam()
+{
+	if (Level == nullptr || !Level->VolBeamActive)
+	{
+		hw_postprocess.volbeam.ClearBeam();
+		return;
+	}
+
+	auto worldToView = [this](const DVector3 &w, bool isDirection) -> FVector3
+	{
+		float pt[4] = { (float)w.X, (float)w.Z, (float)w.Y, isDirection ? 0.0f : 1.0f };
+		float out[4];
+		VPUniforms.mViewMatrix.multMatrixPoint(pt, out);
+		return FVector3(out[0], out[1], out[2]);
+	};
+
+	VolumetricBeamUniforms u = {};
+	u.BeamPos = worldToView(Level->VolBeamPos, false);
+
+	FVector3 dir = worldToView(Level->VolBeamDir, true);
+	float dl = dir.Length();
+	u.BeamDir = (dl > 0.0001f) ? dir / dl : FVector3(0, 0, -1);
+
+	u.BeamColor = FVector3(Level->VolBeamColor.r / 255.f,
+		Level->VolBeamColor.g / 255.f,
+		Level->VolBeamColor.b / 255.f);
+
+	// Half-angles arrive in degrees; the shader compares cosines, so convert
+	// once here rather than per pixel.
+	u.CosInner = (float)cos(Level->VolBeamInner * M_PI / 180.0);
+	u.CosOuter = (float)cos(Level->VolBeamOuter * M_PI / 180.0);
+	u.BeamLength = (float)Level->VolBeamLength;
+	u.Density = (float)Level->VolBeamDensity;
+	u.Falloff = (float)Level->VolBeamFalloff;
+
+	// Rebuilding the pixel ray in the shader needs the view frustum's shape,
+	// which is exactly what the projection matrix's first two diagonals hold.
+	const float *proj = VPUniforms.mProjectionMatrix.get();
+	float px = (proj[0] != 0.0f) ? 1.0f / proj[0] : 1.0f;
+	float py = (proj[5] != 0.0f) ? 1.0f / proj[5] : 1.0f;
+	u.TanHalfFov = FVector2(px, py);
+
+	u.StepCount = clamp((int)vol_beam_quality, 8, 64);
+
+	hw_postprocess.volbeam.SetBeam(u);
+}
+
 void HWDrawInfo::SetViewMatrix(const FRotator &angles, float vx, float vy, float vz, bool mirror, bool planemirror)
 {
 	float mult = mirror ? -1.f : 1.f;
@@ -779,6 +847,8 @@ void HWDrawInfo::RenderScene(FRenderState &state)
 	{
 		state.ClearSweep();
 	}
+
+	SetupVolumetricBeam();
 
 	state.EnableFog(true);
 	state.SetRenderStyle(STYLE_Source);

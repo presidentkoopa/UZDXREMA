@@ -611,6 +611,17 @@ struct LevelLocals native
 	//   int hit; Vector2 uv; double d; [hit, uv, d] = level.TouchBillboard(handPos, 8);
 	native int, Vector2, double TouchBillboard(Vector3 point, double maxRange = 0);
 
+	// [BB] Volumetric beam -- a cone of light visible in the AIR, not just on
+	// the surfaces it lands on. That is the difference between a flashlight
+	// you can see the beam of and one you can only see the disc of.
+	//
+	// inner/outer are half-angles in degrees: full brightness inside inner,
+	// faded to nothing by outer. falloff shapes the fade along the length --
+	// 1 linear, higher concentrates the light near the lens. Publish it each
+	// tic while the light is on; clear it when off, which costs nothing.
+	native void SetVolumetricBeam(Vector3 pos, Vector3 dir, color col, double inner, double outer, double length, double density, double falloff);
+	native void ClearVolumetricBeam();
+
 	// [BB] Sweep -- up to eight thin bands of light travelling through the
 	// world, each tested per pixel against world position on every surface,
 	// so they wrap across floor, wall and ceiling as continuous unbroken

@@ -72,6 +72,33 @@ void PPBloom::UpdateTextures(int width, int height)
 	lastHeight = height;
 }
 
+
+/////////////////////////////////////////////////////////////////////////////
+
+// [BB] Volumetric beam. Drawn BEFORE bloom on purpose: a real beam in the air
+// picks up bloom and feeds the auto-exposure meter, which is most of what
+// sells it as light rather than as a drawn shape.
+void PPVolumetricBeam::Render(PPRenderState *renderstate, int sceneWidth, int sceneHeight)
+{
+	if (!active || uniforms.Density <= 0.0f || uniforms.BeamLength <= 0.0f)
+		return;
+
+	renderstate->PushGroup("volumetricbeam");
+
+	renderstate->Clear();
+	renderstate->Shader = &Beam;
+	renderstate->Uniforms.Set(uniforms);
+	renderstate->Viewport = screen->mSceneViewport;
+	renderstate->SetInputSceneDepth(0);
+	renderstate->SetOutputCurrent();
+	// Additive: the pass outputs only the beam's own contribution, so it
+	// never has to read the scene colour back in.
+	renderstate->SetAdditiveBlend();
+	renderstate->Draw();
+
+	renderstate->PopGroup();
+}
+
 void PPBloom::RenderBloom(PPRenderState *renderstate, int sceneWidth, int sceneHeight, int fixedcm)
 {
 	// Only bloom things if enabled and no special fixed light mode is active
@@ -1133,6 +1160,7 @@ void Postprocess::Pass1(PPRenderState* state, int fixedcm, int sceneWidth, int s
 {
 	exposure.Render(state, sceneWidth, sceneHeight);
 	customShaders.Run(state, "beforebloom");
+	volbeam.Render(state, sceneWidth, sceneHeight);
 	bloom.RenderBloom(state, sceneWidth, sceneHeight, fixedcm);
 }
 

@@ -2999,6 +2999,58 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, RemoveBillboard, RemoveBillboard)
 	return 0;
 }
 
+// [BB] Volumetric beam -- a cone of light visible in the air itself, not just
+// on the surfaces it lands on. Published each tic by whatever owns the
+// flashlight; the renderer resolves it into view space per eye, so stereo and
+// portals come out right without script knowing either exists.
+//
+// inner/outer are half-angles in degrees: full brightness inside inner,
+// faded to nothing by outer. falloff shapes the fade along the beam's length
+// -- 1 is linear, higher concentrates the light near the lens.
+static void SetVolumetricBeam(FLevelLocals *self, double px, double py, double pz,
+	double dx, double dy, double dz, int color,
+	double inner, double outer, double length, double density, double falloff)
+{
+	self->VolBeamActive = true;
+	self->VolBeamPos = DVector3(px, py, pz);
+	DVector3 d(dx, dy, dz);
+	double len = d.Length();
+	self->VolBeamDir = (len > 0.0) ? d / len : DVector3(1, 0, 0);
+	self->VolBeamColor = (PalEntry)color;
+	self->VolBeamInner = inner;
+	self->VolBeamOuter = outer;
+	self->VolBeamLength = length;
+	self->VolBeamDensity = density;
+	self->VolBeamFalloff = falloff;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetVolumetricBeam, SetVolumetricBeam)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(px); PARAM_FLOAT(py); PARAM_FLOAT(pz);
+	PARAM_FLOAT(dx); PARAM_FLOAT(dy); PARAM_FLOAT(dz);
+	PARAM_COLOR(color);
+	PARAM_FLOAT(inner);
+	PARAM_FLOAT(outer);
+	PARAM_FLOAT(length);
+	PARAM_FLOAT(density);
+	PARAM_FLOAT(falloff);
+	SetVolumetricBeam(self, px, py, pz, dx, dy, dz, color, inner, outer, length, density, falloff);
+	return 0;
+}
+
+static void ClearVolumetricBeam(FLevelLocals *self)
+{
+	self->VolBeamActive = false;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearVolumetricBeam, ClearVolumetricBeam)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	ClearVolumetricBeam(self);
+	return 0;
+}
+
 // [BB] Sweep -- up to eight thin bands of light travelling through the world,
 // each tested per pixel against world position on every surface, so they wrap
 // across floor, wall and ceiling as continuous unbroken lines.

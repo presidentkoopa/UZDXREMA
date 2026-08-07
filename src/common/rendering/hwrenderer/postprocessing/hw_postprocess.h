@@ -363,6 +363,66 @@ struct BlurUniforms
 	}
 };
 
+/////////////////////////////////////////////////////////////////////////////
+
+// [BB] Volumetric beam -- see shaders/pp/volumetricbeam.fp. Lights the air
+// inside a cone rather than the surfaces it lands on, so the beam itself is
+// visible. Values arrive already in VIEW space: the CPU resolves world to
+// view per eye, which is what makes this correct in stereo for free.
+struct VolumetricBeamUniforms
+{
+	FVector3 BeamPos;
+	float BeamLength;
+	FVector3 BeamDir;
+	float CosInner;
+	FVector3 BeamColor;
+	float CosOuter;
+	FVector2 TanHalfFov;
+	float Density;
+	float Falloff;
+	int StepCount;
+	float padding0, padding1, padding2;
+
+	static std::vector<UniformFieldDesc> Desc()
+	{
+		return
+		{
+			{ "BeamPos", UniformType::Vec3, offsetof(VolumetricBeamUniforms, BeamPos) },
+			{ "BeamLength", UniformType::Float, offsetof(VolumetricBeamUniforms, BeamLength) },
+			{ "BeamDir", UniformType::Vec3, offsetof(VolumetricBeamUniforms, BeamDir) },
+			{ "CosInner", UniformType::Float, offsetof(VolumetricBeamUniforms, CosInner) },
+			{ "BeamColor", UniformType::Vec3, offsetof(VolumetricBeamUniforms, BeamColor) },
+			{ "CosOuter", UniformType::Float, offsetof(VolumetricBeamUniforms, CosOuter) },
+			{ "TanHalfFov", UniformType::Vec2, offsetof(VolumetricBeamUniforms, TanHalfFov) },
+			{ "Density", UniformType::Float, offsetof(VolumetricBeamUniforms, Density) },
+			{ "Falloff", UniformType::Float, offsetof(VolumetricBeamUniforms, Falloff) },
+			{ "StepCount", UniformType::Int, offsetof(VolumetricBeamUniforms, StepCount) },
+			{ "padding0", UniformType::Float, offsetof(VolumetricBeamUniforms, padding0) },
+			{ "padding1", UniformType::Float, offsetof(VolumetricBeamUniforms, padding1) },
+			{ "padding2", UniformType::Float, offsetof(VolumetricBeamUniforms, padding2) },
+		};
+	}
+};
+
+class PPVolumetricBeam
+{
+public:
+	void Render(PPRenderState *renderstate, int sceneWidth, int sceneHeight);
+
+	// Set per scene draw, in view space, by the renderer. Cleared when no
+	// beam is live so a switched-off flashlight costs nothing at all.
+	void SetBeam(const VolumetricBeamUniforms &u) { uniforms = u; active = true; }
+	void ClearBeam() { active = false; }
+
+private:
+	VolumetricBeamUniforms uniforms = {};
+	bool active = false;
+
+	PPShader Beam = { "shaders/pp/volumetricbeam.fp", "", VolumetricBeamUniforms::Desc() };
+};
+
+/////////////////////////////////////////////////////////////////////////////
+
 enum { NumBloomLevels = 4 };
 
 class PPBlurLevel
@@ -839,6 +899,7 @@ class Postprocess
 {
 public:
 	PPBloom bloom;
+	PPVolumetricBeam volbeam;
 	PPLensDistort lens;
 	PPFXAA fxaa;
 	PPCameraExposure exposure;

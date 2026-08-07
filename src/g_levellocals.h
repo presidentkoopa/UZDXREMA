@@ -805,6 +805,19 @@ public:
 	//
 	// mode: 0 off, 1 cylinder from origin, 2 plane along X, 3 plane along Y,
 	//       4 sphere from origin
+	// [BB] Volumetric beam -- a cone of visible light in the air, for a
+	// flashlight. Published from script each tic and consumed by the
+	// renderer, which resolves it into view space per eye.
+	bool VolBeamActive = false;
+	DVector3 VolBeamPos;
+	DVector3 VolBeamDir;
+	PalEntry VolBeamColor;
+	double VolBeamInner = 10.0;    // degrees, full brightness inside this
+	double VolBeamOuter = 25.0;    // degrees, faded to nothing by here
+	double VolBeamLength = 1024.0;
+	double VolBeamDensity = 1.0;
+	double VolBeamFalloff = 1.5;
+
 	// Up to eight bands travel at once, so a train of them can chase each
 	// other with their own colours and spacing.
 	static const int MAX_SWEEP_BANDS = 8;

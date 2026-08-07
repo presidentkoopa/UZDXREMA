@@ -287,6 +287,7 @@ public:
 
 	void DispatchRenderHacks();
 	void DispatchBillboards();	// [BB]
+	void SetupVolumetricBeam();	// [BB]
 	void AddUpperMissingTexture(side_t * side, subsector_t *sub, float backheight);
 	void AddLowerMissingTexture(side_t * side, subsector_t *sub, float backheight);
 	void HandleMissingTextures(area_t in_area);
