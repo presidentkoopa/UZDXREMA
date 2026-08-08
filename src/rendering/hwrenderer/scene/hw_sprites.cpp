@@ -1975,9 +1975,17 @@ void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double
 // Billboards are UI-grade: fullbright, so a panel stays readable in a dark
 // room rather than disappearing into it.
 //
-// Extent is per-axis. The quad is built camera-facing here; freely oriented
-// billboards need the rotation-matrix path the flat sprites use, which is a
-// separate piece of work.
+// Extent is per-axis, and the quad is built at whatever orientation the
+// billboard asks for -- BBF_FIXED honours its stored yaw and tilt verbatim,
+// and only the camera modes derive a yaw from the viewpoint.
+//
+// The four corners are solved HERE and handed straight back by
+// CalculateVertices, which opens with an early return for isBillboard that
+// skips the entire flat-sprite path. That bypass is load-bearing, not a
+// shortcut: hinged BBF_FIXED panels hold a fixed angle to each other only
+// because nothing downstream re-orients them. Routing billboards through the
+// normal sprite orientation code would collapse every hinged assembly into
+// parallel planes.
 //
 //==========================================================================
 
