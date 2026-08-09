@@ -9,112 +9,106 @@
 // An ordinary font glyph is a picture: each texel says "ink" or "no ink".
 // Magnify it and the hard edge between those two answers magnifies with it,
 // so a letter drawn small and viewed close goes blocky. That is fine for a
-// HUD, where the glyph is always the same size on screen, and wrong for a
-// billboard, which is a real object in the world that the player can walk
-// toward. BB_TEXT was that -- readable across the room, mush up close.
+// HUD, where a glyph is always the same size on screen, and wrong for a
+// billboard, which is a real object the player can walk toward. BB_TEXT was
+// exactly that -- readable across the room, mush up close.
 //
-// A distance field stores something else. Each texel holds HOW FAR IT IS
-// FROM THE EDGE of the letter, positive inside and negative outside, and the
-// hardware's ordinary bilinear filtering interpolates that smoothly. The
-// shader then asks "is my distance above zero" and gets a clean answer at any
-// magnification, because it is reconstructing the edge rather than resampling
-// a picture of one.
+// A distance field stores something else. Each texel holds HOW FAR IT IS FROM
+// THE EDGE of the letter, positive inside and negative outside, and ordinary
+// bilinear filtering interpolates that smoothly. The shader asks "is my
+// distance above zero" and gets a clean answer at any magnification, because
+// it is reconstructing the edge rather than resampling a picture of one.
 //
-// It also hands the glow over for free, which is the actual reason this is
-// here rather than any general wish for tidier text. Neon is a bright core
-// with light falling off past the edge -- which is a function of distance
+// It also hands over the glow, which is the real reason this is here. Neon is
+// a bright core with light falling off past the edge -- a function of distance
 // from the edge, which is exactly and only what this texture stores. No blur
-// pass, no second texture.
+// pass, no second texture, no post-process.
 //
-// WHAT THIS PARTICULAR IMPLEMENTATION CANNOT DO
+// THE ATLAS IS BUILT OFFLINE. tools/sdffont/mksdf.ps1 takes a TTF, walks each
+// glyph's OUTLINE, and writes two lumps: an ordinary PNG and a plain-text
+// metrics file. The engine loads the PNG like any other texture and parses the
+// metrics here. Nothing is generated at runtime and no font file ships.
 //
-// It builds the field from the engine's existing bitmap fonts, because that
-// needs no new asset and works with every font already loaded. That caps it
-// twice, and both are worth knowing before anyone is disappointed:
+// That split is load-bearing rather than tidy-minded. Generating at runtime
+// would mean a distance transform per glyph at every startup, a custom
+// FImageSource to get the result into a texture, and a field whose quality is
+// capped by whatever bitmap font happened to be loaded. Offline, the source is
+// a vector outline supersampled 8x, so the only limit is what the generator
+// was told to do.
 //
-//   * SHARP CORNERS ROUND OFF. A single-channel distance field cannot
-//     represent two edges meeting at a point -- the one number per texel has
-//     to compromise between them. Fixing that is MSDF, which spends three
-//     channels so corners survive, and which needs a vector source to be
-//     worth doing.
-//   * NO DETAIL IS INVENTED. A glyph that is eight pixels tall in the lump
-//     has eight pixels of information. This makes it smooth; it cannot make
-//     it fine.
+// WHAT IT STILL CANNOT DO
 //
-// So the win here is smooth-at-any-size and correct glow. Crisp corners wait
-// for an offline generator fed by a real outline font. When that lands it
-// fills the same FSDFGlyph table and nothing above this file changes.
+// Corners round off, because a single channel per texel cannot describe two
+// edges meeting at a point -- the one number has to compromise between them.
+// Measured at spread 8 in a 64px cell on a pixel font this is not visible, so
+// MSDF (three channels, corners survive) is budgeted and NOT built. If a
+// future font shows it, MSDF fills this same table and nothing above this file
+// changes.
+//
+// GLOW RADIUS IS BOUNDED BY THE SPREAD. Past it there is no field left to
+// read, and the glow clips to a hard square at the cell boundary. Anything
+// wanting a wider glow needs an atlas regenerated with a wider spread, which
+// costs glyph area inside the same cell.
 //
 //==========================================================================
 
 #include "tarray.h"
+#include "zstring.h"
 
-class FFont;
 class FGameTexture;
 
-// [BB] Where one glyph lives in the atlas, and how to place it.
+// [BB] One glyph's cell in the atlas, plus what a layout needs to place it.
 //
-// Metrics are in SOURCE FONT PIXELS, not atlas pixels, deliberately. The
-// atlas rasterises everything to a common size so one font's atlas is not
-// twenty times another's, and if these were atlas pixels every caller would
-// have to know that scale factor to lay out a line. In source pixels a
-// caller can measure a string against FFont::GetHeight() the way it always
-// has and the atlas stays an implementation detail.
+// Metrics are in ATLAS PIXELS -- the same units the generator wrote -- and a
+// caller scales them by whatever height it actually wants. Storing them
+// pre-normalised would bake in one text size and make every other one a
+// division.
 struct FSDFGlyph
 {
-	float u0 = 0.f, v0 = 0.f;	// atlas UV, top-left
-	float u1 = 0.f, v1 = 0.f;	// atlas UV, bottom-right
-	float width = 0.f;			// quad extent, source pixels, INCLUDING the
-	float height = 0.f;			// spread margin -- the field runs past the ink
-	float offsetX = 0.f;		// pen to quad's left edge, source pixels
-	float offsetY = 0.f;		// glyph top to quad's top edge, source pixels
-	float advance = 0.f;		// how far the pen moves, source pixels
-	bool  present = false;		// false = this codepoint is not in the font
+	float u0 = 0.f, v0 = 0.f;	// atlas UV, top-left of the cell
+	float u1 = 0.f, v1 = 0.f;	// atlas UV, bottom-right of the cell
+	float advance = 0.f;		// pen movement, atlas pixels
+	bool  present = false;		// false = codepoint absent from this atlas
 };
 
 //==========================================================================
 //
-// [BB] FSDFFont -- one atlas per source font, built once, cached forever.
-//
-// Building costs a distance transform per glyph, which is why this is not
-// done per draw or per string. It is done the first time a font is asked for
-// and then never again for the life of the process.
+// [BB] FSDFFont -- one atlas plus its metrics, loaded once and cached.
 //
 //==========================================================================
 
 class FSDFFont
 {
 public:
-	// Build-or-fetch. Returns null only if the font has no usable glyphs at
-	// all, which a caller should treat as "fall back to the bitmap path"
-	// rather than as an error -- some fonts really are empty.
-	static FSDFFont *For(FFont *src);
+	// Load-or-fetch by base name. Looks for "<name>.png" and "<name>.txt".
+	// Returns null if either lump is missing or the metrics do not parse,
+	// which callers should treat as "fall back to the bitmap glyph path"
+	// rather than as fatal -- a mod is allowed to not ship one.
+	static FSDFFont *Get(const char *name);
 
-	// Drop every cached atlas. For a texture-precache flush; not needed in
-	// normal play.
 	static void FlushAll();
 
-	// Null when the codepoint is absent from the source font.
+	// Null when the codepoint is not in the atlas.
 	const FSDFGlyph *Glyph(int code) const;
 
 	FGameTexture *Atlas() const { return mAtlas; }
 
-	// Source font's line height, in the same source pixels the metrics use.
-	float Height() const { return mHeight; }
+	// Cell size the atlas was generated at, in atlas pixels. Layout divides
+	// by this to turn a requested text height into a scale factor.
+	float Cell() const { return mCell; }
 
-	// How far past the ink the field still carries usable distance, in
-	// source pixels. The shader needs this to turn a texel's 0..1 value back
-	// into a real distance, and a glow cannot be asked to reach further than
-	// this without running off the end of the field and flattening.
+	// How far past the ink the field still carries usable distance, in atlas
+	// pixels. The shader needs it to turn a texel's 0..1 back into a real
+	// distance, and it is the hard ceiling on glow radius.
 	float Spread() const { return mSpread; }
 
 private:
-	FFont *mSource = nullptr;
+	FString mName;
 	FGameTexture *mAtlas = nullptr;
 	TArray<FSDFGlyph> mGlyphs;	// indexed by code - mFirst
 	int mFirst = 0, mLast = 0;
-	float mHeight = 0.f;
+	float mCell = 0.f;
 	float mSpread = 0.f;
 
-	bool Build(FFont *src);
+	bool Load(const char *name);
 };
