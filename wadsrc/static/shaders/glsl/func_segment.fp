@@ -74,27 +74,40 @@ vec4 ProcessTexel()
 
 	if (mask == 0)
 	{
-		// PLATE. Rounded rectangle: fill plus a brighter rim, which is what
-		// GITD drew behind its digits and what makes a readout look like a
-		// panel rather than text floating on dirt.
-		// NOT named `half` -- that is a GLSL reserved word (half-precision
-		// float) and naming a local after it fails the compile outright.
-		vec2 ext = vec2(0.94, 0.90);
-		float r = 0.18;
-		vec2 q = abs(p) - ext + r;
-		float box = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+		// PLATE -- AN ELLIPSE, not a rounded rectangle.
+		//
+		// GITD's plate was always an oval and the variable that says so is
+		// called `nBox`, which is how it got built wrong here the first time:
+		// length() of normalised coordinates is a radial metric, so
+		// length(vec2(x/w, y/h)) traces an ellipse whatever the name claims.
+		// The thresholds below are GITD's own, kept verbatim -- fill out to
+		// 0.88 then fading to the edge, rim riding between 0.80 and 1.12.
+		//
+		// NOT named `half` -- that is a GLSL reserved word and naming a local
+		// after it fails the compile outright.
+		vec2 ext = vec2(0.95, 0.92);
+		float nb = length(p / ext);
 
-		float w = max(fwidth(box), 0.0001);
-		float fill   = smoothstep(w, -w, box);
-		float border = smoothstep(w, -w, abs(box + 0.045) - 0.045);
+		float fill   = 1.0 - smoothstep(0.88, 1.00, nb);
+		float border = smoothstep(0.80, 0.93, nb) * (1.0 - smoothstep(0.99, 1.12, nb));
 
-		float a = clamp(fill * 0.55 + border * 0.65, 0.0, 1.0);
+		// The fill is DELIBERATELY faint. GITD punched its digits out dark
+		// against a bright plate, which works when one shader draws both and
+		// can subtract. Here the plate and the characters are separate quads
+		// that ADD, so a bright plate simply swallows them -- which is exactly
+		// what it did the first time. A dim bed with a defined rim reads as a
+		// panel and still lets the segments be the brightest thing on it.
+		float a = clamp(fill * 0.13 + border * 0.55, 0.0, 1.0);
 		return vec4(uObjectColor.rgb, a * uObjectColor.a);
 	}
 
 	// The frame. x narrower than y so characters are taller than wide, which
-	// is what makes a row of them read as a display.
-	const float X = 0.62, Y = 0.84;
+	// is most of what makes a row of these read as a display rather than as
+	// text. X is the tuning knob for letter spacing: raising it fattens the
+	// glyphs and closes the gaps, lowering it does the reverse. It trades
+	// against the cell width in EmitBillboardSegments, so change one knowing
+	// the other exists.
+	const float X = 0.66, Y = 0.86;
 	vec2 TL = vec2(-X,  Y), TM = vec2(0.0,  Y), TR = vec2( X,  Y);
 	vec2 ML = vec2(-X, 0.0), MM = vec2(0.0, 0.0), MR = vec2( X, 0.0);
 	vec2 BL = vec2(-X, -Y), BM = vec2(0.0, -Y), BR = vec2( X, -Y);

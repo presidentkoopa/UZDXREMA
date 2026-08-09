@@ -2121,9 +2121,13 @@ void HWSprite::EmitBillboardSegments(const char* text, double halfw, double half
 	// makes a row of these read as a display rather than as text. Width is
 	// whatever fits, capped so a two-character string does not produce two
 	// absurdly fat glyphs.
-	const double cellW = min((halfw * 2.0) / count, halfh * 2.0 * 0.62);
+	// The 0.52 caps how wide a cell may get relative to its height, so a short
+	// string does not stretch into a few enormous glyphs floating in a wide
+	// plate. Tighter than it first was: at 0.62 the characters sat too far
+	// apart to read as one number.
+	const double cellW = min((halfw * 2.0) * 0.88 / count, halfh * 2.0 * 0.62);
 	const double halfCW = cellW * 0.5;
-	const double halfCH = halfh * 0.80;		// inset, so glyphs sit inside the plate
+	const double halfCH = halfh * 0.78;		// inset, so glyphs sit inside the plate
 
 	double pen = -(cellW * count) * 0.5 + halfCW;
 	for (const uint8_t* c = (const uint8_t*)text; *c != 0; ++c)
