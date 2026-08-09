@@ -1965,10 +1965,19 @@ static void EmitBillboardSDFText(FSDFFont* font, const char* text, double halfw,
 	if (total <= 0.0) return;
 
 	// Fit to whichever axis runs out first, exactly as the bitmap row does, so
-	// falling back between the two paths does not change the text's size.
-	const double scale = min((halfw * 2.0) / total, (halfh * 2.0) / cell);
-	const double half = cell * scale * 0.5;
-	const double margin = font->Spread() * scale;
+	// FIT TO THE EM BOX, NOT THE CELL. A cell is the em box plus a spread of
+	// margin on every side, so fitting the cell to the panel spent a quarter
+	// of the height on field that is by definition empty -- the text came out
+	// noticeably smaller than the size it was asked for, with dead space above
+	// and below it. The generator centres the em box in the cell, so scaling by
+	// the em box and still drawing the whole cell leaves the text centred and
+	// keeps the margin available for the halo to live in.
+	const double spread = font->Spread();
+	const double emBox = max(cell - 2.0 * spread, 1.0);
+	const double scale = min((halfw * 2.0) / total, (halfh * 2.0) / emBox);
+
+	const double halfH = cell * scale * 0.5;		// full cell tall: the halo needs its margin
+	const double margin = spread * scale;
 
 	double pen = -(total * scale) * 0.5;
 	int drawn = 0, missing = 0;
@@ -1982,11 +1991,26 @@ static void EmitBillboardSDFText(FSDFFont* font, const char* text, double halfw,
 		const double advance = g->advance * scale;
 		if (advance > 0.0)
 		{
+			// TRIM THE QUAD TO THE PART OF THE CELL THAT CAN CONTAIN ANYTHING.
+			//
+			// Cells are square, but an advance is narrower than a cell is wide
+			// -- 32 against 64 on this font -- so a full-cell quad overhangs
+			// its neighbour by half a cell of pure empty field. Empty field
+			// still carries halo, and two overlapping halos ADD, which is what
+			// was brightening the gaps between letters.
+			//
+			// Everything a glyph can draw lives within its advance plus one
+			// spread of halo each side, so the quad and its UVs are clipped to
+			// exactly that. Nothing real is lost and the overlap halves.
+			const double usefulCells = min(g->advance + 2.0 * spread, cell);
+			const double halfW = usefulCells * scale * 0.5;
+			const double uSpan = (g->u1 - g->u0) * (usefulCells / cell);
+
 			FBillboardUV uv;
 			uv.u0 = g->u0; uv.v0 = g->v0;
-			uv.u1 = g->u1; uv.v1 = g->v1;
+			uv.u1 = g->u0 + (float)uSpan; uv.v1 = g->v1;
 			if (drawn == 0) firstUV = uv;
-			emit((pen - margin + half) / halfw, 0.0, half, half, atlas, tint, uv);
+			emit((pen - margin + halfW) / halfw, 0.0, halfW, halfH, atlas, tint, uv);
 			drawn++;
 		}
 		pen += advance;
