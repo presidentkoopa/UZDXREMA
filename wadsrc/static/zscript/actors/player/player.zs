@@ -3057,6 +3057,12 @@ class PSprite : Object native play
 	native bool InterpolateTic;
 	native int Tics;
 	native TranslationID Translation;
+	// RS fork 2026-08-08 -- tint/glow the HELD 3D WEAPON MODEL.
+	//   Tint multiplies the model's skin (0xffffffff = off)
+	//   Glow  adds on top          (0 = off)
+	// Per-layer, so mainhand and offhand tint independently.
+	native Color Tint;
+	native Color Glow;
 	native bool bAddWeapon;
 	native bool bAddBob;
 	native bool bPowDouble;

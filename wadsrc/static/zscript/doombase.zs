@@ -562,6 +562,13 @@ struct LevelLocals native
 		BBFL_NODEPTH     = 4,
 		BBFL_VIEWLOCKED  = 8,
 		BBFL_FOLLOWANGLE = 16,
+		// Decoration: drawn, but never returned by AimBillboard,
+		// TouchBillboard or SweepBillboard. A composed panel is forty small
+		// billboards -- every glyph of every label, a bar's track and its
+		// fill -- and the queries return the NEAREST hit, so without this the
+		// panel's own face is permanently masked by the text written on it
+		// and a pointer aimed at a row comes back holding a letter.
+		BBFL_NOHIT       = 32,
 	}
 
 	// [BB] Billboards -- world-anchored oriented quads, the native backing
@@ -610,6 +617,23 @@ struct LevelLocals native
 	// press on contact. Returns 0 on a miss. Call as:
 	//   int hit; Vector2 uv; double d; [hit, uv, d] = level.TouchBillboard(handPos, 8);
 	native int, Vector2, double TouchBillboard(Vector3 point, double maxRange = 0);
+	// Swept touch -- where a hand WAS to where it IS. Returns the first
+	// billboard the path touches, its UV, and how far along the segment as a
+	// 0..1 fraction. Returns 0 on a miss.
+	//
+	// TouchBillboard asks "is the hand in the panel now", and script only gets
+	// to ask 35 times a second. A deliberate jab crosses a thin panel between
+	// two tics without ever being inside it on either, so the gentle touch
+	// works and the hard one does nothing. Sweeping the path closes that, and
+	// gives "the hand ARRIVED this tic" for free instead of making callers
+	// infer an edge from two samples.
+	//
+	// radius inflates the face into a slab and pads its edges, which is what a
+	// fingertip is. Debounce, cooldown and which hand it was are deliberately
+	// not here -- that is panel policy, not geometry.
+	//   int hit; Vector2 uv; double f;
+	//   [hit, uv, f] = level.SweepBillboard(lastHandPos, handPos, 2);
+	native int, Vector2, double SweepBillboard(Vector3 from, Vector3 to, double radius = 0);
 
 	// [BB] Volumetric beam -- a cone of light visible in the AIR, not just on
 	// the surfaces it lands on. That is the difference between a flashlight

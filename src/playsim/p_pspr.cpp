@@ -146,6 +146,8 @@ DEFINE_FIELD(DPSprite, Frame)
 DEFINE_FIELD(DPSprite, Flags)
 DEFINE_FIELD(DPSprite, ID)
 DEFINE_FIELD(DPSprite, processPending)
+DEFINE_FIELD(DPSprite, Tint)      // RS fork
+DEFINE_FIELD(DPSprite, Glow)      // RS fork
 DEFINE_FIELD(DPSprite, x)
 DEFINE_FIELD(DPSprite, y)
 DEFINE_FIELD(DPSprite, oldx)
@@ -210,6 +212,8 @@ DPSprite::DPSprite(player_t *owner, AActor *caller, int id)
   	}
   	
   	alpha = 1;
+	Tint = 0xffffffff;   // RS fork: untinted until ZScript says otherwise
+	Glow = 0;
 	LastPatch.SetInvalid();
   	Renderstyle = STYLE_Normal;
 
@@ -1400,6 +1404,8 @@ void DPSprite::Serialize(FSerializer &arc)
 		("oldx", oldx)
 		("oldy", oldy)
 		("alpha", alpha)
+		("tint", Tint)      // RS fork
+		("glow", Glow)      // RS fork
 		("pivot", pivot)
 		("scale", scale)
 		("rotation", rotation)

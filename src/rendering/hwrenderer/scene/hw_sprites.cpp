@@ -222,6 +222,26 @@ void HWSprite::DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent)
 			state.SetObjectColor(finalcol);
 			state.SetAddColor(cursec->AdditiveColors[sector_t::sprites] | 0xff000000);
 		}
+		else if (isBillboard)
+		{
+			// BILLBOARDS HAVE NO SECTOR, AND THAT WAS SILENTLY THROWING THEIR
+			// COLOUR AWAY. Fixed 2026-08-08.
+			//
+			// ProcessBillboard sets neither `actor` nor `particle`
+			// (:2010-2011) -- correctly, a billboard is neither -- so
+			// `cursec` is always null and this whole block was skipped. The
+			// draw state kept the white reset from :385, and EVERY billboard
+			// rendered white no matter what colour was passed to
+			// AddBillboard(). Tier colours, meters, label/value contrast: all
+			// discarded, with nothing logged.
+			//
+			// A billboard is a UI primitive placed in world space, not a
+			// thing standing in a room, so it deliberately takes its colour
+			// straight through without the sector's sprite tint or additive
+			// colour applied. That is also what makes it predictable: the
+			// colour a caller asks for is the colour it gets, in any sector.
+			state.SetObjectColor(ThingColor);
+		}
 		SetColor(state, di->Level, di->lightmode, lightlevel, rel, di->isFullbrightScene(), Colormap, trans);
 	}
 
@@ -2032,56 +2052,43 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 	y = (float)bpos.Y;
 	z = (float)bpos.Z;
 
-	double gscale = max((double)bb_scale, 0.01);
-	double halfw = bb->width * 0.5 * gscale;
-	double halfh = bb->height * 0.5 * gscale;
-
-	// Resolve orientation. Facing is a mode, not the definition of the
-	// primitive: BBF_FIXED honours the stored yaw/tilt verbatim, which is
-	// what lets two panels hold a fixed angle to each other. The camera
-	// modes only substitute a yaw (and for BBF_CAMERA a tilt) computed from
-	// where the viewer actually is.
-	double useYaw = bb->yaw;
-	double useTilt = bb->tilt;
-
-	// An attached billboard can hold its yaw relative to the actor it rides,
-	// so a thing that turns takes its faces with it instead of sliding around
-	// still pointing whichever way it was born facing.
-	if ((bb->flags & BBFL_FOLLOWANGLE) && (bb->flags & BBFL_ATTACHED) && bb->attachedTo != nullptr)
-	{
-		useYaw += bb->attachedTo->Angles.Yaw.Degrees();
-	}
-
-	if (bb->facing == BBF_CAMERAYAW || bb->facing == BBF_CAMERA)
-	{
-		double dx = vp.Pos.X - bpos.X;
-		double dy = vp.Pos.Y - bpos.Y;
-		useYaw = atan2(dy, dx) * (180.0 / M_PI);
-
-		if (bb->facing == BBF_CAMERA)
-		{
-			double dz = vp.Pos.Z - bpos.Z;
-			double flat = sqrt(dx * dx + dy * dy);
-			useTilt = atan2(dz, flat) * (180.0 / M_PI);
-		}
-	}
-
-	// Design space to world vectors. This convention is fixed, not a
-	// preference -- getting right the wrong way round draws every panel
-	// mirrored, which is subtle enough to survive a long time before
-	// anyone notices the text reads backwards:
+	// Orientation and extent, from the one shared solver. Facing is a mode,
+	// not the definition of the primitive: BBF_FIXED honours the stored
+	// yaw/tilt verbatim, which is what lets two panels hold a fixed angle to
+	// each other, and only the camera modes derive a yaw from the viewpoint.
 	//
-	//   face  F = ( cos y,  sin y, 0)
-	//   right R = ( sin y, -cos y, 0)   viewer's right
-	//   up    U tilts toward -F, so positive tilt leans the TOP toward
-	//           the viewer rather than away
-	double yawRad = useYaw * (M_PI / 180.0);
-	double tiltRad = (useTilt + bb_tiltbias) * (M_PI / 180.0);
-	double cy = cos(yawRad), sy = sin(yawRad);
-	double ct = cos(tiltRad), st = sin(tiltRad);
-
-	DVector3 right(sy, -cy, 0.0);
-	DVector3 up(-cy * st, -sy * st, ct);
+	// RIGHT IS (-sy, cy), NOT (sy, -cy). Corrected 2026-08-08, and the
+	// derivation is kept here because this is where the symptom shows.
+	//
+	// The old expression is the viewer's LEFT, and the ordinary sprite path
+	// proves it. A sprite's horizontal extent runs leftfac -> rightfac along
+	// (-V.y, V.x) (:1285-1308), and the UNMIRRORED branch maps v[0] -> u = UR
+	// with UL=0, UR=1 (:1247-1248, gametexture.cpp:340). So the texture's LEFT
+	// edge lands on the rightfac corner -- meaning (-V.y, V.x) points to the
+	// viewer's left.
+	//
+	// A billboard yaws to face the eye, so its view direction is V = -F =
+	// (-cy, -sy), giving (-V.y, V.x) = (sy, -cy) -- identical geometry to the
+	// sprite path, and therefore also the viewer's LEFT.
+	//
+	// Consequence of getting this backwards: billboards inherited the sprite
+	// path's MIRROR branch. Every billboard texture rendered horizontally
+	// flipped, and BB_DIGITS -- which walks its own pen along `right`
+	// (:1884-1897) -- laid multi-digit numbers out in reverse, so 120 read as
+	// 021. `bb_flipu` was added as a workaround for the first symptom and
+	// could never fix the second, because it flips U *inside* each quad
+	// rather than changing the direction the pen travels.
+	//
+	// With the basis corrected, bb_flipu's default (off) is now the right
+	// value and both symptoms go at once.
+	//
+	// The expression now lives in BillboardBasis (g_levellocals.h) rather than
+	// here, because it was three copies and all three were wrong at once. The
+	// queries call the same function with the same cvars, so the pointer and
+	// the picture cannot drift apart again.
+	DVector3 right, up, normal;
+	double halfw, halfh;
+	BillboardBasis(*bb, bpos, vp.Pos, bb_tiltbias, bb_scale, right, up, normal, halfw, halfh);
 
 	DVector3 rw = right * halfw;
 	DVector3 uh = up * halfh;

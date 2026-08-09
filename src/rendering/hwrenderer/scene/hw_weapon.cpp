@@ -130,13 +130,22 @@ void HWDrawInfo::DrawPSprite(HUDSprite *huds, FRenderState &state)
 	state.SetRenderStyle(huds->RenderStyle);
 	state.SetTextureMode(huds->RenderStyle);
 	state.SetObjectColor(huds->ObjectColor);
-	if (huds->owner->Sector)
+	// RS fork: the psprite's own additive term rides on top of the
+	// sector's. Set before RenderHUDModel below and never cleared by the
+	// model renderer, so a 3D weapon model receives it.
 	{
-		state.SetAddColor(huds->owner->Sector->AdditiveColors[sector_t::sprites] | 0xff000000);
-	}
-	else
-	{
-		state.SetAddColor(0);
+		PalEntry add = huds->owner->Sector
+			? PalEntry(huds->owner->Sector->AdditiveColors[sector_t::sprites] | 0xff000000)
+			: PalEntry(0);
+		const PalEntry g = huds->AddColor;
+		if (g.r | g.g | g.b)
+		{
+			add.r = min<int>(255, add.r + g.r);
+			add.g = min<int>(255, add.g + g.g);
+			add.b = min<int>(255, add.b + g.b);
+			add.a = 255;
+		}
+		state.SetAddColor(add);
 	}
 	state.SetDynLight(huds->dynrgb[0], huds->dynrgb[1], huds->dynrgb[2]);
 	state.EnableBrightmap(!(huds->RenderStyle.Flags & STYLEF_ColorIsFixed));
@@ -1351,8 +1360,24 @@ bool HUDSprite::GetWeaponRenderStyle(DPSprite *psp, AActor *playermo, sector_t *
 	PalEntry ThingColor = (playermo->RenderStyle.Flags & STYLEF_ColorIsFixed) ? playermo->fillcolor : 0xffffff;
 	ThingColor.a = 255;
 
+	// RS FORK -- PER-PSPRITE TINT ON THE HELD 3D MODEL. Added 2026-08-08.
+	//
+	// Stock reads only playermo->fillcolor, which is (a) the PLAYER's
+	// colour, so every psprite shares one value and no weapon can differ
+	// from another, and (b) gated behind STYLEF_ColorIsFixed, a flag
+	// whose styles render a flat silhouette -- so the only way to get a
+	// colour was to throw the texture away.
+	//
+	// psp->Tint is neither: it is per-layer (mainhand and offhand are
+	// separate psprites) and it MULTIPLIES the model's own skin, so
+	// detail survives. Default 0xffffffff is the identity, which is why
+	// this is invisible to every mod that does not set it.
+	ThingColor = ThingColor.Modulate(psp->Tint);
+	ThingColor.a = 255;
+
 	const bool bright = isBright(psp);
 	ObjectColor = bright ? ThingColor : ThingColor.Modulate(viewsector->SpecialColors[sector_t::sprites]);
+	AddColor = psp->Glow;
 
 	lightlevel = lighting.lightlevel;
 	cm = lighting.cm;
@@ -1886,6 +1911,7 @@ void HWDrawInfo::PrepareTargeterSprites(double ticfrac)
 	hudsprite.cm.Clear();
 	hudsprite.lightlevel = 255;
 	hudsprite.ObjectColor = 0xffffffff;
+	hudsprite.AddColor = 0;   // RS fork
 	hudsprite.alpha = 1;
 	hudsprite.RenderStyle = DefaultRenderStyle();
 	hudsprite.OverrideShader = -1;

@@ -1369,9 +1369,40 @@ void D_Display ()
 			}
 
 			// Keep HUD and automap toggles independent.
+			//
+			// THE MOUNTED PATHS REQUIRE AN ACTIVE STEREO MODE. Fixed
+			// 2026-08-08.
+			//
+			// vr_hud_mount and vr_automap_mount both default TRUE and are
+			// CVAR_ARCHIVE|CVAR_GLOBALCONFIG (hw_vrmodes.cpp:758), so they
+			// are true on a fresh install and stay true forever. Neither
+			// condition below used to check whether VR was actually
+			// RUNNING, so in a FLAT desktop session (vr_mode 0) the engine
+			// took the mounted branch anyway: drawFaceHud came out false
+			// and the whole 2D layer was skipped.
+			//
+			// That removed everything at once, which is what made it hard
+			// to read as one bug -- the status bar (CallDraw), the view
+			// border, AND every mod RenderOverlay handler, because
+			// DBaseStatusBar::DrawTopStuff dispatches RenderOverlay
+			// (shared_sbar.cpp:1240) from inside this same gate.
+			//
+			// The HUD was still being drawn -- into the offscreen VR
+			// surface via DrawHudToSurface() -- but that surface is only
+			// composited by the two stereo devices (vk_openxrdevice.cpp,
+			// gl_openvr.cpp). With no stereo mode running it went to a
+			// texture nobody ever displays.
+			//
+			// The tell: it came back whenever a menu or the console opened,
+			// because menuactive / ConsoleState flip this same expression.
+			//
+			// vrmode->IsVR() is the check this very block already uses for
+			// its own debug border ~45 lines below, so this makes the
+			// mounted paths agree with it instead of contradicting it.
+			const bool stereoActive = vrmode->IsVR();
 			const bool portableHud = VR_UsePortableHud();
-			const bool drawMountedHud = !menuactive && ConsoleState == c_up && !automapactive && (portableHud || vr_hud_mount);
-			const bool drawMountedMap = !menuactive && ConsoleState == c_up && automapactive && (portableHud || vr_automap_mount);
+			const bool drawMountedHud = stereoActive && !menuactive && ConsoleState == c_up && !automapactive && (portableHud || vr_hud_mount);
+			const bool drawMountedMap = stereoActive && !menuactive && ConsoleState == c_up && automapactive && (portableHud || vr_automap_mount);
 			const bool drawFaceMap = automapactive && !drawMountedMap && !portableHud;
 			const bool drawFaceHud = (!drawMountedHud && !drawMountedMap) || drawFaceMap;
 
@@ -1448,7 +1479,15 @@ void D_Display ()
 	}
 	if (!hud_toggled)
 	{
-		if ((!VR_UsePortableHud() && !vr_hud_mount) || automapactive || menuactive || ConsoleState != c_up)
+		// Same missing stereo guard as the HUD block above (see the long
+		// note at the drawMountedHud declaration). Without vrmode->IsVR()
+		// here, a FLAT session with the default vr_hud_mount=true skipped
+		// the ordinary chat/message drawer during normal play, because it
+		// believed chat was going onto the mounted VR surface instead --
+		// a surface nothing composites when no stereo mode is running.
+		if (!VRMode::GetVRModeCached(true)->IsVR()
+			|| (!VR_UsePortableHud() && !vr_hud_mount)
+			|| automapactive || menuactive || ConsoleState != c_up)
 		{
 			CT_Drawer ();
 		}

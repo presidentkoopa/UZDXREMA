@@ -83,6 +83,24 @@ CVAR(Float, vr_wheel_icon_model_yaw, -135.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_icon_model_xoffset, -40.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_icon_model_zoffset, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_wheel_select_angle, 30.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+// [BB] DESKTOP WHEEL. Added 2026-08-08 at the owner's request -- the wheel
+// was hard-gated to IsVR() in four places, so on a flat screen the binds ran
+// a function that returned on its first line and the buttons did nothing.
+//
+// This is a TESTING AFFORDANCE, not a second UI. It substitutes the two
+// things the wheel cannot get without a headset:
+//   * the anchor hand pose  -> a point in front of the camera, because the
+//     non-VR branch of GetHandPose reads AttackPos, which is the ACTOR'S
+//     FEET unless OverrideAttackPosDir is set. Anchoring there put the
+//     wheel around the player's ankles.
+//   * the thumbstick        -> how far the view has turned since the wheel
+//     opened. OpenYaw/OpenPitch were already being stored, so "turn to
+//     select" costs no new state and no new input path.
+// Haptics and the weapon transform stay VR-only and simply do not fire.
+CVAR(Bool, vr_wheel_desktop, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// Degrees of view turn that equals full stick deflection.
+CVAR(Float, vr_wheel_desktop_range, 22.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // 0 touch, 1 aim (relative to the pose the wheel opened at), 2 thumbstick,
 // 3 pointer -- a ray from the hand, struck against the wheel's own plane.
 //
@@ -136,6 +154,14 @@ CVAR(Color, vr_wheel_info_bg_color, (int)MAKEARGB(190, 12, 12, 14), CVAR_ARCHIVE
 // [BB] Declared rather than included: vk_openxrdevice.h pulls in the OpenXR and
 // Vulkan SDK headers, and this file needs one function out of it.
 namespace s3d { bool OpenXR_GetThumbstick(int abstractHand, float& x, float& y); }
+
+// [BB] The wheel may run when a headset is present, or when the desktop
+// affordance above is switched on. Every gate that used to test IsVR()
+// directly now asks this instead, so the two can never drift apart.
+static bool VRWheel_Available(const VRMode* vrmode)
+{
+	return vrmode != nullptr && (vrmode->IsVR() || vr_wheel_desktop);
+}
 using s3d::OpenXR_GetThumbstick;
 
 void RenderFrameModels(FModelRenderer* renderer, FLevelLocals* Level, const FSpriteModelFrame* smf, const FState* curState, const int curTics, FTranslationID translation, AActor* actor);
@@ -349,6 +375,31 @@ namespace
 		if (player == nullptr || player->mo == nullptr)
 		{
 			return false;
+		}
+
+		// [BB] NO TRACKED HANDS: SYNTHESISE ONE IN FRONT OF THE CAMERA.
+		// The branch below reads AttackPos/OffhandPos, which the engine only
+		// writes when OverrideAttackPosDir is set. Without it they hold the
+		// actor's origin -- its FEET -- so the wheel anchored at ankle height
+		// and looked broken rather than absent. Same trap the in-world panels
+		// hit. Held to the same side the real hand would be on, so the layout
+		// code sees what it expects.
+		if (!player->mo->OverrideAttackPosDir)
+		{
+			const DVector3 head = r_viewpoint.CenterEyePos.LengthSquared() > 1e-8
+				? r_viewpoint.CenterEyePos : r_viewpoint.Pos;
+			const DVector3 fwd = AngleToVector(r_viewpoint.Angles.Yaw, nullAngle);
+			const DVector3 rt  = AngleToVector(r_viewpoint.Angles.Yaw - DAngle::fromDeg(90.0), nullAngle);
+			const double side  = (abstractHand == VR_MAINHAND) ? 1.0 : -1.0;
+
+			pos = head + fwd * 22.0 + rt * (side * 11.0) - DVector3(0.0, 0.0, 8.0);
+			dir = head - pos;
+			if (dir.LengthSquared() <= 1e-8)
+			{
+				dir = AngleToVector(r_viewpoint.Angles.Yaw, r_viewpoint.Angles.Pitch);
+			}
+			dir.MakeUnit();
+			return true;
 		}
 
 		if (abstractHand == VR_OFFHAND)
@@ -1086,7 +1137,7 @@ namespace
 	{
 		auto vrmode = VRMode::GetVRModeCached(true);
 		auto player = &players[consoleplayer];
-		if (vrmode == nullptr || !vrmode->IsVR() || player == nullptr || player->mo == nullptr)
+		if (!VRWheel_Available(vrmode) || player == nullptr || player->mo == nullptr)
 		{
 			return;
 		}
@@ -1814,7 +1865,26 @@ namespace
 		float stickY = 0.0f;
 		if (!OpenXR_GetThumbstick(wheel.AnchorHand, stickX, stickY))
 		{
-			return false;
+			// [BB] DESKTOP: THE VIEW IS THE STICK. How far you have turned
+			// since the wheel opened, normalised against vr_wheel_desktop_range,
+			// is the deflection. OpenYaw/OpenPitch are already recorded at open
+			// time for the VR path, so this needs no extra state.
+			//
+			// Yaw grows counter-clockwise in Doom while stick X is right-
+			// positive, hence the negation -- without it the wheel selects the
+			// mirror of what you turned toward, which reads as "the wheel is
+			// backwards" rather than as a sign error.
+			if (!vr_wheel_desktop)
+			{
+				return false;
+			}
+
+			const float range = max<float>(1.0f, vr_wheel_desktop_range);
+			const double dYaw   = (r_viewpoint.Angles.Yaw   - wheel.OpenYaw  ).Normalized180().Degrees();
+			const double dPitch = (r_viewpoint.Angles.Pitch - wheel.OpenPitch).Normalized180().Degrees();
+
+			stickX = clamp<float>((float)(-dYaw   / range), -1.0f, 1.0f);
+			stickY = clamp<float>((float)(-dPitch / range), -1.0f, 1.0f);
 		}
 
 		const float deadzone = clamp<float>(vr_wheel_stick_deadzone, 0.05f, 0.95f);
@@ -1850,7 +1920,7 @@ namespace
 		}
 
 		auto vrmode = VRMode::GetVRModeCached(true);
-		if (vrmode == nullptr || !vrmode->IsVR())
+		if (!VRWheel_Available(vrmode))
 		{
 			return;
 		}
@@ -2269,7 +2339,7 @@ void VRWheel_Draw(HWDrawInfo* di, FRenderState& state)
 	}
 
 	auto vrmode = VRMode::GetVRModeCached(true);
-	if (vrmode == nullptr || !vrmode->IsVR())
+	if (!VRWheel_Available(vrmode))
 	{
 		return;
 	}

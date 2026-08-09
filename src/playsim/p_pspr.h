@@ -136,6 +136,31 @@ public:
 	int Flags;
 	FRenderStyle Renderstyle;
 
+	// RS FORK -- PER-PSPRITE MODEL TINT. Added 2026-08-08.
+	// Tint multiplies the weapon's own texture; Glow is added on top.
+	// Both apply to a 3D HUD MODEL, not just a sprite: hw_weapon.cpp
+	// sets them on the draw state immediately before RenderHUDModel,
+	// and neither hw_models.cpp nor modelrenderer.h touches object or
+	// add colour, so the model inherits them.
+	//
+	// These live on the PSprite rather than the weapon actor so each
+	// hand tints independently -- mainhand and offhand are separate
+	// PSprite layers (PSP_WEAPON / PSP_OFFHANDWEAPON).
+	//
+	// Stock GZDoom could not do this at all: the only colour input was
+	// the PLAYER's fillcolor, gated behind STYLEF_ColorIsFixed, which
+	// forces a stencil style and flattens the model to a silhouette.
+	// IN-CLASS INITIALISERS, NOT CONSTRUCTOR-BODY ONES, AND THAT IS LOAD
+	// BEARING. DPSprite has a second, PRIVATE default constructor used by
+	// savegame deserialisation (`DPSprite () {}` below) which runs none of
+	// the public constructor's body. Set only there, these stayed
+	// uninitialised on every load, and the serialiser leaves them alone
+	// when reading a save written before they existed -- so an old save
+	// resumed with whatever garbage was in that memory. Garbage near zero
+	// multiplies the weapon by black.
+	PalEntry Tint = 0xffffffff;   // multiply, 0xffffffff = untinted
+	PalEntry Glow = 0;            // additive, 0x00000000 = none
+
 private:
 	DPSprite () {}
 

@@ -139,6 +139,18 @@ enum EBillboardFlags
 	BBFL_NODEPTH    = 4,  // skip depth test; draws over world geometry
 	BBFL_VIEWLOCKED = 8,  // pos is an offset from the viewer, not a world point
 	BBFL_FOLLOWANGLE = 16, // attached only: yaw is relative to the actor's facing, so faces turn with it
+
+	// [BB] Decoration. Drawn like anything else, but never returned by
+	// AimBillboard/TouchBillboard/SweepBillboard.
+	//
+	// A composed panel is not one quad -- it is forty small ones, a bar's
+	// track and fill and every glyph of every label, each a billboard with
+	// its own handle. The queries return the NEAREST hit, so without this
+	// flag the panel's own face is permanently masked by the text drawn on
+	// it: a pointer aimed at a row comes back holding the handle of a
+	// letter, and no caller can map that to a row. Flag the decoration and
+	// the one quad that means something is the one that answers.
+	BBFL_NOHIT      = 32,
 };
 
 // [BB] A world-anchored quad: real depth-tested geometry, not a HUD overlay
@@ -184,6 +196,81 @@ struct FBillboard
 	// first frame after a load rewrites it.
 	DVector3 drawPos;
 };
+
+// [BB] THE ONE TRUE BILLBOARD BASIS. Renderer, aim ray, touch test and sweep
+// all resolve their orientation HERE and nowhere else.
+//
+// This used to be three hand-copied pairs of lines, and on 2026-08-08 all
+// three were wrong in the same way at once: `right` was the viewer's LEFT, so
+// every billboard texture drew mirrored and BB_DIGITS laid multi-digit numbers
+// out backwards (120 read as 021). Correcting three copies is three chances to
+// correct only two of them, and a pointer that lands somewhere other than
+// where the panel draws is invisible until someone notices a row is clickable
+// half a panel away from where it looks. So there is one copy now, and
+// "all three must always agree" is structural rather than a comment.
+//
+//   face   F = ( cos y,  sin y, 0)
+//   right  R = (-sin y,  cos y, 0)   the viewer's right
+//   up     U tilts toward -F, so positive tilt leans the top toward the viewer
+//   normal N = R x U, which reduces to F at zero tilt
+//
+// `bpos` is where the billboard actually is -- drawPos for a view-locked one,
+// pos otherwise. `eye` is whatever the caller looks FROM: the viewpoint in the
+// renderer, the ray origin or the touching point in a query. A pointer and a
+// viewpoint are not the same thing in VR, but resolving a camera-facing
+// billboard against the thing doing the asking is what a player expects.
+//
+// tiltBias and scale are the bb_tiltbias / bb_scale cvars, passed in rather
+// than read here so this header stays free of cvar dependencies. EVERY caller
+// must pass the live values: they are comfort dials that change what is DRAWN,
+// so a query that ignored them would put the clickable region somewhere other
+// than the picture. That was a real defect -- the queries used bb.width
+// unscaled while the renderer scaled it, so raising bb_scale to make a panel
+// readable grew the panel and left its new edges dead.
+inline void BillboardBasis(const FBillboard &bb, const DVector3 &bpos, const DVector3 &eye,
+	double tiltBias, double scale,
+	DVector3 &right, DVector3 &up, DVector3 &normal, double &halfw, double &halfh)
+{
+	const double DEG2RAD = 0.01745329251994329576923690768489;
+	const double RAD2DEG = 57.29577951308232087679815481410517;
+
+	double useYaw = bb.yaw;
+	double useTilt = bb.tilt;
+
+	// An attached billboard can hold its yaw relative to the actor it rides,
+	// so a thing that turns takes its faces with it instead of sliding around
+	// still pointing whichever way it was born facing.
+	if ((bb.flags & BBFL_FOLLOWANGLE) && (bb.flags & BBFL_ATTACHED) && bb.attachedTo != nullptr)
+	{
+		useYaw += bb.attachedTo->Angles.Yaw.Degrees();
+	}
+
+	if (bb.facing == BBF_CAMERAYAW || bb.facing == BBF_CAMERA)
+	{
+		double dx = eye.X - bpos.X;
+		double dy = eye.Y - bpos.Y;
+		useYaw = atan2(dy, dx) * RAD2DEG;
+
+		if (bb.facing == BBF_CAMERA)
+		{
+			double dz = eye.Z - bpos.Z;
+			useTilt = atan2(dz, sqrt(dx * dx + dy * dy)) * RAD2DEG;
+		}
+	}
+
+	double yawRad = useYaw * DEG2RAD;
+	double tiltRad = (useTilt + tiltBias) * DEG2RAD;
+	double cy = cos(yawRad), sy = sin(yawRad);
+	double ct = cos(tiltRad), st = sin(tiltRad);
+
+	right = DVector3(-sy, cy, 0.0);
+	up = DVector3(-cy * st, -sy * st, ct);
+	normal = right ^ up;
+
+	double g = scale > 0.01 ? scale : 0.01;
+	halfw = bb.width * 0.5 * g;
+	halfh = bb.height * 0.5 * g;
+}
 
 struct FLevelLocals
 {

@@ -2758,6 +2758,16 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, Vec3Diff, Vec3Diff)
 //
 //==========================================================================
 
+// The renderer's two comfort dials. A query has to apply BOTH or the pointer
+// stops matching the picture: bb_scale changes how big a panel is DRAWN, so a
+// hit test using the unscaled extent leaves the new edges dead, and
+// bb_tiltbias changes how far it leans. Both were missing here until
+// 2026-08-08 -- a player who enlarged panels to read them got a panel with a
+// border that ignored the pointer, which reads as flaky tracking rather than
+// as a cvar doing exactly what it said.
+EXTERN_CVAR(Float, bb_scale)
+EXTERN_CVAR(Float, bb_tiltbias)
+
 // [BB] Where a billboard really is right now. View-locked ones have no fixed
 // world position -- theirs is an offset from the viewer, resolved by the
 // renderer each frame -- so queries have to use what was last drawn or the
@@ -3125,6 +3135,17 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearSweep, ClearSweep)
 	return 0;
 }
 
+// [BB] Can this billboard answer a query at all?
+//
+// Transients carry no handle, so a hit could not be reported even if it
+// happened. BBFL_NOHIT is decoration the caller has declared unclickable --
+// the letters painted on a panel, a bar's track -- and without it the nearest
+// hit is always the text rather than the panel it is written on.
+static inline bool BillboardHittable(const FBillboard &bb)
+{
+	return bb.id != 0 && (bb.flags & BBFL_NOHIT) == 0;
+}
+
 // [BB] Ray versus billboard. Returns the id of the nearest billboard the ray
 // crosses and where on its face it landed, as 0..1 across and down -- so a
 // caller gets back the same UV the shader sees and can decide what was
@@ -3152,57 +3173,31 @@ static int AimBillboard(FLevelLocals *self, double sx, double sy, double sz,
 
 	for (auto &bb : self->Billboards)
 	{
-		if (bb.id == 0) continue;	// transients carry no handle, so a hit could not be reported
+		if (!BillboardHittable(bb)) continue;
 
-		double useYaw = bb.yaw;
-		double useTilt = bb.tilt;
-		if ((bb.flags & BBFL_FOLLOWANGLE) && (bb.flags & BBFL_ATTACHED) && bb.attachedTo != nullptr)
-		{
-			useYaw += bb.attachedTo->Angles.Yaw.Degrees();
-		}
-		if (bb.facing == BBF_CAMERAYAW || bb.facing == BBF_CAMERA)
-		{
-			const DVector3 &bpos = BillboardWorldPos(bb);
-			double ex = start.X - bpos.X;
-			double ey = start.Y - bpos.Y;
-			useYaw = atan2(ey, ex) * (180.0 / M_PI);
-			if (bb.facing == BBF_CAMERA)
-			{
-				double ez = start.Z - bpos.Z;
-				useTilt = atan2(ez, sqrt(ex * ex + ey * ey)) * (180.0 / M_PI);
-			}
-		}
+		const DVector3 &bpos = BillboardWorldPos(bb);
 
-		double yawRad = useYaw * (M_PI / 180.0);
-		double tiltRad = useTilt * (M_PI / 180.0);
-		double cy = cos(yawRad), sy2 = sin(yawRad);
-		double ct = cos(tiltRad), st = sin(tiltRad);
-
-		// Must match ProcessBillboard's convention exactly, or the pointer
-		// lands somewhere other than where the player sees the panel.
-		DVector3 right(sy2, -cy, 0.0);
-		DVector3 up(-cy * st, -sy2 * st, ct);
-		DVector3 normal = right ^ up;		// face normal
+		// Same solver, same cvars, as the renderer. See BillboardBasis.
+		DVector3 right, up, normal;
+		double halfw, halfh;
+		BillboardBasis(bb, bpos, start, bb_tiltbias, bb_scale, right, up, normal, halfw, halfh);
 
 		double denom = normal | dir;
 		if (fabs(denom) < EQUAL_EPSILON) continue;	// parallel to the face
 
-		double t = (normal | (BillboardWorldPos(bb) - start)) / denom;
+		double t = (normal | (bpos - start)) / denom;
 		if (t <= 0.0 || t >= bestT) continue;		// behind the ray, or farther than a hit we already have
 
-		DVector3 hit = start + dir * t;
-		DVector3 rel = hit - BillboardWorldPos(bb);
+		DVector3 rel = (start + dir * t) - bpos;
 
 		double across = rel | right;
 		double down = rel | up;
-		double halfw = bb.width * 0.5;
-		double halfh = bb.height * 0.5;
 		if (fabs(across) > halfw || fabs(down) > halfh) continue;	// outside the quad
 
 		bestT = t;
 		bestID = bb.id;
 		// Match the drawn UV: u runs left to right, v runs top to bottom.
-		bestUV = DVector2((across + halfw) / bb.width, (halfh - down) / bb.height);
+		bestUV = DVector2((across + halfw) / (halfw * 2.0), (halfh - down) / (halfh * 2.0));
 	}
 
 	if (uvOut) *uvOut = bestUV;
@@ -3234,39 +3229,15 @@ static int TouchBillboard(FLevelLocals *self, double px, double py, double pz,
 
 	for (auto &bb : self->Billboards)
 	{
-		if (bb.id == 0) continue;	// transients carry no handle, so a hit could not be reported
+		if (!BillboardHittable(bb)) continue;
 
-		double useYaw = bb.yaw;
-		double useTilt = bb.tilt;
-		if ((bb.flags & BBFL_FOLLOWANGLE) && (bb.flags & BBFL_ATTACHED) && bb.attachedTo != nullptr)
-		{
-			useYaw += bb.attachedTo->Angles.Yaw.Degrees();
-		}
-		if (bb.facing == BBF_CAMERAYAW || bb.facing == BBF_CAMERA)
-		{
-			const DVector3 &bpos2 = BillboardWorldPos(bb);
-			double ex = p.X - bpos2.X;
-			double ey = p.Y - bpos2.Y;
-			useYaw = atan2(ey, ex) * (180.0 / M_PI);
-			if (bb.facing == BBF_CAMERA)
-			{
-				double ez = p.Z - bpos2.Z;
-				useTilt = atan2(ez, sqrt(ex * ex + ey * ey)) * (180.0 / M_PI);
-			}
-		}
+		const DVector3 &bpos = BillboardWorldPos(bb);
 
-		double yawRad = useYaw * (M_PI / 180.0);
-		double tiltRad = useTilt * (M_PI / 180.0);
-		double cy = cos(yawRad), sy2 = sin(yawRad);
-		double ct = cos(tiltRad), st = sin(tiltRad);
+		DVector3 right, up, normal;
+		double halfw, halfh;
+		BillboardBasis(bb, bpos, p, bb_tiltbias, bb_scale, right, up, normal, halfw, halfh);
 
-		// Must match ProcessBillboard's convention exactly, or the pointer
-		// lands somewhere other than where the player sees the panel.
-		DVector3 right(sy2, -cy, 0.0);
-		DVector3 up(-cy * st, -sy2 * st, ct);
-		DVector3 normal = right ^ up;
-
-		DVector3 rel = p - BillboardWorldPos(bb);
+		DVector3 rel = p - bpos;
 
 		// Distance to the plane, unsigned: a finger behind a panel is still
 		// touching it as far as the player is concerned.
@@ -3275,18 +3246,132 @@ static int TouchBillboard(FLevelLocals *self, double px, double py, double pz,
 
 		double across = rel | right;
 		double down = rel | up;
-		double halfw = bb.width * 0.5;
-		double halfh = bb.height * 0.5;
 		if (fabs(across) > halfw || fabs(down) > halfh) continue;
 
 		bestDist = dist;
 		bestID = bb.id;
-		bestUV = DVector2((across + halfw) / bb.width, (halfh - down) / bb.height);
+		bestUV = DVector2((across + halfw) / (halfw * 2.0), (halfh - down) / (halfh * 2.0));
 	}
 
 	if (uvOut) *uvOut = bestUV;
 	if (distOut) *distOut = (bestID != 0) ? bestDist : 0.0;
 	return bestID;
+}
+
+// [BB] Swept touch -- did this hand cross into a panel between one tic and the
+// next, and where did it land?
+//
+// TouchBillboard answers "is the hand in the panel RIGHT NOW", and that
+// question has a hole in it that only shows up on the most emphatic gesture a
+// player can make. Script runs at 35Hz. A panel's touch slab is a few map
+// units thick. A deliberate jab moves a controller several units per tic, so
+// the hand can be in front of the panel on one tic and behind it on the next
+// and never once be inside it: reach out gently and it works, punch it and
+// nothing happens. Sampling harder is not available to script, and thickening
+// the slab to cover the fastest possible hand makes a panel you cannot stand
+// near without pressing.
+//
+// So the segment is the primitive, not the point. `from` and `to` are where
+// the hand was and where it is; the answer is the FIRST billboard the path
+// touches, the UV where it touched, and how far along the segment that
+// happened as a 0..1 fraction. Testing the whole path also makes the enter
+// event fall out for free -- a caller that wants "the hand arrived this tic"
+// no longer has to infer it from two containment tests and hope it saw both.
+//
+// `radius` inflates the quad into a slab of that thickness and pads its edges,
+// which is what a fingertip or a controller tip actually is. 0 is the exact
+// plane.
+//
+// Deliberately NOT a debounce, a cooldown, or a hysteresis band: which hand
+// did it, whether it counts twice, and what a press means are all policy, and
+// policy belongs to whoever owns the panel. This reports geometry.
+//
+// Returns 0 on a miss, with frac 0.
+static int SweepBillboard(FLevelLocals *self, double fx, double fy, double fz,
+	double tx, double ty, double tz, double radius, DVector2 *uvOut, double *fracOut)
+{
+	DVector3 from(fx, fy, fz);
+	DVector3 to(tx, ty, tz);
+	DVector3 seg = to - from;
+
+	if (radius < 0.0) radius = 0.0;
+
+	int bestID = 0;
+	double bestFrac = 1.0e30;
+	DVector2 bestUV(0, 0);
+
+	for (auto &bb : self->Billboards)
+	{
+		if (!BillboardHittable(bb)) continue;
+
+		const DVector3 &bpos = BillboardWorldPos(bb);
+
+		// Resolved against where the hand ENDED, so a camera-facing panel is
+		// tested against the orientation it holds now rather than one it has
+		// already turned away from.
+		DVector3 right, up, normal;
+		double halfw, halfh;
+		BillboardBasis(bb, bpos, to, bb_tiltbias, bb_scale, right, up, normal, halfw, halfh);
+
+		// Signed distance off the face at each end of the sweep.
+		double d0 = normal | (from - bpos);
+		double d1 = normal | (to - bpos);
+
+		// When did the path first come within `radius` of the plane? Already
+		// there at the start is frac 0 -- a hand resting on a panel has
+		// touched it, and it is the caller's business whether that repeats.
+		double frac;
+		if (fabs(d0) <= radius)
+		{
+			frac = 0.0;
+		}
+		else
+		{
+			// Aim for the near face of the slab, on the side the hand
+			// started, so a sweep that passes clean through still reports
+			// where it went IN rather than where it came out.
+			double target = (d0 > 0.0) ? radius : -radius;
+			double denom = d1 - d0;
+			if (fabs(denom) < EQUAL_EPSILON) continue;	// travelling parallel to the face
+
+			frac = (target - d0) / denom;
+			if (frac < 0.0 || frac > 1.0) continue;		// never reached it this tic
+		}
+
+		if (frac >= bestFrac) continue;					// something else was touched sooner
+
+		DVector3 rel = (from + seg * frac) - bpos;
+		double across = rel | right;
+		double down = rel | up;
+		if (fabs(across) > halfw + radius || fabs(down) > halfh + radius) continue;
+
+		bestFrac = frac;
+		bestID = bb.id;
+		// Clamped, because the radius pad lets a hit land just outside the
+		// face and a caller mapping UV to a row must never see 1.02.
+		bestUV = DVector2(
+			clamp((across + halfw) / (halfw * 2.0), 0.0, 1.0),
+			clamp((halfh - down) / (halfh * 2.0), 0.0, 1.0));
+	}
+
+	if (uvOut) *uvOut = bestUV;
+	if (fracOut) *fracOut = (bestID != 0) ? bestFrac : 0.0;
+	return bestID;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SweepBillboard, SweepBillboard)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(fx); PARAM_FLOAT(fy); PARAM_FLOAT(fz);
+	PARAM_FLOAT(tx); PARAM_FLOAT(ty); PARAM_FLOAT(tz);
+	PARAM_FLOAT(radius);
+	DVector2 uv;
+	double frac = 0.0;
+	int id = SweepBillboard(self, fx, fy, fz, tx, ty, tz, radius, &uv, &frac);
+	if (numret > 0) ret[0].SetInt(id);
+	if (numret > 1) ret[1].SetVector2(uv);
+	if (numret > 2) ret[2].SetFloat(frac);
+	return min(numret, 3);
 }
 
 DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, TouchBillboard, TouchBillboard)

@@ -55,6 +55,7 @@ handed and never computes a hinge itself.
 4   no depth      draws over world geometry instead of being occluded
 8   view-locked   pos becomes an offset from the viewer: X ahead, Y right, Z up
 16  follow angle  attached only: yaw is measured from the actor's facing
+32  no hit        drawn, but invisible to aim, touch and sweep
 ```
 
 `4` is what a HUD-locked panel needs — welded to the view, it would otherwise
@@ -68,6 +69,14 @@ movement. Resolved in the renderer instead, it stays welded.
 travels with an actor. Four billboards at yaw 0/90/180/270 on one actor make a
 box; without this flag the box shears into a plane as the actor turns. A floor
 marker under a monster wants the flag off.
+
+`32` exists because a panel is usually not one quad. Compose a card out of
+payloads and it is forty billboards — every glyph of every label, a bar's track
+and its fill — and the queries return the *nearest* hit, so the panel's own
+face is permanently masked by the text written on it. A pointer aimed at a row
+comes back holding the handle of a letter, which no caller can map to anything.
+Flag the decoration and the one quad that means something is the one that
+answers. Anything a player can point at, touch or shoot leaves it off.
 
 ## Payloads
 
@@ -111,6 +120,7 @@ void RemoveBillboard    (int id)
 
 int, Vector2         AimBillboard   (Vector3 start, Vector3 dir, double maxDist = 0)
 int, Vector2, double TouchBillboard (Vector3 point, double maxRange = 0)
+int, Vector2, double SweepBillboard (Vector3 from, Vector3 to, double radius = 0)
 ```
 
 `AddBillboard` issues no handle. It is the cheapest form — use it for anything
@@ -139,6 +149,21 @@ touch feel like touch: drive a hover highlight as the hand approaches, fire the
 press on contact. Two things worth handling in script — a hover band, or
 buttons light up whenever a hand drifts near; and debouncing, or a hand resting
 on a panel fires every tic.
+
+`SweepBillboard` is the same test taken along a path — where the hand was, to
+where it is — and it exists because script only gets to ask 35 times a second.
+A panel's touch slab is a few map units thick and a deliberate jab moves a
+controller several units per tic, so the hand can be in front of the panel on
+one tic and behind it on the next without ever being inside it: the gentle
+touch works and the hard one does nothing. Sweeping the path closes that, and
+hands back "the hand arrived this tic" instead of making the caller infer an
+edge from two samples. `radius` inflates the face into a slab and pads its
+edges, which is what a fingertip is; the returned fraction is where along the
+segment contact happened.
+
+Debounce, cooldown, hysteresis and which hand acted are deliberately *not* in
+the engine. How many presses a held hand is worth is a design question, not a
+geometric one, and it belongs to whoever owns the panel.
 
 ## Lifetime
 
@@ -185,16 +210,26 @@ headset.
 `bb_flipu` is different in kind. It is not a preference but the settlement of a
 handedness question, and the bug it fixes stays invisible until something with
 text on it renders backwards. This project has been caught by exactly that
-before. The basis vectors follow the convention the panel layer documents:
+before. With the basis corrected on 2026-08-08 its default — off — is the right
+value, and it should stay there.
 
 ```
 face  F = ( cos y,  sin y, 0)
-right R = ( sin y, -cos y, 0)
+right R = (-sin y,  cos y, 0)
 up    U tilts toward -F, so positive tilt leans the top toward the viewer
 ```
 
-The renderer, the aim ray and the touch test all use those same vectors. They
-have to agree, or the pointer lands somewhere other than where the panel is.
+**This block said `R = (sin y, -cos y, 0)` until 2026-08-08, and that is the
+viewer's LEFT.** So did the code, in three separate copies, which is why every
+billboard drew mirrored and `BB_DIGITS` laid `120` out as `021`. The derivation
+is in `FORK_CHANGES.md` and in the comment at `hw_sprites.cpp`.
+
+The renderer, both queries and the sweep have to agree, or the pointer lands
+somewhere other than where the panel is — so they no longer each carry a copy.
+All four call `BillboardBasis` in `g_levellocals.h`, which also applies
+`bb_scale` and `bb_tiltbias`. Those two were missing from the queries: raising
+`bb_scale` to make a panel readable used to grow the picture and leave the new
+edges dead.
 
 Under a budget the nearest billboards win — the far ones are unreadable anyway,
 so they are both the cheapest to drop and the least missed. View-locked

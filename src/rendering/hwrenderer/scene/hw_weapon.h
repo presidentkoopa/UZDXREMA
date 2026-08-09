@@ -47,6 +47,7 @@ struct HUDSprite
 	FColormap cm;
 	int lightlevel;
 	PalEntry ObjectColor;
+	PalEntry AddColor;   // RS fork: per-psprite additive glow
 
 	FRenderStyle RenderStyle;
 	float alpha;
