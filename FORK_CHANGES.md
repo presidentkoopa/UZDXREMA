@@ -153,12 +153,31 @@ instead of the wall pair behaving differently from the flat pair.
 
 A band of light defined in **world space** that wraps floor, wall and ceiling
 continuously as it passes — rather than being a per-surface effect that breaks
-at every edge. Eight bands can be live at once.
+at every edge. Eight bands can be drawn at once.
 
 ```
 Level.SetSweepOrigin(mode, origin, count)
 Level.SetSweepBand(index, radius, thickness, softness, col, intensity)
+Level.SetSweepTrail(length)      // signed wake; 0 = symmetric band
+Level.ClearSweep()
 ```
+
+Five distance modes: cylinder ring, X plane, Y plane, sphere shell, and a
+**signed vertical** mode (5) so one band can rise or fall through a map.
+
+The **wake** (`SetSweepTrail`) stretches each band backwards along its
+direction of travel — one falloff widened on the trailing side rather than a
+second gradient bolted on, so there is no seam at the band's core. The sign
+carries direction; at zero the band is exactly the symmetric one it always
+was. The uniform reuses a dead pad int in `StreamData`, so the Vulkan buffer
+layout did not change.
+
+Eight is a **GPU limit only** — `uSweepBands[8]` in a fixed 64KB uniform
+block. Script-side systems (see the GITD mod's wave list) can run any number
+of *logical* waves and allocate the eight drawn slots by priority; the engine
+neither knows nor cares. Per-band origins were considered and rejected:
+another `vec4[8]` in `StreamData` costs roughly a tenth of draw batching in
+every frame, permanently, to make simultaneous multi-origin waves visible.
 
 ## 4. Volumetric beam
 
