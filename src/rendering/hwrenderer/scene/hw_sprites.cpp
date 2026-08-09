@@ -2445,7 +2445,11 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 	{
 		const int gr = (int)(clamp(bb->glowRadius, 0.0, 1.0) * 255.0 + 0.5);
 		const int gs = (int)(clamp(bb->glowStrength, 0.0, 1.0) * 255.0 + 0.5);
-		bbGlow = PalEntry(255, (uint8_t)gr, (uint8_t)gs, 0);
+		// Blue carries BBFL_VOID to the seam shader. The segment payload
+		// overwrites blue per quad with its character mask, which is fine --
+		// nothing is both a seam and a character.
+		const int vd = (bb->flags & BBFL_VOID) ? 255 : 0;
+		bbGlow = PalEntry(255, (uint8_t)gr, (uint8_t)gs, (uint8_t)vd);
 	}
 
 	// [BB] Submit one quad. A payload is free to call this more than once --

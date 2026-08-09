@@ -591,6 +591,10 @@ struct LevelLocals native
 		// panel's own face is permanently masked by the text written on it
 		// and a pointer aimed at a row comes back holding a letter.
 		BBFL_NOHIT       = 32,
+		// BB_SEAM only: the opening is a HOLE -- dark inside, bright rim --
+		// instead of a lit panel. Use it whenever something is supposed to
+		// come OUT of the seam, or it reads as standing in front of a light.
+		BBFL_VOID        = 64,
 	}
 
 	// [BB] Billboards -- world-anchored oriented quads, the native backing

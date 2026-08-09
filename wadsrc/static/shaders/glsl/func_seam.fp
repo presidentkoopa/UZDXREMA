@@ -53,6 +53,28 @@ vec4 ProcessTexel()
 		halo = (h * 0.55 + h * h * h * 0.45) * strength;
 	}
 
+	// VOID MODE -- the seam is a hole rather than a panel.
+	//
+	// A lit slab is the wrong read for something that is supposed to open and
+	// let a monster out: the monster ends up standing in FRONT of a light
+	// instead of coming from anywhere. So the interior goes dark and only the
+	// rim burns, which is what the edge of a hole looks like.
+	//
+	// The rim is measured from the same distance field, so it tracks the shape
+	// automatically as the caller widens the quad -- there is nothing to keep
+	// in step by hand.
+	if (uAddColor.b > 0.5)
+	{
+		float rim = 1.0 - smoothstep(0.0, 0.13, sd);	// bright only near the edge
+		float inner = smoothstep(0.0, 0.20, sd);		// 1 well inside the hole
+
+		// Interior is drawn as near-black rather than as nothing, so the hole
+		// occludes the floor texture instead of letting it show through.
+		vec3 rgb = uObjectColor.rgb * rim;
+		float a = max(max(core * mix(1.0, 0.82, inner), halo), core);
+		return vec4(rgb, a * uObjectColor.a);
+	}
+
 	float a = max(core * (0.35 + 0.65 * slit), halo);
 	return vec4(uObjectColor.rgb, a * uObjectColor.a);
 }

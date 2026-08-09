@@ -2812,7 +2812,14 @@ static void FillBillboard(FLevelLocals *self, FBillboard &bb, const DVector3 &po
 	// while compiling a call to a native with that many -- no error, no
 	// dialog, just a silent exit during LoadActors. Everything below the
 	// cliff works, so the cliff is simply not approached.
-	if (payload == BB_TEXT && data != 0)
+	// EVERY procedural payload, not just BB_TEXT. This read BB_TEXT alone at
+	// first, which meant BB_SEGMENT, BB_SEGLCD and BB_SEAM accepted a
+	// BBGlow() and threw it away -- their shaders got reach 0 and drew no halo
+	// at all. It was invisible for a while because bloom is on by default, so
+	// bright segments still bled and looked like they were glowing. They were
+	// not; the bloom was doing all of it and none of it was controllable.
+	if (data != 0 && (payload == BB_TEXT || payload == BB_SEGMENT
+		|| payload == BB_SEGLCD || payload == BB_SEAM))
 	{
 		bb.glowRadius = ((data >> 0) & 0xff) / 255.0;
 		bb.glowStrength = ((data >> 8) & 0xff) / 255.0;

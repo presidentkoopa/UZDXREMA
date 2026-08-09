@@ -155,6 +155,12 @@ enum EBillboardFlags
 	// letter, and no caller can map that to a row. Flag the decoration and
 	// the one quad that means something is the one that answers.
 	BBFL_NOHIT      = 32,
+
+	// [BB] BB_SEAM only: the opening is a HOLE, not a lit panel. Dark
+	// interior, bright rim. Without it a seam is a glowing slab and anything
+	// stepping out of it reads as standing in front of a light rather than
+	// emerging from somewhere.
+	BBFL_VOID       = 64,
 };
 
 // [BB] A world-anchored quad: real depth-tested geometry, not a HUD overlay
