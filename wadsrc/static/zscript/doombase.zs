@@ -542,10 +542,14 @@ struct LevelLocals native
 	{
 		BB_PANEL   = 0,		// rounded-rect backing
 		BB_TEXTURE = 1,		// any texture; data = TextureID.GetIndex()
-		BB_DIGITS  = 2,
-		BB_GLYPH   = 3,
+		BB_DIGITS  = 2,		// one integer, printed; data = the value
+		BB_GLYPH   = 3,		// one character; data = its code
 		BB_RING    = 4,
 		BB_BAR     = 5,
+		// Arbitrary text -- pass the `text` argument, not `data`. BB_DIGITS
+		// can only ever show a number because an int is all `data` is; this
+		// takes a string, so names, IDs and labels fit.
+		BB_TEXT    = 6,
 	}
 
 	enum EBillboardFacing
@@ -583,7 +587,8 @@ struct LevelLocals native
 	// facing: 0 = use my own orientation, 1 = turn to viewer but stay
 	//         upright, 2 = turn to viewer including tilt
 	// payload: 0 = panel, 1 = texture (data = TextureID.GetIndex()),
-	//          2 = digits, 3 = glyph, 4 = ring, 5 = bar
+	//          2 = digits, 3 = glyph, 4 = ring, 5 = bar,
+	//          6 = text (uses the `text` argument, ignores data)
 	// flags: 1 = persistent, 2 = attached, 4 = no depth test,
 	//        8 = view-locked (pos becomes an offset from the viewer:
 	//            X ahead, Y right, Z up). Resolved at render rate, so a
@@ -592,13 +597,20 @@ struct LevelLocals native
 	//       16 = follow angle (attached only: yaw becomes relative to the
 	//            actor's facing, so faces turn with it)
 	//
+	// `text` is BB_TEXT's payload and is ignored by every other one. It is a
+	// trailing default so no existing caller has to change.
+	//
 	// Transient -- expires by lifetime, no handle issued.
-	native void AddBillboard(Vector3 pos, double w, double h, double yaw, double tilt, int facing, int payload, int data, color col, int flags = 0, double lifetime = 0);
+	native void AddBillboard(Vector3 pos, double w, double h, double yaw, double tilt, int facing, int payload, int data, color col, int flags = 0, double lifetime = 0, string text = "");
 	// Persistent -- lives until RemoveBillboard(id). Returns a handle.
-	native int AddBillboardPersistent(Vector3 pos, double w, double h, double yaw, double tilt, int facing, int payload, int data, color col, int flags = 0, double lifetime = 0);
+	native int AddBillboardPersistent(Vector3 pos, double w, double h, double yaw, double tilt, int facing, int payload, int data, color col, int flags = 0, double lifetime = 0, string text = "");
 	// Attached -- follows mo at offset and dies with it. Returns a handle.
-	native int AttachBillboard(Actor mo, Vector3 offset, double w, double h, double yaw, double tilt, int facing, int payload, int data, color col, int flags = 0);
+	native int AttachBillboard(Actor mo, Vector3 offset, double w, double h, double yaw, double tilt, int facing, int payload, int data, color col, int flags = 0, string text = "");
 	native void UpdateBillboard(int id, int data, color col);
+	// Retext a live BB_TEXT billboard. Separate from UpdateBillboard for the
+	// same reason SetBillboardAlpha is: a readout that restrings itself every
+	// tic should not have to restate its colour to do it.
+	native void SetBillboardText(int id, string text);
 	native void MoveBillboard(int id, Vector3 pos);
 	native void OrientBillboard(int id, double yaw, double tilt, int facing);
 	native void ResizeBillboard(int id, double w, double h);

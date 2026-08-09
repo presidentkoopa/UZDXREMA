@@ -1981,6 +1981,14 @@ void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double
 		return;
 	}
 
+	// [BB] Arbitrary text. Same glyph row as BB_DIGITS, but the string comes
+	// from the billboard instead of being printed from an int, so there is no
+	// length or alphabet limit -- a name, an ID, a label, whatever script
+	// hands it. EmitBillboardGlyphs already no-ops on an empty string.
+	case BB_TEXT:
+		EmitBillboardGlyphs(bb->text.GetChars(), halfw, halfh, tint, emit);
+		return;
+
 	default:
 		return;
 	}

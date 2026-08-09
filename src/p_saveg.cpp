@@ -93,6 +93,7 @@ FSerializer &Serialize(FSerializer &arc, const char *key, FBillboard &bb, FBillb
 			("facing", bb.facing)
 			("payload", bb.payload)
 			("data", bb.data)
+			("text", bb.text)
 			("color", bb.color)
 			("alpha", bb.alpha)
 			("flags", bb.flags)

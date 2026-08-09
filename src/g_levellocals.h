@@ -112,10 +112,11 @@ enum EBillboardPayload
 {
 	BB_PANEL   = 0,  // rounded-rect backing; data byte0 = corner radius, byte1 = border width
 	BB_TEXTURE = 1,  // arbitrary TextureID on the quad; data = TextureID.GetIndex()
-	BB_DIGITS  = 2,  // SDF digits; data = value (bits 0-16) | palette (bits 17+)
-	BB_GLYPH   = 3,  // SDF glyph; data = id (low byte) | palette (second byte)
+	BB_DIGITS  = 2,  // one integer, printed; data = the value
+	BB_GLYPH   = 3,  // one character; data = its code
 	BB_RING    = 4,  // progress ring; data = progress (low byte, 0-255) | style bits above
 	BB_BAR     = 5,  // progress bar; data = progress (low byte, 0-255) | style bits above
+	BB_TEXT    = 6,  // arbitrary string; reads FBillboard::text, ignores data
 };
 
 // [BB] How a billboard decides which way it points. Facing is a MODE, not
@@ -174,6 +175,18 @@ struct FBillboard
 	int      facing = BBF_FIXED;   // EBillboardFacing
 	int      payload = 0;          // EBillboardPayload
 	int      data = 0;             // payload-specific packed int
+
+	// [BB] BB_TEXT's string, and only BB_TEXT's.
+	//
+	// It lives here rather than inside `data` because `data` is one int and
+	// text is not a number. BB_DIGITS works by packing a value into that int,
+	// and there is no equivalent trick for a string: 0-9 plus A-Z is 36
+	// symbols, six bits each, and an int safely carries four characters before
+	// it runs out. "B0002" is five and "CG B0001" is eight, so the packing
+	// cannot represent the names this is for. Empty on every other payload,
+	// which costs one empty FString per billboard and nothing else.
+	FString  text;
+
 	PalEntry color;
 	double   alpha = 1.0;          // 0 = invisible, 1 = opaque; the fade handle
 	int      flags = 0;            // EBillboardFlags

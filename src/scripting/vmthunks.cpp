@@ -2790,7 +2790,8 @@ static FBillboard *FindBillboardByID(FLevelLocals *self, int id)
 }
 
 static void FillBillboard(FLevelLocals *self, FBillboard &bb, const DVector3 &pos, double w, double h,
-	double yaw, double tilt, int facing, int payload, int data, int color, int flags, double lifetime)
+	double yaw, double tilt, int facing, int payload, int data, int color, int flags, double lifetime,
+	const FString &text)
 {
 	bb.pos = pos;
 	bb.width = w;
@@ -2800,6 +2801,7 @@ static void FillBillboard(FLevelLocals *self, FBillboard &bb, const DVector3 &po
 	bb.facing = facing;
 	bb.payload = payload;
 	bb.data = data;
+	bb.text = text;
 	bb.color = (PalEntry)color;
 	bb.flags = flags;
 	bb.lifetime = lifetime;
@@ -2809,11 +2811,12 @@ static void FillBillboard(FLevelLocals *self, FBillboard &bb, const DVector3 &po
 // Transient: no handle issued, expires by lifetime. Cheapest form -- use it
 // for anything you will never need to address again.
 static void AddBillboard(FLevelLocals *self, double x, double y, double z, double w, double h,
-	double yaw, double tilt, int facing, int payload, int data, int color, int flags, double lifetime)
+	double yaw, double tilt, int facing, int payload, int data, int color, int flags, double lifetime,
+	const FString &text)
 {
 	FBillboard bb;
 	FillBillboard(self, bb, DVector3(x, y, z), w, h, yaw, tilt, facing, payload, data, color,
-		flags & ~(BBFL_PERSISTENT | BBFL_ATTACHED), lifetime);
+		flags & ~(BBFL_PERSISTENT | BBFL_ATTACHED), lifetime, text);
 	self->Billboards.Push(bb);
 }
 
@@ -2829,18 +2832,20 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, AddBillboard, AddBillboard)
 	PARAM_COLOR(color);
 	PARAM_INT(flags);
 	PARAM_FLOAT(lifetime);
-	AddBillboard(self, x, y, z, w, h, yaw, tilt, facing, payload, data, color, flags, lifetime);
+	PARAM_STRING(text);
+	AddBillboard(self, x, y, z, w, h, yaw, tilt, facing, payload, data, color, flags, lifetime, text);
 	return 0;
 }
 
 // Persistent: lives until RemoveBillboard(). Returns the handle.
 static int AddBillboardPersistent(FLevelLocals *self, double x, double y, double z, double w, double h,
-	double yaw, double tilt, int facing, int payload, int data, int color, int flags, double lifetime)
+	double yaw, double tilt, int facing, int payload, int data, int color, int flags, double lifetime,
+	const FString &text)
 {
 	FBillboard bb;
 	bb.id = self->NextBillboardID++;
 	FillBillboard(self, bb, DVector3(x, y, z), w, h, yaw, tilt, facing, payload, data, color,
-		(flags | BBFL_PERSISTENT) & ~BBFL_ATTACHED, lifetime);
+		(flags | BBFL_PERSISTENT) & ~BBFL_ATTACHED, lifetime, text);
 	self->Billboards.Push(bb);
 	return bb.id;
 }
@@ -2857,19 +2862,21 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, AddBillboardPersistent, AddBillboard
 	PARAM_COLOR(color);
 	PARAM_INT(flags);
 	PARAM_FLOAT(lifetime);
-	ACTION_RETURN_INT(AddBillboardPersistent(self, x, y, z, w, h, yaw, tilt, facing, payload, data, color, flags, lifetime));
+	PARAM_STRING(text);
+	ACTION_RETURN_INT(AddBillboardPersistent(self, x, y, z, w, h, yaw, tilt, facing, payload, data, color, flags, lifetime, text));
 }
 
 // Attached: follows an actor at a fixed offset and dies with it. Returns
 // the handle. Lifetime is ignored -- the actor decides when this ends.
 static int AttachBillboard(FLevelLocals *self, AActor *mo, double ox, double oy, double oz,
-	double w, double h, double yaw, double tilt, int facing, int payload, int data, int color, int flags)
+	double w, double h, double yaw, double tilt, int facing, int payload, int data, int color, int flags,
+	const FString &text)
 {
 	if (mo == nullptr) return 0;
 	FBillboard bb;
 	bb.id = self->NextBillboardID++;
 	FillBillboard(self, bb, mo->Pos() + DVector3(ox, oy, oz), w, h, yaw, tilt, facing, payload, data, color,
-		(flags | BBFL_ATTACHED) & ~BBFL_PERSISTENT, 0.0);
+		(flags | BBFL_ATTACHED) & ~BBFL_PERSISTENT, 0.0, text);
 	bb.attachedTo = mo;
 	bb.attachOffset = DVector3(ox, oy, oz);
 	self->Billboards.Push(bb);
@@ -2888,7 +2895,8 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, AttachBillboard, AttachBillboard)
 	PARAM_INT(data);
 	PARAM_COLOR(color);
 	PARAM_INT(flags);
-	ACTION_RETURN_INT(AttachBillboard(self, mo, ox, oy, oz, w, h, yaw, tilt, facing, payload, data, color, flags));
+	PARAM_STRING(text);
+	ACTION_RETURN_INT(AttachBillboard(self, mo, ox, oy, oz, w, h, yaw, tilt, facing, payload, data, color, flags, text));
 }
 
 static void UpdateBillboard(FLevelLocals *self, int id, int data, int color)
@@ -2906,6 +2914,26 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, UpdateBillboard, UpdateBillboard)
 	PARAM_INT(data);
 	PARAM_COLOR(color);
 	UpdateBillboard(self, id, data, color);
+	return 0;
+}
+
+// [BB] Retext a live BB_TEXT billboard. Separate from UpdateBillboard for the
+// same reason SetBillboardAlpha is: a readout that changes its string every
+// tic should not have to restate its colour to do it, and a caller that only
+// wanted new text would otherwise have to remember what colour it set.
+static void SetBillboardText(FLevelLocals *self, int id, const FString &text)
+{
+	FBillboard *bb = FindBillboardByID(self, id);
+	if (bb == nullptr) return;
+	bb->text = text;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetBillboardText, SetBillboardText)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(id);
+	PARAM_STRING(text);
+	SetBillboardText(self, id, text);
 	return 0;
 }
 
