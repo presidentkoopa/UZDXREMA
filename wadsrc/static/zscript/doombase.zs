@@ -556,6 +556,12 @@ struct LevelLocals native
 		// stays perfectly sharp at any size. Numbers want this; names want
 		// BB_TEXT. Draws a bordered plate behind itself.
 		BB_SEGMENT = 7,
+		// The same display with its polarity inverted: a lit face with the
+		// characters punched out of it dark, which is what GITD's original
+		// did and what an LCD looks like. BB_SEGMENT is the LED version --
+		// dark bed, glowing segments. Pick by which reads better against the
+		// room, not by which is more correct.
+		BB_SEGLCD  = 8,
 	}
 
 	enum EBillboardFacing

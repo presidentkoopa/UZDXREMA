@@ -2099,7 +2099,8 @@ static void EmitBillboardSDFText(FSDFFont* font, const char* text, double halfw,
 //==========================================================================
 
 void HWSprite::EmitBillboardSegments(const char* text, double halfw, double halfh, PalEntry tint,
-	const std::function<void(double, double, double, double, FGameTexture*, PalEntry, const FBillboardUV&)>& emit)
+	const std::function<void(double, double, double, double, FGameTexture*, PalEntry, const FBillboardUV&)>& emit,
+	bool inverted)
 {
 	if (text == nullptr || *text == 0) return;
 	FGameTexture* white = GetBillboardShape("bbwhite");
@@ -2112,9 +2113,15 @@ void HWSprite::EmitBillboardSegments(const char* text, double halfw, double half
 	const PalEntry savedGlow = bbGlow;
 	const uint8_t gr = savedGlow.r, gs = savedGlow.g;
 
-	// Plate first, so the characters sort in front of it. Mask 0 is the
-	// sentinel the shader reads as "draw the panel, not a glyph".
-	bbGlow = PalEntry(0, gr, gs, 0);
+	// Plate first, and that ORDER IS LOAD BEARING when inverted -- billboards
+	// do not depth-test against each other, so submission order is draw order,
+	// and a subtractive character drawn before its plate would have nothing to
+	// subtract from.
+	//
+	// Mask 0 is the LED bed, mask 1 the LCD face. Both are plate sentinels.
+	const PalEntry savedStyleGlow = bbGlow;
+	const FRenderStyle savedStyle = RenderStyle;
+	bbGlow = PalEntry(0, gr, gs, (uint8_t)(inverted ? 1 : 0));
 	emit(0.0, 0.0, halfw, halfh, white, tint, FBillboardUV());
 
 	// A character cell is taller than it is wide -- that ratio is most of what
@@ -2138,12 +2145,20 @@ void HWSprite::EmitBillboardSegments(const char* text, double halfw, double half
 			// Blue is the low byte, alpha the high one. Alpha is free here:
 			// nothing downstream reads uAddColor.a, and the draw path resets
 			// the whole colour between sprites anyway.
-			bbGlow = PalEntry((uint8_t)(mask >> 8), gr, gs, (uint8_t)(mask & 0xff));
+			//
+			// Inverted characters carry NO GLOW REACH, and that is not an
+			// oversight: a subtractive halo would eat a dark ring out of the
+			// plate around every glyph. The plate keeps its glow; the holes
+			// punched in it should have hard edges, which is what an LCD
+			// looks like.
+			bbGlow = PalEntry((uint8_t)(mask >> 8), inverted ? 0 : gr, gs, (uint8_t)(mask & 0xff));
+			RenderStyle = inverted ? LegacyRenderStyles[STYLE_Subtract] : savedStyle;
 			emit(pen / halfw, 0.0, halfCW, halfCH, white, tint, FBillboardUV());
 		}
 		pen += cellW;
 	}
 
+	RenderStyle = savedStyle;
 	bbGlow = savedGlow;
 }
 
@@ -2272,10 +2287,12 @@ void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double
 	// way for it to be unavailable -- the glyphs are arithmetic, so this cannot
 	// fail the way a missing font lump can.
 	case BB_SEGMENT:
+	case BB_SEGLCD:
 	{
 		const int saved = OverrideShader;
 		OverrideShader = SHADER_Segment;
-		EmitBillboardSegments(bb->text.GetChars(), halfw, halfh, tint, emit);
+		EmitBillboardSegments(bb->text.GetChars(), halfw, halfh, tint, emit,
+			bb->payload == BB_SEGLCD);
 		OverrideShader = saved;
 		return;
 	}

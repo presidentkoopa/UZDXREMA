@@ -444,7 +444,8 @@ public:
 	// rewrites bbGlow between quads to carry each character's mask, and
 	// PutSprite snapshots the sprite per quad, so that has to happen on `this`.
 	void EmitBillboardSegments(const char* text, double halfw, double halfh, PalEntry tint,
-		const std::function<void(double, double, double, double, FGameTexture*, PalEntry, const FBillboardUV&)>& emit);
+		const std::function<void(double, double, double, double, FGameTexture*, PalEntry, const FBillboardUV&)>& emit,
+		bool inverted);
 	void AdjustVisualThinker(HWDrawInfo *di, DVisualThinker *spr, sector_t *sector);
 
 	void DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent);

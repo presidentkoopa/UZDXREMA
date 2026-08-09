@@ -72,7 +72,9 @@ vec4 ProcessTexel()
 	// the shared halo maths below reads the same way in both files.
 	float sd = -1e9;
 
-	if (mask == 0)
+	// 0 and 1 are both plate sentinels: 0 is the LED bed, 1 is the LCD face.
+	// Neither collides with a character -- the lowest real mask is 0x000C.
+	if (mask <= 1)
 	{
 		// PLATE -- AN ELLIPSE, not a rounded rectangle.
 		//
@@ -91,13 +93,19 @@ vec4 ProcessTexel()
 		float fill   = 1.0 - smoothstep(0.88, 1.00, nb);
 		float border = smoothstep(0.80, 0.93, nb) * (1.0 - smoothstep(0.99, 1.12, nb));
 
-		// The fill is DELIBERATELY faint. GITD punched its digits out dark
-		// against a bright plate, which works when one shader draws both and
-		// can subtract. Here the plate and the characters are separate quads
-		// that ADD, so a bright plate simply swallows them -- which is exactly
-		// what it did the first time. A dim bed with a defined rim reads as a
-		// panel and still lets the segments be the brightest thing on it.
-		float a = clamp(fill * 0.13 + border * 0.55, 0.0, 1.0);
+		// TWO POLARITIES, and the plate has to know which one it is in.
+		//
+		// LED (mask 0): a faint bed. The characters ADD on top of it, so a
+		// bright plate would simply swallow them -- which it did, the first
+		// time this was built.
+		//
+		// LCD (mask 1): GITD's own values, a genuinely lit face. Here the
+		// characters SUBTRACT instead, punching themselves out of it dark,
+		// so the plate wants to be bright or there is nothing to punch.
+		float f = (mask == 0) ? 0.13 : 0.55;
+		float b = (mask == 0) ? 0.55 : 0.65;
+
+		float a = clamp(fill * f + border * b, 0.0, 1.0);
 		return vec4(uObjectColor.rgb, a * uObjectColor.a);
 	}
 
