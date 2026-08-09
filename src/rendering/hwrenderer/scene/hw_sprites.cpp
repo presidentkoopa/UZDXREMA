@@ -2329,6 +2329,30 @@ void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double
 		return;
 	}
 
+	// [BB] The transcription. One quad, and the shader lays out everything
+	// inside it -- no per-digit quads, which is precisely how the original
+	// manages to punch its digits out of its own plate.
+	case BB_WG13:
+	{
+		FGameTexture* white = GetBillboardShape("bbwhite");
+		if (white == nullptr) return;
+
+		// Progress in red, the number as 24 bits across the rest. The original
+		// packed both into its glow spot the same way.
+		const int num = clamp(bb->data, 0, 0xFFFFFF);
+		const int pr = (int)(clamp(bb->progress, 0.0, 1.0) * 255.0 + 0.5);
+		const PalEntry savedWG = bbGlow;
+		bbGlow = PalEntry((uint8_t)(num & 0xff), (uint8_t)pr,
+			(uint8_t)((num >> 16) & 0xff), (uint8_t)((num >> 8) & 0xff));
+
+		const int savedShader = OverrideShader;
+		OverrideShader = SHADER_WG13;
+		emit(0.0, 0.0, halfw, halfh, white, tint, FBillboardUV());
+		OverrideShader = savedShader;
+		bbGlow = savedWG;
+		return;
+	}
+
 	case BB_SEGMENT:
 	case BB_SEGLCD:
 	{

@@ -568,6 +568,16 @@ struct LevelLocals native
 		// Flat (tilt 90) it is a seam in the floor; upright (tilt 0) it is a
 		// door something can walk out of.
 		BB_SEAM    = 9,
+		// GITD's kill badge, transcribed from the original shader rather than
+		// rebuilt. A lozenge plate with the number punched out of it in
+		// black, all in one pass. `data` is the number. Drive progress to
+		// open it -- a thin slit at 0, full lozenge at 1, digits appearing
+		// past 0.55. Digits only; letters are BB_SEGMENT.
+		//
+		// Size it as the original does: halfH 46, and
+		// halfW = halfH * (0.60 + digits * 0.42). Square dimensions give a
+		// circle, which is not what it is meant to be.
+		BB_WG13    = 10,
 	}
 
 	enum EBillboardFacing

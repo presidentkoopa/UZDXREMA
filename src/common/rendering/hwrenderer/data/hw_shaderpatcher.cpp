@@ -301,6 +301,8 @@ const FDefaultShader defaultshaders[] =
 	{"Segment", "shaders/glsl/func_segment.fp", "shaders/glsl/material_nolight.fp", "#define NO_LAYERS\n"},
 	// [BB] A glowing slit that opens. Also samples nothing.
 	{"Seam", "shaders/glsl/func_seam.fp", "shaders/glsl/material_nolight.fp", "#define NO_LAYERS\n"},
+	// [BB] GITD's kill badge, transcribed. Plate and digits in ONE pass.
+	{"WG13", "shaders/glsl/func_wg13.fp", "shaders/glsl/material_nolight.fp", "#define NO_LAYERS\n"},
 	{nullptr,nullptr,nullptr,nullptr}
 };
 
