@@ -87,6 +87,7 @@ enum MaterialShaderIndex
 	// checks that they agree.
 	SHADER_SDFText,
 	SHADER_Segment,
+	SHADER_Seam,
 	FIRST_USER_SHADER
 };
 

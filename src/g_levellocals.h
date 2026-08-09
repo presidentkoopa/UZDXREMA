@@ -119,6 +119,7 @@ enum EBillboardPayload
 	BB_TEXT    = 6,  // arbitrary string; reads FBillboard::text, ignores data
 	BB_SEGMENT = 7,  // same string, drawn as a 16-segment display -- no atlas
 	BB_SEGLCD  = 8,  // as BB_SEGMENT but inverted: lit plate, digits punched out
+	BB_SEAM    = 9,  // a glowing slit; widen it with ResizeBillboard to open it
 };
 
 // [BB] How a billboard decides which way it points. Facing is a MODE, not

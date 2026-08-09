@@ -694,6 +694,11 @@ class Actor : Thinker native
 	native clearscope static class<Actor> GetReplacement(class<Actor> cls);
 	native clearscope static class<Actor> GetReplacee(class<Actor> cls);
 	native static int GetSpriteIndex(name sprt);
+	// [BB] This actor's current sprite frame as a texture, so callers can ask
+	// TexMan.GetSize() how big the ARTWORK is. Sizing anything off Height
+	// instead measures the collision cylinder, which is a different number and
+	// wrong by a lot on tall monsters. rotation is the view angle 0-15.
+	native TextureID GetSpriteTextureID(int rotation = 0);
 	native clearscope static double GetDefaultSpeed(class<Actor> type);
 	native static class<Actor> GetSpawnableType(int spawnnum);
 	native clearscope static int ApplyDamageFactors(class<Inventory> itemcls, Name damagetype, int damage, int defdamage);

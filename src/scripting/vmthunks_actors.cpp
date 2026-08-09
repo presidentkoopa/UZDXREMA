@@ -30,6 +30,8 @@
 
 #include "vm.h"
 #include "r_defs.h"
+#include "r_state.h"
+#include "r_data/sprites.h"
 #include "g_levellocals.h"
 #include "s_sound.h"
 #include "p_local.h"
@@ -1981,6 +1983,44 @@ static void SetViewPos(AActor *self, double x, double y, double z, int flags)
 
 	DVector3 pos = { x,y,z };
 	self->ViewPos->Set(pos, flags);
+}
+
+//==========================================================================
+//
+// [BB] An actor's CURRENT SPRITE, as a texture.
+//
+// Added because there was no way to ask, and the absence had a real cost:
+// anything wanting to lay a silhouette of a monster on the ground had to size
+// it from Height instead -- which is the COLLISION CYLINDER, not the artwork.
+// A Cacodemon and a Revenant have wildly different sprite-to-height ratios, so
+// a silhouette sized that way is wrong for half the bestiary and badly wrong
+// for the tall ones. GITD's floor silhouettes do exactly this and it is why
+// they come out the wrong size.
+//
+// With a TextureID in hand, TexMan.GetSize() gives the real artwork dimensions
+// and the caller can size to what will actually be drawn.
+//
+// rotation is the view angle 0-15; 0 is the front-facing frame, which is what
+// a flat silhouette wants regardless of which way the monster was looking.
+//
+//==========================================================================
+
+static int GetSpriteTextureID(AActor *self, int rotation)
+{
+	if (self == nullptr) return 0;
+	if ((unsigned)self->sprite >= sprites.Size()) return 0;
+
+	bool mirror = false;
+	FTextureID tex = sprites[self->sprite].GetSpriteFrame(self->frame,
+		clamp(rotation, 0, 15), nullAngle, &mirror);
+	return tex.isValid() ? tex.GetIndex() : 0;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(AActor, GetSpriteTextureID, GetSpriteTextureID)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_INT(rotation);
+	ACTION_RETURN_INT(GetSpriteTextureID(self, rotation));
 }
 
 DEFINE_ACTION_FUNCTION_NATIVE(AActor, SetViewPos, SetViewPos)

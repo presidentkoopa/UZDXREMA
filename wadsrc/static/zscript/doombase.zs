@@ -562,6 +562,12 @@ struct LevelLocals native
 		// dark bed, glowing segments. Pick by which reads better against the
 		// room, not by which is more correct.
 		BB_SEGLCD  = 8,
+		// A glowing slit. Open it by animating its WIDTH with
+		// ResizeBillboard -- the shader deliberately has no progress term, so
+		// the easing, the pause and the reverse all belong to the caller.
+		// Flat (tilt 90) it is a seam in the floor; upright (tilt 0) it is a
+		// door something can walk out of.
+		BB_SEAM    = 9,
 	}
 
 	enum EBillboardFacing

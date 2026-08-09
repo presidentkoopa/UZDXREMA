@@ -2292,6 +2292,21 @@ void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double
 	// [BB] The same string as a segment display. No atlas, no fallback, and no
 	// way for it to be unavailable -- the glyphs are arithmetic, so this cannot
 	// fail the way a missing font lump can.
+	// [BB] A glowing slit. One quad, procedural, and it neither knows nor
+	// cares which way it faces -- tilt 90 is a seam in the floor, tilt 0 is a
+	// door standing up. Opening is ResizeBillboard, caller-side, so the easing
+	// belongs to whoever owns the effect.
+	case BB_SEAM:
+	{
+		FGameTexture* white = GetBillboardShape("bbwhite");
+		if (white == nullptr) return;
+		const int savedSeam = OverrideShader;
+		OverrideShader = SHADER_Seam;
+		emit(0.0, 0.0, halfw, halfh, white, tint, FBillboardUV());
+		OverrideShader = savedSeam;
+		return;
+	}
+
 	case BB_SEGMENT:
 	case BB_SEGLCD:
 	{
