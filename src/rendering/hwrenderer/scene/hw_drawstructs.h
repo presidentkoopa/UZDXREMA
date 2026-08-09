@@ -356,6 +356,16 @@ public:
 //==========================================================================
 
 
+// [BB] Which part of its texture a billboard sub-quad draws.
+//
+// Every payload but text uses the whole texture, which is what the default
+// says. Text cannot: its glyphs share one atlas, so each quad has to name its
+// own cell or every letter would draw the entire alphabet squashed into it.
+struct FBillboardUV
+{
+	float u0 = 0.f, v0 = 0.f, u1 = 1.f, v1 = 1.f;
+};
+
 class HWSprite
 {
 public:
@@ -423,7 +433,7 @@ public:
 	// every payload work without a shader. Offsets are in half-extents of the
 	// parent billboard, so 1.0 is its edge.
 	void EmitBillboardPayload(HWDrawInfo* di, const struct FBillboard* bb, double halfw, double halfh,
-		const std::function<void(double, double, double, double, FGameTexture*, PalEntry)>& emit);
+		const std::function<void(double, double, double, double, FGameTexture*, PalEntry, const FBillboardUV&)>& emit);
 	void AdjustVisualThinker(HWDrawInfo *di, DVisualThinker *spr, sector_t *sector);
 
 	void DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent);

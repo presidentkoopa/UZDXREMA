@@ -43,6 +43,7 @@
 #include "models.h"
 #include "vectors.h"
 #include "texturemanager.h"
+#include "hw_sdffont.h"
 #include "v_font.h"
 #include "basics.h"
 
@@ -98,6 +99,16 @@ CVAR(Bool, bb_flipu, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // and the tilt that makes a panel look upright both differ per person.
 CVAR(Float, bb_scale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, bb_tiltbias, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+// [BB] Which distance-field atlas BB_TEXT draws with. Names a texture and,
+// beside it, "sdffonts/<name>.txt". Set it to something that does not exist
+// and text falls back to the bitmap font rather than disappearing.
+//
+// KEEP THE NAME TO EIGHT CHARACTERS. The texture manager does not find a
+// longer one -- "sdfpixmono" resolved to nothing and every string quietly drew
+// through the bitmap path instead, which looks like the atlas simply being bad
+// rather than never being consulted.
+CVAR(String, bb_sdffont, "sdfmono", CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Bool, gl_usecolorblending, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, gl_sprite_blend, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
@@ -1881,7 +1892,7 @@ static FGameTexture* GetBillboardShape(const char* name)
 // billboard's width at its own aspect, centred, so a number fills the panel it
 // was given rather than sitting at some arbitrary pixel size.
 static void EmitBillboardGlyphs(const char* text, double halfw, double halfh, PalEntry tint,
-	const std::function<void(double, double, double, double, FGameTexture*, PalEntry)>& emit)
+	const std::function<void(double, double, double, double, FGameTexture*, PalEntry, const FBillboardUV&)>& emit)
 {
 	if (text == nullptr || *text == 0) return;
 	FFont* font = SmallFont;
@@ -1911,14 +1922,66 @@ static void EmitBillboardGlyphs(const char* text, double halfw, double halfh, Pa
 		{
 			const double gw = glyph->GetDisplayWidth() * unitsPerPixel;
 			const double gh = glyph->GetDisplayHeight() * unitsPerPixel;
-			emit((pen + advance * 0.5) / halfw, 0.0, gw * 0.5, gh * 0.5, glyph, tint);
+			emit((pen + advance * 0.5) / halfw, 0.0, gw * 0.5, gh * 0.5, glyph, tint, FBillboardUV());
+		}
+		pen += advance;
+	}
+}
+
+// [BB] The same row, but read out of a distance-field atlas instead of the
+// bitmap font -- see hw_sdffont.h for what that buys. Every glyph is still an
+// ordinary quad off one texture, so this keeps the "a payload needs no shader"
+// shape the others have; the only difference is that the caller turns
+// OverrideShader on around it.
+//
+// A cell is square and carries the spread margin baked in, so the ink sits
+// inset from the cell's own edge. The pen therefore tracks the INK origin and
+// each quad is pushed back by that margin -- without it every letter would
+// drift one spread further right than the last.
+static void EmitBillboardSDFText(FSDFFont* font, const char* text, double halfw, double halfh,
+	PalEntry tint,
+	const std::function<void(double, double, double, double, FGameTexture*, PalEntry, const FBillboardUV&)>& emit)
+{
+	if (font == nullptr || text == nullptr || *text == 0) return;
+	FGameTexture* atlas = font->Atlas();
+	if (atlas == nullptr) return;
+
+	const double cell = font->Cell();
+	if (cell <= 0.0) return;
+
+	double total = 0.0;
+	for (const uint8_t* c = (const uint8_t*)text; *c != 0; ++c)
+	{
+		if (const FSDFGlyph* g = font->Glyph((int)*c)) total += g->advance;
+	}
+	if (total <= 0.0) return;
+
+	// Fit to whichever axis runs out first, exactly as the bitmap row does, so
+	// falling back between the two paths does not change the text's size.
+	const double scale = min((halfw * 2.0) / total, (halfh * 2.0) / cell);
+	const double half = cell * scale * 0.5;
+	const double margin = font->Spread() * scale;
+
+	double pen = -(total * scale) * 0.5;
+	for (const uint8_t* c = (const uint8_t*)text; *c != 0; ++c)
+	{
+		const FSDFGlyph* g = font->Glyph((int)*c);
+		if (g == nullptr) continue;
+
+		const double advance = g->advance * scale;
+		if (advance > 0.0)
+		{
+			FBillboardUV uv;
+			uv.u0 = g->u0; uv.v0 = g->v0;
+			uv.u1 = g->u1; uv.v1 = g->v1;
+			emit((pen - margin + half) / halfw, 0.0, half, half, atlas, tint, uv);
 		}
 		pen += advance;
 	}
 }
 
 void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double halfw, double halfh,
-	const std::function<void(double, double, double, double, FGameTexture*, PalEntry)>& emit)
+	const std::function<void(double, double, double, double, FGameTexture*, PalEntry, const FBillboardUV&)>& emit)
 {
 	const PalEntry tint = bb->color;
 
@@ -1929,16 +1992,16 @@ void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double
 		FTextureID tid;
 		tid.SetIndex(bb->data);
 		if (!tid.isValid()) return;
-		emit(0.0, 0.0, halfw, halfh, TexMan.GetGameTexture(tid, true), tint);
+		emit(0.0, 0.0, halfw, halfh, TexMan.GetGameTexture(tid, true), tint, FBillboardUV());
 		return;
 	}
 
 	case BB_PANEL:
-		emit(0.0, 0.0, halfw, halfh, GetBillboardShape("bbpanel"), tint);
+		emit(0.0, 0.0, halfw, halfh, GetBillboardShape("bbpanel"), tint, FBillboardUV());
 		return;
 
 	case BB_RING:
-		emit(0.0, 0.0, halfw, halfh, GetBillboardShape("bbring"), tint);
+		emit(0.0, 0.0, halfw, halfh, GetBillboardShape("bbring"), tint, FBillboardUV());
 		return;
 
 	case BB_BAR:
@@ -1953,7 +2016,7 @@ void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double
 		track.r = (uint8_t)(track.r / 4);
 		track.g = (uint8_t)(track.g / 4);
 		track.b = (uint8_t)(track.b / 4);
-		emit(0.0, 0.0, halfw, halfh, white, track);
+		emit(0.0, 0.0, halfw, halfh, white, track, FBillboardUV());
 
 		const double fill = clamp(bb->data, 0, 100) / 100.0;
 		if (fill <= 0.0) return;
@@ -1962,7 +2025,7 @@ void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double
 		// right end moves -- a bar whose centre slid around would be unreadable
 		// at a glance, which is the only way these are ever read.
 		const double fillHalf = halfw * fill;
-		emit(-(1.0 - fill), 0.0, fillHalf, halfh, white, tint);
+		emit(-(1.0 - fill), 0.0, fillHalf, halfh, white, tint, FBillboardUV());
 		return;
 	}
 
@@ -1984,10 +2047,29 @@ void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double
 	// [BB] Arbitrary text. Same glyph row as BB_DIGITS, but the string comes
 	// from the billboard instead of being printed from an int, so there is no
 	// length or alphabet limit -- a name, an ID, a label, whatever script
-	// hands it. EmitBillboardGlyphs already no-ops on an empty string.
+	// hands it.
+	//
+	// Distance field when one is available, bitmap when it is not. The fallback
+	// is not politeness: bb_sdffont names lumps a mod is free not to ship, and
+	// text that silently vanished because an atlas was missing would be a very
+	// confusing way to find that out.
 	case BB_TEXT:
+	{
+		if (FSDFFont* sdf = FSDFFont::Get(bb_sdffont))
+		{
+			// Set around the emit rather than in ProcessBillboard: PutSprite
+			// copies the sprite into the draw list per quad, so the shader
+			// choice travels with the glyphs and nothing else on this
+			// billboard inherits it.
+			const int saved = OverrideShader;
+			OverrideShader = SHADER_SDFText;
+			EmitBillboardSDFText(sdf, bb->text.GetChars(), halfw, halfh, tint, emit);
+			OverrideShader = saved;
+			return;
+		}
 		EmitBillboardGlyphs(bb->text.GetChars(), halfw, halfh, tint, emit);
 		return;
+	}
 
 	default:
 		return;
@@ -2119,13 +2201,21 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 	// right edge, +offUp toward its top, both measured in half-extents so that
 	// 1.0 is the edge.
 	auto emitQuad = [&](double offRight, double offUp, double halfWidth, double halfHeight,
-		FGameTexture* tex, PalEntry tint) -> void
+		FGameTexture* tex, PalEntry tint, const FBillboardUV& uv) -> void
 	{
 		if (tex == nullptr || !tex->isValid() || halfWidth <= 0.0 || halfHeight <= 0.0) return;
 
 		texture = tex;
 		ThingColor = tint;
 		ThingColor.a = 255;
+
+		// Per-quad UVs. bb_flipu still swaps the horizontal pair rather than
+		// being folded into the caller's rect, so it keeps working as the
+		// escape hatch it is for a texture authored mirrored.
+		ul = bb_flipu ? uv.u1 : uv.u0;
+		ur = bb_flipu ? uv.u0 : uv.u1;
+		vt = uv.v0;
+		vb = uv.v1;
 
 		const DVector3 centre = bpos + right * (offRight * halfw) + up * (offUp * halfh);
 		const DVector3 qr = right * halfWidth;

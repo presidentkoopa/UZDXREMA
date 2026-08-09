@@ -290,6 +290,11 @@ const FDefaultShader defaultshaders[] =
 	{"Noise Fuzz", "shaders/glsl/fuzz_noise.fp", "shaders/glsl/material_normal.fp", ""},
 	{"Smooth Noise Fuzz", "shaders/glsl/fuzz_smoothnoise.fp", "shaders/glsl/material_normal.fp", ""},
 	{"Software Fuzz", "shaders/glsl/fuzz_software.fp", "shaders/glsl/material_normal.fp", ""},
+	// [BB] Distance-field text. material_nolight because a glyph is UI drawn
+	// in world space -- it is lit by being emissive, not by the room it is
+	// standing in, and a readout that dims in a dark corridor is a readout
+	// you cannot read exactly when you need it.
+	{"SDF Text", "shaders/glsl/func_sdftext.fp", "shaders/glsl/material_nolight.fp", "#define NO_LAYERS\n"},
 	{nullptr,nullptr,nullptr,nullptr}
 };
 

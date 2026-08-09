@@ -82,6 +82,10 @@ enum MaterialShaderIndex
 	SHADER_NoiseFuzz,
 	SHADER_SmoothNoiseFuzz,
 	SHADER_SoftwareFuzz,
+	// [BB] Distance-field text. Must stay in step with defaultshaders[] in
+	// hw_shaderpatcher.cpp -- the array is indexed by this enum and nothing
+	// checks that they agree.
+	SHADER_SDFText,
 	FIRST_USER_SHADER
 };
 
