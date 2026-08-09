@@ -398,6 +398,19 @@ void HWWall::RenderTexturedWall(HWWallDispatcher*di, FRenderState &state, int rf
 	state.SetTextureClamp(false);
 	state.EnableGlow(false);
 	state.EnableGradient(false);
+
+	// [BB] FLAT GLOW LEAKED ONTO WALLS. It is set in the flat path and was
+	// cleared nowhere else, and main.fp applies it to ANY surface without
+	// checking whether that surface is a flat. Draw order is plain walls,
+	// plain flats, then masked walls, models, decals and translucent -- so
+	// everything after the flat pass inherited the LAST FLAT's colour, reach
+	// and its sector's linedef list, and measured its own world XZ against a
+	// foreign sector's edges. Whether a given wall lit up depended on whether
+	// it happened to fall near one of those lines, and which flat was last
+	// depends on the viewpoint. That is a purple wash appearing and vanishing
+	// on particular walls as the player moves.
+	state.ClearFlatGlow();
+
 	state.ApplyTextureManipulation(nullptr);
 }
 

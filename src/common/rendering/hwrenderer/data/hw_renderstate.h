@@ -545,11 +545,6 @@ public:
 		mStreamData.uSweepColors[i] = { r, g, b, intensity };
 	}
 
-	void ClearSweep()
-	{
-		mStreamData.uSweepOrigin = { 0.0f, 0.0f, 0.0f, 0.0f };
-		mStreamData.uSweepCount = 0;
-	}
 
 	// [BB] Flat-edge glow: rgb + reach, a falloff curve, and up to 64 of the
 	// sector's linedef endpoints for the shader's per-pixel distance check.
@@ -564,13 +559,21 @@ public:
 		}
 	}
 
+	// [BB] Clears FLAT GLOW ONLY. It used to zero the sweep uniforms too,
+	// which is a different feature that has nothing to do with it -- so any
+	// flat WITHOUT glow silently killed the sweep for everything drawn after
+	// it. Latent only because the sweep ships off by default.
 	void ClearFlatGlow()
 	{
-		mStreamData.uSweepOrigin = { 0.0f, 0.0f, 0.0f, 0.0f };
-		mStreamData.uSweepCount = 0;
 		mStreamData.uFlatGlowColor = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uFlatGlowFalloff = 0;
 		mStreamData.uFlatGlowLineCount = 0;
+	}
+
+	void ClearSweep()
+	{
+		mStreamData.uSweepOrigin = { 0.0f, 0.0f, 0.0f, 0.0f };
+		mStreamData.uSweepCount = 0;
 	}
 
 	void SetSoftLightLevel(int llevel, int blendfactor = 0)
