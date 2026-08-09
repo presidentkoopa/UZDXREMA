@@ -417,6 +417,10 @@ public:
 	// nothing is being displaced. r = reach as a fraction of the atlas spread,
 	// g = strength. Zero means no glow, which is every other payload.
 	PalEntry bbGlow = 0;
+
+	// [BB] Gradient's far end. Alpha 0 = no gradient, which is what every
+	// payload that does not want one leaves it at.
+	PalEntry bbColor2 = 0;
 	FVector3 bbVerts[4];
 
 	void SplitSprite(HWDrawInfo *di, sector_t * frontsector, bool translucent);

@@ -210,6 +210,13 @@ struct FBillboard
 	double   glowStrength = 0.0;   // 0 = off, 1 = halo as bright as the core
 
 	PalEntry color;
+
+	// [BB] Second colour, for payloads that draw a gradient. Alpha 0 means
+	// "no gradient" and the payload uses `color` flat -- which is why this
+	// defaults to 0 rather than to white: a white second colour would wash
+	// every existing billboard the moment the field appeared.
+	PalEntry color2 = 0;
+
 	double   alpha = 1.0;          // 0 = invisible, 1 = opaque; the fade handle
 	int      flags = 0;            // EBillboardFlags
 	double   lifetime = 0.0;       // seconds; <= 0 = permanent. Moot once persistent/attached.

@@ -250,10 +250,19 @@ and losing one to a budget would read as the interface vanishing.
 
 ## Not done
 
-**SDF payloads.** The five non-texture payloads now draw as quads rather than
-as signed-distance fields. True SDFs remain interesting for building whole
-objects out of shapes rather than out of geometry, but nothing is blocked on
-them -- that is a different feature, not a missing half of this one.
+**SDF payloads -- done, and then some.** `BB_TEXT` reads a real signed-distance
+atlas built offline from any TTF (`tools/sdffont/mksdf.ps1`), so it stays sharp
+at any magnification and its glow falls out of the field rather than out of a
+blur pass. `BB_SEGMENT` and `BB_SEGLCD` build a sixteen-segment display from
+arithmetic with no atlas at all, and `BB_SEAM` is a procedural slit. All four
+are genuine distance fields; all four share one halo.
+
+Still true from the original note: building whole OBJECTS out of shapes rather
+than out of geometry is a different feature and nothing is blocked on it.
+
+What remains not-SDF is `BB_PANEL`, `BB_RING`, `BB_BAR`, `BB_DIGITS` and
+`BB_GLYPH` -- the first three sample small textures, the last two are the
+bitmap-font path `BB_TEXT` supersedes. They work; they are just not fields.
 
 **Collision.** Billboards are render-only. You fall through one. Doom's
 collision model has no place for an arbitrary oriented quad, so this is a real

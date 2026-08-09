@@ -63,6 +63,20 @@ vec4 ProcessTexel()
 	// The rim is measured from the same distance field, so it tracks the shape
 	// automatically as the caller widens the quad -- there is nothing to keep
 	// in step by hand.
+	// GRADIENT. uObjectColor2's ALPHA is the switch, not its colour: zero
+	// means the caller never set one, and treating that as "blend toward
+	// transparent black" would quietly darken every seam that never asked.
+	//
+	// It runs along the SHORT axis, across the opening rather than along it,
+	// because that is the axis that grows -- so the ramp reveals itself as the
+	// seam widens instead of just sitting there.
+	vec3 tint = uObjectColor.rgb;
+	if (uObjectColor2.a > 0.0)
+	{
+		float g = clamp(p.y * 0.5 + 0.5, 0.0, 1.0);
+		tint = mix(uObjectColor.rgb, uObjectColor2.rgb, g);
+	}
+
 	if (uAddColor.b > 0.5)
 	{
 		float rim = 1.0 - smoothstep(0.0, 0.13, sd);	// bright only near the edge
@@ -70,11 +84,11 @@ vec4 ProcessTexel()
 
 		// Interior is drawn as near-black rather than as nothing, so the hole
 		// occludes the floor texture instead of letting it show through.
-		vec3 rgb = uObjectColor.rgb * rim;
+		vec3 rgb = tint * rim;
 		float a = max(max(core * mix(1.0, 0.82, inner), halo), core);
 		return vec4(rgb, a * uObjectColor.a);
 	}
 
 	float a = max(core * (0.35 + 0.65 * slit), halo);
-	return vec4(uObjectColor.rgb, a * uObjectColor.a);
+	return vec4(tint, a * uObjectColor.a);
 }

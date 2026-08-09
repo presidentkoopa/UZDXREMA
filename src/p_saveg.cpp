@@ -97,6 +97,7 @@ FSerializer &Serialize(FSerializer &arc, const char *key, FBillboard &bb, FBillb
 			("glowradius", bb.glowRadius)
 			("glowstrength", bb.glowStrength)
 			("color", bb.color)
+			("color2", bb.color2)
 			("alpha", bb.alpha)
 			("flags", bb.flags)
 			("lifetime", bb.lifetime)

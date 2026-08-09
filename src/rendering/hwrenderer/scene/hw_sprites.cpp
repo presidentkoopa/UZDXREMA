@@ -260,6 +260,11 @@ void HWSprite::DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent)
 			// unless it is the one running, and every other payload leaves
 			// this zero.
 			state.SetAddColor(bbGlow);
+			// uObjectColor2 is untouched on this path, so the gradient's far
+			// end rides there. Its ALPHA is the switch -- the shader treats 0
+			// as "no gradient" rather than as a transparent black to blend
+			// toward, which would darken everything that never asked.
+			state.SetObjectColor2(bbColor2);
 		}
 		SetColor(state, di->Level, di->lightmode, lightlevel, rel, di->isFullbrightScene(), Colormap, trans);
 	}
@@ -2451,6 +2456,7 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 		const int vd = (bb->flags & BBFL_VOID) ? 255 : 0;
 		bbGlow = PalEntry(255, (uint8_t)gr, (uint8_t)gs, (uint8_t)vd);
 	}
+	bbColor2 = bb->color2;
 
 	// [BB] Submit one quad. A payload is free to call this more than once --
 	// which is the whole reason the payloads below need no shaders. A bar is a

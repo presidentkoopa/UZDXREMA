@@ -638,6 +638,15 @@ struct LevelLocals native
 	// there is nothing left to read and the halo clips to a hard square at the
 	// glyph's cell edge. strength 0 is off, 1 is a halo as bright as the core.
 	native void SetBillboardGlow(int id, double radius, double strength);
+	// The far end of a gradient. Alpha 0 switches it off; a payload that
+	// supports gradients then draws `col` flat. Its own setter because the
+	// Add functions are already near the argument-count cliff.
+	native void SetBillboardGradient(int id, color col2);
+	// How wide a BB_TEXT string will draw at this height, in map units.
+	// Returns 0 if no SDF atlas is loaded -- treat that as "estimate it
+	// yourself", not as an empty string. Beats counting characters, which is
+	// only right for a monospace atlas and breaks silently on any other.
+	native double MeasureBillboardText(string text, double height);
 
 	// Pack a halo into the `data` argument of a BB_TEXT billboard. BB_TEXT
 	// ignores data otherwise, so this costs nothing and needs no extra

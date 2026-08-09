@@ -2765,6 +2765,9 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, Vec3Diff, Vec3Diff)
 // 2026-08-08 -- a player who enlarged panels to read them got a panel with a
 // border that ignored the pointer, which reads as flaky tracking rather than
 // as a cvar doing exactly what it said.
+#include "rendering/hwrenderer/scene/hw_sdffont.h"
+
+EXTERN_CVAR(String, bb_sdffont)
 EXTERN_CVAR(Float, bb_scale)
 EXTERN_CVAR(Float, bb_tiltbias)
 
@@ -2978,6 +2981,71 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetBillboardGlow, SetBillboardGlow)
 	PARAM_FLOAT(strength);
 	SetBillboardGlow(self, id, radius, strength);
 	return 0;
+}
+
+// [BB] The gradient's far end. Its own setter rather than an argument, because
+// AddBillboardPersistent is already at fourteen and the ZScript compiler
+// CRASHES compiling a call to a native with sixteen -- silently, part way
+// through LoadActors. Alpha 0 turns the gradient off again.
+static void SetBillboardGradient(FLevelLocals *self, int id, int color2)
+{
+	FBillboard *bb = FindBillboardByID(self, id);
+	if (bb == nullptr) return;
+	bb->color2 = (PalEntry)color2;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetBillboardGradient, SetBillboardGradient)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(id);
+	PARAM_COLOR(color2);
+	SetBillboardGradient(self, id, color2);
+	return 0;
+}
+
+//==========================================================================
+//
+// [BB] How wide a BB_TEXT string will be, in map units, at a given height.
+//
+// Asked for by the card compositor, which was approximating from character
+// count. That approximation is only ever right for a monospace atlas, and it
+// is silently wrong the moment anyone swaps in a proportional font -- the kind
+// of bug that shows up as "labels overflow on one font" long after the change.
+//
+// This mirrors EmitBillboardSDFText's own layout maths rather than
+// re-deriving it: total advance, scaled so the EM BOX matches the requested
+// height. If the two ever disagree, this is wrong and the renderer is right.
+//
+// Returns 0 when no atlas is loaded, which a caller should read as "fall back
+// to your own estimate" rather than as a zero-width string.
+//
+//==========================================================================
+
+static double MeasureBillboardText(FLevelLocals *self, const FString &text, double height)
+{
+	if (text.IsEmpty() || height <= 0.0) return 0.0;
+
+	FSDFFont *font = FSDFFont::Get(bb_sdffont);
+	if (font == nullptr) return 0.0;
+
+	const double cell = font->Cell();
+	const double emBox = max(cell - 2.0 * font->Spread(), 1.0);
+	if (cell <= 0.0) return 0.0;
+
+	double total = 0.0;
+	for (const uint8_t *c = (const uint8_t *)text.GetChars(); *c != 0; ++c)
+	{
+		if (const FSDFGlyph *g = font->Glyph((int)*c)) total += g->advance;
+	}
+	return total * (height / emBox);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, MeasureBillboardText, MeasureBillboardText)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_STRING(text);
+	PARAM_FLOAT(height);
+	ACTION_RETURN_FLOAT(MeasureBillboardText(self, text, height));
 }
 
 static void MoveBillboard(FLevelLocals *self, int id, double x, double y, double z)
