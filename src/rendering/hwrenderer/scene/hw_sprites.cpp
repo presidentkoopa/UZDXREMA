@@ -1963,10 +1963,13 @@ static void EmitBillboardSDFText(FSDFFont* font, const char* text, double halfw,
 	const double margin = font->Spread() * scale;
 
 	double pen = -(total * scale) * 0.5;
+	int drawn = 0, missing = 0;
+	FBillboardUV firstUV;
+
 	for (const uint8_t* c = (const uint8_t*)text; *c != 0; ++c)
 	{
 		const FSDFGlyph* g = font->Glyph((int)*c);
-		if (g == nullptr) continue;
+		if (g == nullptr) { missing++; continue; }
 
 		const double advance = g->advance * scale;
 		if (advance > 0.0)
@@ -1974,9 +1977,25 @@ static void EmitBillboardSDFText(FSDFFont* font, const char* text, double halfw,
 			FBillboardUV uv;
 			uv.u0 = g->u0; uv.v0 = g->v0;
 			uv.u1 = g->u1; uv.v1 = g->v1;
+			if (drawn == 0) firstUV = uv;
 			emit((pen - margin + half) / halfw, 0.0, half, half, atlas, tint, uv);
+			drawn++;
 		}
 		pen += advance;
+	}
+
+	// One shot, first SDF string of the session. The loader reporting a good
+	// atlas only proves the FILE was read -- it says nothing about whether the
+	// draw path ever ran, which is the thing that is actually hard to see from
+	// outside. Quads, UVs and scale here mean a wrong-looking result can be
+	// told apart from a result that never happened, without a debugger.
+	static bool reported = false;
+	if (!reported)
+	{
+		reported = true;
+		Printf("BB_TEXT: first SDF draw -- \"%s\", %d quads, %d missing glyphs, "
+			"scale %.4f, first uv (%.4f,%.4f)-(%.4f,%.4f)\n",
+			text, drawn, missing, scale, firstUV.u0, firstUV.v0, firstUV.u1, firstUV.v1);
 	}
 }
 
@@ -2066,6 +2085,16 @@ void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double
 			EmitBillboardSDFText(sdf, bb->text.GetChars(), halfw, halfh, tint, emit);
 			OverrideShader = saved;
 			return;
+		}
+		// One shot as well, and the more important of the two: if this fires,
+		// everything on screen is the OLD path and any judgement about how the
+		// field looks is being made about something else entirely.
+		static bool reportedFallback = false;
+		if (!reportedFallback)
+		{
+			reportedFallback = true;
+			Printf(TEXTCOLOR_YELLOW "BB_TEXT: drawing through BITMAP glyphs, not the field "
+				"(bb_sdffont = \"%s\")\n", *bb_sdffont);
 		}
 		EmitBillboardGlyphs(bb->text.GetChars(), halfw, halfh, tint, emit);
 		return;
