@@ -2111,7 +2111,7 @@ static void EmitBillboardSDFText(FSDFFont* font, const char* text, double halfw,
 
 void HWSprite::EmitBillboardSegments(const char* text, double halfw, double halfh, PalEntry tint,
 	const std::function<void(double, double, double, double, FGameTexture*, PalEntry, const FBillboardUV&)>& emit,
-	bool inverted)
+	bool inverted, double progress)
 {
 	if (text == nullptr || *text == 0) return;
 	FGameTexture* white = GetBillboardShape("bbwhite");
@@ -2132,8 +2132,25 @@ void HWSprite::EmitBillboardSegments(const char* text, double halfw, double half
 	// Mask 0 is the LED bed, mask 1 the LCD face. Both are plate sentinels.
 	const PalEntry savedStyleGlow = bbGlow;
 	const FRenderStyle savedStyle = RenderStyle;
+	// THE PLATE OPENS. This is GITD's wgType 13 and it is the whole effect --
+	// its plate divides the vertical extent by progress
+	//
+	//     nBox = length(vec2(abs(nAX)/nhW, abs(nAY)/(nProg*nhH)))
+	//
+	// so at low progress it is a thin horizontal slit and it widens vertically
+	// into a full ellipse, like an eye opening. Drawing the finished ellipse
+	// and skipping the reveal throws away the reason anyone liked it.
+	//
+	// Floored at 0.05, as the original does with max(wgMask.y, 0.05), so a
+	// progress of zero is a hairline rather than nothing at all.
+	const double open = clamp(progress, 0.05, 1.0);
 	bbGlow = PalEntry(0, gr, gs, (uint8_t)(inverted ? 1 : 0));
-	emit(0.0, 0.0, halfw, halfh, white, tint, FBillboardUV());
+	emit(0.0, 0.0, halfw, halfh * open, white, tint, FBillboardUV());
+
+	// AND THE CHARACTERS WAIT UNTIL IT IS OPEN. The original gates them on
+	// nProg > 0.55 -- the plate opens empty, then the number arrives. Showing
+	// them from the first frame turns a reveal into a fade-in.
+	if (progress < 0.55) return;
 
 	// A character cell is taller than it is wide -- that ratio is most of what
 	// makes a row of these read as a display rather than as text. Width is
@@ -2318,7 +2335,7 @@ void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double
 		const int saved = OverrideShader;
 		OverrideShader = SHADER_Segment;
 		EmitBillboardSegments(bb->text.GetChars(), halfw, halfh, tint, emit,
-			bb->payload == BB_SEGLCD);
+			bb->payload == BB_SEGLCD, bb->progress);
 		OverrideShader = saved;
 		return;
 	}

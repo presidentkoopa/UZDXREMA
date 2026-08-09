@@ -642,6 +642,11 @@ struct LevelLocals native
 	// supports gradients then draws `col` flat. Its own setter because the
 	// Add functions are already near the argument-count cliff.
 	native void SetBillboardGradient(int id, color col2);
+	// How far through its reveal, 0..1. On BB_SEGMENT / BB_SEGLCD the plate is
+	// a thin slit at 0 that opens vertically into a full ellipse, and the
+	// characters only appear past 0.55 -- which is the reveal GITD's original
+	// wgType 13 had and the reason it was worth stealing. 1 = fully formed.
+	native void SetBillboardProgress(int id, double t);
 	// How wide a BB_TEXT string will draw at this height, in map units.
 	// Returns 0 if no SDF atlas is loaded -- treat that as "estimate it
 	// yourself", not as an empty string. Beats counting characters, which is

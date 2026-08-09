@@ -2987,6 +2987,25 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetBillboardGlow, SetBillboardGlow)
 // AddBillboardPersistent is already at fourteen and the ZScript compiler
 // CRASHES compiling a call to a native with sixteen -- silently, part way
 // through LoadActors. Alpha 0 turns the gradient off again.
+// [BB] Drive a payload's reveal, 0..1. Its own setter because this is meant to
+// be called every tic on a live billboard, which is exactly the shape
+// SetBillboardAlpha already has.
+static void SetBillboardProgress(FLevelLocals *self, int id, double t)
+{
+	FBillboard *bb = FindBillboardByID(self, id);
+	if (bb == nullptr) return;
+	bb->progress = clamp(t, 0.0, 1.0);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetBillboardProgress, SetBillboardProgress)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(id);
+	PARAM_FLOAT(t);
+	SetBillboardProgress(self, id, t);
+	return 0;
+}
+
 static void SetBillboardGradient(FLevelLocals *self, int id, int color2)
 {
 	FBillboard *bb = FindBillboardByID(self, id);

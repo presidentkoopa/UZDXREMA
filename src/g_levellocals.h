@@ -206,6 +206,15 @@ struct FBillboard
 	//
 	// Ignored by every payload that is not distance-field text, because a
 	// glow needs an edge to fall away from and a plain quad has no such thing.
+	// [BB] How far through its reveal a payload is, 0..1. THE ANIMATED HALF OF
+	// GITD's wgType 13 lived here and was the point of it: its plate is a thin
+	// slit that opens vertically into a full ellipse, and the number only
+	// appears once it is more than half open. Drawing the end state and
+	// skipping the reveal throws away the effect.
+	//
+	// 1.0 by default, so anything that never sets it draws fully formed.
+	double   progress = 1.0;
+
 	double   glowRadius = 0.0;
 	double   glowStrength = 0.0;   // 0 = off, 1 = halo as bright as the core
 

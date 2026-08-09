@@ -449,7 +449,7 @@ public:
 	// PutSprite snapshots the sprite per quad, so that has to happen on `this`.
 	void EmitBillboardSegments(const char* text, double halfw, double halfh, PalEntry tint,
 		const std::function<void(double, double, double, double, FGameTexture*, PalEntry, const FBillboardUV&)>& emit,
-		bool inverted);
+		bool inverted, double progress);
 	void AdjustVisualThinker(HWDrawInfo *di, DVisualThinker *spr, sector_t *sector);
 
 	void DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent);
