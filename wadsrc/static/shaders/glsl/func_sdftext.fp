@@ -51,9 +51,18 @@ vec4 ProcessTexel()
 	float halo = 0.0;
 	if (reach > 0.0 && strength > 0.0)
 	{
-		halo = clamp(1.0 + sd / reach, 0.0, 1.0);
-		halo *= halo;			// squared, so it hugs the letter instead of hazing
-		halo *= strength;
+		float h = clamp(1.0 + sd / reach, 0.0, 1.0);
+
+		// NOT SQUARED. It was, and squaring is what made the halo invisible:
+		// at half the reach it is already down to a quarter brightness, so the
+		// glow only ever occupied the innermost sliver of the field and
+		// widening the field did nothing anyone could see.
+		//
+		// A tight bright core plus a wide soft bleed instead -- which is what
+		// neon actually looks like, and what the extra spread was bought for.
+		// The cubic term keeps the core hot; the linear term is the part you
+		// can see from across a room.
+		halo = (h * 0.55 + h * h * h * 0.45) * strength;
 	}
 
 	float a = max(core, halo);
