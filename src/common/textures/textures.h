@@ -86,6 +86,7 @@ enum MaterialShaderIndex
 	// hw_shaderpatcher.cpp -- the array is indexed by this enum and nothing
 	// checks that they agree.
 	SHADER_SDFText,
+	SHADER_Segment,
 	FIRST_USER_SHADER
 };
 

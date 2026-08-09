@@ -1936,6 +1936,57 @@ static void EmitBillboardGlyphs(const char* text, double halfw, double halfh, Pa
 	}
 }
 
+//==========================================================================
+//
+// [BB] The sixteen-segment alphabet, as bit masks.
+//
+// This lives in C++ rather than in the shader on purpose. The shader needs to
+// know WHICH BARS are lit, not which character it is, and answering "which
+// bars does R use" with a 36-entry branch chain running once per pixel would
+// be absurd when the answer never changes. The mask is computed once per
+// glyph here and handed over as two bytes.
+//
+// Bit order matches the frame drawn in func_segment.fp:
+//   0 a1  1 a2   2 b   3 c   4 d2  5 d1  6 e   7 f
+//   8 g1  9 g2  10 h  11 i  12 j  13 k  14 l  15 m
+//
+// Zero is reserved: it means PLATE to the shader, so a character with no lit
+// bars must never be emitted. Space is handled by advancing the pen without
+// drawing, which is also one fewer quad.
+//
+//==========================================================================
+
+static uint16_t SegmentMask(int ch)
+{
+	if (ch >= 'a' && ch <= 'z') ch -= 32;		// the display has one case
+
+	switch (ch)
+	{
+	case '0': return 0x00FF;  case '1': return 0x000C;  case '2': return 0x0377;
+	case '3': return 0x023F;  case '4': return 0x038C;  case '5': return 0x03BB;
+	case '6': return 0x03FB;  case '7': return 0x000F;  case '8': return 0x03FF;
+	case '9': return 0x03BF;
+
+	case 'A': return 0x03CF;  case 'B': return 0x4A3F;  case 'C': return 0x00F3;
+	case 'D': return 0x483F;  case 'E': return 0x03F3;  case 'F': return 0x01C3;
+	case 'G': return 0x02FB;  case 'H': return 0x03CC;  case 'I': return 0x4833;
+	case 'J': return 0x007C;  case 'K': return 0x91C0;  case 'L': return 0x00F0;
+	case 'M': return 0x14CC;  case 'N': return 0x84CC;  case 'O': return 0x00FF;
+	case 'P': return 0x03C7;  case 'Q': return 0x80FF;  case 'R': return 0x83C7;
+	case 'S': return 0x03BB;  case 'T': return 0x4803;  case 'U': return 0x00FC;
+	case 'V': return 0x30C0;  case 'W': return 0xA0CC;  case 'X': return 0xB400;
+	case 'Y': return 0x5400;  case 'Z': return 0x3033;
+
+	case '-': return 0x0300;  case '_': return 0x0030;  case '=': return 0x0330;
+	case '+': return 0x4B00;  case '*': return 0xFC00;  case '/': return 0x3000;
+	case '\\': return 0x8400; case '|': return 0x4800;  case '\'': return 0x0800;
+	case '"': return 0x0880;  case '(': return 0x3000;  case ')': return 0x8400;
+	case '[': return 0x00F3;  case ']': return 0x003F;  case '?': return 0x0287;
+	case '!': return 0x4008;  case '.': return 0x4000;  case ':': return 0x4800;
+	}
+	return 0;		// unknown -- draws nothing rather than inventing a glyph
+}
+
 // [BB] The same row, but read out of a distance-field atlas instead of the
 // bitmap font -- see hw_sdffont.h for what that buys. Every glyph is still an
 // ordinary quad off one texture, so this keeps the "a payload needs no shader"
@@ -2029,6 +2080,67 @@ static void EmitBillboardSDFText(FSDFFont* font, const char* text, double halfw,
 			"scale %.4f, first uv (%.4f,%.4f)-(%.4f,%.4f)\n",
 			text, drawn, missing, scale, firstUV.u0, firstUV.v0, firstUV.u1, firstUV.v1);
 	}
+}
+
+//==========================================================================
+//
+// [BB] HWSprite::EmitBillboardSegments
+//
+// A plate quad, then one quad per character. Every quad binds the same white
+// plate texture and none of them sample it -- func_segment.fp builds the
+// shape from arithmetic. The texture is bound only because the material path
+// requires something valid.
+//
+// The character travels in bbGlow's blue and alpha bytes as a sixteen-bit
+// lit-segment mask. That is why this is a member: PutSprite copies the sprite
+// into the draw list once per quad, so rewriting bbGlow between emits gives
+// each quad its own character while everything else stays shared.
+//
+//==========================================================================
+
+void HWSprite::EmitBillboardSegments(const char* text, double halfw, double halfh, PalEntry tint,
+	const std::function<void(double, double, double, double, FGameTexture*, PalEntry, const FBillboardUV&)>& emit)
+{
+	if (text == nullptr || *text == 0) return;
+	FGameTexture* white = GetBillboardShape("bbwhite");
+	if (white == nullptr) return;
+
+	int count = 0;
+	for (const uint8_t* c = (const uint8_t*)text; *c != 0; ++c) count++;
+	if (count <= 0) return;
+
+	const PalEntry savedGlow = bbGlow;
+	const uint8_t gr = savedGlow.r, gs = savedGlow.g;
+
+	// Plate first, so the characters sort in front of it. Mask 0 is the
+	// sentinel the shader reads as "draw the panel, not a glyph".
+	bbGlow = PalEntry(0, gr, gs, 0);
+	emit(0.0, 0.0, halfw, halfh, white, tint, FBillboardUV());
+
+	// A character cell is taller than it is wide -- that ratio is most of what
+	// makes a row of these read as a display rather than as text. Width is
+	// whatever fits, capped so a two-character string does not produce two
+	// absurdly fat glyphs.
+	const double cellW = min((halfw * 2.0) / count, halfh * 2.0 * 0.62);
+	const double halfCW = cellW * 0.5;
+	const double halfCH = halfh * 0.80;		// inset, so glyphs sit inside the plate
+
+	double pen = -(cellW * count) * 0.5 + halfCW;
+	for (const uint8_t* c = (const uint8_t*)text; *c != 0; ++c)
+	{
+		const uint16_t mask = SegmentMask((int)*c);
+		if (mask != 0)
+		{
+			// Blue is the low byte, alpha the high one. Alpha is free here:
+			// nothing downstream reads uAddColor.a, and the draw path resets
+			// the whole colour between sprites anyway.
+			bbGlow = PalEntry((uint8_t)(mask >> 8), gr, gs, (uint8_t)(mask & 0xff));
+			emit(pen / halfw, 0.0, halfCW, halfCH, white, tint, FBillboardUV());
+		}
+		pen += cellW;
+	}
+
+	bbGlow = savedGlow;
 }
 
 void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double halfw, double halfh,
@@ -2149,6 +2261,18 @@ void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double
 		WhitenGlyphs();
 		EmitBillboardGlyphs(bb->text.GetChars(), halfw, halfh, tint, emit);
 		translation = NO_TRANSLATION;
+		return;
+	}
+
+	// [BB] The same string as a segment display. No atlas, no fallback, and no
+	// way for it to be unavailable -- the glyphs are arithmetic, so this cannot
+	// fail the way a missing font lump can.
+	case BB_SEGMENT:
+	{
+		const int saved = OverrideShader;
+		OverrideShader = SHADER_Segment;
+		EmitBillboardSegments(bb->text.GetChars(), halfw, halfh, tint, emit);
+		OverrideShader = saved;
 		return;
 	}
 

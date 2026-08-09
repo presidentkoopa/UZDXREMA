@@ -550,6 +550,12 @@ struct LevelLocals native
 		// can only ever show a number because an int is all `data` is; this
 		// takes a string, so names, IDs and labels fit.
 		BB_TEXT    = 6,
+		// The same string drawn as a 16-segment display -- the arcade
+		// readout look. No atlas: the glyphs are built from arithmetic in
+		// the shader, so this cannot be broken by a missing font lump and
+		// stays perfectly sharp at any size. Numbers want this; names want
+		// BB_TEXT. Draws a bordered plate behind itself.
+		BB_SEGMENT = 7,
 	}
 
 	enum EBillboardFacing

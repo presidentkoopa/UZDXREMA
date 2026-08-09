@@ -295,6 +295,10 @@ const FDefaultShader defaultshaders[] =
 	// standing in, and a readout that dims in a dark corridor is a readout
 	// you cannot read exactly when you need it.
 	{"SDF Text", "shaders/glsl/func_sdftext.fp", "shaders/glsl/material_nolight.fp", "#define NO_LAYERS\n"},
+	// [BB] Segment display. Samples no texture at all -- the glyph is
+	// arithmetic -- but still needs a valid one bound, so callers hand it
+	// bbwhite and it ignores it.
+	{"Segment", "shaders/glsl/func_segment.fp", "shaders/glsl/material_nolight.fp", "#define NO_LAYERS\n"},
 	{nullptr,nullptr,nullptr,nullptr}
 };
 

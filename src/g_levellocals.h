@@ -117,6 +117,7 @@ enum EBillboardPayload
 	BB_RING    = 4,  // progress ring; data = progress (low byte, 0-255) | style bits above
 	BB_BAR     = 5,  // progress bar; data = progress (low byte, 0-255) | style bits above
 	BB_TEXT    = 6,  // arbitrary string; reads FBillboard::text, ignores data
+	BB_SEGMENT = 7,  // same string, drawn as a 16-segment display -- no atlas
 };
 
 // [BB] How a billboard decides which way it points. Facing is a MODE, not
