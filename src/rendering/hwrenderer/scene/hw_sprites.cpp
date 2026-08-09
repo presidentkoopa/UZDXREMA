@@ -1967,7 +1967,13 @@ static uint16_t SegmentMask(int ch)
 	case '6': return 0x03FB;  case '7': return 0x000F;  case '8': return 0x03FF;
 	case '9': return 0x03BF;
 
-	case 'A': return 0x03CF;  case 'B': return 0x4A3F;  case 'C': return 0x00F3;
+	// B is NOT the textbook 16-segment B (0x4A3F). That form has no left
+	// verticals and leans on the centre uprights for its spine, which renders
+	// as a 3 with a bar through it -- fine in the abstract, unreadable when
+	// every boss in RS_Main is named B0001. This keeps the left stem and drops
+	// only the LEFT half of the middle bar, so it reads as a B and still
+	// cannot be confused with 8, which has both halves.
+	case 'A': return 0x03CF;  case 'B': return 0x02FF;  case 'C': return 0x00F3;
 	case 'D': return 0x483F;  case 'E': return 0x03F3;  case 'F': return 0x01C3;
 	case 'G': return 0x02FB;  case 'H': return 0x03CC;  case 'I': return 0x4833;
 	case 'J': return 0x007C;  case 'K': return 0x91C0;  case 'L': return 0x00F0;
