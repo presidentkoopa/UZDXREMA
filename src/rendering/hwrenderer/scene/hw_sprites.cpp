@@ -2019,12 +2019,10 @@ static void EmitBillboardSDFText(FSDFFont* font, const char* text, double halfw,
 	const double cell = font->Cell();
 	if (cell <= 0.0) return;
 
-	double total = 0.0;
-	for (const uint8_t* c = (const uint8_t*)text; *c != 0; ++c)
-	{
-		if (const FSDFGlyph* g = font->Glyph((int)*c)) total += g->advance;
-	}
-	if (total <= 0.0) return;
+	// Metrics come from the shared header so that what is drawn here and what
+	// MeasureBillboardText() promises script cannot drift apart.
+	const FSDFTextMetrics metrics = SDFMeasureText(font, text);
+	if (metrics.widest <= 0.0) return;
 
 	// Fit to whichever axis runs out first, exactly as the bitmap row does, so
 	// FIT TO THE EM BOX, NOT THE CELL. A cell is the em box plus a spread of
@@ -2034,48 +2032,75 @@ static void EmitBillboardSDFText(FSDFFont* font, const char* text, double halfw,
 	// and below it. The generator centres the em box in the cell, so scaling by
 	// the em box and still drawing the whole cell leaves the text centred and
 	// keeps the margin available for the halo to live in.
+	//
+	// The horizontal term is the WIDEST LINE and the vertical term is the WHOLE
+	// BLOCK. Both matter: measuring width across the whole string would make a
+	// two-line label think it was twice as wide as it is and shrink to nothing,
+	// and fitting one line's height would let a three-line block overflow its
+	// panel by two lines without any indication that it had.
 	const double spread = font->Spread();
 	const double emBox = max(cell - 2.0 * spread, 1.0);
-	const double scale = min((halfw * 2.0) / total, (halfh * 2.0) / emBox);
+	const double scale = min((halfw * 2.0) / metrics.widest,
+	                         (halfh * 2.0) / (emBox * metrics.blockEm));
 
 	const double halfH = cell * scale * 0.5;		// full cell tall: the halo needs its margin
 	const double margin = spread * scale;
+	const double lineStep = emBox * SDFTEXT_LINE_PITCH * scale;
 
-	double pen = -(total * scale) * 0.5;
+	// The block is centred on the panel, so the first line's centre sits half a
+	// block up and then half a line back down. Single-line text puts blockEm at
+	// exactly 1.0, which cancels to the 0.0 this used to pass -- the one-line
+	// case is unchanged, not merely similar.
+	double penY = (emBox * metrics.blockEm * scale) * 0.5 - (emBox * scale) * 0.5;
+
 	int drawn = 0, missing = 0;
 	FBillboardUV firstUV;
 
-	for (const uint8_t* c = (const uint8_t*)text; *c != 0; ++c)
+	const uint8_t* c = (const uint8_t*)text;
+	for (;;)
 	{
-		const FSDFGlyph* g = font->Glyph((int)*c);
-		if (g == nullptr) { missing++; continue; }
+		// Each line is centred on its own width rather than on the block's, so
+		// a short line among long ones reads as centred instead of left-ragged.
+		double pen = -(SDFMeasureLine(font, c) * scale) * 0.5;
 
-		const double advance = g->advance * scale;
-		if (advance > 0.0)
+		for (; *c != 0 && *c != '\n'; ++c)
 		{
-			// TRIM THE QUAD TO THE PART OF THE CELL THAT CAN CONTAIN ANYTHING.
-			//
-			// Cells are square, but an advance is narrower than a cell is wide
-			// -- 32 against 64 on this font -- so a full-cell quad overhangs
-			// its neighbour by half a cell of pure empty field. Empty field
-			// still carries halo, and two overlapping halos ADD, which is what
-			// was brightening the gaps between letters.
-			//
-			// Everything a glyph can draw lives within its advance plus one
-			// spread of halo each side, so the quad and its UVs are clipped to
-			// exactly that. Nothing real is lost and the overlap halves.
-			const double usefulCells = min(g->advance + 2.0 * spread, cell);
-			const double halfW = usefulCells * scale * 0.5;
-			const double uSpan = (g->u1 - g->u0) * (usefulCells / cell);
+			if (*c == '\r') continue;
 
-			FBillboardUV uv;
-			uv.u0 = g->u0; uv.v0 = g->v0;
-			uv.u1 = g->u0 + (float)uSpan; uv.v1 = g->v1;
-			if (drawn == 0) firstUV = uv;
-			emit((pen - margin + halfW) / halfw, 0.0, halfW, halfH, atlas, tint, uv);
-			drawn++;
+			const FSDFGlyph* g = font->Glyph((int)*c);
+			if (g == nullptr) { missing++; continue; }
+
+			const double advance = g->advance * scale;
+			if (advance > 0.0)
+			{
+				// TRIM THE QUAD TO THE PART OF THE CELL THAT CAN CONTAIN ANYTHING.
+				//
+				// Cells are square, but an advance is narrower than a cell is wide
+				// -- 32 against 64 on this font -- so a full-cell quad overhangs
+				// its neighbour by half a cell of pure empty field. Empty field
+				// still carries halo, and two overlapping halos ADD, which is what
+				// was brightening the gaps between letters.
+				//
+				// Everything a glyph can draw lives within its advance plus one
+				// spread of halo each side, so the quad and its UVs are clipped to
+				// exactly that. Nothing real is lost and the overlap halves.
+				const double usefulCells = min(g->advance + 2.0 * spread, cell);
+				const double halfW = usefulCells * scale * 0.5;
+				const double uSpan = (g->u1 - g->u0) * (usefulCells / cell);
+
+				FBillboardUV uv;
+				uv.u0 = g->u0; uv.v0 = g->v0;
+				uv.u1 = g->u0 + (float)uSpan; uv.v1 = g->v1;
+				if (drawn == 0) firstUV = uv;
+				emit((pen - margin + halfW) / halfw, penY / halfh, halfW, halfH, atlas, tint, uv);
+				drawn++;
+			}
+			pen += advance;
 		}
-		pen += advance;
+
+		if (*c == 0) break;
+		++c;					// step over the newline itself
+		penY -= lineStep;
 	}
 
 	// One shot, first SDF string of the session. The loader reporting a good
@@ -2088,8 +2113,9 @@ static void EmitBillboardSDFText(FSDFFont* font, const char* text, double halfw,
 	{
 		reported = true;
 		Printf("BB_TEXT: first SDF draw -- \"%s\", %d quads, %d missing glyphs, "
-			"scale %.4f, first uv (%.4f,%.4f)-(%.4f,%.4f)\n",
-			text, drawn, missing, scale, firstUV.u0, firstUV.v0, firstUV.u1, firstUV.v1);
+			"%d line(s), scale %.4f, first uv (%.4f,%.4f)-(%.4f,%.4f)\n",
+			text, drawn, missing, metrics.lines, scale,
+			firstUV.u0, firstUV.v0, firstUV.u1, firstUV.v1);
 	}
 }
 
@@ -2283,7 +2309,11 @@ void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double
 	// confusing way to find that out.
 	case BB_TEXT:
 	{
-		if (FSDFFont* sdf = FSDFFont::Get(bb_sdffont))
+		// Slot, not the cvar: a card wants a display face on the name and a
+		// clean one on the numbers, and the cvar could only ever answer with
+		// one of those. Slot 0 IS the cvar, so a billboard that never set a
+		// font draws exactly as it did before this existed.
+		if (FSDFFont* sdf = FSDFFontRoster::Slot(bb->font))
 		{
 			// Set around the emit rather than in ProcessBillboard: PutSprite
 			// copies the sprite into the draw list per quad, so the shader

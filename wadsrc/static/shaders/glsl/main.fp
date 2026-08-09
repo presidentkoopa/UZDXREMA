@@ -816,6 +816,7 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 		if (smode == 1)      sdist = length(pixelpos.xz - uSweepOrigin.xz);   // cylinder
 		else if (smode == 2) sdist = abs(pixelpos.x - uSweepOrigin.x);        // plane along X
 		else if (smode == 3) sdist = abs(pixelpos.z - uSweepOrigin.z);        // plane along Y
+		else if (smode == 5) sdist = pixelpos.y - uSweepOrigin.y;             // rising, SIGNED
 		else                 sdist = length(pixelpos.xyz - uSweepOrigin.xyz); // sphere
 
 		for (int sb = 0; sb < 8; sb++)
@@ -824,11 +825,24 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 			vec4 sband = uSweepBands[sb];
 			if (sband.w <= 0.0) continue;
 
-			float band = abs(sdist - sband.x);
+			// The wake. A band is symmetric until uSweepTrail says otherwise,
+			// and then it is simply WIDER on the side it came from -- not a
+			// second gradient bolted alongside, which would show a seam where
+			// the two met. Stretching one half keeps it one falloff, so the
+			// core stays where it was and dims away behind. Sign carries the
+			// direction: positive trails inward (outward sweep), negative
+			// trails outward (a collapsing one). At zero this is byte for
+			// byte the symmetric band it always was.
+			float ssigned = sdist - sband.x;
 			float thick = max(sband.y, 0.001);
-			if (band < thick)
+			float strail = abs(uSweepTrail);
+			float sbehind = (uSweepTrail >= 0.0) ? -ssigned : ssigned;
+			float swidth = (strail > thick && sbehind > 0.0) ? strail : thick;
+
+			float band = abs(ssigned);
+			if (band < swidth)
 			{
-				float satten = pow(1.0 - band / thick, max(sband.z, 0.01));
+				float satten = pow(1.0 - band / swidth, max(sband.z, 0.01));
 				vec4 scol = uSweepColors[sb];
 				color.rgb += desaturate(vec4(scol.rgb * satten * scol.a, 1.0)).rgb;
 			}

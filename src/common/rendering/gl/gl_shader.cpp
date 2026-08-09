@@ -273,6 +273,7 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 		uniform vec4 uSweepBands[8];
 		uniform vec4 uSweepColors[8];
 		uniform int uSweepCount;
+		uniform float uSweepTrail;
 
 		// [BB] Flat-edge glow: floors/ceilings glow inward from their own edges
 		uniform vec4 uFlatGlowColor;
@@ -632,6 +633,7 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 	muGlowBottomIntensity.Init(hShader, "uGlowBottomIntensity");
 	muSweepOrigin.Init(hShader, "uSweepOrigin");
 	muSweepCount.Init(hShader, "uSweepCount");
+	muSweepTrail.Init(hShader, "uSweepTrail");
 	muSweepBandsLoc = glGetUniformLocation(hShader, "uSweepBands");
 	muSweepColorsLoc = glGetUniformLocation(hShader, "uSweepColors");
 	muFlatGlowColor.Init(hShader, "uFlatGlowColor");

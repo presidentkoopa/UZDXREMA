@@ -845,7 +845,8 @@ void HWDrawInfo::RenderScene(FRenderState &state)
 	{
 		int n = min(Level->SweepCount, FLevelLocals::MAX_SWEEP_BANDS);
 		state.SetSweepOrigin(Level->SweepMode,
-			(float)Level->SweepOrigin.X, (float)Level->SweepOrigin.Z, (float)Level->SweepOrigin.Y, n);
+			(float)Level->SweepOrigin.X, (float)Level->SweepOrigin.Z, (float)Level->SweepOrigin.Y, n,
+			(float)Level->SweepTrail);
 		for (int i = 0; i < n; i++)
 		{
 			state.SetSweepBand(i,

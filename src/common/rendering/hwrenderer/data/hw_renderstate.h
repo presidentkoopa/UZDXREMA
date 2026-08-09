@@ -209,7 +209,7 @@ struct StreamData
 	FVector4 uSweepBands[8];   // radius, thickness, softness, active
 	FVector4 uSweepColors[8];  // r, g, b, intensity
 	int uSweepCount;
-	int uSweepPad0;
+	float uSweepTrail;         // wake length, signed; 0 = symmetric band
 	int uSweepPad1;
 	int uSweepPad2;
 
@@ -350,6 +350,7 @@ public:
 		mStreamData.uGlowBottomPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uSweepOrigin = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uSweepCount = 0;
+		mStreamData.uSweepTrail = 0.0f;
 		mStreamData.uFlatGlowColor = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uFlatGlowFalloff = 0;
 		mStreamData.uFlatGlowLineCount = 0;
@@ -531,10 +532,11 @@ public:
 	// [BB] Sweep: one world-space band applied to every surface. Set once
 	// per frame rather than per draw -- it is a property of the world, not
 	// of any sector or wall.
-	void SetSweepOrigin(int mode, float ox, float oy, float oz, int count)
+	void SetSweepOrigin(int mode, float ox, float oy, float oz, int count, float trail = 0.0f)
 	{
 		mStreamData.uSweepOrigin = { ox, oy, oz, (float)mode };
 		mStreamData.uSweepCount = count;
+		mStreamData.uSweepTrail = trail;
 	}
 
 	void SetSweepBand(int i, float radius, float thickness, float softness,

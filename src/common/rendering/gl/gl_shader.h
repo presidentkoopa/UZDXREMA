@@ -260,6 +260,7 @@ class FShader
 	FBufferedUniform1f muGlowBottomIntensity;
 	FUniform4f muSweepOrigin;
 	FBufferedUniform1i muSweepCount;
+	FBufferedUniform1f muSweepTrail;
 	int muSweepBandsLoc;
 	int muSweepColorsLoc;
 	FUniform4f muFlatGlowColor;

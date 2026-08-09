@@ -170,6 +170,7 @@ bool FGLRenderState::ApplyShader()
 	// shader gates on uSweepColor.a, so clearing has to actually reach it.
 	activeShader->muSweepOrigin.Set(&mStreamData.uSweepOrigin.X);
 	activeShader->muSweepCount.Set(mStreamData.uSweepCount);
+	activeShader->muSweepTrail.Set(mStreamData.uSweepTrail);
 	if (mStreamData.uSweepCount > 0)
 	{
 		if (activeShader->muSweepBandsLoc >= 0)

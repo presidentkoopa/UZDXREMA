@@ -190,6 +190,13 @@ struct FBillboard
 	int      payload = 0;          // EBillboardPayload
 	int      data = 0;             // payload-specific packed int
 
+	// [BB] Which typeface, for the distance-field payloads. 0 is the default
+	// face and is what every existing call site gets by not setting this;
+	// 1..N index the rolled roster. See FSDFFontRoster in hw_sdffont.h --
+	// the roster is SHUFFLED PER GAME, so a slot names a ROLE ("the display
+	// face") and is never a promise about which typeface answers to it.
+	int      font = 0;
+
 	// [BB] BB_TEXT's string, and only BB_TEXT's.
 	//
 	// It lives here rather than inside `data` because `data` is one int and
@@ -975,6 +982,7 @@ public:
 	double SweepSoftness[MAX_SWEEP_BANDS] = {};   // 1 linear, higher = tighter core
 	PalEntry SweepColor[MAX_SWEEP_BANDS] = {};
 	double SweepIntensity[MAX_SWEEP_BANDS] = {};
+	double SweepTrail = 0;                        // wake length, signed
 
 	// links to global game objects
 	TArray<TObjPtr<AActor *>> CorpseQueue;

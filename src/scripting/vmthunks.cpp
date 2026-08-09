@@ -2983,6 +2983,75 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetBillboardGlow, SetBillboardGlow)
 	return 0;
 }
 
+// [BB] Which typeface this billboard draws in. A SETTER and not an argument
+// for the same reason the gradient is one: AddBillboardPersistent already
+// takes fourteen and the ZScript compiler crashes, silently, on a native call
+// with sixteen. Slot 0 is the default face, 1..BillboardFontCount() index the
+// rolled roster. Out of range is not an error -- it draws in the default face,
+// because the wrong typeface is a far better failure than invisible text.
+static void SetBillboardFont(FLevelLocals *self, int id, int slot)
+{
+	FBillboard *bb = FindBillboardByID(self, id);
+	if (bb == nullptr) return;
+	bb->font = slot;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetBillboardFont, SetBillboardFont)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(id);
+	PARAM_INT(slot);
+	SetBillboardFont(self, id, slot);
+	return 0;
+}
+
+// [BB] Shuffle the roster. Called at game start so a run does not look like
+// the last one; safe to call whenever a fresh look is wanted. No atlas is
+// reloaded -- this reorders names, and FSDFFont::Get's cache is untouched.
+static void RollBillboardFonts(FLevelLocals *self)
+{
+	FSDFFontRoster::Roll();
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, RollBillboardFonts, RollBillboardFonts)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	RollBillboardFonts(self);
+	return 0;
+}
+
+// [BB] How many rolled faces exist, NOT counting slot 0. 0 means only the
+// default face shipped, and every slot will resolve to it -- which is a
+// legitimate load, not a broken one, so callers should treat it as "do not
+// bother varying the typeface" rather than as an error.
+static int BillboardFontCount(FLevelLocals *self)
+{
+	return FSDFFontRoster::Count();
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, BillboardFontCount, BillboardFontCount)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	ACTION_RETURN_INT(BillboardFontCount(self));
+}
+
+// [BB] Which face is in this slot right now, for diagnostics and for a font
+// preview. The answer changes every roll, which is exactly why something has
+// to be able to ask.
+static void BillboardFontName(FLevelLocals *self, int slot, FString *result)
+{
+	*result = FSDFFontRoster::SlotName(slot);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, BillboardFontName, BillboardFontName)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(slot);
+	FString result;
+	BillboardFontName(self, slot, &result);
+	ACTION_RETURN_STRING(result);
+}
+
 // [BB] The gradient's far end. Its own setter rather than an argument, because
 // AddBillboardPersistent is already at fourteen and the ZScript compiler
 // CRASHES compiling a call to a native with sixteen -- silently, part way
@@ -3038,25 +3107,31 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetBillboardGradient, SetBillboardGr
 // Returns 0 when no atlas is loaded, which a caller should read as "fall back
 // to your own estimate" rather than as a zero-width string.
 //
+// MULTI-LINE, since 2026-08-09: `height` is the height of ONE LINE, and the
+// width reported is the WIDEST line. A two-line string is therefore as wide as
+// its longer half, not as wide as both halves end to end. Callers that need
+// the other axis want MeasureBillboardTextBlock() below -- a panel sized from
+// this alone would be one line tall no matter how many lines it held.
+//
 //==========================================================================
 
-static double MeasureBillboardText(FLevelLocals *self, const FString &text, double height)
+// `fontSlot` MUST match the slot the billboard will draw in. Different faces
+// have different advances, so measuring in one and drawing in another is a
+// layout that is quietly wrong by however much the two disagree -- and since
+// the roster is reshuffled every game, it would be wrong by a DIFFERENT amount
+// each run, which is about the worst way for a bug like this to present.
+static double MeasureBillboardText(FLevelLocals *self, const FString &text, double height, int fontSlot)
 {
 	if (text.IsEmpty() || height <= 0.0) return 0.0;
 
-	FSDFFont *font = FSDFFont::Get(bb_sdffont);
+	FSDFFont *font = FSDFFontRoster::Slot(fontSlot);
 	if (font == nullptr) return 0.0;
 
 	const double cell = font->Cell();
-	const double emBox = max(cell - 2.0 * font->Spread(), 1.0);
 	if (cell <= 0.0) return 0.0;
+	const double emBox = max(cell - 2.0 * font->Spread(), 1.0);
 
-	double total = 0.0;
-	for (const uint8_t *c = (const uint8_t *)text.GetChars(); *c != 0; ++c)
-	{
-		if (const FSDFGlyph *g = font->Glyph((int)*c)) total += g->advance;
-	}
-	return total * (height / emBox);
+	return SDFMeasureText(font, text.GetChars()).widest * (height / emBox);
 }
 
 DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, MeasureBillboardText, MeasureBillboardText)
@@ -3064,7 +3139,53 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, MeasureBillboardText, MeasureBillboa
 	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
 	PARAM_STRING(text);
 	PARAM_FLOAT(height);
-	ACTION_RETURN_FLOAT(MeasureBillboardText(self, text, height));
+	PARAM_INT(fontSlot);
+	ACTION_RETURN_FLOAT(MeasureBillboardText(self, text, height, fontSlot));
+}
+
+//==========================================================================
+//
+// [BB] The whole block: width AND height, for text that carries newlines.
+//
+// Returned together, in one call, on purpose. The line pitch is the renderer's
+// business and script has no way to derive it -- exposing width here and making
+// callers multiply by a constant they had to be told would put a copy of the
+// engine's layout rule in every mod that draws a table, and those copies would
+// go stale the first time the pitch was tuned.
+//
+// x is the widest line, y is the total block height, both in map units, both
+// for the given PER-LINE height. Single-line text returns exactly (width,
+// height), so a caller can use this unconditionally.
+//
+// (0, 0) when no atlas is loaded, same contract as MeasureBillboardText.
+//
+//==========================================================================
+
+static void MeasureBillboardTextBlock(FLevelLocals *self, const FString &text, double height, int fontSlot, DVector2 *result)
+{
+	*result = DVector2(0, 0);
+	if (text.IsEmpty() || height <= 0.0) return;
+
+	FSDFFont *font = FSDFFontRoster::Slot(fontSlot);
+	if (font == nullptr) return;
+
+	const double cell = font->Cell();
+	if (cell <= 0.0) return;
+	const double emBox = max(cell - 2.0 * font->Spread(), 1.0);
+
+	const FSDFTextMetrics m = SDFMeasureText(font, text.GetChars());
+	*result = DVector2(m.widest * (height / emBox), m.blockEm * height);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, MeasureBillboardTextBlock, MeasureBillboardTextBlock)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_STRING(text);
+	PARAM_FLOAT(height);
+	PARAM_INT(fontSlot);
+	DVector2 result;
+	MeasureBillboardTextBlock(self, text, height, fontSlot, &result);
+	ACTION_RETURN_VEC2(result);
 }
 
 static void MoveBillboard(FLevelLocals *self, int id, double x, double y, double z)
@@ -3280,10 +3401,24 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetSweepBand, SetSweepBand)
 	return 0;
 }
 
+static void SetSweepTrail(FLevelLocals *self, double trail)
+{
+	self->SweepTrail = trail;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetSweepTrail, SetSweepTrail)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(trail);
+	SetSweepTrail(self, trail);
+	return 0;
+}
+
 static void ClearSweep(FLevelLocals *self)
 {
 	self->SweepMode = 0;
 	self->SweepCount = 0;
+	self->SweepTrail = 0;
 }
 
 DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearSweep, ClearSweep)

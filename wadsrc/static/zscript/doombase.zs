@@ -661,7 +661,37 @@ struct LevelLocals native
 	// Returns 0 if no SDF atlas is loaded -- treat that as "estimate it
 	// yourself", not as an empty string. Beats counting characters, which is
 	// only right for a monospace atlas and breaks silently on any other.
-	native double MeasureBillboardText(string text, double height);
+	// Which typeface a billboard draws in. 0 is the default face; 1 through
+	// BillboardFontCount() index the roster, which is RESHUFFLED EVERY GAME --
+	// so ask for a slot because you want "the display face", never because
+	// you want a particular font. Out of range draws in the default face.
+	// A setter and not an argument: AddBillboardPersistent is already at
+	// fourteen natively and sixteen crashes the script compiler outright.
+	native void SetBillboardFont(int id, int slot);
+	// Reshuffle. Call at game start for a fresh look; no atlas is reloaded.
+	native void RollBillboardFonts();
+	// Rolled faces available, NOT counting slot 0. Zero is a legitimate load
+	// -- it means only the default face shipped -- so read it as "do not
+	// bother varying the typeface", not as a failure.
+	native int BillboardFontCount();
+	// Which face is in that slot right now. Changes on every roll, which is
+	// why anything wanting to name it has to ask rather than remember.
+	native string BillboardFontName(int slot);
+
+	// A string carrying '\n' draws as stacked, centred lines, so `height` is
+	// the height of ONE line and this reports the WIDEST one.
+	//
+	// fontSlot MUST be the slot the billboard will draw in. Faces have
+	// different advances, so measuring in one and drawing in another is
+	// silently wrong -- and with a reshuffled roster it would be wrong by a
+	// different amount every game.
+	native double MeasureBillboardText(string text, double height, int fontSlot = 0);
+	// Width AND total height of a multi-line BB_TEXT string, for the given
+	// per-line height. Returned as a pair because the line pitch is the
+	// renderer's rule and script cannot derive it -- ask, do not multiply by a
+	// constant of your own, or your layout goes stale the day the pitch moves.
+	// Single-line text returns exactly (width, height), so this is always safe.
+	native Vector2 MeasureBillboardTextBlock(string text, double height, int fontSlot = 0);
 
 	// Pack a halo into the `data` argument of a BB_TEXT billboard. BB_TEXT
 	// ignores data otherwise, so this costs nothing and needs no extra
@@ -742,6 +772,7 @@ struct LevelLocals native
 	// for a sweep, stagger them for a train chasing itself down a corridor.
 	native void SetSweepOrigin(int mode, Vector3 origin, int count);
 	native void SetSweepBand(int index, double radius, double thickness, double softness, color col, double intensity);
+	native void SetSweepTrail(double trail);
 	native void ClearSweep();
 
 	native String GetChecksum() const;
