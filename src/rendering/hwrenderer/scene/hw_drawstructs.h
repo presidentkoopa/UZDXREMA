@@ -411,6 +411,12 @@ public:
 	// billboard has neither. CalculateVertices hands these straight back.
 	bool isBillboard = false;
 	bool bbNoDepth = false;		// draw over world geometry instead of being occluded by it
+
+	// [BB] Halo parameters for distance-field text, packed into a colour so
+	// they can ride uAddColor -- which the billboard path leaves at zero, so
+	// nothing is being displaced. r = reach as a fraction of the atlas spread,
+	// g = strength. Zero means no glow, which is every other payload.
+	PalEntry bbGlow = 0;
 	FVector3 bbVerts[4];
 
 	void SplitSprite(HWDrawInfo *di, sector_t * frontsector, bool translucent);

@@ -2802,6 +2802,21 @@ static void FillBillboard(FLevelLocals *self, FBillboard &bb, const DVector3 &po
 	bb.payload = payload;
 	bb.data = data;
 	bb.text = text;
+
+	// [BB] BB_TEXT's halo rides in `data`, which that payload does not
+	// otherwise read -- byte 0 is reach, byte 1 is strength, both 0..255
+	// mapped to 0..1. Use LevelLocals.BBGlow() to build it.
+	//
+	// It is packed rather than passed because two more arguments would put
+	// AddBillboardPersistent at sixteen, and the ZScript compiler CRASHES
+	// while compiling a call to a native with that many -- no error, no
+	// dialog, just a silent exit during LoadActors. Everything below the
+	// cliff works, so the cliff is simply not approached.
+	if (payload == BB_TEXT && data != 0)
+	{
+		bb.glowRadius = ((data >> 0) & 0xff) / 255.0;
+		bb.glowStrength = ((data >> 8) & 0xff) / 255.0;
+	}
 	bb.color = (PalEntry)color;
 	bb.flags = flags;
 	bb.lifetime = lifetime;
@@ -2934,6 +2949,27 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetBillboardText, SetBillboardText)
 	PARAM_INT(id);
 	PARAM_STRING(text);
 	SetBillboardText(self, id, text);
+	return 0;
+}
+
+// [BB] Retune a live billboard's halo. Its own call for the same reason the
+// text and alpha setters are: a readout that pulses its glow every tic should
+// not have to restate its string to do it.
+static void SetBillboardGlow(FLevelLocals *self, int id, double radius, double strength)
+{
+	FBillboard *bb = FindBillboardByID(self, id);
+	if (bb == nullptr) return;
+	bb->glowRadius = radius;
+	bb->glowStrength = strength;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetBillboardGlow, SetBillboardGlow)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(id);
+	PARAM_FLOAT(radius);
+	PARAM_FLOAT(strength);
+	SetBillboardGlow(self, id, radius, strength);
 	return 0;
 }
 

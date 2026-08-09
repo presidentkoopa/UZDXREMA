@@ -135,6 +135,70 @@ void FLevelLocals::TickBillboards()
 //
 //==========================================================================
 
+//==========================================================================
+//
+// [BB] bb_text -- put a line of distance-field text in front of the player.
+//
+//   bb_text <string> [glowRadius] [glowStrength] [rrggbb]
+//
+// The companion to bb_spawn, and the reason it exists is that testing BB_TEXT
+// otherwise means writing a mod, packing a pk3 and restarting -- which is a
+// long way round to find out whether a halo is too tight.
+//
+// glowRadius is a fraction of the atlas spread; 1.0 is the whole field and
+// the practical maximum. Colour is hex, default cyan.
+//
+//==========================================================================
+
+CCMD(bb_text)
+{
+	if (gamestate != GS_LEVEL || players[consoleplayer].mo == nullptr)
+	{
+		Printf("bb_text: not in a level\n");
+		return;
+	}
+	if (argv.argc() < 2)
+	{
+		Printf("bb_text <string> [glowRadius 0..1] [glowStrength 0..1] [rrggbb]\n");
+		return;
+	}
+
+	AActor *pmo = players[consoleplayer].mo;
+	auto Level = pmo->Level;
+
+	const double gr = (argv.argc() > 2) ? atof(argv[2]) : 0.0;
+	const double gs = (argv.argc() > 3) ? atof(argv[3]) : 0.0;
+	const uint32_t rgb = (argv.argc() > 4) ? (uint32_t)strtoul(argv[4], nullptr, 16) : 0x28FFFFu;
+
+	DAngle ang = pmo->Angles.Yaw;
+	DVector3 where = pmo->Pos()
+		+ DVector3(ang.Cos() * 96.0, ang.Sin() * 96.0, pmo->Height * 0.7);
+
+	FBillboard bb;
+	bb.id = Level->NextBillboardID++;
+	bb.pos = where;
+	bb.width = 96.0;
+	bb.height = 24.0;
+	// Turned to face back at the player, so it is readable where it lands
+	// rather than edge-on.
+	bb.yaw = (ang + DAngle::fromDeg(180)).Degrees();
+	bb.tilt = 0.0;
+	bb.facing = BBF_FIXED;
+	bb.payload = BB_TEXT;
+	bb.data = 0;
+	bb.text = argv[1];
+	bb.glowRadius = gr;
+	bb.glowStrength = gs;
+	bb.color = PalEntry(255, (uint8_t)((rgb >> 16) & 0xff), (uint8_t)((rgb >> 8) & 0xff), (uint8_t)(rgb & 0xff));
+	bb.alpha = 1.0;
+	bb.flags = BBFL_PERSISTENT;
+	bb.spawntic = Level->maptime;
+	Level->Billboards.Push(bb);
+
+	Printf("bb_text: id %d, \"%s\", glow %g/%g (%d live) -- bb_clear removes them\n",
+		bb.id, bb.text.GetChars(), gr, gs, Level->Billboards.Size());
+}
+
 CCMD(bb_spawn)
 {
 	if (gamestate != GS_LEVEL || players[consoleplayer].mo == nullptr)

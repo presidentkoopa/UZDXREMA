@@ -187,6 +187,19 @@ struct FBillboard
 	// which costs one empty FString per billboard and nothing else.
 	FString  text;
 
+	// [BB] Neon, for the payloads drawn from a distance field.
+	//
+	// glowRadius is how far past the letter's edge the halo reaches, as a
+	// fraction of the atlas's spread: 1.0 uses the whole field, 0 is off.
+	// It CANNOT usefully exceed 1 -- past the spread there is no field left to
+	// read and the halo clips to a hard square at the glyph's cell boundary.
+	// Measured before the shader existed, in tools/sdffont/sdfpreview.ps1.
+	//
+	// Ignored by every payload that is not distance-field text, because a
+	// glow needs an edge to fall away from and a plain quad has no such thing.
+	double   glowRadius = 0.0;
+	double   glowStrength = 0.0;   // 0 = off, 1 = halo as bright as the core
+
 	PalEntry color;
 	double   alpha = 1.0;          // 0 = invisible, 1 = opaque; the fade handle
 	int      flags = 0;            // EBillboardFlags

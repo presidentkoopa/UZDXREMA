@@ -35,15 +35,27 @@ vec4 ProcessTexel()
 	// The halo is read straight out of the field. Neon is brightness falling
 	// off with distance from the edge, and distance from the edge is the only
 	// thing this texture stores, so there is nothing to blur and no second
-	// pass to run. Squared so it hugs the letterform instead of hazing.
+	// pass to run.
 	//
-	// The 5.0 keeps the falloff inside the generator's spread. Push it lower
-	// and the halo runs off the end of the field and clips to a hard square
-	// at the cell boundary -- confirmed in tools/sdffont/sdfpreview.ps1 before
-	// this shader existed.
-	float halo = clamp(1.0 + sd * 5.0, 0.0, 1.0);
-	halo *= halo;
+	// uAddColor carries it: .r is reach as a fraction of the atlas spread,
+	// .g is strength. The billboard draw path leaves this uniform at zero and
+	// reads it nowhere else, so it is free carriage rather than a hijack.
+	//
+	// Reach is halved because sd only spans -0.5..0.5 -- a full 1.0 means the
+	// whole spread, which is as far as the field can answer for. Past that
+	// there is nothing left to read and the falloff would stop dead in a
+	// square at the cell boundary.
+	float reach = uAddColor.r * 0.5;
+	float strength = uAddColor.g;
 
-	float a = max(core, halo * 0.55);
+	float halo = 0.0;
+	if (reach > 0.0 && strength > 0.0)
+	{
+		halo = clamp(1.0 + sd / reach, 0.0, 1.0);
+		halo *= halo;			// squared, so it hugs the letter instead of hazing
+		halo *= strength;
+	}
+
+	float a = max(core, halo);
 	return vec4(uObjectColor.rgb, a * uObjectColor.a);
 }

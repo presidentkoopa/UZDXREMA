@@ -611,6 +611,27 @@ struct LevelLocals native
 	// same reason SetBillboardAlpha is: a readout that restrings itself every
 	// tic should not have to restate its colour to do it.
 	native void SetBillboardText(int id, string text);
+	// Neon, for BB_TEXT. radius is a fraction of the atlas spread -- 1.0 uses
+	// the whole field and is the practical maximum, because past the spread
+	// there is nothing left to read and the halo clips to a hard square at the
+	// glyph's cell edge. strength 0 is off, 1 is a halo as bright as the core.
+	native void SetBillboardGlow(int id, double radius, double strength);
+
+	// Pack a halo into the `data` argument of a BB_TEXT billboard. BB_TEXT
+	// ignores data otherwise, so this costs nothing and needs no extra
+	// parameter -- which matters, because adding two more would put
+	// AddBillboardPersistent at sixteen arguments and the script compiler
+	// CRASHES compiling a call to a native with that many. No error, no
+	// dialog, just a silent exit while loading actors.
+	//
+	//   level.AddBillboard(pos, w, h, yaw, tilt, facing, LevelLocals.BB_TEXT,
+	//                      LevelLocals.BBGlow(0.5, 0.75), col, 0, 2, "ELITE");
+	static int BBGlow(double radius, double strength)
+	{
+		int r = int(clamp(radius, 0.0, 1.0) * 255.0 + 0.5);
+		int s = int(clamp(strength, 0.0, 1.0) * 255.0 + 0.5);
+		return r | (s << 8);
+	}
 	native void MoveBillboard(int id, Vector3 pos);
 	native void OrientBillboard(int id, double yaw, double tilt, int facing);
 	native void ResizeBillboard(int id, double w, double h);

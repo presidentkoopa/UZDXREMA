@@ -252,6 +252,14 @@ void HWSprite::DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent)
 			// colour applied. That is also what makes it predictable: the
 			// colour a caller asks for is the colour it gets, in any sector.
 			state.SetObjectColor(ThingColor);
+
+			// [BB] The halo rides here. uAddColor is otherwise untouched on
+			// this path -- the sector branch above sets it, the billboard
+			// branch never did -- so it is free carriage for two numbers the
+			// SDF shader needs and nothing else reads. The shader ignores it
+			// unless it is the one running, and every other payload leaves
+			// this zero.
+			state.SetAddColor(bbGlow);
 		}
 		SetColor(state, di->Level, di->lightmode, lightlevel, rel, di->isFullbrightScene(), Colormap, trans);
 	}
@@ -2004,6 +2012,20 @@ void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double
 {
 	const PalEntry tint = bb->color;
 
+	// [BB] Doom's SmallFont is RED, and the bitmap glyph paths were fetching it
+	// with CR_UNTRANSLATED and then multiplying the billboard's tint into it.
+	// Green text came out dark maroon, and every other colour came out wrong in
+	// its own way, because a multiply against red can only ever darken toward
+	// red. A green 1337 rendering brown is what made this visible.
+	//
+	// Translating the glyphs to white first makes the multiply mean what the
+	// caller intended: tint x white = tint. The SDF path never had this problem
+	// -- its atlas is a greyscale field and the shader emits uObjectColor
+	// directly -- which is why only the fallback was wrong.
+	auto WhitenGlyphs = [this]() {
+		if (SmallFont != nullptr) translation = SmallFont->GetColorTranslation(CR_WHITE);
+	};
+
 	switch (bb->payload)
 	{
 	case BB_TEXTURE:
@@ -2052,14 +2074,18 @@ void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double
 	{
 		char buffer[24];
 		mysnprintf(buffer, countof(buffer), "%d", bb->data);
+		WhitenGlyphs();
 		EmitBillboardGlyphs(buffer, halfw, halfh, tint, emit);
+		translation = NO_TRANSLATION;
 		return;
 	}
 
 	case BB_GLYPH:
 	{
 		const char text[2] = { (char)clamp(bb->data, 1, 255), 0 };
+		WhitenGlyphs();
 		EmitBillboardGlyphs(text, halfw, halfh, tint, emit);
+		translation = NO_TRANSLATION;
 		return;
 	}
 
@@ -2096,7 +2122,9 @@ void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double
 			Printf(TEXTCOLOR_YELLOW "BB_TEXT: drawing through BITMAP glyphs, not the field "
 				"(bb_sdffont = \"%s\")\n", *bb_sdffont);
 		}
+		WhitenGlyphs();
 		EmitBillboardGlyphs(bb->text.GetChars(), halfw, halfh, tint, emit);
+		translation = NO_TRANSLATION;
 		return;
 	}
 
@@ -2219,6 +2247,16 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 
 	isBillboard = true;
 	bbNoDepth = (bb->flags & BBFL_NODEPTH) != 0;
+
+	// [BB] Pack the halo into a colour for uAddColor. Radius is clamped at 1
+	// because that is the whole spread -- ask for more and the falloff runs
+	// off the end of the field and stops dead in a square, so clamping here is
+	// kinder than letting a caller discover the artifact.
+	{
+		const int gr = (int)(clamp(bb->glowRadius, 0.0, 1.0) * 255.0 + 0.5);
+		const int gs = (int)(clamp(bb->glowStrength, 0.0, 1.0) * 255.0 + 0.5);
+		bbGlow = PalEntry(255, (uint8_t)gr, (uint8_t)gs, 0);
+	}
 
 	// [BB] Submit one quad. A payload is free to call this more than once --
 	// which is the whole reason the payloads below need no shaders. A bar is a
