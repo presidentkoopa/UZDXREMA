@@ -206,7 +206,8 @@ struct StreamData
 	// every surface. Origin xyz + mode is shared; each band carries its own
 	// radius/thickness/softness and its own colour + intensity.
 	FVector4 uSweepOrigin;
-	FVector4 uSweepBands[8];      // radius, thickness, softness, active
+	FVector4 uSweepBands[8];      // radius, thickness, softness, mode
+	                              // mode: 0 off, 1 add, 2 lift, 3 crush
 	FVector4 uSweepColors[8];     // r, g, b, intensity
 	FVector4 uSweepBandOrigin[8]; // per band: xyz origin, w = shape (0 = off)
 	int uSweepCount;
@@ -555,11 +556,19 @@ public:
 		mStreamData.uSweepBandOrigin[i] = { ox, oy, oz, (float)mode };
 	}
 
+	// What this band does to the pixels it covers: 1 add, 2 lift, 3 crush.
+	// Call after SetSweepBand, which writes the default.
+	void SetSweepBandDraw(int i, int drawmode)
+	{
+		if (i < 0 || i >= 8) return;
+		mStreamData.uSweepBands[i].W = (float)drawmode;
+	}
+
 	void SetSweepBand(int i, float radius, float thickness, float softness,
 		float r, float g, float b, float intensity)
 	{
 		if (i < 0 || i >= 8) return;
-		mStreamData.uSweepBands[i] = { radius, thickness, softness, 1.0f };
+		mStreamData.uSweepBands[i] = { radius, thickness, softness, 1.0f };  // mode 1 = add
 		mStreamData.uSweepColors[i] = { r, g, b, intensity };
 	}
 

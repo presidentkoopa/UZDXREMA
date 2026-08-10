@@ -3401,6 +3401,23 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetSweepBand, SetSweepBand)
 	return 0;
 }
 
+// What a band does to the pixels it covers: 1 add (the original), 2 lift --
+// multiply up, which is a reveal -- 3 crush, multiply down.
+static void SetSweepBandDraw(FLevelLocals *self, int index, int drawmode)
+{
+	if (index < 0 || index >= FLevelLocals::MAX_SWEEP_BANDS) return;
+	self->SweepBandDraw[index] = drawmode;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetSweepBandDraw, SetSweepBandDraw)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(index);
+	PARAM_INT(drawmode);
+	SetSweepBandDraw(self, index, drawmode);
+	return 0;
+}
+
 // Set ONLY the band count. SetSweepOrigin also seeds all eight per-band
 // origins, so it cannot be used to correct the count after those origins have
 // been set -- it would erase them. Hence a setter that touches nothing else.
@@ -3454,7 +3471,7 @@ static void ClearSweep(FLevelLocals *self)
 	self->SweepMode = 0;
 	self->SweepCount = 0;
 	self->SweepTrail = 0;
-	for (int i = 0; i < FLevelLocals::MAX_SWEEP_BANDS; i++) self->SweepBandMode[i] = 0;
+	for (int i = 0; i < FLevelLocals::MAX_SWEEP_BANDS; i++) { self->SweepBandMode[i] = 0; self->SweepBandDraw[i] = 0; }
 }
 
 DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearSweep, ClearSweep)

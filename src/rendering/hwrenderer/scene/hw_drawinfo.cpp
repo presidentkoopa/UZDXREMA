@@ -857,6 +857,9 @@ void HWDrawInfo::RenderScene(FRenderState &state)
 			// Same swizzle as the shared origin above: Doom's Z is the
 			// shader's Y. A band left at mode 0 falls back to the shared
 			// origin, which SetSweepOrigin already seeded into all eight.
+			if (Level->SweepBandDraw[i] > 0)
+				state.SetSweepBandDraw(i, Level->SweepBandDraw[i]);
+
 			if (Level->SweepBandMode[i] > 0)
 			{
 				state.SetSweepBandOrigin(i,

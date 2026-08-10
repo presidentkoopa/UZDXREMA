@@ -702,6 +702,33 @@ void SetMaterialProps(inout Material material, vec2 texCoord)
 #endif
 }
 
+float SweepBandAttenAt(int sb)
+{
+	vec4 sband = uSweepBands[sb];
+	if (sband.w <= 0.0) return 0.0;
+
+	vec4 sorg = uSweepBandOrigin[sb];
+	int smode = int(sorg.w);
+	if (smode <= 0) return 0.0;
+
+	float sdist;
+	if (smode == 1)      sdist = length(pixelpos.xz - sorg.xz);
+	else if (smode == 2) sdist = abs(pixelpos.x - sorg.x);
+	else if (smode == 3) sdist = abs(pixelpos.z - sorg.z);
+	else if (smode == 5) sdist = pixelpos.y - sorg.y;
+	else                 sdist = length(pixelpos.xyz - sorg.xyz);
+
+	float ssigned = sdist - sband.x;
+	float thick = max(sband.y, 0.001);
+	float strail = abs(uSweepTrail);
+	float sbehind = (uSweepTrail >= 0.0) ? -ssigned : ssigned;
+	float swidth = (strail > thick && sbehind > 0.0) ? strail : thick;
+
+	float b = abs(ssigned);
+	if (b >= swidth) return 0.0;
+	return pow(1.0 - b / swidth, max(sband.z, 0.01));
+}
+
 //===========================================================================
 //
 // Calculate light
@@ -740,6 +767,48 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 	}
 
 	//
+	// [BB] How strongly band sb covers THIS pixel, 0 if it does not.
+	//
+	// Factored out because two passes need it and they are separated by the
+	// whole glow block: the recolour pass below has to run BEFORE the glow is
+	// drawn (it changes what colour the glow is), and the light pass has to
+	// run after (it changes what the finished pixel becomes). One copy of the
+	// maths, so the two can never drift apart and disagree about where a band
+	// is.
+	//
+
+	//
+	// [BB] SWEEP RECOLOUR -- runs BEFORE the glow, because it changes what
+	// colour the glow IS rather than adding light on top of it.
+	//
+	// Glow already varies per pixel VERTICALLY: glowdist is the fragment's
+	// distance from the floor or ceiling plane, which is what makes coverage
+	// and falloff smooth up a wall. Horizontally it could not vary at all,
+	// because the colour arrives as one value for the whole surface. So a
+	// wall could fade top to bottom beautifully and was a single flat colour
+	// left to right.
+	//
+	// A band in recolour mode (4) blends the glow toward its own colour by
+	// how strongly it covers this pixel. The result is a colour change that
+	// SWEEPS ACROSS the wall instead of the room flipping: glow ahead of the
+	// band is your palette, glow inside it is the band's, and the boundary
+	// travels.
+	//
+	// Strongest band wins rather than accumulating -- two overlapping
+	// recolours should hand over, not average into mud.
+	//
+	vec3 sweepTint = vec3(0.0);
+	float sweepTintW = 0.0;
+	for (int rb = 0; rb < 8; rb++)
+	{
+		if (rb >= uSweepCount) break;
+		if (int(uSweepBands[rb].w) != 4) continue;
+		float ra = SweepBandAttenAt(rb) * uSweepColors[rb].a;
+		if (ra > sweepTintW) { sweepTintW = ra; sweepTint = uSweepColors[rb].rgb; }
+	}
+	sweepTintW = clamp(sweepTintW, 0.0, 1.0);
+
+	//
 	// handle glowing walls
 	//
 	if (uGlowTopColor.a > 0.0 && glowdist.x < uGlowTopColor.a)
@@ -750,7 +819,8 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 		else if (uGlowTopFalloff == 1) topatten = 1.0 - topfrac * topfrac;
 		else if (uGlowTopFalloff == 2) topatten = 1.0 - sqrt(topfrac);
 		else                            topatten = exp(-topfrac * 3.0);
-		color.rgb += desaturate(vec4(uGlowTopColor.rgb * topatten * uGlowTopIntensity, 1.0)).rgb;
+		vec3 gtop = mix(uGlowTopColor.rgb, sweepTint, sweepTintW);
+		color.rgb += desaturate(vec4(gtop * topatten * uGlowTopIntensity, 1.0)).rgb;
 	}
 	if (uGlowBottomColor.a > 0.0 && glowdist.y < uGlowBottomColor.a)
 	{
@@ -760,7 +830,8 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 		else if (uGlowBottomFalloff == 1) botatten = 1.0 - botfrac * botfrac;
 		else if (uGlowBottomFalloff == 2) botatten = 1.0 - sqrt(botfrac);
 		else                                botatten = exp(-botfrac * 3.0);
-		color.rgb += desaturate(vec4(uGlowBottomColor.rgb * botatten * uGlowBottomIntensity, 1.0)).rgb;
+		vec3 gbot = mix(uGlowBottomColor.rgb, sweepTint, sweepTintW);
+		color.rgb += desaturate(vec4(gbot * botatten * uGlowBottomIntensity, 1.0)).rgb;
 	}
 
 	//
@@ -830,41 +901,49 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 		{
 			if (sb >= uSweepCount) break;
 			vec4 sband = uSweepBands[sb];
-			if (sband.w <= 0.0) continue;
+			int bmode = int(sband.w);
+			if (bmode <= 0) continue;
+			// Recolour bands already had their say, above the glow.
+			if (bmode == 4) continue;
 
-			vec4 sorg = uSweepBandOrigin[sb];
-			int smode = int(sorg.w);
-			if (smode <= 0) continue;
-
-			float sdist;
-			if (smode == 1)      sdist = length(pixelpos.xz - sorg.xz);   // cylinder
-			else if (smode == 2) sdist = abs(pixelpos.x - sorg.x);        // plane along X
-			else if (smode == 3) sdist = abs(pixelpos.z - sorg.z);        // plane along Y
-			else if (smode == 5) sdist = pixelpos.y - sorg.y;             // rising, SIGNED
-			else                 sdist = length(pixelpos.xyz - sorg.xyz); // sphere
+			float satten = SweepBandAttenAt(sb);
+			if (satten <= 0.0) continue;
+			vec4 scol = uSweepColors[sb];
 
 			// The wake. A band is symmetric until uSweepTrail says otherwise,
-			// and then it is simply WIDER on the side it came from -- not a
-			// second gradient bolted alongside, which would show a seam where
-			// the two met. Stretching one half keeps it one falloff, so the
-			// core stays where it was and dims away behind. Sign carries the
-			// direction: positive trails inward (outward sweep), negative
-			// trails outward (a collapsing one). At zero this is byte for
-			// byte the symmetric band it always was.
-			float ssigned = sdist - sband.x;
-			float thick = max(sband.y, 0.001);
-			float strail = abs(uSweepTrail);
-			float sbehind = (uSweepTrail >= 0.0) ? -ssigned : ssigned;
-			float swidth = (strail > thick && sbehind > 0.0) ? strail : thick;
-
-			float band = abs(ssigned);
-			if (band < swidth)
+			// and then it is simply WIDER on the side it came from -- one
+			// falloff stretched, not a second gradient bolted alongside, so
+			// there is no seam at the core. That lives in SweepBandAttenAt
+			// now, shared with the recolour pass above.
+			//
+			// WHAT THE BAND DOES TO THE PIXEL. sband.w was a bare on/off flag
+			// hardcoded to 1.0 -- four bytes of nothing -- and is the mode
+			// now, so this cost no extra uniform space. 0 still means off.
+			//
+			// ADD (1)    emits light additively. A glowing line, and useless
+			//            as a reveal: adding a colour to a room crushed
+			//            toward black gives you that colour, not the room.
+			// LIFT (2)   multiplies what is already there. Darkness scales a
+			//            sector's colour down, so the detail is not gone, it
+			//            is small -- scaling back up restores it. Per pixel,
+			//            so a room ten times the band's width reveals in a
+			//            moving strip instead of switching on whole.
+			// CRUSH (3)  the same operation inverted: a travelling darkness.
+			// RECOLOUR (4) handled above, before the glow.
+			if (bmode == 2)
 			{
-				float satten = pow(1.0 - band / swidth, max(sband.z, 0.01));
-				vec4 scol = uSweepColors[sb];
+				color.rgb *= (1.0 + satten * scol.a);
+			}
+			else if (bmode == 3)
+			{
+				color.rgb *= max(0.0, 1.0 - satten * scol.a);
+			}
+			else
+			{
 				color.rgb += desaturate(vec4(scol.rgb * satten * scol.a, 1.0)).rgb;
 			}
 		}
+
 	}
 #endif
 	color = min(color, 1.0);

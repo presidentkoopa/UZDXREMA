@@ -988,6 +988,8 @@ public:
 	// SetSweepBandAt. Shape 0 means the band is off.
 	DVector3 SweepBandOrigin[MAX_SWEEP_BANDS];
 	int SweepBandMode[MAX_SWEEP_BANDS] = {};
+	// What each band does to the pixels it covers: 1 add, 2 lift, 3 crush.
+	int SweepBandDraw[MAX_SWEEP_BANDS] = {};
 
 	// links to global game objects
 	TArray<TObjPtr<AActor *>> CorpseQueue;
