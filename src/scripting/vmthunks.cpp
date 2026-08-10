@@ -3401,6 +3401,41 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetSweepBand, SetSweepBand)
 	return 0;
 }
 
+// Set ONLY the band count. SetSweepOrigin also seeds all eight per-band
+// origins, so it cannot be used to correct the count after those origins have
+// been set -- it would erase them. Hence a setter that touches nothing else.
+static void SetSweepCount(FLevelLocals *self, int count)
+{
+	self->SweepCount = clamp(count, 0, FLevelLocals::MAX_SWEEP_BANDS);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetSweepCount, SetSweepCount)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(count);
+	SetSweepCount(self, count);
+	return 0;
+}
+
+// Give one band its own origin and shape. Mode 0 hands it back to the shared
+// origin. Called after SetSweepOrigin, which seeds all eight.
+static void SetSweepBandAt(FLevelLocals *self, int index, double x, double y, double z, int mode)
+{
+	if (index < 0 || index >= FLevelLocals::MAX_SWEEP_BANDS) return;
+	self->SweepBandOrigin[index] = DVector3(x, y, z);
+	self->SweepBandMode[index] = mode;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetSweepBandAt, SetSweepBandAt)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(index);
+	PARAM_FLOAT(x); PARAM_FLOAT(y); PARAM_FLOAT(z);
+	PARAM_INT(mode);
+	SetSweepBandAt(self, index, x, y, z, mode);
+	return 0;
+}
+
 static void SetSweepTrail(FLevelLocals *self, double trail)
 {
 	self->SweepTrail = trail;
@@ -3419,6 +3454,7 @@ static void ClearSweep(FLevelLocals *self)
 	self->SweepMode = 0;
 	self->SweepCount = 0;
 	self->SweepTrail = 0;
+	for (int i = 0; i < FLevelLocals::MAX_SWEEP_BANDS; i++) self->SweepBandMode[i] = 0;
 }
 
 DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearSweep, ClearSweep)

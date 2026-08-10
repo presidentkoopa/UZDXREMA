@@ -272,6 +272,7 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 		uniform vec4 uSweepOrigin;
 		uniform vec4 uSweepBands[8];
 		uniform vec4 uSweepColors[8];
+		uniform vec4 uSweepBandOrigin[8];
 		uniform int uSweepCount;
 		uniform float uSweepTrail;
 
@@ -636,6 +637,7 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 	muSweepTrail.Init(hShader, "uSweepTrail");
 	muSweepBandsLoc = glGetUniformLocation(hShader, "uSweepBands");
 	muSweepColorsLoc = glGetUniformLocation(hShader, "uSweepColors");
+	muSweepBandOriginLoc = glGetUniformLocation(hShader, "uSweepBandOrigin");
 	muFlatGlowColor.Init(hShader, "uFlatGlowColor");
 	muFlatGlowFalloff.Init(hShader, "uFlatGlowFalloff");
 	muFlatGlowLineCount.Init(hShader, "uFlatGlowLineCount");

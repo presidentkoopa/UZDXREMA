@@ -983,6 +983,11 @@ public:
 	PalEntry SweepColor[MAX_SWEEP_BANDS] = {};
 	double SweepIntensity[MAX_SWEEP_BANDS] = {};
 	double SweepTrail = 0;                        // wake length, signed
+	// Per band, so eight sweeps need not agree about where the centre of the
+	// world is. Seeded from SweepOrigin/SweepMode; overridden per band by
+	// SetSweepBandAt. Shape 0 means the band is off.
+	DVector3 SweepBandOrigin[MAX_SWEEP_BANDS];
+	int SweepBandMode[MAX_SWEEP_BANDS] = {};
 
 	// links to global game objects
 	TArray<TObjPtr<AActor *>> CorpseQueue;

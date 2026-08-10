@@ -807,23 +807,41 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 	// draws an unbroken rectangle around a corridor. Nothing here knows or
 	// cares what kind of surface it is shading, which is the entire trick.
 	//
-	if (uSweepCount > 0 && uSweepOrigin.w > 0.5)
+	if (uSweepCount > 0)
 	{
-		// Distance is computed once and every band tests against it, so a
-		// train of eight costs barely more than one.
-		int smode = int(uSweepOrigin.w);
-		float sdist;
-		if (smode == 1)      sdist = length(pixelpos.xz - uSweepOrigin.xz);   // cylinder
-		else if (smode == 2) sdist = abs(pixelpos.x - uSweepOrigin.x);        // plane along X
-		else if (smode == 3) sdist = abs(pixelpos.z - uSweepOrigin.z);        // plane along Y
-		else if (smode == 5) sdist = pixelpos.y - uSweepOrigin.y;             // rising, SIGNED
-		else                 sdist = length(pixelpos.xyz - uSweepOrigin.xyz); // sphere
-
+		// EVERY BAND CARRIES ITS OWN ORIGIN AND ITS OWN SHAPE.
+		//
+		// This used to compute the distance ONCE, outside the loop, from a
+		// single shared origin -- which made a train of eight nearly free but
+		// forced all eight to be concentric and the same shape. That was a
+		// shortcut, not a limit: nothing about a band requires it to agree
+		// with its neighbours about where the centre of the world is.
+		//
+		// Now the distance moves inside the loop and reads uSweepBandOrigin
+		// per band -- xyz is that band's origin, w is its shape. So a ring can
+		// expand from the map centre while a column climbs out of a corner and
+		// a plane sweeps the long axis, all in the same frame. The cost is eight
+		// distance evaluations instead of one, which is a handful of ALU in a
+		// shader that is already sampling textures.
+		//
+		// w <= 0 means "this band is off", which is also the gate that used to
+		// live on the shared origin.
 		for (int sb = 0; sb < 8; sb++)
 		{
 			if (sb >= uSweepCount) break;
 			vec4 sband = uSweepBands[sb];
 			if (sband.w <= 0.0) continue;
+
+			vec4 sorg = uSweepBandOrigin[sb];
+			int smode = int(sorg.w);
+			if (smode <= 0) continue;
+
+			float sdist;
+			if (smode == 1)      sdist = length(pixelpos.xz - sorg.xz);   // cylinder
+			else if (smode == 2) sdist = abs(pixelpos.x - sorg.x);        // plane along X
+			else if (smode == 3) sdist = abs(pixelpos.z - sorg.z);        // plane along Y
+			else if (smode == 5) sdist = pixelpos.y - sorg.y;             // rising, SIGNED
+			else                 sdist = length(pixelpos.xyz - sorg.xyz); // sphere
 
 			// The wake. A band is symmetric until uSweepTrail says otherwise,
 			// and then it is simply WIDER on the side it came from -- not a

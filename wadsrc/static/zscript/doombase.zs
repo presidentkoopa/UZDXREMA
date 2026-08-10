@@ -772,6 +772,8 @@ struct LevelLocals native
 	// for a sweep, stagger them for a train chasing itself down a corridor.
 	native void SetSweepOrigin(int mode, Vector3 origin, int count);
 	native void SetSweepBand(int index, double radius, double thickness, double softness, color col, double intensity);
+	native void SetSweepCount(int count);
+	native void SetSweepBandAt(int index, Vector3 origin, int shape);
 	native void SetSweepTrail(double trail);
 	native void ClearSweep();
 

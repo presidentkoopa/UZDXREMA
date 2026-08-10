@@ -177,6 +177,8 @@ bool FGLRenderState::ApplyShader()
 			glUniform4fv(activeShader->muSweepBandsLoc, mStreamData.uSweepCount, &mStreamData.uSweepBands[0].X);
 		if (activeShader->muSweepColorsLoc >= 0)
 			glUniform4fv(activeShader->muSweepColorsLoc, mStreamData.uSweepCount, &mStreamData.uSweepColors[0].X);
+		if (activeShader->muSweepBandOriginLoc >= 0)
+			glUniform4fv(activeShader->muSweepBandOriginLoc, mStreamData.uSweepCount, &mStreamData.uSweepBandOrigin[0].X);
 	}
 
 	// [BB] Flat-edge glow. No enable/disable caching -- uFlatGlowColor.a > 0

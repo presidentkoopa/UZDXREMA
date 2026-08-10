@@ -245,6 +245,7 @@ static const char *shaderBindings = R"(
 		vec4 uSweepOrigin;
 		vec4 uSweepBands[8];
 		vec4 uSweepColors[8];
+		vec4 uSweepBandOrigin[8];
 		int uSweepCount;
 		float uSweepTrail;
 		int uSweepPad1;
@@ -383,6 +384,7 @@ static const char *shaderBindings = R"(
 	#define uSweepOrigin data[uDataIndex].uSweepOrigin
 	#define uSweepBands data[uDataIndex].uSweepBands
 	#define uSweepColors data[uDataIndex].uSweepColors
+	#define uSweepBandOrigin data[uDataIndex].uSweepBandOrigin
 	#define uSweepTrail data[uDataIndex].uSweepTrail
 	#define uSweepCount data[uDataIndex].uSweepCount
 	#define uFlatGlowColor data[uDataIndex].uFlatGlowColor

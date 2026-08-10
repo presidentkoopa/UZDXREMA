@@ -206,8 +206,9 @@ struct StreamData
 	// every surface. Origin xyz + mode is shared; each band carries its own
 	// radius/thickness/softness and its own colour + intensity.
 	FVector4 uSweepOrigin;
-	FVector4 uSweepBands[8];   // radius, thickness, softness, active
-	FVector4 uSweepColors[8];  // r, g, b, intensity
+	FVector4 uSweepBands[8];      // radius, thickness, softness, active
+	FVector4 uSweepColors[8];     // r, g, b, intensity
+	FVector4 uSweepBandOrigin[8]; // per band: xyz origin, w = shape (0 = off)
 	int uSweepCount;
 	float uSweepTrail;         // wake length, signed; 0 = symmetric band
 	int uSweepPad1;
@@ -351,6 +352,8 @@ public:
 		mStreamData.uSweepOrigin = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uSweepCount = 0;
 		mStreamData.uSweepTrail = 0.0f;
+		for (int i = 0; i < 8; i++)
+			mStreamData.uSweepBandOrigin[i] = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uFlatGlowColor = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uFlatGlowFalloff = 0;
 		mStreamData.uFlatGlowLineCount = 0;
@@ -532,11 +535,24 @@ public:
 	// [BB] Sweep: one world-space band applied to every surface. Set once
 	// per frame rather than per draw -- it is a property of the world, not
 	// of any sector or wall.
+	// Sets the SHARED origin, which now means "the default every band starts
+	// with". A band that never overrides it behaves exactly as before, which
+	// is what keeps every existing caller correct.
 	void SetSweepOrigin(int mode, float ox, float oy, float oz, int count, float trail = 0.0f)
 	{
 		mStreamData.uSweepOrigin = { ox, oy, oz, (float)mode };
 		mStreamData.uSweepCount = count;
 		mStreamData.uSweepTrail = trail;
+		for (int i = 0; i < 8; i++)
+			mStreamData.uSweepBandOrigin[i] = { ox, oy, oz, (float)mode };
+	}
+
+	// Overrides one band's origin and shape. Call AFTER SetSweepOrigin, which
+	// seeds all eight.
+	void SetSweepBandOrigin(int i, float ox, float oy, float oz, int mode)
+	{
+		if (i < 0 || i >= 8) return;
+		mStreamData.uSweepBandOrigin[i] = { ox, oy, oz, (float)mode };
 	}
 
 	void SetSweepBand(int i, float radius, float thickness, float softness,
