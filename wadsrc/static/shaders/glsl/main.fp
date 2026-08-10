@@ -811,6 +811,17 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 	//
 	// handle glowing walls
 	//
+	// [BB] Each glow can carry a SECOND colour. Without one a glow holds a
+	// single colour and only dims as it fades, so a wall and the floor it
+	// meets arrive at their shared line as two different colours at full
+	// strength -- a hard edge no amount of falloff tuning removes. With a far
+	// colour the glow ramps instead: the primary colour sits AT the plane
+	// (atten 1) and the far colour is where it fades to (atten 0). Hand the
+	// same junction colour to both surfaces and the corner becomes one
+	// continuous ramp -- floor colour, blend, wall colour -- with no flat
+	// region in it. Alpha 0 on the far colour means unset, and the glow is
+	// byte-for-byte the flat wash it always was.
+	//
 	if (uGlowTopColor.a > 0.0 && glowdist.x < uGlowTopColor.a)
 	{
 		float topfrac = glowdist.x / uGlowTopColor.a;
@@ -819,7 +830,9 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 		else if (uGlowTopFalloff == 1) topatten = 1.0 - topfrac * topfrac;
 		else if (uGlowTopFalloff == 2) topatten = 1.0 - sqrt(topfrac);
 		else                            topatten = exp(-topfrac * 3.0);
-		vec3 gtop = mix(uGlowTopColor.rgb, sweepTint, sweepTintW);
+		vec3 gtop = uGlowTopColor.rgb;
+		if (uGlowTopFar.a > 0.0) gtop = mix(uGlowTopFar.rgb, gtop, topatten);
+		gtop = mix(gtop, sweepTint, sweepTintW);
 		color.rgb += desaturate(vec4(gtop * topatten * uGlowTopIntensity, 1.0)).rgb;
 	}
 	if (uGlowBottomColor.a > 0.0 && glowdist.y < uGlowBottomColor.a)
@@ -830,7 +843,9 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 		else if (uGlowBottomFalloff == 1) botatten = 1.0 - botfrac * botfrac;
 		else if (uGlowBottomFalloff == 2) botatten = 1.0 - sqrt(botfrac);
 		else                                botatten = exp(-botfrac * 3.0);
-		vec3 gbot = mix(uGlowBottomColor.rgb, sweepTint, sweepTintW);
+		vec3 gbot = uGlowBottomColor.rgb;
+		if (uGlowBottomFar.a > 0.0) gbot = mix(uGlowBottomFar.rgb, gbot, botatten);
+		gbot = mix(gbot, sweepTint, sweepTintW);
 		color.rgb += desaturate(vec4(gbot * botatten * uGlowBottomIntensity, 1.0)).rgb;
 	}
 
@@ -866,7 +881,9 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 			else if (uFlatGlowFalloff == 2) atten = 1.0 - sqrt(frac);
 			else                             atten = exp(-frac * 3.0);
 
-			color.rgb += desaturate(vec4(uFlatGlowColor.rgb * atten, 1.0)).rgb;
+			vec3 gflat = uFlatGlowColor.rgb;
+			if (uFlatGlowFar.a > 0.0) gflat = mix(uFlatGlowFar.rgb, gflat, atten);
+			color.rgb += desaturate(vec4(gflat * atten, 1.0)).rgb;
 		}
 	}
 

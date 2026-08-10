@@ -157,6 +157,8 @@ bool FGLRenderState::ApplyShader()
 	{
 		activeShader->muGlowTopColor.Set(&mStreamData.uGlowTopColor.X);
 		activeShader->muGlowBottomColor.Set(&mStreamData.uGlowBottomColor.X);
+		activeShader->muGlowTopFar.Set(&mStreamData.uGlowTopFar.X);
+		activeShader->muGlowBottomFar.Set(&mStreamData.uGlowBottomFar.X);
 		activeShader->muGlowTopPlane.Set(&mStreamData.uGlowTopPlane.X);
 		activeShader->muGlowBottomPlane.Set(&mStreamData.uGlowBottomPlane.X);
 		activeShader->muGlowTopFalloff.Set(mStreamData.uGlowTopFalloff);
@@ -185,6 +187,7 @@ bool FGLRenderState::ApplyShader()
 	// is the gate the shader itself checks, so an unconditional upload here
 	// is what ClearFlatGlow() (setting alpha back to 0) actually relies on.
 	activeShader->muFlatGlowColor.Set(&mStreamData.uFlatGlowColor.X);
+	activeShader->muFlatGlowFar.Set(&mStreamData.uFlatGlowFar.X);
 	activeShader->muFlatGlowFalloff.Set(mStreamData.uFlatGlowFalloff);
 	activeShader->muFlatGlowLineCount.Set(mStreamData.uFlatGlowLineCount);
 	if (mStreamData.uFlatGlowLineCount > 0 && activeShader->muFlatGlowLinesLoc >= 0)

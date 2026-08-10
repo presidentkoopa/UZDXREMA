@@ -183,6 +183,9 @@ public:
 
 	float topglowcolor[4];
 	float bottomglowcolor[4];
+	// [BB] Colour each glow fades toward; w is a set/unset flag, not a reach.
+	FVector4 topglowfar;
+	FVector4 bottomglowfar;
 
 	int dynlightindex;
 

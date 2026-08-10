@@ -556,6 +556,13 @@ struct Sector native play
 	native void SetGlowHeight(int pos, double height);
 	native void SetGlowColor(int pos, color color);
 
+	// [BB] Two-colour glow. SetGlowColor is what the glow shows AT the plane
+	// it grows from; this is what it fades toward. Give a wall's bottom glow
+	// and the floor's own glow the same colour here and the corner between
+	// them becomes one continuous ramp instead of a hard edge. Alpha 0 =
+	// unset, and the glow stays a single flat colour as before.
+	native void SetGlowColorFar(int pos, color color);
+
 	// [BB] Falloff shape and intensity for wall glow -- wf/wc now carry the
 	// same spec as fg/cg below: color, coverage (SetGlowHeight, above),
 	// falloff, intensity.
@@ -570,8 +577,11 @@ struct Sector native play
 	// Sector.ceiling, same as SetGlowColor.
 	//   height    reach inward from the nearest edge, in map units
 	//   falloff   0 linear, 1 quadratic, 2 sqrt, 3 exponential
-	//   intensity multiplier, 0.0-2.0+
+	//   intensity multiplier on the COLOUR, 0.0-2.0+ -- the same quantity
+	//             SetGlowIntensity is for walls. It used to scale reach here
+	//             instead, so the two sliders did different jobs.
 	native void SetFlatGlowColor(int pos, color color);
+	native void SetFlatGlowColorFar(int pos, color color);
 	native void SetFlatGlowHeight(int pos, double height);
 	native void SetFlatGlowFalloff(int pos, int falloff);
 	native void SetFlatGlowIntensity(int pos, double intensity);

@@ -412,10 +412,25 @@ void HWFlat::DrawFlat(HWDrawInfo *di, FRenderState &state, bool translucent)
 		auto &sp = sector->planes[planeIdx];
 		if (sp.FlatGlowColor.a > 0 && sp.FlatGlowHeight > 0.f)
 		{
-			float r = sp.FlatGlowColor.r / 255.f;
-			float g = sp.FlatGlowColor.g / 255.f;
-			float b = sp.FlatGlowColor.b / 255.f;
-			float reach = sp.FlatGlowHeight * (sp.FlatGlowIntensity > 0.f ? sp.FlatGlowIntensity : 1.f);
+			// Intensity scales the COLOUR, not the reach. It used to be folded
+			// into reach here while the wall glow's identically named slider
+			// multiplied colour, so the same control did two different jobs
+			// depending on which lane it sat on. Values above 1 are legal and
+			// feed bloom exactly as the wall glow's already do; reach is the
+			// coverage slider's alone now.
+			float inten = sp.FlatGlowIntensity > 0.f ? sp.FlatGlowIntensity : 1.f;
+			float r = sp.FlatGlowColor.r / 255.f * inten;
+			float g = sp.FlatGlowColor.g / 255.f * inten;
+			float b = sp.FlatGlowColor.b / 255.f * inten;
+			float reach = sp.FlatGlowHeight;
+
+			// The far colour rides the same intensity, or the ramp would
+			// change brightness along its length.
+			PalEntry farCol = sp.FlatGlowColorFar;
+			FVector4 farColor = farCol.a > 0
+				? FVector4(farCol.r / 255.f * inten, farCol.g / 255.f * inten, farCol.b / 255.f * inten, 1.0f)
+				: FVector4(0.f, 0.f, 0.f, 0.f);
+
 			int count = (int)sector->Lines.Size();
 			if (count > 64) count = 64;
 			FVector4 lines[64];
@@ -425,7 +440,7 @@ void HWFlat::DrawFlat(HWDrawInfo *di, FRenderState &state, bool translucent)
 				lines[i] = { (float)ln->v1->fX(), (float)ln->v1->fY(),
 				             (float)ln->v2->fX(), (float)ln->v2->fY() };
 			}
-			state.SetFlatGlowParams(r, g, b, reach, sp.FlatGlowFalloff, count, lines);
+			state.SetFlatGlowParams(r, g, b, reach, farColor, sp.FlatGlowFalloff, count, lines);
 		}
 		else
 		{

@@ -195,6 +195,17 @@ struct StreamData
 	FVector4 uGlowBottomPlane;
 	FVector4 uGlowBottomColor;
 
+	// [BB] The far end of each wall glow. A glow used to hold one colour and
+	// only dim as it faded, so a wall met a floor at a hard edge: two
+	// gradients nose to nose, each a different colour at the line they share.
+	// With a far colour the glow RAMPS -- the primary colour sits at the
+	// plane it grows from, this one is what it fades toward -- and the mod
+	// can hand the junction colour to both surfaces so the corner becomes
+	// continuous. Alpha 0 means unset and the glow stays flat, exactly as
+	// before; same convention side_t's own glow already uses.
+	FVector4 uGlowTopFar;
+	FVector4 uGlowBottomFar;
+
 	// [BB] Falloff shape and intensity for wall glow, matching flat-edge
 	// glow below.
 	int uGlowTopFalloff;
@@ -219,6 +230,10 @@ struct StreamData
 	// linedef endpoints so the fragment shader can find distance to the
 	// nearest edge per pixel.
 	FVector4 uFlatGlowColor;
+	// [BB] Far end of the flat glow, same deal as the wall pair above. Floor
+	// and ceiling time-share this one slot because a draw only ever covers
+	// one of them.
+	FVector4 uFlatGlowFar;
 	int uFlatGlowFalloff;
 	int uFlatGlowLineCount;
 	int uFlatGlowPad1;
@@ -244,8 +259,6 @@ struct StreamData
 	int padding1;
 	int padding2;
 	int padding3;
-
-	FVector4 padding4;
 };
 
 class FRenderState
@@ -344,6 +357,8 @@ public:
 		mStreamData.uVertexColor = { 1.0f, 1.0f, 1.0f, 1.0f };
 		mStreamData.uGlowTopColor = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uGlowBottomColor = { 0.0f, 0.0f, 0.0f, 0.0f };
+		mStreamData.uGlowTopFar = { 0.0f, 0.0f, 0.0f, 0.0f };
+		mStreamData.uGlowBottomFar = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uGlowTopFalloff = 0;
 		mStreamData.uGlowBottomFalloff = 0;
 		mStreamData.uGlowTopIntensity = 1.0f;
@@ -356,6 +371,7 @@ public:
 		for (int i = 0; i < 8; i++)
 			mStreamData.uSweepBandOrigin[i] = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uFlatGlowColor = { 0.0f, 0.0f, 0.0f, 0.0f };
+		mStreamData.uFlatGlowFar = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uFlatGlowFalloff = 0;
 		mStreamData.uFlatGlowLineCount = 0;
 		mStreamData.uGradientTopPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -482,6 +498,8 @@ public:
 		{
 			mStreamData.uGlowTopColor = { 0.0f, 0.0f, 0.0f, 0.0f };
 			mStreamData.uGlowBottomColor = { 0.0f, 0.0f, 0.0f, 0.0f };
+			mStreamData.uGlowTopFar = { 0.0f, 0.0f, 0.0f, 0.0f };
+			mStreamData.uGlowBottomFar = { 0.0f, 0.0f, 0.0f, 0.0f };
 		}
 		mGlowEnabled = on;
 	}
@@ -520,6 +538,14 @@ public:
 	{
 		mStreamData.uGlowTopColor = { t[0], t[1], t[2], t[3] };
 		mStreamData.uGlowBottomColor = { b[0], b[1], b[2], b[3] };
+	}
+
+	// [BB] Far end of each wall glow -- see uGlowTopFar. Alpha carries
+	// "is set", not a reach: the near colour already owns the reach.
+	void SetGlowFar(const FVector4 &t, const FVector4 &b)
+	{
+		mStreamData.uGlowTopFar = t;
+		mStreamData.uGlowBottomFar = b;
 	}
 
 	// [BB] Falloff shape and intensity for wall glow. Kept separate from
@@ -575,9 +601,11 @@ public:
 
 	// [BB] Flat-edge glow: rgb + reach, a falloff curve, and up to 64 of the
 	// sector's linedef endpoints for the shader's per-pixel distance check.
-	void SetFlatGlowParams(float r, float g, float b, float reach, int falloff, int lineCount, const FVector4* lines)
+	// "farColor", not "far" -- windows.h defines `far` as an empty macro.
+	void SetFlatGlowParams(float r, float g, float b, float reach, const FVector4 &farColor, int falloff, int lineCount, const FVector4* lines)
 	{
 		mStreamData.uFlatGlowColor = { r, g, b, reach };
+		mStreamData.uFlatGlowFar = farColor;
 		mStreamData.uFlatGlowFalloff = falloff;
 		mStreamData.uFlatGlowLineCount = lineCount;
 		for (int i = 0; i < lineCount; i++)
@@ -593,6 +621,7 @@ public:
 	void ClearFlatGlow()
 	{
 		mStreamData.uFlatGlowColor = { 0.0f, 0.0f, 0.0f, 0.0f };
+		mStreamData.uFlatGlowFar = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uFlatGlowFalloff = 0;
 		mStreamData.uFlatGlowLineCount = 0;
 	}

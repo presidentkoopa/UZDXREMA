@@ -565,6 +565,22 @@ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetXOffset, SetXOffset)
 	 return 0;
  }
 
+ // [BB] The colour the flat glow fades toward -- see FlatGlowColorFar. Alpha
+ // 0 leaves the glow the single flat colour it has always been.
+ static void SetFlatGlowColorFar(sector_t *self, int pos, int o)
+ {
+	 self->SetFlatGlowColorFar(pos, o);
+ }
+
+ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetFlatGlowColorFar, SetFlatGlowColorFar)
+ {
+	 PARAM_SELF_STRUCT_PROLOGUE(sector_t);
+	 PARAM_INT(pos);
+	 PARAM_COLOR(o);
+	 self->SetFlatGlowColorFar(pos, o);
+	 return 0;
+ }
+
  static void SetFlatGlowHeight(sector_t *self, int pos, double o)
  {
 	 self->SetFlatGlowHeight(pos, float(o));
@@ -1219,6 +1235,22 @@ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetXOffset, SetXOffset)
 	 PARAM_INT(pos);
 	 PARAM_COLOR(o);
 	 self->SetGlowColor(pos, o);
+	 return 0;
+ }
+
+ // [BB] The colour the wall glow fades toward -- see GlowColorFar. Alpha 0
+ // leaves the glow the single flat colour it has always been.
+ static void SetGlowColorFar(sector_t *self, int pos, int o)
+ {
+	 self->SetGlowColorFar(pos, o);
+ }
+
+ DEFINE_ACTION_FUNCTION_NATIVE(_Sector, SetGlowColorFar, SetGlowColorFar)
+ {
+	 PARAM_SELF_STRUCT_PROLOGUE(sector_t);
+	 PARAM_INT(pos);
+	 PARAM_COLOR(o);
+	 self->SetGlowColorFar(pos, o);
 	 return 0;
  }
 

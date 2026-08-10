@@ -51,7 +51,13 @@
 //
 //==========================================================================
 
-static bool ApplyWallOwnGlow(side_t *sidedef, float *topglowcolor, float *bottomglowcolor)
+// A side that carries its own glow also clears the sector's far colour for
+// that channel. Its glow is a different colour from the room's, so keeping
+// the room's far colour would ramp the wall's accent toward a colour chosen
+// for a glow that is no longer being drawn -- a gradient between two things
+// that never meet. Flat is the honest fallback until a side can carry a far
+// colour of its own.
+static bool ApplyWallOwnGlow(side_t *sidedef, float *topglowcolor, float *bottomglowcolor, FVector4 &topfar, FVector4 &bottomfar)
 {
 	if (sidedef == nullptr) return false;
 	bool changed = false;
@@ -63,6 +69,7 @@ static bool ApplyWallOwnGlow(side_t *sidedef, float *topglowcolor, float *bottom
 		topglowcolor[1] = ceilGlow.g / 255.f;
 		topglowcolor[2] = ceilGlow.b / 255.f;
 		topglowcolor[3] = (float)sidedef->GetGlowHeight(sector_t::ceiling);
+		topfar = { 0.0f, 0.0f, 0.0f, 0.0f };
 		changed = true;
 	}
 	PalEntry floorGlow = sidedef->GetGlowColor(sector_t::floor);
@@ -72,9 +79,20 @@ static bool ApplyWallOwnGlow(side_t *sidedef, float *topglowcolor, float *bottom
 		bottomglowcolor[1] = floorGlow.g / 255.f;
 		bottomglowcolor[2] = floorGlow.b / 255.f;
 		bottomglowcolor[3] = (float)sidedef->GetGlowHeight(sector_t::floor);
+		bottomfar = { 0.0f, 0.0f, 0.0f, 0.0f };
 		changed = true;
 	}
 	return changed;
+}
+
+// [BB] Pull the sector's far colours out into the shader's form. Alpha is a
+// flag, not a reach -- the near colour already carries the reach.
+static void GetWallGlowFar(sector_t *sec, FVector4 &topfar, FVector4 &bottomfar)
+{
+	PalEntry t = sec->GetGlowColorFar(sector_t::ceiling);
+	PalEntry b = sec->GetGlowColorFar(sector_t::floor);
+	topfar    = t.a > 0 ? FVector4(t.r / 255.f, t.g / 255.f, t.b / 255.f, 1.0f) : FVector4(0.f, 0.f, 0.f, 0.f);
+	bottomfar = b.a > 0 ? FVector4(b.r / 255.f, b.g / 255.f, b.b / 255.f, 1.0f) : FVector4(0.f, 0.f, 0.f, 0.f);
 }
 
 struct FWallLightCandidate
@@ -272,6 +290,7 @@ void HWWall::RenderTexturedWall(HWWallDispatcher*di, FRenderState &state, int rf
 	{
 		state.EnableGlow(true);
 		state.SetGlowParams(topglowcolor, bottomglowcolor);
+		state.SetGlowFar(topglowfar, bottomglowfar);
 		// [BB] Falloff shape and intensity, matching flat-edge glow.
 		state.SetGlowFalloffIntensity(
 			frontsector->GetGlowFalloff(sector_t::ceiling),
@@ -2409,8 +2428,9 @@ void HWWall::Process(HWWallDispatcher *di, seg_t *seg, sector_t * frontsector, s
 	texture = NULL;
 
 
+	GetWallGlowFar(frontsector, topglowfar, bottomglowfar);
 	if (frontsector->GetWallGlow(topglowcolor, bottomglowcolor)) flags |= HWF_GLOW;
-	if (ApplyWallOwnGlow(seg->sidedef, topglowcolor, bottomglowcolor)) flags |= HWF_GLOW;
+	if (ApplyWallOwnGlow(seg->sidedef, topglowcolor, bottomglowcolor, topglowfar, bottomglowfar)) flags |= HWF_GLOW;
 
 	zfloor[0] = ffh1 = segfront->floorplane.ZatPoint(v1);
 	zfloor[1] = ffh2 = segfront->floorplane.ZatPoint(v2);
@@ -2794,8 +2814,9 @@ void HWWall::ProcessLowerMiniseg(HWWallDispatcher *di, seg_t *seg, sector_t * fr
 		RenderStyle = STYLE_Normal;
 		Colormap = frontsector->Colormap;
 
+		GetWallGlowFar(frontsector, topglowfar, bottomglowfar);
 		if (frontsector->GetWallGlow(topglowcolor, bottomglowcolor)) flags |= HWF_GLOW;
-		if (ApplyWallOwnGlow(seg->sidedef, topglowcolor, bottomglowcolor)) flags |= HWF_GLOW;
+		if (ApplyWallOwnGlow(seg->sidedef, topglowcolor, bottomglowcolor, topglowfar, bottomglowfar)) flags |= HWF_GLOW;
 		dynlightindex = -1;
 
 		zfloor[0] = zfloor[1] = ffh;

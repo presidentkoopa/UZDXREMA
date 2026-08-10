@@ -252,6 +252,8 @@ class FShader
 	FBufferedUniformPE muTextureAddColor;
 	FUniform4f muGlowBottomColor;
 	FUniform4f muGlowTopColor;
+	FUniform4f muGlowBottomFar;
+	FUniform4f muGlowTopFar;
 	FUniform4f muGlowBottomPlane;
 	FUniform4f muGlowTopPlane;
 	FBufferedUniform1i muGlowTopFalloff;
@@ -265,6 +267,7 @@ class FShader
 	int muSweepColorsLoc;
 	int muSweepBandOriginLoc;
 	FUniform4f muFlatGlowColor;
+	FUniform4f muFlatGlowFar;
 	FBufferedUniform1i muFlatGlowFalloff;
 	FBufferedUniform1i muFlatGlowLineCount;
 	int muFlatGlowLinesLoc;

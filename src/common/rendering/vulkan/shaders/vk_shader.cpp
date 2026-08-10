@@ -237,6 +237,8 @@ static const char *shaderBindings = R"(
 		vec4 uGlowTopColor;
 		vec4 uGlowBottomPlane;
 		vec4 uGlowBottomColor;
+		vec4 uGlowTopFar;
+		vec4 uGlowBottomFar;
 		int uGlowTopFalloff;
 		int uGlowBottomFalloff;
 		float uGlowTopIntensity;
@@ -252,6 +254,7 @@ static const char *shaderBindings = R"(
 		int uSweepPad2;
 
 		vec4 uFlatGlowColor;
+		vec4 uFlatGlowFar;
 		int uFlatGlowFalloff;
 		int uFlatGlowLineCount;
 		int uFlatGlowPad1;
@@ -277,8 +280,6 @@ static const char *shaderBindings = R"(
 		int padding1;
 		int padding2;
 		int padding3;
-
-		vec4 padding4;
 	};
 
 	layout(set = 1, binding = 2, std140) uniform StreamUBO {
@@ -377,6 +378,8 @@ static const char *shaderBindings = R"(
 	#define uGlowTopColor data[uDataIndex].uGlowTopColor
 	#define uGlowBottomPlane data[uDataIndex].uGlowBottomPlane
 	#define uGlowBottomColor data[uDataIndex].uGlowBottomColor
+	#define uGlowTopFar data[uDataIndex].uGlowTopFar
+	#define uGlowBottomFar data[uDataIndex].uGlowBottomFar
 	#define uGlowTopFalloff data[uDataIndex].uGlowTopFalloff
 	#define uGlowBottomFalloff data[uDataIndex].uGlowBottomFalloff
 	#define uGlowTopIntensity data[uDataIndex].uGlowTopIntensity
@@ -388,6 +391,7 @@ static const char *shaderBindings = R"(
 	#define uSweepTrail data[uDataIndex].uSweepTrail
 	#define uSweepCount data[uDataIndex].uSweepCount
 	#define uFlatGlowColor data[uDataIndex].uFlatGlowColor
+	#define uFlatGlowFar data[uDataIndex].uFlatGlowFar
 	#define uFlatGlowFalloff data[uDataIndex].uFlatGlowFalloff
 	#define uFlatGlowLineCount data[uDataIndex].uFlatGlowLineCount
 	#define uFlatGlowLines data[uDataIndex].uFlatGlowLines

@@ -263,6 +263,8 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 		uniform vec4 uGlowTopColor;
 		uniform vec4 uGlowBottomPlane;
 		uniform vec4 uGlowBottomColor;
+		uniform vec4 uGlowTopFar;
+		uniform vec4 uGlowBottomFar;
 		uniform int uGlowTopFalloff;
 		uniform int uGlowBottomFalloff;
 		uniform float uGlowTopIntensity;
@@ -278,6 +280,7 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 
 		// [BB] Flat-edge glow: floors/ceilings glow inward from their own edges
 		uniform vec4 uFlatGlowColor;
+		uniform vec4 uFlatGlowFar;
 		uniform int uFlatGlowFalloff;
 		uniform int uFlatGlowLineCount;
 		uniform vec4 uFlatGlowLines[64];
@@ -626,6 +629,8 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 	muObjectColor2.Init(hShader, "uObjectColor2");
 	muGlowBottomColor.Init(hShader, "uGlowBottomColor");
 	muGlowTopColor.Init(hShader, "uGlowTopColor");
+	muGlowBottomFar.Init(hShader, "uGlowBottomFar");
+	muGlowTopFar.Init(hShader, "uGlowTopFar");
 	muGlowBottomPlane.Init(hShader, "uGlowBottomPlane");
 	muGlowTopPlane.Init(hShader, "uGlowTopPlane");
 	muGlowTopFalloff.Init(hShader, "uGlowTopFalloff");
@@ -639,6 +644,7 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 	muSweepColorsLoc = glGetUniformLocation(hShader, "uSweepColors");
 	muSweepBandOriginLoc = glGetUniformLocation(hShader, "uSweepBandOrigin");
 	muFlatGlowColor.Init(hShader, "uFlatGlowColor");
+	muFlatGlowFar.Init(hShader, "uFlatGlowFar");
 	muFlatGlowFalloff.Init(hShader, "uFlatGlowFalloff");
 	muFlatGlowLineCount.Init(hShader, "uFlatGlowLineCount");
 	muFlatGlowLinesLoc = glGetUniformLocation(hShader, "uFlatGlowLines");

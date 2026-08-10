@@ -676,6 +676,11 @@ struct sector_t
 		int GlowFalloff;      // 0 linear, 1 quadratic, 2 sqrt, 3 exponential -- see FlatGlowFalloff below
 		float GlowIntensity;  // multiplier, 0.0-2.0+ -- see FlatGlowIntensity below
 
+		// [BB] The colour the wall glow fades TOWARD. GlowColor is what it
+		// shows at the plane; this is what it becomes as it dies out. Alpha 0
+		// = unset, and the glow stays one flat colour as it always did.
+		PalEntry GlowColorFar;
+
 		// [BB] Flat-edge glow: the plane's OWN surface glows inward from its
 		// linedef edges, fading with distance from the wall. Separate from
 		// GlowColor above -- that one never touches the flat itself, only
@@ -684,7 +689,9 @@ struct sector_t
 		PalEntry FlatGlowColor;
 		float FlatGlowHeight;      // reach inward from the nearest edge, in map units
 		int FlatGlowFalloff;       // 0 linear, 1 quadratic, 2 sqrt, 3 exponential
-		float FlatGlowIntensity;   // multiplier, 0.0-2.0+
+		float FlatGlowIntensity;   // multiplier on the COLOUR, 0.0-2.0+, same
+		                           // quantity the wall glow's intensity is
+		PalEntry FlatGlowColorFar; // fades toward this; alpha 0 = unset
 
 		FTextureID Texture;
 		TextureManipulation TextureFx;
@@ -994,6 +1001,10 @@ public:
 		planes[pos].GlowColor = color;
 	}
 
+	// [BB] Second colour for the wall glow -- see GlowColorFar.
+	void SetGlowColorFar(int pos, PalEntry color) { planes[pos].GlowColorFar = color; }
+	PalEntry GetGlowColorFar(int pos) { return planes[pos].GlowColorFar; }
+
 	// [BB] Flat-edge glow accessors -- see FlatGlowColor above.
 	void SetFlatGlowColor(int pos, PalEntry color) { planes[pos].FlatGlowColor = color; }
 	PalEntry GetFlatGlowColor(int pos) { return planes[pos].FlatGlowColor; }
@@ -1003,6 +1014,8 @@ public:
 	int GetFlatGlowFalloff(int pos) { return planes[pos].FlatGlowFalloff; }
 	void SetFlatGlowIntensity(int pos, float inten) { planes[pos].FlatGlowIntensity = inten; }
 	float GetFlatGlowIntensity(int pos) { return planes[pos].FlatGlowIntensity; }
+	void SetFlatGlowColorFar(int pos, PalEntry color) { planes[pos].FlatGlowColorFar = color; }
+	PalEntry GetFlatGlowColorFar(int pos) { return planes[pos].FlatGlowColorFar; }
 
 	FTextureID GetTexture(int pos) const
 	{
