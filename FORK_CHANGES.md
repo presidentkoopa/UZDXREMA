@@ -149,6 +149,37 @@ Wall glow gained matching `SetGlowFalloff` / intensity controls so all four
 lanes (wall bottom, wall top, ceiling, floor) can be driven identically
 instead of the wall pair behaving differently from the flat pair.
 
+### Two colours per glow
+
+A glow used to hold one colour and only dim as it faded, so a wall and the
+floor it meets both arrived at their shared line at full strength in two
+different colours — a hard edge nothing could soften. Each channel now takes a
+second colour and ramps between them by attenuation.
+
+```
+Sector.SetGlowColorFar(pos, color)        // wall glow's far end
+Sector.SetFlatGlowColorFar(pos, color)    // flat glow's far end
+```
+
+The primary colour sits **at** the plane the glow grows from; the far colour is
+what it fades toward. Give both surfaces the same colour at their junction and
+the corner is one continuous ramp — floor colour, blend, wall colour — instead
+of a seam. Alpha 0 means unset and the glow is byte-for-byte the flat wash it
+always was, the same convention `Side.SetGlowColor` uses.
+
+Three uniforms cover four logical channels: floor and ceiling flat glow
+time-share one, because a draw only ever covers one of them. They are paid for
+out of slack already present in `StreamData`, so `MAX_STREAM_DATA` is unchanged
+at 34 and draw batching is not affected.
+
+**`SetFlatGlowIntensity` changed meaning.** It scaled the glow's *reach* while
+the identically named wall control scaled *colour*. It scales colour now, so
+all four lanes' intensity means one thing; reach belongs to height alone.
+Content relying on intensity to widen a flat glow must raise its height.
+
+GLES does not implement flat glow, wall falloff or intensity, and does not
+implement this either.
+
 ## 3. Sweep
 
 A band of light defined in **world space** that wraps floor, wall and ceiling
