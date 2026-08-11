@@ -110,6 +110,7 @@
 #include "i_interface.h"
 #include "animations.h"
 #include "texturemanager.h"
+#include "rendering/hwrenderer/scene/hw_sdffont.h"
 #include "formats/multipatchtexture.h"
 #include "scriptutil.h"
 #include "v_palette.h"
@@ -3793,7 +3794,18 @@ static int D_InitGame(const FIWADInfo* iwad_info, std::vector<std::string>& allw
 	}
 
 	TexMan.Init();
-	
+
+	// [BB] The SDF font cache holds raw FGameTexture* obtained from the
+	// texture manager, and the roster holds face names scanned out of the
+	// load order. TexMan.Init() invalidates both: every cached pointer is
+	// dangling, and after a wad-set change the roster still names faces from
+	// the previous set. FlushAll() had zero callers in the whole tree, so the
+	// cache was never dropped once in the fork's lifetime. Clearing the roll
+	// flag makes the next roster query re-scan and re-shuffle. Added
+	// 2026-08-11.
+	FSDFFont::FlushAll();
+	FSDFFontRoster::Invalidate();
+
 	if (!batchrun) Printf ("V_Init: allocate screen.\n");
 	if (!restart)
 	{

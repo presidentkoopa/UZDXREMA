@@ -94,6 +94,12 @@ FSerializer &Serialize(FSerializer &arc, const char *key, FBillboard &bb, FBillb
 			("payload", bb.payload)
 			("data", bb.data)
 			("text", bb.text)
+			// The font travels with the text. Without it a reloaded card draws
+			// roster slot 0 into a box that was MEASURED for whatever face the
+			// card was built with -- advances differ nearly 2x across the
+			// roster, so the string visibly under- or over-fills its panel.
+			// Added 2026-08-11; every other SDF-era field was already here.
+			("font", bb.font)
 			("progress", bb.progress)
 			("glowradius", bb.glowRadius)
 			("glowstrength", bb.glowStrength)

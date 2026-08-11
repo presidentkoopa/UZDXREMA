@@ -163,6 +163,14 @@ public:
 
 	// Family name in this slot, for diagnostics. Never null.
 	static const char *SlotName(int n);
+
+	// Drop the roster and arm a re-roll on next use. Called from TexMan.Init,
+	// because a wad-set change means the scanned names may no longer exist and
+	// faces the new set ships are missing from the list. Added 2026-08-11:
+	// before this, Roll() ran ONCE per process -- lazily, mid-frame, on
+	// whatever first asked for a slot -- so the "shuffled at game load" this
+	// header promises above never actually happened a second time.
+	static void Invalidate();
 };
 
 //==========================================================================

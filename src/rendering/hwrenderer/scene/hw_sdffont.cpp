@@ -224,6 +224,12 @@ static FRandom pr_sdfroster("SDFFontRoster");
 static TArray<FString> sRoster;
 static bool sRosterRolled = false;
 
+void FSDFFontRoster::Invalidate()
+{
+	sRoster.Clear();
+	sRosterRolled = false;
+}
+
 void FSDFFontRoster::Roll()
 {
 	sRoster.Clear();

@@ -2519,13 +2519,41 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 	// off the end of the field and stops dead in a square, so clamping here is
 	// kinder than letting a caller discover the artifact.
 	{
-		const int gr = (int)(clamp(bb->glowRadius, 0.0, 1.0) * 255.0 + 0.5);
-		const int gs = (int)(clamp(bb->glowStrength, 0.0, 1.0) * 255.0 + 0.5);
-		// Blue carries BBFL_VOID to the seam shader. The segment payload
-		// overwrites blue per quad with its character mask, which is fine --
-		// nothing is both a seam and a character.
-		const int vd = (bb->flags & BBFL_VOID) ? 255 : 0;
-		bbGlow = PalEntry(255, (uint8_t)gr, (uint8_t)gs, (uint8_t)vd);
+		// ONLY THE FIELD PAYLOADS. Fixed 2026-08-11.
+		//
+		// The comment on SetAddColor below says "every other payload leaves
+		// this zero". It did not -- this packed unconditionally, so BB_PANEL,
+		// BB_TEXTURE, BB_RING and BB_BAR carried a halo into a shader that has
+		// no idea what a halo is. Those keep OverrideShader = 0 and land on
+		// main.fp's `texel.rgb += uAddColor.rgb`, which is a plain ADD applied
+		// BEFORE the object colour multiply.
+		//
+		// The damage was differential, which is why it read as a colour bug
+		// rather than a brightness one: red carries glowRadius and green
+		// carries glowStrength, blue is 0 unless BBFL_VOID. On a white plate
+		// SetGlow(0.55, 0.7) is a per-channel gain of about (1.55, 1.70, 1.00)
+		// -- so every tier hue got pulled toward yellow and clipped in its two
+		// brightest channels, and with bloom on by default the frame bloomed
+		// out the exact signal the tier colour exists to carry.
+		//
+		// BB_TEXT and above are the payloads that swap in a field shader
+		// (SDFText, Segment, Seam, WG13) and actually read these two bytes.
+		// Known remaining gap: BB_TEXT's bitmap FALLBACK, when no atlas is
+		// loaded, also runs at OverrideShader = 0 and will still take the add.
+		if (bb->payload >= BB_TEXT)
+		{
+			const int gr = (int)(clamp(bb->glowRadius, 0.0, 1.0) * 255.0 + 0.5);
+			const int gs = (int)(clamp(bb->glowStrength, 0.0, 1.0) * 255.0 + 0.5);
+			// Blue carries BBFL_VOID to the seam shader. The segment payload
+			// overwrites blue per quad with its character mask, which is fine --
+			// nothing is both a seam and a character.
+			const int vd = (bb->flags & BBFL_VOID) ? 255 : 0;
+			bbGlow = PalEntry(255, (uint8_t)gr, (uint8_t)gs, (uint8_t)vd);
+		}
+		else
+		{
+			bbGlow = PalEntry(255, 0, 0, 0);
+		}
 	}
 	bbColor2 = bb->color2;
 
