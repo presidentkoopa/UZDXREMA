@@ -271,6 +271,7 @@ DMenu::DMenu(DMenu *parent)
 	mMouseCapture = false;
 	mBackbuttonSelected = false;
 	DontDim = false;
+	DontPause = false;
 	GC::WriteBarrier(this, parent);
 }
 
@@ -481,6 +482,15 @@ void M_ResetButtonStates()
 int getMenuState()
 {
 	return (int)menuactive;
+}
+
+// [BB] Asked by P_CheckTickerPaused. Only the menu on TOP decides: a
+// non-pausing page opened from a pausing one still runs, which is what makes
+// "Glow Waves..." off the main options page behave like the page that opened
+// it rather than freezing halfway down a submenu chain.
+bool M_MenuPauses()
+{
+	return !(CurrentMenu != nullptr && CurrentMenu->DontPause);
 }
 
 bool M_IsAnimated()
@@ -1100,6 +1110,7 @@ DEFINE_FIELD(DMenu, mMouseCapture);
 DEFINE_FIELD(DMenu, mBackbuttonSelected);
 DEFINE_FIELD(DMenu, DontDim);
 DEFINE_FIELD(DMenu, DontBlur);
+DEFINE_FIELD(DMenu, DontPause);
 DEFINE_FIELD(DMenu, AnimatedTransition);
 DEFINE_FIELD(DMenu, Animated);
 

@@ -236,7 +236,11 @@ struct StreamData
 	FVector4 uFlatGlowFar;
 	int uFlatGlowFalloff;
 	int uFlatGlowLineCount;
-	int uFlatGlowPad1;
+	// [BB] Which of the two flats this draw is. Floor and ceiling time-share
+	// uFlatGlowColor above, so the fragment shader has no way to tell them
+	// apart -- and the glow wave gives them different phases, so it has to.
+	// This was a pad, so it costs nothing: MAX_STREAM_DATA is unchanged.
+	int uFlatGlowIsCeiling;
 	int uFlatGlowPad2;
 	FVector4 uFlatGlowLines[64];
 
@@ -373,6 +377,7 @@ public:
 		mStreamData.uFlatGlowColor = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uFlatGlowFar = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uFlatGlowFalloff = 0;
+		mStreamData.uFlatGlowIsCeiling = 0;
 		mStreamData.uFlatGlowLineCount = 0;
 		mStreamData.uGradientTopPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uGradientBottomPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -602,11 +607,12 @@ public:
 	// [BB] Flat-edge glow: rgb + reach, a falloff curve, and up to 64 of the
 	// sector's linedef endpoints for the shader's per-pixel distance check.
 	// "farColor", not "far" -- windows.h defines `far` as an empty macro.
-	void SetFlatGlowParams(float r, float g, float b, float reach, const FVector4 &farColor, int falloff, int lineCount, const FVector4* lines)
+	void SetFlatGlowParams(float r, float g, float b, float reach, const FVector4 &farColor, int falloff, int lineCount, const FVector4* lines, int isCeiling = 0)
 	{
 		mStreamData.uFlatGlowColor = { r, g, b, reach };
 		mStreamData.uFlatGlowFar = farColor;
 		mStreamData.uFlatGlowFalloff = falloff;
+		mStreamData.uFlatGlowIsCeiling = isCeiling;
 		mStreamData.uFlatGlowLineCount = lineCount;
 		for (int i = 0; i < lineCount; i++)
 		{
@@ -623,6 +629,7 @@ public:
 		mStreamData.uFlatGlowColor = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uFlatGlowFar = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uFlatGlowFalloff = 0;
+		mStreamData.uFlatGlowIsCeiling = 0;
 		mStreamData.uFlatGlowLineCount = 0;
 	}
 

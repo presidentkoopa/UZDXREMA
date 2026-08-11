@@ -189,6 +189,7 @@ bool FGLRenderState::ApplyShader()
 	activeShader->muFlatGlowColor.Set(&mStreamData.uFlatGlowColor.X);
 	activeShader->muFlatGlowFar.Set(&mStreamData.uFlatGlowFar.X);
 	activeShader->muFlatGlowFalloff.Set(mStreamData.uFlatGlowFalloff);
+	activeShader->muFlatGlowIsCeiling.Set(mStreamData.uFlatGlowIsCeiling);
 	activeShader->muFlatGlowLineCount.Set(mStreamData.uFlatGlowLineCount);
 	if (mStreamData.uFlatGlowLineCount > 0 && activeShader->muFlatGlowLinesLoc >= 0)
 	{

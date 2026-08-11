@@ -191,6 +191,20 @@ static const char *shaderBindings = R"(
 		int uShadowmapFilter;
 		
 		int uLightBlendMode;
+
+		// [BB] Glow wave. The int above plus mPadding0 in the C++ struct end
+		// this block at 28 bytes; std140 aligns a vec4 to 16, so the compiler
+		// pads to 32 and these land on exactly the offsets HWViewpointUniforms
+		// puts them at. Do not insert a scalar before them.
+		vec4 uGlowWave;
+		vec4 uGlowWaveDepth;
+		vec4 uGlowWavePhase;
+		vec4 uGlowWaveOrigin;
+
+		// [BB] Darkness as a shader term.
+		vec4 uDarkness;
+		vec4 uDarkness2;
+		vec4 uDarkness3;
 	};
 
 	layout(set = 1, binding = 0, std140) uniform ViewpointUBO {
@@ -209,6 +223,13 @@ static const char *shaderBindings = R"(
 	#define uClipHeightDirection viewpoints[HW_VIEWPOINT_INDEX].uClipHeightDirection
 	#define uShadowmapFilter viewpoints[HW_VIEWPOINT_INDEX].uShadowmapFilter
 	#define uLightBlendMode viewpoints[HW_VIEWPOINT_INDEX].uLightBlendMode
+	#define uGlowWave viewpoints[HW_VIEWPOINT_INDEX].uGlowWave
+	#define uGlowWaveDepth viewpoints[HW_VIEWPOINT_INDEX].uGlowWaveDepth
+	#define uGlowWavePhase viewpoints[HW_VIEWPOINT_INDEX].uGlowWavePhase
+	#define uGlowWaveOrigin viewpoints[HW_VIEWPOINT_INDEX].uGlowWaveOrigin
+	#define uDarkness viewpoints[HW_VIEWPOINT_INDEX].uDarkness
+	#define uDarkness2 viewpoints[HW_VIEWPOINT_INDEX].uDarkness2
+	#define uDarkness3 viewpoints[HW_VIEWPOINT_INDEX].uDarkness3
 
 	layout(set = 1, binding = 1, std140) uniform MatricesUBO {
 		mat4 ModelMatrix;
@@ -257,7 +278,7 @@ static const char *shaderBindings = R"(
 		vec4 uFlatGlowFar;
 		int uFlatGlowFalloff;
 		int uFlatGlowLineCount;
-		int uFlatGlowPad1;
+		int uFlatGlowIsCeiling;
 		int uFlatGlowPad2;
 		vec4 uFlatGlowLines[64];
 
@@ -393,6 +414,7 @@ static const char *shaderBindings = R"(
 	#define uFlatGlowColor data[uDataIndex].uFlatGlowColor
 	#define uFlatGlowFar data[uDataIndex].uFlatGlowFar
 	#define uFlatGlowFalloff data[uDataIndex].uFlatGlowFalloff
+	#define uFlatGlowIsCeiling data[uDataIndex].uFlatGlowIsCeiling
 	#define uFlatGlowLineCount data[uDataIndex].uFlatGlowLineCount
 	#define uFlatGlowLines data[uDataIndex].uFlatGlowLines
 	#define uGradientTopPlane data[uDataIndex].uGradientTopPlane

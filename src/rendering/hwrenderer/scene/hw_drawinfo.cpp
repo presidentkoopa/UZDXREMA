@@ -194,6 +194,42 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 		VPUniforms.mShadowmapFilter = gl_shadowmap_filter;
 		VPUniforms.mLightBlendMode = (level.info ? (int)level.info->lightblendmode : 0);
 	}
+
+	// [BB] Glow wave, scene-global. Copied here rather than per draw because
+	// every draw in the frame reads the same wave -- only the phase differs,
+	// and that is per CHANNEL, not per surface.
+	//
+	// Doom's Z is the shader's Y, the same swizzle the sweep origin uses just
+	// below in RenderScene. Getting it wrong is not a crash, it is a ring
+	// wave that expands through the floor instead of across it.
+	if (Level != nullptr)
+	{
+		VPUniforms.mGlowWave = {
+			(float)Level->GlowWaveLength, (float)Level->GlowWaveSpeed,
+			(float)Level->GlowWaveSharp,  (float)Level->GlowWaveShape };
+		VPUniforms.mGlowWaveDepth = {
+			(float)Level->GlowWaveReach,  (float)Level->GlowWaveBright,
+			(float)Level->GlowWaveColour, (float)Level->GlowWaveDetune };
+		VPUniforms.mGlowWavePhase = {
+			(float)Level->GlowWavePhase[0], (float)Level->GlowWavePhase[1],
+			(float)Level->GlowWavePhase[2], (float)Level->GlowWavePhase[3] };
+		VPUniforms.mGlowWaveOrigin = {
+			(float)Level->GlowWaveOrigin.X, (float)Level->GlowWaveOrigin.Z,
+			(float)Level->GlowWaveOrigin.Y, (float)Level->GlowWaveSeed };
+
+		// [BB] Darkness. Frame-global for the same reason: the curve and its
+		// gains are the same everywhere, and only the FRAGMENT it is asked
+		// about differs.
+		VPUniforms.mDarkness = {
+			(float)Level->DarkMode,     (float)Level->DarkAdjust,
+			(float)Level->DarkMinLight, (float)Level->DarkPreGain };
+		VPUniforms.mDarkness2 = {
+			(float)Level->DarkPostGain, (float)Level->DarkDistDepth,
+			(float)Level->DarkDistRange, 0.0f };
+		VPUniforms.mDarkness3 = {
+			(float)Level->DarkHeightDepth, (float)Level->DarkHeightRef,
+			(float)Level->DarkHeightRange, 0.0f };
+	}
 	mClipper->SetViewpoint(Viewpoint);
 	vClipper->SetViewpoint(Viewpoint);
 	rClipper->SetViewpoint(Viewpoint);

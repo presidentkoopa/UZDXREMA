@@ -15,6 +15,9 @@ anything else here.
 | [Bloom](#5-bloom) | threshold, knee, anamorphic streak, tint, chromatic fringing | — |
 | [VR weapon wheel](#6-vr-weapon-wheel) | a wheel per hand, worked by the hand it belongs to | — |
 | [HUD stereo gating](#7-hud-stereo-gating-bug-fix) | **bug fix** — flat sessions lost the entire HUD | [`HUD_STEREO_GATING.md`](HUD_STEREO_GATING.md) |
+| [Glow wave](#8-glow-wave) | a glow's edge varies along a surface, not just up it | — |
+| [Per-fragment darkness](#9-per-fragment-darkness) | the darkness curve leaves the sector | — |
+| [Non-pausing menus](#10-non-pausing-menus) | a settings page can let the world run behind it | — |
 
 ---
 
@@ -258,6 +261,175 @@ that nothing composites.
 Gated on `vrmode->IsVR()`, which the same block already used for its own debug
 border. Full write-up, including why it reads as a one-second delay, in
 [`HUD_STEREO_GATING.md`](HUD_STEREO_GATING.md).
+
+## 8. Glow wave
+
+A glow varies per pixel going **up** a wall — `glowdist` is the fragment's
+distance from the plane, which is what makes coverage and falloff smooth. It
+could not vary **along** the wall at all, because reach arrives as one number
+for the whole surface. So a wall faded beautifully top to bottom and had a dead
+straight top edge from one end of a room to the other.
+
+Sweep recolour (mode 4) already worked around this for *colour*. Nothing
+addressed *shape*. This does.
+
+```
+Level.SetGlowWave(wavelength, speed, sharpness, shape)      // wavelength 0 = off
+Level.SetGlowWaveOrigin(origin)
+Level.SetGlowWaveDepth(reach, bright, colour, detune, seed)
+Level.SetGlowWavePhase(wallTop, wallBottom, floorPhase, ceilPhase)
+Level.ClearGlowWave()
+```
+
+`GlowWaveRaw()` in `main.fp` returns a signed −1..+1 modulation for the
+fragment. Three separate depths read it, and they look nothing like each other:
+
+- **reach** — scales the glow's reach *before* the cutoff test, so the band's
+  **edge** rises and falls. This is the one that cannot be produced any other
+  way; multiplying the finished contribution only pulses a straight-edged band
+  brighter and dimmer.
+- **bright** — multiplies the contribution. Straight edge, moving light.
+- **colour** — offsets the near/far mix instead, so the two-colour boundary
+  slides up and down *inside* a band whose shape never changes. Requires the
+  far colour from §2 to be set; on a one-colour glow it does nothing.
+
+The far-colour ramp already rides `atten`, so the corner gradient stretches and
+squashes with the edge without any extra work.
+
+**The distance function is the sweep's.** Same five shapes, same per-band origin
+vocabulary. Not tidiness: it means a wave running along a floor and a sweep band
+crossing the room can be given one shape and made to *arrive together*. Two
+systems that measure the world differently can never be lined up; two that share
+a distance function line up by construction.
+
+**Detune** adds a second sine at an irrational multiple of the first. One sine
+is legible as machinery within about ten seconds because the eye finds the
+period; two that never resolve are not. One extra `sin`.
+
+**Per-room scatter** (`seed`) offsets phase by a hash of geometry that is
+already uploaded — the glow plane's height for a wall, the first linedef
+endpoint for a flat. Without it the whole map undulates as one organism, which
+reads as a filter over the game rather than as lighting in it. No new data.
+
+### Two things it needed from elsewhere
+
+`uFlatGlowPad1` became **`uFlatGlowIsCeiling`**. Floor and ceiling time-share
+`uFlatGlowColor` (§2), so the fragment shader had no way to tell them apart —
+and they need different phases, or a wave cannot climb a room. It was a pad, so
+`MAX_STREAM_DATA` is unchanged.
+
+The parameters live in **`HWViewpointUniforms`, not `StreamData`**. They are
+identical in every draw of a frame; `StreamData`'s size divides 64KB into
+`MAX_STREAM_DATA` draws, so spending 64 bytes of it to say the same thing
+thirty-four times would cost batching in every frame of the game. The viewpoint
+block is written a handful of times per frame. The four `vec4` are appended
+after `mLightBlendMode`/`mPadding0`; those end at 28 bytes and std140 aligns a
+`vec4` to 16, so the compiler pads to 32 and the GLSL offsets match the C++
+struct without the padding int being declared in either shader. **Do not insert
+a scalar before them.**
+
+`timer` already existed in `StreamData` as a live per-frame float, so no clock
+uniform was added.
+
+### A bug fixed alongside
+
+Sweep recolour reached **two of the four glow channels**. Both wall blocks mixed
+`sweepTint`; the flat-edge block never did, so a recolour band sweeping a room
+changed the walls and left the floor and ceiling on the old palette — visible as
+the band crossing a corner and stopping dead at it. `main.fp`, one line.
+
+GLES implements none of this, consistent with §2.
+
+## 9. Per-fragment darkness
+
+A darkness mod darkens by scaling each **sector's** colour: one multiplier, one
+room, wall to wall. That was correct when a sector's light level was the only
+lever there was. It stopped being correct once a band of light could be measured
+per pixel — and the tell was that the *reveal* worked by multiplying back up
+exactly what the darkness had multiplied down. Two features undoing each other
+and calling the result a lighting model.
+
+```
+Level.SetDarkness(mode, adjust, minLight, preGain, postGain)   // mode 0 = off
+Level.SetDarknessSpace(distDepth, distRange, heightDepth, heightRef, heightRange)
+Level.ClearDarkness()
+```
+
+`DarknessAt(lightLevel)` in `main.fp` returns the fraction of light that
+survives. **The four curves are unchanged** — subtract, compress, cap brightest,
+deepen shadows, with pre-gain before and min-light and post-gain after, in that
+order. They are transcribed from the ZScript that had them, which took them
+verbatim from DarkDoomZ. They work in Doom's 0–255 light because every constant
+in them (256, 33, /8) is in those units; the conversion happens at the top
+rather than rescaling the curves, so they stay readable against the original.
+
+`adjust` is pre-multiplied by the caller (`32 ×` a 0–8 dial, in the original) so
+the shader never has to know what a "preset" is.
+
+**Where it is applied is load-bearing.** In `getLightColor`, *after* the Doom
+lighting equation — so it scales the light the room actually ended up with,
+including whatever the blink/flicker/strobe thinkers did this tic, which the
+per-sector version had to fight for — and *before* the glow and sweep blocks,
+because those are **emissive**. They are light being added, not light the room
+has. Darkening them would darken the only thing left to see in a black room.
+
+The fog path has no scalar light — the colour *is* the light — so its luminance
+stands in, which keeps both paths agreeing about how dark a room is instead of
+one quietly opting out.
+
+### The two terms a sector cannot express
+
+- **distance** — `distance(pixelpos, uCameraPos)`, deepening with range. This is
+  the one that makes a dark room feel like it has depth rather than like the
+  brightness slider went down, and it is flatly impossible per sector: every
+  pixel in a room is the same distance as far as a sector multiplier knows.
+- **height** — dark pooling below a world Z, or rising as a tide.
+
+Three `vec4` in `HWViewpointUniforms`, appended after §8's four, same alignment
+rule.
+
+### Known gap
+
+**Sky scaling is not implemented in the per-fragment path.** The per-sector
+version scales the *adjustment* (not the result) for sectors whose floor or
+ceiling is the sky flat. The fragment shader has no per-draw sky flag; adding
+one means another pad plus writes in both `hw_flats.cpp` and `hw_walls.cpp`.
+`uSweepPad1` is still free and is the obvious place. Until then, sky sectors are
+darkened by the unscaled adjustment.
+
+### Consumers should treat this as a mode, not a replacement
+
+Every level of every curve was tuned against a per-sector multiply and will not
+feel identical through a per-fragment one. The two must never both run — the
+curve would apply twice and every value on the dial would read wrong, in a way
+that is confusing precisely because both halves are behaving correctly.
+
+Also worth knowing: **per-fragment darkness is invisible to the playsim.**
+Nothing can ask "is this spot dark?" any more, because the answer is no longer
+stored anywhere. Content that needs it must keep a per-sector shadow of the
+term.
+
+## 10. Non-pausing menus
+
+A menu pauses the game in single player. That is right for almost every menu and
+wrong for one whose entire purpose is to adjust what you are looking at: nothing
+re-evaluates while the playsim is stopped, so a slider takes effect when you
+back out rather than when you move it — and anything driven from a tic is simply
+frozen while you look at it.
+
+```
+DontPause   // bool on DMenu, alongside DontDim / DontBlur
+```
+
+`P_CheckTickerPaused` already had a `MENU_OnNoPause` case; this adds a third
+condition, `M_MenuPauses()`, which consults the menu currently on top. Only the
+top menu decides, so a non-pausing page opened from a pausing one runs — which
+is what keeps a submenu behaving like the page that opened it instead of
+freezing halfway down a chain.
+
+Opt-in per menu, and the cost is real: monsters keep moving and the player can
+be hurt while the page is open. That is the right trade for a lighting page and
+the wrong one for the save menu, which is why it is not a global.
 
 ---
 

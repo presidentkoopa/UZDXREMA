@@ -778,6 +778,32 @@ struct LevelLocals native
 	native void SetSweepTrail(double trail);
 	native void ClearSweep();
 
+	// [BB] Glow wave: peaks and valleys along a glow, per pixel. Reach moves
+	// the band's edge, brightness moves its light, colour moves the two-colour
+	// boundary inside a band that never changes shape. Phases are per channel,
+	// so offsetting them makes one wave climb a room. Wavelength 0 = off.
+	//
+	// CLEARSCOPE, all but the origin. These are render settings, not
+	// simulation: nothing downstream of them can change what happens in the
+	// world, so a menu may push them while the playsim is paused and a slider
+	// moves the picture as it is dragged. The ORIGIN is play-scope, because
+	// resolving "follows you" or "the nearest live monster" means reading the
+	// world -- it keeps its last value while the game is stopped, which is
+	// right, since nothing in the world is moving either.
+	native clearscope void SetGlowWave(double wavelength, double speed, double sharpness, int shape);
+	native void SetGlowWaveOrigin(Vector3 origin);
+	native clearscope void SetGlowWaveDepth(double reach, double bright, double colour, double detune, double seed);
+	native clearscope void SetGlowWavePhase(double wallTop, double wallBottom, double floorPhase, double ceilPhase);
+	native clearscope void ClearGlowWave();
+
+	// [BB] Darkness as a shader term. The same four curves a mod would run per
+	// sector per tic, evaluated instead against each fragment's own light --
+	// plus distance and height, which a sector cannot express at all.
+	// Mode 0 = off. Clearscope for the same reason as above.
+	native clearscope void SetDarkness(int mode, double adjust, double minLight, double preGain, double postGain);
+	native clearscope void SetDarknessSpace(double distDepth, double distRange, double heightDepth, double heightRef, double heightRange);
+	native clearscope void ClearDarkness();
+
 	native String GetChecksum() const;
 
 	native void ChangeSky(TextureID sky1, TextureID sky2 );

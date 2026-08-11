@@ -991,6 +991,64 @@ public:
 	// What each band does to the pixels it covers: 1 add, 2 lift, 3 crush.
 	int SweepBandDraw[MAX_SWEEP_BANDS] = {};
 
+	// [BB] GLOW WAVE -- the missing axis.
+	//
+	// A glow already varies per pixel VERTICALLY: the fragment's distance
+	// from the plane is what makes coverage and falloff smooth up a wall.
+	// Horizontally it could not vary at all, because reach arrives as one
+	// number for the whole surface -- so a wall faded beautifully top to
+	// bottom and had a dead straight top edge from one end to the other.
+	//
+	// This is a world-space wave that modulates that reach per fragment, so
+	// the edge itself rises and falls along the surface. It can drive the
+	// brightness and the two-colour boundary as well, which are the same
+	// wave read into different terms and look nothing like each other.
+	//
+	// Measured with the SAME five shapes as the sweep, from its own origin,
+	// so a wave along the floor and a band crossing the room can be given
+	// the same shape and made to agree. Two systems that measure the world
+	// differently can never be lined up; two that share one distance
+	// function line up by construction.
+	//
+	// Scene-global, so unlike the sweep this does not ride StreamData -- it
+	// goes in the viewpoint block, which is written a handful of times a
+	// frame rather than once per draw. MAX_STREAM_DATA stays at 34.
+	double GlowWaveLength = 0;      // world units per cycle; 0 = off
+	double GlowWaveSpeed = 0;       // radians per second
+	double GlowWaveSharp = 1;       // pow() on the crest; 1 = plain sine
+	int    GlowWaveShape = 1;       // same vocabulary as SweepMode
+	double GlowWaveReach = 0;       // how far the edge moves, 0-1
+	double GlowWaveBright = 0;      // how much the brightness swings, 0-1
+	double GlowWaveColour = 0;      // how far the near/far boundary slides
+	double GlowWaveDetune = 0;      // second sine, offset from the first
+	double GlowWaveSeed = 0;        // per-room phase scatter, 0 = all as one
+	double GlowWavePhase[4] = {};   // wall top, wall bottom, floor, ceiling
+	DVector3 GlowWaveOrigin;
+
+	// [BB] DARKNESS, PER FRAGMENT.
+	//
+	// The same four curves a mod would otherwise run per sector per tic,
+	// handed to the shader to run against each fragment's own light. Mode 0
+	// is off and costs one compare.
+	//
+	// Adjust is the curve's input, pre-multiplied by the caller (32 x a 0-8
+	// dial, in the original) so the shader never has to know what a "preset"
+	// is. MinLight floors the result and PostGain lifts it, both after the
+	// curve, exactly where they were.
+	int    DarkMode = 0;            // 0 off, 1 subtract, 2 compress,
+	                                // 3 cap brightest, 4 deepen shadows
+	double DarkAdjust = 0;
+	double DarkMinLight = 0;
+	double DarkPreGain = 0;
+	double DarkPostGain = 0;
+
+	// The two a sector cannot express.
+	double DarkDistDepth = 0;       // how much darker at DistRange away
+	double DarkDistRange = 2048;
+	double DarkHeightDepth = 0;     // how much darker below HeightRef
+	double DarkHeightRef = 0;       // world Z the pooling starts from
+	double DarkHeightRange = 256;
+
 	// links to global game objects
 	TArray<TObjPtr<AActor *>> CorpseQueue;
 	TObjPtr<DFraggleThinker *> FraggleScriptThinker = MakeObjPtr<DFraggleThinker*>(nullptr);

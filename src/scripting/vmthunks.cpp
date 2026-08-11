@@ -3498,6 +3498,196 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetSweepTrail, SetSweepTrail)
 	return 0;
 }
 
+// [BB] GLOW WAVE. Peaks and valleys along a glow, per pixel.
+//
+// Reach, brightness and the two-colour boundary can each take the wave at
+// their own depth. Reach is the one that cannot be faked any other way: it
+// moves the EDGE of the band rather than how bright the band is.
+//
+// Wavelength 0 switches the whole thing off and every glow goes back to the
+// arithmetic it did before, byte for byte.
+// THE ORIGIN IS SET SEPARATELY, AND ON PURPOSE.
+//
+// Everything else here is a number read straight off a slider, so it can be
+// pushed from ANY scope -- including a menu's own ticker, which keeps running
+// while the playsim is paused. That is what lets these sliders move the
+// picture while you are still looking at the page.
+//
+// The origin cannot: resolving "follows you" or "the nearest live monster"
+// means reading the playsim. So it is its own play-scope call, made from the
+// world tic, and it simply keeps its last value while the game is paused --
+// which is correct, because nothing in the world is moving either.
+static void SetGlowWave(FLevelLocals *self, double wavelength, double speed,
+	double sharpness, int shape)
+{
+	self->GlowWaveLength = wavelength;
+	self->GlowWaveSpeed = speed;
+	self->GlowWaveSharp = sharpness;
+	self->GlowWaveShape = shape > 0 ? shape : 1;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetGlowWave, SetGlowWave)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(wavelength);
+	PARAM_FLOAT(speed);
+	PARAM_FLOAT(sharpness);
+	PARAM_INT(shape);
+	SetGlowWave(self, wavelength, speed, sharpness, shape);
+	return 0;
+}
+
+static void SetGlowWaveOrigin(FLevelLocals *self, double x, double y, double z)
+{
+	self->GlowWaveOrigin = DVector3(x, y, z);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetGlowWaveOrigin, SetGlowWaveOrigin)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(x); PARAM_FLOAT(y); PARAM_FLOAT(z);
+	SetGlowWaveOrigin(self, x, y, z);
+	return 0;
+}
+
+// How far each term swings. Detune adds a second sine at a wavelength that
+// does not divide the first, so the room never quite repeats.
+static void SetGlowWaveDepth(FLevelLocals *self, double reach, double bright,
+	double colour, double detune, double seed)
+{
+	self->GlowWaveReach = reach;
+	self->GlowWaveBright = bright;
+	self->GlowWaveColour = colour;
+	self->GlowWaveDetune = detune;
+	self->GlowWaveSeed = seed;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetGlowWaveDepth, SetGlowWaveDepth)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(reach); PARAM_FLOAT(bright);
+	PARAM_FLOAT(colour); PARAM_FLOAT(detune); PARAM_FLOAT(seed);
+	SetGlowWaveDepth(self, reach, bright, colour, detune, seed);
+	return 0;
+}
+
+// One phase per channel, in radians. Offsetting them is what makes a single
+// wave CLIMB a room -- floor crests, then the lower wall, then the upper
+// wall, then the ceiling -- rather than every surface pulsing as one.
+static void SetGlowWavePhase(FLevelLocals *self, double wallTop, double wallBottom,
+	double floorPhase, double ceilPhase)
+{
+	self->GlowWavePhase[0] = wallTop;
+	self->GlowWavePhase[1] = wallBottom;
+	self->GlowWavePhase[2] = floorPhase;
+	self->GlowWavePhase[3] = ceilPhase;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetGlowWavePhase, SetGlowWavePhase)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(wallTop); PARAM_FLOAT(wallBottom);
+	PARAM_FLOAT(floorPhase); PARAM_FLOAT(ceilPhase);
+	SetGlowWavePhase(self, wallTop, wallBottom, floorPhase, ceilPhase);
+	return 0;
+}
+
+static void ClearGlowWave(FLevelLocals *self)
+{
+	self->GlowWaveLength = 0;
+	self->GlowWaveReach = 0;
+	self->GlowWaveBright = 0;
+	self->GlowWaveColour = 0;
+	self->GlowWaveDetune = 0;
+	self->GlowWaveSeed = 0;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearGlowWave, ClearGlowWave)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	ClearGlowWave(self);
+	return 0;
+}
+
+// [BB] DARKNESS AS A SHADER TERM.
+//
+// Darkening a room by scaling its sector colour makes the sector the unit of
+// lighting: one multiplier, one room, wall to wall. That was correct when a
+// sector's light level was the only lever there was, and it stopped being
+// correct the moment a band of light could be measured per pixel.
+//
+// These carry the SAME four curves, unchanged -- subtract, compress, cap and
+// deepen, with pre-gain before and min-light and post-gain after -- and hand
+// them to the fragment shader to evaluate against the FRAGMENT's light
+// instead of the sector's. The arithmetic is identical. What changes is how
+// often it is asked, and that it can then take terms a sector cannot have:
+// distance from the eye, and height.
+//
+// mode 0 switches the whole thing off and every fragment keeps the light it
+// already had.
+static void SetDarkness(FLevelLocals *self, int mode, double adjust,
+	double minLight, double preGain, double postGain)
+{
+	self->DarkMode = mode;
+	self->DarkAdjust = adjust;
+	self->DarkMinLight = minLight;
+	self->DarkPreGain = preGain;
+	self->DarkPostGain = postGain;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetDarkness, SetDarkness)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(mode);
+	PARAM_FLOAT(adjust); PARAM_FLOAT(minLight);
+	PARAM_FLOAT(preGain); PARAM_FLOAT(postGain);
+	SetDarkness(self, mode, adjust, minLight, preGain, postGain);
+	return 0;
+}
+
+// The two terms that only exist per pixel, and the reason the move is worth
+// making at all.
+//
+// DISTANCE is the big one: darkness deepening with range is what makes a dark
+// room feel like it has depth rather than like the brightness slider went
+// down. A sector has no way to express it -- every pixel in the room is the
+// same distance as far as a sector multiplier is concerned.
+//
+// HEIGHT pools the dark at floor level, or raises it as a tide. Same idea in
+// the other axis, and free once the term is per fragment.
+static void SetDarknessSpace(FLevelLocals *self, double distDepth, double distRange,
+	double heightDepth, double heightRef, double heightRange)
+{
+	self->DarkDistDepth = distDepth;
+	self->DarkDistRange = distRange;
+	self->DarkHeightDepth = heightDepth;
+	self->DarkHeightRef = heightRef;
+	self->DarkHeightRange = heightRange;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetDarknessSpace, SetDarknessSpace)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(distDepth); PARAM_FLOAT(distRange);
+	PARAM_FLOAT(heightDepth); PARAM_FLOAT(heightRef); PARAM_FLOAT(heightRange);
+	SetDarknessSpace(self, distDepth, distRange, heightDepth, heightRef, heightRange);
+	return 0;
+}
+
+static void ClearDarkness(FLevelLocals *self)
+{
+	self->DarkMode = 0;
+	self->DarkDistDepth = 0;
+	self->DarkHeightDepth = 0;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearDarkness, ClearDarkness)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	ClearDarkness(self);
+	return 0;
+}
+
 static void ClearSweep(FLevelLocals *self)
 {
 	self->SweepMode = 0;

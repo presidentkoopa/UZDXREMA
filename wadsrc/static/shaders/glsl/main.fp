@@ -743,6 +743,174 @@ float SweepBandAttenAt(int sb)
 //
 //===========================================================================
 
+//
+// [BB] THE GLOW WAVE -- the axis a glow never had.
+//
+// A glow varies per pixel going UP a wall and is one flat value going ALONG
+// it, because reach arrives as a single number for the whole surface. So a
+// wall faded beautifully top to bottom and had a dead straight top edge from
+// one end of the room to the other. Recolour bands fixed that for COLOUR.
+// Nothing fixed it for SHAPE.
+//
+// This returns a signed -1..+1 modulation for this fragment. Feed it a
+// channel's phase and the blocks below apply it to REACH -- so the edge
+// itself rises and falls -- and separately to brightness and to the near/far
+// colour boundary. One wave, three terms, and they look nothing like each
+// other: reach moves the shape, brightness moves the light, and colour moves
+// where one lane's colour becomes the other's INSIDE a band whose shape never
+// changes at all.
+//
+// Distance is measured with the SAME five shapes as the sweep, from the
+// wave's own origin, so a wave running along the floor and a band crossing
+// the room can be given one shape and made to arrive together. Two systems
+// that measure the world differently can never be lined up; two that share a
+// distance function line up by construction.
+//
+//   uGlowWave        x wavelength, y speed, z sharpness, w shape
+//   uGlowWaveDepth   x reach, y brightness, z colour, w detune
+//   uGlowWavePhase   x wall top, y wall bottom, z floor, w ceiling
+//   uGlowWaveOrigin  xyz origin, w per-room seed scatter
+//
+// Wavelength 0 means off, and every glow falls through to exactly the
+// arithmetic it did before this existed.
+//
+float GlowWaveRaw(float phase, float seedOff)
+{
+	if (uGlowWave.x <= 0.0) return 0.0;
+
+	int wshape = int(uGlowWave.w);
+	vec3 wo = uGlowWaveOrigin.xyz;
+	float d;
+	if (wshape == 2)      d = abs(pixelpos.x - wo.x);
+	else if (wshape == 3) d = abs(pixelpos.z - wo.z);
+	else if (wshape == 4) d = length(pixelpos.xyz - wo);
+	else if (wshape == 5) d = pixelpos.y - wo.y;
+	else                  d = length(pixelpos.xz - wo.xz);
+
+	float t = d / uGlowWave.x + timer * uGlowWave.y + phase + seedOff;
+	float w = 0.5 + 0.5 * sin(t);
+
+	// DETUNE. One sine is legible as machinery within about ten seconds,
+	// because it repeats and the eye finds the period. A second sine at a
+	// wavelength that does not divide the first never resolves, so the room
+	// keeps almost-repeating and never quite does. That is the whole
+	// difference between "animated" and "alive", and it costs one sin.
+	if (uGlowWaveDepth.w > 0.0)
+	{
+		float w2 = 0.5 + 0.5 * sin(t * 0.6180339887 + 1.7);
+		w = mix(w, w * w2 * 2.0, uGlowWaveDepth.w);
+	}
+
+	// Sharpness narrows the CREST and never the trough, because it is a pow
+	// on a 0..1 value. At 1 it is a plain swell; high, it is a spike through
+	// an otherwise flat lane -- weather against machinery.
+	w = pow(clamp(w, 0.0, 1.0), max(uGlowWave.z, 0.001));
+
+	return 2.0 * w - 1.0;
+}
+
+// PER-ROOM SCATTER. Without this the entire map undulates as one organism,
+// which reads as a filter over the game rather than as lighting in it. The
+// seed is taken from geometry that is already uploaded and already differs
+// per sector -- the glow plane's height for a wall, the first linedef
+// endpoint for a flat -- so every room gets its own moment for nothing.
+float GlowWaveSeedOff(float src)
+{
+	if (uGlowWaveOrigin.w <= 0.0) return 0.0;
+	return fract(sin(src * 12.9898) * 43758.5453) * 6.2831853 * uGlowWaveOrigin.w;
+}
+
+//
+// [BB] DARKNESS, PER FRAGMENT.
+//
+// A darkness mod scales each SECTOR's colour: one multiplier, one room, wall
+// to wall. That was correct when a sector's light level was the only lever
+// there was. It stopped being correct the moment a band of light could be
+// measured per pixel -- and the tell was that the reveal worked by
+// multiplying back UP what the darkness had multiplied DOWN. Two features
+// politely undoing each other and calling the result a lighting model.
+//
+// THE FOUR CURVES ARE UNCHANGED. Subtract, compress, cap brightest and deepen
+// shadows, transcribed from the ZScript they came from, which took them
+// verbatim from the original. Pre-gain lifts the input before the curve;
+// min-light floors the result and post-gain lifts it after. Same arithmetic,
+// same order, same numbers.
+//
+// What changes is the INPUT: the fragment's own light rather than the room's.
+// That alone stops a large room being uniformly dim. Then two terms that a
+// sector could never have expressed at all:
+//
+//   DISTANCE -- darkness deepening with range. This is the one that makes a
+//   dark room feel like it has depth instead of like the brightness slider
+//   went down, and it is one line here and impossible per sector.
+//
+//   HEIGHT -- dark pooling at floor level, or rising as a tide.
+//
+// Returns the fraction of light that survives, 0..1.
+//
+//   uDarkness   mode, adjust, min light, pre-gain
+//   uDarkness2  post-gain, distance depth, distance range, -
+//   uDarkness3  height depth, height reference, height range, -
+//
+float DarknessAt(float lightLevel)
+{
+	int dmode = int(uDarkness.x);
+	if (dmode <= 0) return 1.0;
+
+	// The curves work in Doom's 0-255 light, because that is what they were
+	// written against and every one of their constants -- 256, 33, /8 -- is
+	// in those units. Converting here rather than rescaling the curves keeps
+	// them readable against the original.
+	float base = lightLevel * 255.0;
+	if (base <= 0.0) return 1.0;      // already black; nothing to scale
+
+	float A = uDarkness.y;
+	float L = base + uDarkness.w;     // pre-gain, before the curve
+
+	float outL;
+	if (dmode == 1)                   // subtract -- a simple fade
+	{
+		outL = L - A;
+	}
+	else if (dmode == 2)              // compress -- the one that ignores base
+	{
+		outL = L * (1.0 - A / 256.0);
+	}
+	else if (dmode == 3)              // cap brightest -- dark rooms survive
+	{
+		outL = min(L, 256.0 - A);
+	}
+	else                              // deepen shadows -- exponential gamma
+	{
+		if (A <= 0.0) outL = L;
+		else outL = (256.0 - pow(A, A / 256.0))
+		          * pow(L / 256.0, 1.0 + (A / (33.0 - (A / 8.0))));
+	}
+
+	outL = max(outL, uDarkness.z);    // min light, a floor
+	outL += uDarkness2.x;             // post-gain, a lift
+
+	float mul = clamp(outL / base, 0.0, 1.0);
+
+	// DISTANCE. Measured from the eye to this fragment, so it deepens with
+	// range rather than with which room you are standing in.
+	if (uDarkness2.y > 0.0)
+	{
+		float d = distance(pixelpos.xyz, uCameraPos.xyz) / max(uDarkness2.z, 1.0);
+		mul *= 1.0 - uDarkness2.y * clamp(d, 0.0, 1.0);
+	}
+
+	// HEIGHT. Below the reference, dark pools; above it, nothing changes. The
+	// range is how far below the reference it takes to reach full depth.
+	if (uDarkness3.x > 0.0)
+	{
+		float below = (uDarkness3.y - pixelpos.y) / max(uDarkness3.z, 1.0);
+		mul *= 1.0 - uDarkness3.x * clamp(below, 0.0, 1.0);
+	}
+
+	return clamp(mul, 0.0, 1.0);
+}
+
 vec4 getLightColor(Material material, float fogdist, float fogfactor)
 {
 	vec4 color = vColor;
@@ -764,6 +932,31 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 		// apply light diminishing through fog equation
 		//
 		color.rgb = mix(vec3(0.0, 0.0, 0.0), color.rgb, fogfactor);
+	}
+
+	//
+	// [BB] DARKNESS, AND IT GOES HERE FOR A REASON.
+	//
+	// AFTER the lighting equation, so it scales the light the room actually
+	// ended up with -- including whatever Doom's own blinking and flickering
+	// sectors did to it this tic, which is a thing the per-sector version had
+	// to fight for and gets here for free.
+	//
+	// BEFORE the glow and the sweep, which is the important half. Those are
+	// EMISSIVE: they are light this mod is adding, not light the room has.
+	// Darkening them would darken the only thing left to see in a black room,
+	// and the whole design is that the glow survives the dark. Everything
+	// below this line is added on top of an already-darkened surface, exactly
+	// as a light in a dark room is.
+	//
+	// uLightLevel is the sector's light, 0..1, and is what the curves want.
+	// The fog path has no scalar light -- the colour IS the light there -- so
+	// its luminance stands in, which keeps the two paths agreeing about how
+	// dark a room is instead of one of them quietly opting out.
+	if (uDarkness.x > 0.0)
+	{
+		float dl = (uLightLevel >= 0.0) ? uLightLevel : grayscale(vec4(color.rgb, 1.0));
+		color.rgb *= DarknessAt(dl);
 	}
 
 	//
@@ -822,31 +1015,50 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 	// region in it. Alpha 0 on the far colour means unset, and the glow is
 	// byte-for-byte the flat wash it always was.
 	//
-	if (uGlowTopColor.a > 0.0 && glowdist.x < uGlowTopColor.a)
+	// [BB] The wave, per channel. Reach is modulated BEFORE the cutoff test,
+	// which is the whole point: multiplying the finished contribution only
+	// makes a straight-edged band pulse brighter and dimmer, while moving the
+	// reach moves the edge itself. The far-colour ramp rides atten, so the
+	// corner gradient stretches and squashes with the edge for free.
+	//
+	// Seeded from the glow plane's height, which is already here, already
+	// per sector, and already differs between rooms.
+	float wTop = GlowWaveRaw(uGlowWavePhase.x, GlowWaveSeedOff(uGlowTopPlane.w));
+	float wBot = GlowWaveRaw(uGlowWavePhase.y, GlowWaveSeedOff(uGlowBottomPlane.w));
+
+	float topReach = uGlowTopColor.a * (1.0 + uGlowWaveDepth.x * wTop);
+	if (uGlowTopColor.a > 0.0 && glowdist.x < topReach)
 	{
-		float topfrac = glowdist.x / uGlowTopColor.a;
+		float topfrac = glowdist.x / topReach;
 		float topatten;
 		if (uGlowTopFalloff == 0)      topatten = 1.0 - topfrac;
 		else if (uGlowTopFalloff == 1) topatten = 1.0 - topfrac * topfrac;
 		else if (uGlowTopFalloff == 2) topatten = 1.0 - sqrt(topfrac);
 		else                            topatten = exp(-topfrac * 3.0);
 		vec3 gtop = uGlowTopColor.rgb;
-		if (uGlowTopFar.a > 0.0) gtop = mix(uGlowTopFar.rgb, gtop, topatten);
+		// Colour depth slides the near/far boundary without touching the
+		// shape -- the band stands still and the colour moves through it.
+		if (uGlowTopFar.a > 0.0)
+			gtop = mix(uGlowTopFar.rgb, gtop, clamp(topatten + uGlowWaveDepth.z * wTop, 0.0, 1.0));
 		gtop = mix(gtop, sweepTint, sweepTintW);
-		color.rgb += desaturate(vec4(gtop * topatten * uGlowTopIntensity, 1.0)).rgb;
+		color.rgb += desaturate(vec4(gtop * topatten * uGlowTopIntensity
+			* (1.0 + uGlowWaveDepth.y * wTop), 1.0)).rgb;
 	}
-	if (uGlowBottomColor.a > 0.0 && glowdist.y < uGlowBottomColor.a)
+	float botReach = uGlowBottomColor.a * (1.0 + uGlowWaveDepth.x * wBot);
+	if (uGlowBottomColor.a > 0.0 && glowdist.y < botReach)
 	{
-		float botfrac = glowdist.y / uGlowBottomColor.a;
+		float botfrac = glowdist.y / botReach;
 		float botatten;
 		if (uGlowBottomFalloff == 0)      botatten = 1.0 - botfrac;
 		else if (uGlowBottomFalloff == 1) botatten = 1.0 - botfrac * botfrac;
 		else if (uGlowBottomFalloff == 2) botatten = 1.0 - sqrt(botfrac);
 		else                                botatten = exp(-botfrac * 3.0);
 		vec3 gbot = uGlowBottomColor.rgb;
-		if (uGlowBottomFar.a > 0.0) gbot = mix(uGlowBottomFar.rgb, gbot, botatten);
+		if (uGlowBottomFar.a > 0.0)
+			gbot = mix(uGlowBottomFar.rgb, gbot, clamp(botatten + uGlowWaveDepth.z * wBot, 0.0, 1.0));
 		gbot = mix(gbot, sweepTint, sweepTintW);
-		color.rgb += desaturate(vec4(gbot * botatten * uGlowBottomIntensity, 1.0)).rgb;
+		color.rgb += desaturate(vec4(gbot * botatten * uGlowBottomIntensity
+			* (1.0 + uGlowWaveDepth.y * wBot), 1.0)).rgb;
 	}
 
 	//
@@ -871,7 +1083,19 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 			minDist = min(minDist, d);
 		}
 
-		float reach = uFlatGlowColor.a;
+		// [BB] Floor and ceiling TIME-SHARE this uniform, because a draw only
+		// ever covers one of them -- so the shader cannot tell which it is
+		// and has to be told. uFlatGlowIsCeiling is what used to be a pad.
+		// Without it both flats would take the same phase and the wave could
+		// not climb a room.
+		//
+		// Seeded off the first linedef endpoint, which is per sector and
+		// already uploaded for the distance search above.
+		float flatPhase = (uFlatGlowIsCeiling != 0) ? uGlowWavePhase.w : uGlowWavePhase.z;
+		float wFlat = GlowWaveRaw(flatPhase,
+			GlowWaveSeedOff(uFlatGlowLines[0].x + uFlatGlowLines[0].y));
+
+		float reach = uFlatGlowColor.a * (1.0 + uGlowWaveDepth.x * wFlat);
 		if (minDist < reach)
 		{
 			float frac = minDist / reach;
@@ -882,8 +1106,16 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 			else                             atten = exp(-frac * 3.0);
 
 			vec3 gflat = uFlatGlowColor.rgb;
-			if (uFlatGlowFar.a > 0.0) gflat = mix(uFlatGlowFar.rgb, gflat, atten);
-			color.rgb += desaturate(vec4(gflat * atten, 1.0)).rgb;
+			if (uFlatGlowFar.a > 0.0)
+				gflat = mix(uFlatGlowFar.rgb, gflat, clamp(atten + uGlowWaveDepth.z * wFlat, 0.0, 1.0));
+			// [BB] RECOLOUR REACHED TWO CHANNELS OUT OF FOUR. Both wall glows
+			// mix sweepTint above and this one never did, so a recolour band
+			// sweeping a room changed the walls and left the floor and the
+			// ceiling on the old palette -- visible as the band crossing a
+			// corner and stopping dead at it.
+			gflat = mix(gflat, sweepTint, sweepTintW);
+			color.rgb += desaturate(vec4(gflat * atten
+				* (1.0 + uGlowWaveDepth.y * wFlat), 1.0)).rgb;
 		}
 	}
 

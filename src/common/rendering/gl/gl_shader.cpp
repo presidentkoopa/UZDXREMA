@@ -240,6 +240,20 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 			int uShadowmapFilter;
 			
 			int uLightBlendMode;
+
+			// [BB] Glow wave -- see hw_viewpointuniforms.h. The scalars above
+			// plus mPadding0 end at 28 bytes and std140 aligns a vec4 to 16,
+			// so these land on the C++ struct's offsets. Do not insert a
+			// scalar before them.
+			vec4 uGlowWave;
+			vec4 uGlowWaveDepth;
+			vec4 uGlowWavePhase;
+			vec4 uGlowWaveOrigin;
+
+			// [BB] Darkness as a shader term.
+			vec4 uDarkness;
+			vec4 uDarkness2;
+			vec4 uDarkness3;
 		};
 
 		uniform int uTextureMode;
@@ -282,6 +296,7 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 		uniform vec4 uFlatGlowColor;
 		uniform vec4 uFlatGlowFar;
 		uniform int uFlatGlowFalloff;
+		uniform int uFlatGlowIsCeiling;
 		uniform int uFlatGlowLineCount;
 		uniform vec4 uFlatGlowLines[64];
 
@@ -646,6 +661,7 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 	muFlatGlowColor.Init(hShader, "uFlatGlowColor");
 	muFlatGlowFar.Init(hShader, "uFlatGlowFar");
 	muFlatGlowFalloff.Init(hShader, "uFlatGlowFalloff");
+	muFlatGlowIsCeiling.Init(hShader, "uFlatGlowIsCeiling");
 	muFlatGlowLineCount.Init(hShader, "uFlatGlowLineCount");
 	muFlatGlowLinesLoc = glGetUniformLocation(hShader, "uFlatGlowLines");
 	muGradientBottomPlane.Init(hShader, "uGradientBottomPlane");

@@ -269,6 +269,7 @@ class FShader
 	FUniform4f muFlatGlowColor;
 	FUniform4f muFlatGlowFar;
 	FBufferedUniform1i muFlatGlowFalloff;
+	FBufferedUniform1i muFlatGlowIsCeiling;
 	FBufferedUniform1i muFlatGlowLineCount;
 	int muFlatGlowLinesLoc;
 	FUniform4f muGradientBottomPlane;

@@ -41,6 +41,7 @@
 #include "i_interface.h"
 #include "c_dispatch.h"
 #include "texturemanager.h"
+#include "menu.h"          // [BB] M_MenuPauses -- see P_CheckTickerPaused
 
 extern gamestate_t wipegamestate;
 extern uint8_t globalfreeze, globalchangefreeze;
@@ -58,9 +59,14 @@ extern uint8_t globalfreeze, globalchangefreeze;
 bool P_CheckTickerPaused ()
 {
 	// pause if in menu or console and at least one tic has been run
+	// [BB] M_MenuPauses() is the third case: a menu that opted out of pausing
+	// via DMenu::DontPause. Without it a lighting page can turn off the dim
+	// and the blur to show you the room it is adjusting, and then show you a
+	// frozen one -- no slider takes effect until you back out, because
+	// nothing re-evaluates while the playsim is stopped.
 	if ( !netgame
 		 && gamestate != GS_TITLELEVEL
-		 && ((menuactive != MENU_Off && menuactive != MENU_OnNoPause) ||
+		 && ((menuactive != MENU_Off && menuactive != MENU_OnNoPause && M_MenuPauses()) ||
 			 ConsoleState == c_down || ConsoleState == c_falling)
 		 && !demoplayback
 		 && !demorecording

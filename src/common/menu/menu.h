@@ -238,6 +238,21 @@ public:
 	bool mBackbuttonSelected;
 	bool DontDim;
 	bool DontBlur;
+	// [BB] Let the world keep running behind this menu.
+	//
+	// A menu pauses the game in single player, which is right for almost
+	// every menu and wrong for one that exists to ADJUST WHAT YOU ARE LOOKING
+	// AT. A lighting page that turns off the dim and the blur so you can see
+	// the room is promising a live preview it cannot deliver while the
+	// playsim is stopped: nothing re-evaluates, so every slider only takes
+	// effect once you back out, and anything driven from a tic -- lane
+	// colours, sweeps, presets, the darkness term -- is simply frozen.
+	//
+	// Opt-in and per menu, because the reason to pause is real: the player is
+	// not holding the controls. A page that sets this is saying the preview
+	// is worth more than the safety, which is true of a lighting page in a
+	// lit room and false of the save menu.
+	bool DontPause;
 	bool Animated;
 	bool AnimatedTransition;
 	static int InMenu;
@@ -326,6 +341,8 @@ FTextureID GetMenuTexture(const char* const name);
 void DeinitMenus();
 bool M_Active();
 bool M_IsAnimated();
+// [BB] False while a menu that opted out of pausing is on top. See DMenu::DontPause.
+bool M_MenuPauses();
 
 
 struct IJoystickConfig;

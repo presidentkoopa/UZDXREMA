@@ -136,6 +136,12 @@ class Menu : Object native ui version("2.4")
 	native bool mBackbuttonSelected;
 	native bool DontDim;
 	native bool DontBlur;
+	// [BB] Let the world keep running behind this menu. For a page that
+	// exists to adjust what you are looking at, a paused preview is not a
+	// preview -- nothing re-evaluates until you back out. Opt-in per menu,
+	// because the reason to pause is real: the player is not holding the
+	// controls.
+	native bool DontPause;
 	native bool AnimatedTransition;
 	native bool Animated;
 

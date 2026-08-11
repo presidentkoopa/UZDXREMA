@@ -440,7 +440,7 @@ void HWFlat::DrawFlat(HWDrawInfo *di, FRenderState &state, bool translucent)
 				lines[i] = { (float)ln->v1->fX(), (float)ln->v1->fY(),
 				             (float)ln->v2->fX(), (float)ln->v2->fY() };
 			}
-			state.SetFlatGlowParams(r, g, b, reach, farColor, sp.FlatGlowFalloff, count, lines);
+			state.SetFlatGlowParams(r, g, b, reach, farColor, sp.FlatGlowFalloff, count, lines, ceiling ? 1 : 0);
 		}
 		else
 		{
