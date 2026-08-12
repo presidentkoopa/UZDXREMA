@@ -201,8 +201,24 @@ void main()
 
 	// Normalise by step count so density means the same thing regardless of
 	// quality setting -- turning quality down must not turn the beam down.
+	//
+	// Then multiply by the marched length, which turns the average into an
+	// integral along the ray. That is the correct Riemann sum and it is also
+	// where the units live: DENSITY IS PER 1000 UNITS, the same convention the
+	// fog slab uses, and the 0.001 is what says so.
+	//
+	// It was missing, and for the whole life of this pass that was invisible.
+	// The march used to be clamped against the RAW depth sample -- a 0..1
+	// value treated as a distance -- so the length was never more than 1.0 and
+	// the scale was accidentally sane. Fixing the depth made the length real,
+	// somewhere between a hundred and a couple of thousand units, and the beam
+	// came out three orders of magnitude too bright. Straight into an additive
+	// pass that runs BEFORE bloom, which then amplified it.
+	//
+	// Two bugs that had been cancelling each other out, where fixing the first
+	// one alone looks like the fix caused the problem.
 	accum *= Density / float(steps);
-	accum *= (tMax - tMin);
+	accum *= (tMax - tMin) * 0.001;
 
 	FragColor = vec4(BeamColor * accum, 1.0);
 }
