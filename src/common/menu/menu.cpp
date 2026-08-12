@@ -404,7 +404,28 @@ void DMenu::CallTicker()
 	IFVIRTUAL(DMenu, Ticker)
 	{
 		VMValue params[] = { (DObject*)this };
+
+		// [BB] THE MENU'S TICK IS MENU CODE.
+		//
+		// ZScript refuses to write a non-mod cvar unless InMenu is set -- see
+		// vmnatives.cpp, "Attempt to change CVAR outside of menu code". That
+		// guard is right: gameplay should not be able to rewrite a player's
+		// engine settings.
+		//
+		// It was set around MenuEvent, OnUIEvent and OnInputEvent but not here,
+		// and that omission has no principle behind it. A menu ticking is as
+		// much menu code as a menu handling a keypress; the only difference is
+		// what woke it up.
+		//
+		// The consequence was specific and annoying: a settings page could
+		// apply everything it owned live, and then had to wait for a keypress
+		// to apply bloom or exposure -- so a preset chosen from the console
+		// arrived in two halves at two different moments, and a page whose
+		// whole promise is a live preview quietly failed to keep it for the
+		// two settings most responsible for how the scene reads.
+		InMenu++;
 		VMCall(func, params, 1, nullptr, 0);
+		InMenu--;
 	}
 }
 
