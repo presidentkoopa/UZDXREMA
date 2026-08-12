@@ -949,6 +949,29 @@ vec3 BeamLightAt(vec3 p)
 
 		vec3 a = uBeamA[i].xyz;
 		vec3 b = uBeamB[i].xyz;
+
+		float thick = max(uBeamA[i].w, 0.01);
+		float soft  = max(uBeamB[i].w, 0.01);
+
+		// CHEAP REJECT FIRST. A beam only lights within thick + soft*8 of
+		// itself, so a fragment further than that from the segment's midpoint
+		// -- plus half the segment's own length -- cannot possibly be lit by
+		// it. That is a squared-distance compare against a bounding sphere:
+		// about six operations, against roughly twenty-five for the solve
+		// below.
+		//
+		// It matters because this runs for every beam on every fragment of
+		// every draw. With eight beams standing in one doorway, the great
+		// majority of the screen is outside all eight, and paying the full
+		// closest-point solve to discover that eight times per pixel is what
+		// takes a large display to its knees.
+		vec3 mid = (a + b) * 0.5;
+		float halfLen = length(b - a) * 0.5;
+		float reach = thick + soft * 8.0 + 1.0;
+		float cull = halfLen + reach;
+		vec3 dm = p - mid;
+		if (dot(dm, dm) > cull * cull) continue;
+
 		vec3 ab = b - a;
 		vec3 ap = p - a;
 
@@ -957,9 +980,6 @@ vec3 BeamLightAt(vec3 p)
 		// along its axis out to the edge of the map.
 		float t = clamp(dot(ap, ab) / max(dot(ab, ab), 0.0001), 0.0, 1.0);
 		float d = length(ap - ab * t);
-
-		float thick = max(uBeamA[i].w, 0.01);
-		float soft  = max(uBeamB[i].w, 0.01);
 
 		float core = 1.0 - smoothstep(thick, thick + soft, d);
 		float halo = 1.0 - smoothstep(thick, thick + soft * 8.0 + 1.0, d);
@@ -1015,6 +1035,21 @@ vec3 BeamAirGlow(vec3 fragPos)
 
 		vec3 a = uBeamA[i].xyz;
 		vec3 b = uBeamB[i].xyz;
+
+		// SAME REJECT, ON THE RAY. A view ray can only see this beam's glow
+		// if it passes within reach of it, and the cheapest sufficient test
+		// is the distance from the beam's midpoint to the ray. One cross
+		// product against the full closest-approach solve below, which has a
+		// division in it and cannot be skipped once entered.
+		float thick = max(uBeamA[i].w, 0.01);
+		float soft  = max(uBeamB[i].w, 0.01);
+		vec3 mid = (a + b) * 0.5;
+		float cull = length(b - a) * 0.5 + thick + soft * 6.0 + 1.0;
+		vec3 em = mid - eye;
+		float along = clamp(dot(em, dir), 0.0, fragDist);
+		vec3 perp = em - dir * along;
+		if (dot(perp, perp) > cull * cull) continue;
+
 		vec3 v = b - a;
 		vec3 w = eye - a;
 
@@ -1047,8 +1082,6 @@ vec3 BeamAirGlow(vec3 fragPos)
 
 		float dist = length((eye + dir * sc) - (a + v * tc));
 
-		float thick = max(uBeamA[i].w, 0.01);
-		float soft  = max(uBeamB[i].w, 0.01);
 
 		// ---- WHAT HAPPENS ALONG THE BEAM ------------------------------
 		//
