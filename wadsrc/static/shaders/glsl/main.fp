@@ -917,6 +917,201 @@ float GITDNoise3(vec3 p)
 		    mix(GITDHash31(i + vec3(0,1,1)), GITDHash31(i + vec3(1,1,1)), f.x), f.y), f.z);
 }
 
+//
+// [BB] SIGNED DISTANCE FIELDS -- shapes drawn onto surfaces.
+//
+// A distance function answers ONE question: how far is this point from the
+// edge of the shape? Negative inside, zero on the edge, positive outside. That
+// is the whole idea, and almost everything else in this file already works
+// this way without saying so -- a beam asks its distance from a segment, the
+// tornado from an axis, the fog from a plane.
+//
+// WHAT THE FUNCTIONS BUY THAT INLINING WOULD NOT.
+//
+// Each primitive is named and separate rather than folded into the one place
+// that calls it, for two reasons that are worth the handful of extra lines.
+//
+// First, they COMPOSE. min() is union, max() is intersection, max(a, -b) is
+// subtraction, and a smooth min melts two shapes into one. A ring is a disc
+// through abs(). A square outline is a square through abs(). Every shape below
+// past the first two is one of the first two with an operator applied, which
+// is why the list is short and the vocabulary is not.
+//
+// Second, they TRANSCRIBE. When the playsim eventually needs to ask the same
+// question the shader is asking -- is the player standing inside this shape --
+// these are the functions that get mirrored into ZScript, and mirroring a
+// named three-line function is a transcription rather than an excavation. One
+// definition per shape is also what stops the drawn shape and the tested shape
+// drifting apart, which is the bug this codebase has already shipped three
+// times in other forms.
+//
+// The same functions serve a flat decal and a raymarched solid without
+// changing: sdBox does not care whether it is being asked about a floor or
+// about a ray. Nothing here marches yet.
+//
+
+float sdCircle(vec2 p, float r)
+{
+	return length(p) - r;
+}
+
+// Exact, including the outside corners -- the max(d,0) term is what makes a
+// point diagonally off the corner measure to the CORNER rather than to the
+// nearer edge's infinite line.
+float sdBox(vec2 p, vec2 b)
+{
+	vec2 d = abs(p) - b;
+	return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
+}
+
+// Three folds of a hexagon's symmetry, then one edge.
+float sdHexagon(vec2 p, float r)
+{
+	const vec3 k = vec3(-0.866025404, 0.5, 0.577350269);
+	p = abs(p);
+	p -= 2.0 * min(dot(k.xy, p), 0.0) * k.xy;
+	p -= vec2(clamp(p.x, -k.z * r, k.z * r), r);
+	return length(p) * sign(p.y);
+}
+
+float sdTriangle(vec2 p, float r)
+{
+	const float k = 1.732050808;
+	p.x = abs(p.x) - r;
+	p.y = p.y + r / k;
+	if (p.x + k * p.y > 0.0) p = vec2(p.x - k * p.y, -k * p.x - p.y) / 2.0;
+	p.x -= clamp(p.x, -2.0 * r, 0.0);
+	return -length(p) * sign(p.y);
+}
+
+// A plus sign: the union of two boxes, which is one min().
+float sdCross(vec2 p, vec2 b)
+{
+	return min(sdBox(p, b), sdBox(p, b.yx));
+}
+
+// ---- operators -----------------------------------------------------------
+//
+// An OUTLINE is any shape through abs(): the distance to its edge, rather than
+// to its inside. That single trick turns every filled primitive above into a
+// hollow one, which is why there is no sdRing and no sdSquareOutline.
+float opOutline(float d, float w) { return abs(d) - w; }
+
+float opUnion(float a, float b)  { return min(a, b); }
+float opSub(float a, float b)    { return max(a, -b); }
+float opInter(float a, float b)  { return max(a, b); }
+
+// The one that has no mesh equivalent: two shapes that MELT together as they
+// approach instead of intersecting with a crease.
+float opSmoothUnion(float a, float b, float k)
+{
+	float h = clamp(0.5 + 0.5 * (b - a) / max(k, 0.0001), 0.0, 1.0);
+	return mix(b, a, h) - k * h * (1.0 - h);
+}
+
+vec2 opRotate(vec2 p, float deg)
+{
+	float a = radians(deg);
+	float c = cos(a), s = sin(a);
+	return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
+}
+
+//
+// [BB] The shapes, drawn where a surface passes through them.
+//
+// Flat decals, not solids: each shape is evaluated in the plane of whatever
+// surface the fragment belongs to, and faded by how far that fragment is from
+// the shape's own height. That is what makes it lie ON the floor rather than
+// hang in the air, and it costs one subtract instead of a march.
+//
+// ORIENTATION IS A FILTER ON THE SURFACE NORMAL, not a second code path. A
+// floor shape wants upward faces and a wall shape wants vertical ones, and
+// which two axes the pattern runs in follows from the same test -- so "on the
+// floor" and "on the wall" are the same six lines with a different pair picked
+// out of the position.
+//
+// THE SEAM IS A SUBTRACTION, which is the entire reason the operators above
+// exist as operators. A shape splitting open down the middle is that shape
+// minus a widening slab, and what shows through the gap is a second colour
+// masked by the ORIGINAL shape -- so the reveal is bounded by the thing that
+// split rather than bleeding past its edge.
+//
+vec3 ShapesAt(vec3 fragPos, vec3 nrm)
+{
+	vec3 sum = vec3(0.0);
+	if (uShapeParams.x <= 0.0) return sum;
+
+	float soft = max(uShapeParams.x, 0.01);
+	float hfade = max(uShapeParams.y, 1.0);
+
+	float up = nrm.y;                 // +1 on a floor, 0 on a wall, -1 ceiling
+	bool isFlat = abs(up) > 0.7;
+
+	for (int i = 0; i < 16; i++)
+	{
+		float size = uShapeA[i].w;
+		if (size <= 0.0) continue;
+
+		int packed_kind = int(uShapeB[i].x);
+		int kind = packed_kind & 15;
+		if (kind <= 0) continue;
+
+		int orient = packed_kind >> 4;
+		if (orient == 0 && !isFlat) continue;    // floors only
+		if (orient == 1 && isFlat) continue;     // walls only
+
+		vec3 c = uShapeA[i].xyz;
+
+		// The two axes the pattern runs in, and the one it fades along --
+		// picked from the surface rather than from the shape, so a single
+		// shape crossing a step draws correctly on both levels.
+		vec2 uv;
+		float off;
+		if (isFlat) { uv = fragPos.xz - c.xz; off = fragPos.y - c.y; }
+		else        { uv = vec2(fragPos.x - c.x, fragPos.y - c.y); off = fragPos.z - c.z; }
+
+		float fade = 1.0 - smoothstep(0.0, hfade, abs(off));
+		if (fade <= 0.0) continue;
+
+		uv = opRotate(uv, uShapeB[i].y);
+
+		float thick = max(uShapeB[i].z, 0.01);
+		float d;
+		if      (kind == 1) d = sdCircle(uv, size);
+		else if (kind == 2) d = opOutline(sdCircle(uv, size), thick);
+		else if (kind == 3) d = sdBox(uv, vec2(size));
+		else if (kind == 4) d = opOutline(sdBox(uv, vec2(size)), thick);
+		else if (kind == 5) d = sdCross(uv, vec2(size, thick));
+		else if (kind == 6) d = sdHexagon(uv, size);
+		else                d = sdTriangle(uv, size);
+
+		float cov = 1.0 - smoothstep(0.0, soft, d);
+		if (cov <= 0.0) continue;
+
+		// SPLIT. A slab through the middle, widening with the seam value.
+		// Taken out of the shape by subtraction and given back as the under
+		// colour, masked by the shape it came out of.
+		vec3 col = uShapeCol[i].rgb * uShapeCol[i].w;
+		float seam = uShapeB[i].w;
+		if (seam > 0.0)
+		{
+			float gap = abs(uv.x) - seam * size;
+			float gcov = (1.0 - smoothstep(0.0, soft, gap)) * cov;
+			cov -= gcov;
+			sum += uShapeUnder.rgb * gcov * fade;
+		}
+
+		// A little reach past the edge, so a hard shape still sits in the room
+		// rather than being stuck onto it.
+		if (uShapeParams.z > 0.0)
+			cov += (1.0 - smoothstep(0.0, uShapeParams.z, max(d, 0.0)))
+			     * uShapeParams.z * 0.02;
+
+		sum += col * max(cov, 0.0) * fade;
+	}
+	return sum;
+}
+
 float GlowTextureAt(float seedOff)
 {
 	// Everything off is the common case and it must cost one compare.
@@ -2796,6 +2991,16 @@ void main()
 		// [BB] And the sweep's own lattice, hanging in the air inside the band
 		// rather than painted on what the band lands on.
 		frag.rgb += SweepAirLattice(pixelpos.xyz);
+
+		// [BB] Shapes drawn onto surfaces. Emissive, so they go here with the
+		// rest of the light rather than through the lighting equation -- a
+		// mark burned onto a floor does not get darker because the room is.
+		//
+		// Sprites carry no world normal, so they are skipped rather than
+		// guessed at: a shape smeared across a monster standing in it would
+		// read as a rendering fault, and the floor beneath is drawn anyway.
+		if (dot(vWorldNormal.xyz, vWorldNormal.xyz) > 0.5)
+			frag.rgb += ShapesAt(pixelpos.xyz, normalize(vWorldNormal.xyz));
 
 		frag.rgb += BeamAirGlow(pixelpos.xyz);
 	}

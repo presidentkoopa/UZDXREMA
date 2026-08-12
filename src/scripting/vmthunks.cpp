@@ -4209,6 +4209,166 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, HeatmapAt, HeatmapAt)
 	ACTION_RETURN_FLOAT(HeatmapAt(self, x, y));
 }
 
+// ===========================================================================
+// [BB] SHAPES -- signed distance fields drawn onto surfaces.
+//
+// A ring buffer like the disturbances, and for the same reason: a shape is
+// mostly a short-lived event, and refusing the seventeenth one makes the most
+// interesting moment of a firefight silently do nothing. The oldest slot is
+// always the right one to lose.
+//
+// A shape with life 0 never expires and holds its slot until cleared, which is
+// what a permanent marker wants. Those are placed at the FRONT of the array by
+// convention -- nothing enforces it, but a script that mixes permanent and
+// transient marks in one buffer will eventually recycle a permanent one, and
+// the fix for that is two arrays rather than a rule nobody remembers.
+// ===========================================================================
+static int ShapeSlot(FLevelLocals *self)
+{
+	double now = self->maptime / (double)TICRATE;
+	int slot = -1;
+	double oldest = 1e30;
+
+	for (int i = 0; i < FLevelLocals::MAX_SHAPES; i++)
+	{
+		if (self->ShapeSize[i] <= 0.0 || self->ShapeKind[i] <= 0)
+			return i;
+		if (self->ShapeLife[i] > 0.0 &&
+			now - self->ShapeBirth[i] > self->ShapeLife[i])
+			return i;
+		// Permanent shapes are never the oldest candidate -- they cannot age
+		// out, so treating them as stale would recycle the one thing that was
+		// explicitly asked to stay.
+		if (self->ShapeLife[i] > 0.0 && self->ShapeBirth[i] < oldest)
+		{
+			oldest = self->ShapeBirth[i];
+			slot = i;
+		}
+	}
+	return (slot >= 0) ? slot : 0;
+}
+
+static int AddShape(FLevelLocals *self, int kind, int orient,
+	double x, double y, double z, double size, double angle, double thick,
+	int color, double intensity, double life)
+{
+	if (kind <= 0 || size <= 0.0) return -1;
+
+	int i = ShapeSlot(self);
+	self->ShapePos[i] = DVector3(x, y, z);
+	self->ShapeSize[i] = size;
+	self->ShapeKind[i] = clamp(kind, 0, 7);
+	self->ShapeOrient[i] = clamp(orient, 0, 2);
+	self->ShapeAngle[i] = angle;
+	self->ShapeThick[i] = thick;
+	self->ShapeColor[i] = color;
+	self->ShapeIntensity[i] = intensity;
+	self->ShapeLife[i] = life;
+	self->ShapeBirth[i] = self->maptime / (double)TICRATE;
+	self->ShapeSeam[i] = 0;
+	self->ShapeSeamRate[i] = 0;
+	self->ShapeGrow[i] = 0;
+	return i;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, AddShape, AddShape)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(kind); PARAM_INT(orient);
+	PARAM_FLOAT(x); PARAM_FLOAT(y); PARAM_FLOAT(z);
+	PARAM_FLOAT(size); PARAM_FLOAT(angle); PARAM_FLOAT(thick);
+	PARAM_COLOR(color); PARAM_FLOAT(intensity); PARAM_FLOAT(life);
+	ACTION_RETURN_INT(AddShape(self, kind, orient, x, y, z, size, angle,
+		thick, color, intensity, life));
+}
+
+// The seam, and growth. Separate from AddShape because they are the ANIMATED
+// half and a caller usually wants to place a shape and only sometimes wants it
+// to move -- and because both are resolved per frame from a rate rather than
+// stepped per tic from script.
+static void SetShapeMotion(FLevelLocals *self, int slot, double seam,
+	double seamRate, double grow)
+{
+	if (slot < 0 || slot >= FLevelLocals::MAX_SHAPES) return;
+	self->ShapeSeam[slot] = seam;
+	self->ShapeSeamRate[slot] = seamRate;
+	self->ShapeGrow[slot] = grow;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetShapeMotion, SetShapeMotion)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(slot); PARAM_FLOAT(seam); PARAM_FLOAT(seamRate); PARAM_FLOAT(grow);
+	SetShapeMotion(self, slot, seam, seamRate, grow);
+	return 0;
+}
+
+// Moving one that already exists, so a shape can follow an actor without
+// being re-added every tic and losing its age with it.
+static void MoveShape(FLevelLocals *self, int slot, double x, double y, double z)
+{
+	if (slot < 0 || slot >= FLevelLocals::MAX_SHAPES) return;
+	self->ShapePos[slot] = DVector3(x, y, z);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, MoveShape, MoveShape)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(slot); PARAM_FLOAT(x); PARAM_FLOAT(y); PARAM_FLOAT(z);
+	MoveShape(self, slot, x, y, z);
+	return 0;
+}
+
+static void RemoveShape(FLevelLocals *self, int slot)
+{
+	if (slot < 0 || slot >= FLevelLocals::MAX_SHAPES) return;
+	self->ShapeSize[slot] = 0;
+	self->ShapeKind[slot] = 0;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, RemoveShape, RemoveShape)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(slot);
+	RemoveShape(self, slot);
+	return 0;
+}
+
+static void ClearShapes(FLevelLocals *self)
+{
+	for (int i = 0; i < FLevelLocals::MAX_SHAPES; i++)
+	{
+		self->ShapeSize[i] = 0;
+		self->ShapeKind[i] = 0;
+	}
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearShapes, ClearShapes)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	ClearShapes(self);
+	return 0;
+}
+
+// How they are drawn, shared by all sixteen.
+static void SetShapeLook(FLevelLocals *self, double soft, double heightFade,
+	double reach, int under)
+{
+	self->ShapeSoft = soft;
+	self->ShapeHeightFade = heightFade;
+	self->ShapeReach = reach;
+	self->ShapeUnder = under;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetShapeLook, SetShapeLook)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(soft); PARAM_FLOAT(heightFade); PARAM_FLOAT(reach);
+	PARAM_COLOR(under);
+	SetShapeLook(self, soft, heightFade, reach, under);
+	return 0;
+}
+
 // [BB] ONE DISTURBANCE PRIMITIVE, FIVE EFFECTS.
 //
 // A wake, a ripple, an ignition, fog draining from a point and a monster

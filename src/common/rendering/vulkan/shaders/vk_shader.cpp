@@ -247,6 +247,11 @@ static const char *shaderBindings = R"(
 		vec4 uGlowTex3;
 		vec4 uGlowTex4;
 		vec4 uDesatKeep;
+		vec4 uShapeA[16];
+		vec4 uShapeB[16];
+		vec4 uShapeCol[16];
+		vec4 uShapeParams;
+		vec4 uShapeUnder;
 	};
 
 	layout(set = 1, binding = 0, std140) uniform ViewpointUBO {
@@ -308,6 +313,11 @@ static const char *shaderBindings = R"(
 	#define uGlowTex3 viewpoints[HW_VIEWPOINT_INDEX].uGlowTex3
 	#define uGlowTex4 viewpoints[HW_VIEWPOINT_INDEX].uGlowTex4
 	#define uDesatKeep viewpoints[HW_VIEWPOINT_INDEX].uDesatKeep
+	#define uShapeA viewpoints[HW_VIEWPOINT_INDEX].uShapeA
+	#define uShapeB viewpoints[HW_VIEWPOINT_INDEX].uShapeB
+	#define uShapeCol viewpoints[HW_VIEWPOINT_INDEX].uShapeCol
+	#define uShapeParams viewpoints[HW_VIEWPOINT_INDEX].uShapeParams
+	#define uShapeUnder viewpoints[HW_VIEWPOINT_INDEX].uShapeUnder
 
 	layout(set = 1, binding = 1, std140) uniform MatricesUBO {
 		mat4 ModelMatrix;

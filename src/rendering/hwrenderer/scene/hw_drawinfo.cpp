@@ -382,6 +382,51 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 		VPUniforms.mFogBow = { (float)Level->FogBowStrength,
 			(float)Level->FogBowWidth, (float)Level->FogBowThin, 0.f };
 
+		// [BB] Shapes. Size, growth and the seam all resolve HERE rather than
+		// in script, so a mark that opens does it at render rate instead of in
+		// 35Hz steps -- a seam crawling apart one tic at a time is a visible
+		// staircase, and it is the one part of the effect anyone looks at.
+		{
+			double now = Level->maptime / (double)TICRATE;
+			for (int i = 0; i < FLevelLocals::MAX_SHAPES; i++)
+			{
+				double base = Level->ShapeSize[i];
+				double life = Level->ShapeLife[i];
+				double age = now - Level->ShapeBirth[i];
+
+				if (base <= 0.0 || Level->ShapeKind[i] <= 0 ||
+					(life > 0.0 && (age < 0.0 || age > life)))
+				{
+					VPUniforms.mShapeA[i] = { 0.f, 0.f, 0.f, 0.f };
+					VPUniforms.mShapeB[i] = { 0.f, 0.f, 0.f, 0.f };
+					VPUniforms.mShapeCol[i] = { 0.f, 0.f, 0.f, 0.f };
+					continue;
+				}
+
+				float fade = (life > 0.0) ? (float)(1.0 - age / life) : 1.0f;
+				float size = (float)(base + Level->ShapeGrow[i] * age);
+				float seam = (float)clamp(Level->ShapeSeam[i]
+					+ Level->ShapeSeamRate[i] * age, 0.0, 1.0);
+
+				VPUniforms.mShapeA[i] = { (float)Level->ShapePos[i].X,
+					(float)Level->ShapePos[i].Z, (float)Level->ShapePos[i].Y,
+					size };
+				VPUniforms.mShapeB[i] = {
+					(float)(Level->ShapeKind[i] + 16 * Level->ShapeOrient[i]),
+					(float)Level->ShapeAngle[i], (float)Level->ShapeThick[i],
+					seam };
+				VPUniforms.mShapeCol[i] = {
+					Level->ShapeColor[i].r / 255.f, Level->ShapeColor[i].g / 255.f,
+					Level->ShapeColor[i].b / 255.f,
+					(float)Level->ShapeIntensity[i] * fade };
+			}
+		}
+
+		VPUniforms.mShapeParams = { (float)Level->ShapeSoft,
+			(float)Level->ShapeHeightFade, (float)Level->ShapeReach, 0.f };
+		VPUniforms.mShapeUnder = { Level->ShapeUnder.r / 255.f,
+			Level->ShapeUnder.g / 255.f, Level->ShapeUnder.b / 255.f, 0.f };
+
 		VPUniforms.mDesatKeep = { (float)Level->DesatKeep,
 			(float)Level->DesatKeepSoft, (float)Level->DesatKeepHue, 0.f };
 		VPUniforms.mGlowTex = { (float)Level->GlowTexNoise,

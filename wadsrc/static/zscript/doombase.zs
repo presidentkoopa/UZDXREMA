@@ -863,6 +863,24 @@ struct LevelLocals native
 	native clearscope void SetFogBow(double strength, double width, double thin);
 	native clearscope void SetFogGradient(color col, double mix);
 
+	// [BB] SHAPES -- signed distance fields drawn onto surfaces. Sixteen
+	// slots, oldest recycled. AddShape returns its slot so the other four
+	// can address it later; -1 means it was refused.
+	//
+	//   kind    1 disc, 2 ring, 3 square, 4 square outline,
+	//           5 cross, 6 hexagon, 7 triangle
+	//   orient  0 floors, 1 walls, 2 any surface
+	//   life    seconds; 0 never expires
+	//
+	// A seam SPLITS a shape down its middle and shows the under colour
+	// through the gap -- subtraction, masked by the shape it came out of.
+	native int AddShape(int kind, int orient, double x, double y, double z, double size, double angle, double thick, color col, double intensity, double life);
+	native void SetShapeMotion(int slot, double seam, double seamRate, double grow);
+	native void MoveShape(int slot, double x, double y, double z);
+	native void RemoveShape(int slot);
+	native void ClearShapes();
+	native clearscope void SetShapeLook(double soft, double heightFade, double reach, color under);
+
 	// [BB] TEXTURE INSIDE THE GLOW. The wave varies a glow's EDGE and has
 	// nothing left to say once reach saturates and the edge is off screen.
 	// These happen WITHIN the lit area, as multipliers on its contribution,

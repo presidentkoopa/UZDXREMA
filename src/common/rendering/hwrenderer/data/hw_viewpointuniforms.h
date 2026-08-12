@@ -292,7 +292,37 @@ struct HWViewpointUniforms
 	//   y softness of that threshold
 	//   z hue gate: 0 any hue, 1 red-dominant only, 2 green, 3 blue
 	//   w spare
+
 	FVector4 mDesatKeep = { 0.f, 0.15f, 0.f, 0.f };
+
+	// [BB] SHAPES -- signed distance fields drawn onto surfaces.
+	//
+	// Sixteen rather than eight. Eight was the beam budget and it was chosen
+	// for a system where every slot costs a segment solve per fragment; a
+	// shape is a couple of ALU and an early reject, so the old cap was being
+	// copied rather than reasoned about.
+	//
+	//   mShapeA[i]    xyz world centre (shader space), w size
+	//   mShapeB[i]    x kind + 16*orientation, y rotation (deg),
+	//                 z thickness (ring/outline), w seam 0..1
+	//   mShapeCol[i]  rgb colour, w intensity
+	//
+	//   kind  0 off, 1 disc, 2 ring, 3 square, 4 square outline,
+	//         5 cross, 6 hexagon, 7 triangle
+	//   orient 0 floor (upward faces), 1 walls (vertical faces), 2 any
+	//
+	// The distance functions themselves are named and separate in main.fp
+	// rather than inlined, so a later ZScript mirror is a transcription
+	// instead of an excavation.
+	FVector4 mShapeA[16];
+	FVector4 mShapeB[16];
+	FVector4 mShapeCol[16];
+
+	// x edge softness, y height fade, z glow reach past the edge, w unused
+	FVector4 mShapeParams = { 2.f, 24.f, 0.f, 0.f };
+
+	// What a seam reveals underneath. rgb, w unused.
+	FVector4 mShapeUnder = { 1.f, 0.15f, 0.05f, 0.f };
 
 
 	void CalcDependencies()

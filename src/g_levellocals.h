@@ -1179,6 +1179,32 @@ public:
 	//
 	// Eight, because that is enough for a weapon beam plus a tripwire grid,
 	// and the per-fragment cost is eight cheap segment tests.
+// [BB] SHAPES. Sixteen, not eight -- eight was the beam budget, chosen for a
+	// system where every slot costs a segment solve per fragment. A shape is a
+	// couple of ALU behind an early reject, so the old cap was being copied
+	// rather than reasoned about.
+	static const int MAX_SHAPES = 16;
+	DVector3 ShapePos[MAX_SHAPES];
+	double   ShapeSize[MAX_SHAPES] = {};      // 0 = the slot is free
+	int      ShapeKind[MAX_SHAPES] = {};      // 0 off, see hw_viewpointuniforms.h
+	int      ShapeOrient[MAX_SHAPES] = {};    // 0 floor, 1 wall, 2 any
+	double   ShapeAngle[MAX_SHAPES] = {};
+	double   ShapeThick[MAX_SHAPES] = {};
+	double   ShapeSeam[MAX_SHAPES] = {};      // 0 closed, 1 fully split
+	PalEntry ShapeColor[MAX_SHAPES] = {};
+	double   ShapeIntensity[MAX_SHAPES] = {};
+	// Lifetime, resolved at render rate so a seam opens smoothly rather than
+	// in 35Hz steps -- same reason the disturbances resolve their age there.
+	double   ShapeBirth[MAX_SHAPES] = {};
+	double   ShapeLife[MAX_SHAPES] = {};       // 0 = it never expires
+	double   ShapeGrow[MAX_SHAPES] = {};       // size added per second
+	double   ShapeSeamRate[MAX_SHAPES] = {};   // seam opened per second
+
+	double   ShapeSoft = 2.0;
+	double   ShapeHeightFade = 24.0;
+	double   ShapeReach = 0.0;
+	PalEntry ShapeUnder = 0xffff2610;
+
 	static const int MAX_BEAMS = 8;
 	int      BeamCount = 0;
 	DVector3 BeamStart[MAX_BEAMS];
