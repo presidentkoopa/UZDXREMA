@@ -18,6 +18,8 @@ anything else here.
 | [Glow wave](#8-glow-wave) | a glow's edge varies along a surface, not just up it | — |
 | [Per-fragment darkness](#9-per-fragment-darkness) | the darkness curve leaves the sector | — |
 | [Non-pausing menus](#10-non-pausing-menus) | a settings page can let the world run behind it | — |
+| [Fog slab](#11-fog-slab) | fog with a **top** — a layer of mist you stand in | — |
+| [Sweep band fill](#12-sweep-band-fill) | a band can carry a lattice, not just a wash | — |
 
 ---
 
@@ -430,6 +432,180 @@ freezing halfway down a chain.
 Opt-in per menu, and the cost is real: monsters keep moving and the player can
 be hurt while the page is open. That is the right trade for a lighting page and
 the wrong one for the save menu, which is why it is not a global.
+
+## 11. Fog slab
+
+Sector fog is a distance tint on **surfaces**: the further a wall is, the more
+it blends toward the fog colour. Nothing is simulated in the air. That is why
+it has no shape — no ceiling, no thickness, and no way to be brighter where a
+light passes through it. You cannot be knee deep in it, because it has no
+knees.
+
+This adds a horizontal slab of participating medium with a world-space top.
+
+```
+Level.SetFogSlab(topZ, density, softness, scatter, col)   // density 0 = off
+Level.SetFogWake(pos, radius, strength)
+Level.SetFogPickup(amount)
+Level.ClearFogSlab()
+```
+
+### Analytic, not raymarched
+
+`FogSlabAt()` in `main.fp` solves it in closed form. For a flat-topped slab the
+answer is exact without marching: find how much of the eye-to-fragment ray lay
+below the ceiling, and fog by that length.
+
+```glsl
+float dEye  = smoothstep(topZ + soft, topZ - soft, uCameraPos.y);
+float dFrag = smoothstep(topZ + soft, topZ - soft, fragPos.y);
+float travel = distance(eye, fragPos) * 0.5 * (dEye + dFrag);
+float amount = 1.0 - exp(-density * travel * 0.001);
+```
+
+No loop, no step count, no undersampling banding, and the cost is a handful of
+ALU. The `smoothstep` across the soft band is not decoration — a hard cut at
+the ceiling reads as a sheet of coloured glass lying across the room, and the
+fade is what turns it into a *surface* you can look down at.
+
+Averaging occupancy at the two ends is exact for a linear ramp and its error
+against a true integral through the smoothstep is far below what the eye
+resolves in fog.
+
+### Three terms that make it a substance rather than a filter
+
+**Pickup** mixes the fog toward the colour of the pixel behind it. Without it
+the slab is a flat colour laid over the scene: mist standing in front of a red
+glowing wall stays its own colour, which is wrong in a way that is instantly
+obvious even if you cannot name it. A true scattering integral would gather
+light along the ray; this gathers it from the one place it is already known —
+the fragment behind the fog, which carries the wall, its glow, and any sweep
+band crossing it. One `mix`, no extra sampling.
+
+**Scatter** brightens fog inside the flashlight cone, so the torch lights the
+mist it sweeps.
+
+**Wake** thins the slab inside a radius around a point that *lags* the player.
+The lag is the whole effect — the disturbance is where you were a moment ago,
+so walking drags a thinned channel behind you that closes as the point catches
+up. A wake pinned to the player is a hole you carry, not a trail. One point on
+a spring rather than a history buffer, because a trail that settles *is* a
+point that follows you slowly, and a ring buffer of positions would need a
+uniform array.
+
+### The beam had to be duplicated, and why
+
+The volumetric beam (§4) is a **postprocess** pass working in **view** space;
+its uniforms are not reachable from `main.fp`. Rather than plumb a second copy
+of the beam through the postprocess chain, the three values the scatter term
+needs — world position with length, world direction with `cos(inner)`, colour
+with `cos(outer)` — are handed to the fragment shader in the viewpoint block as
+`uFogBeamPos/Dir/Col`, filled from the same `FLevelLocals` fields the
+postprocess pass reads.
+
+### Where it is applied, and why that is the opposite of §9
+
+The slab runs **last, over everything**, in `main()` after `ApplyFadeColor`.
+
+That is deliberately the reverse of per-fragment darkness, which runs *before*
+the glow so emissive light survives being in a dark room. Fog is not darkness —
+it is a substance sitting *between* the eye and the surface, so it occludes
+whatever is behind it including the glow. A glowing floor seen through
+knee-deep mist should be a glow diffused by mist, not a glow with mist politely
+behind it.
+
+### Uniforms
+
+Seven `vec4` appended to `HWViewpointUniforms` after §9's, same alignment rule
+and same reasoning about `StreamData`: `uFogSlab`, `uFogSlabColor`,
+`uFogSlabWake`, `uFogBeamPos`, `uFogBeamDir`, `uFogBeamCol`, `uFogSlabExtra`.
+
+`uFogSlabExtra` carries wake strength and pickup. It has its own slot rather
+than being packed into a spare component of an existing one — the first attempt
+overloaded `uFogSlabColor.w`, which was already wake strength, and the two then
+could not be set independently. Worth stating because the temptation to reuse a
+spare `w` is exactly how that happens.
+
+Density 0 switches the whole thing off and the fragment shader returns
+immediately.
+
+GLES does not implement this, consistent with §2 and §8.
+
+## 12. Sweep band fill
+
+A sweep band (§3) knows two things about every pixel it covers: **how strongly**
+it covers it, and **where that pixel is**. It discarded the second and blended
+one flat colour weighted by the first, so a band could only ever be a wash.
+
+The observation that makes a pattern cheap: **every shape that defines a
+distance also implies two tangent coordinates**, and a pattern is a function of
+those two.
+
+| shape | distance (what makes the band) | pattern runs in |
+| --- | --- | --- |
+| bar E/W | `abs(x - ox)` | `z`, `y` |
+| bar N/S | `abs(z - oz)` | `x`, `y` |
+| rising | `y - oy` | `x`, `z` |
+| ring | `length(xz - o)` | arc length, `y` |
+| shell | `length(xyz - o)` | longitude, `y` |
+
+So one function draws a lattice standing across a corridor *and* a cage on an
+expanding cylinder, with no per-shape casing beyond picking the two axes.
+
+```
+Level.SetSweepFill(spacingU, spacingV, width, soft, col, gap)
+Level.SetSweepFillMotion(rotate, drift, major, majorBoost, jitter, flicker, grad, gradAxis)
+Level.SetSweepBandFill(index, fill)   // 0 none, 1 grid, 2 dots, 3 solid slab
+```
+
+### Two decisions worth stating
+
+**Spacing 0 in an axis means no lines in that axis.** That single rule collapses
+grid, slats and a lone tripwire into one mode with one number changed, which is
+why there is no enum entry for any of them. Fewer modes, more range.
+
+**Line width is in world units, not a fraction of the spacing.** A fractional
+width makes a lattice coarsen with distance and shimmer under motion. A world
+width holds its real size and antialiases against `fwidth`, so a line a hundred
+units away is one clean line rather than moiré.
+
+Arc length is used for ring and shell rather than raw angle, for the same
+reason: an angular grid spreads apart as the band expands, which is a fan
+rather than a cage.
+
+### Colour: the band is the field, the fill is the lines
+
+`gap` is how much of the **band's own colour** fills the space between lines.
+0 means only the lines are lit and the room shows through between them, which
+is what reads as actual lasers; 1 makes it a lit pane with structure in it —
+a completely different object. Negative inverts: lit gaps, dark lines, a grid
+of shadow.
+
+### Per band without costing a uniform
+
+Only the **mode** is per band, and it is packed into the draw mode's spare
+bits: `drawmode + 16 * fill` in `uSweepBands[i].w`, decoded with a mask and a
+shift.
+
+That component has form — it began as a bare on/off flag hardcoded to `1.0`,
+four bytes of nothing, and became the draw mode at no cost. Draw mode is 0–4
+and always will be, since it names the four things a band can do to a pixel,
+so the rest of the float was free.
+
+The **style** — spacing, width, softness, rotation, drift, jitter, flicker,
+gradient, major lines — is frame-global in `HWViewpointUniforms`. Per band
+would mean another `vec4[8]` in `StreamData`, and that buffer's size divides
+64KB into `MAX_STREAM_DATA` draws, so it would cost draw batching in every
+frame of the game to let band 3 have a different line width from band 4. In
+practice the limit barely bites: a train can still be a solid wall, then a
+lattice, then travelling darkness, because that is all mode.
+
+One trap this created and the fix for it: `SetSweepBandDraw` was only called
+when a band overrode its draw mode, and `SetSweepBand` seeds mode 1 into that
+component — so a band with a fill but no draw override would have had its fill
+silently dropped. The call site now fires when **either** is set.
+
+GLES does not implement this, consistent with §2, §8 and §11.
 
 ---
 

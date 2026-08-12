@@ -804,6 +804,24 @@ struct LevelLocals native
 	native clearscope void SetDarknessSpace(double distDepth, double distRange, double heightDepth, double heightRef, double heightRange);
 	native clearscope void ClearDarkness();
 
+	// [BB] Fog with a top -- a horizontal slab of mist with a world-space
+	// ceiling, so you can stand knee deep in it and look down at its surface.
+	// Density 0 = off. Scatter lets the flashlight cone light it.
+	// The wake is one lagging point that thins the mist where you just walked.
+	native clearscope void SetFogSlab(double topZ, double density, double softness, double scatter, color col);
+	native void SetFogWake(Vector3 pos, double radius, double strength);
+	native clearscope void SetFogPickup(double amount);
+	native clearscope void ClearFogSlab();
+
+	// [BB] The pattern drawn INSIDE a sweep band. Spacing 0 in an axis means
+	// no lines in that axis, so grid / slats / a single tripwire are one mode.
+	// The band's own colour is the field; this colour is the lines. Gap 0 =
+	// only the lines are lit and the room shows between them.
+	// Per band: 0 none, 1 grid, 2 dots, 3 solid slab.
+	native clearscope void SetSweepFill(double spacingU, double spacingV, double width, double soft, color col, double gap);
+	native clearscope void SetSweepFillMotion(double rotate, double drift, double major, double majorBoost, double jitter, double flicker, double grad, int gradAxis);
+	native clearscope void SetSweepBandFill(int index, int fill);
+
 	native String GetChecksum() const;
 
 	native void ChangeSky(TextureID sky1, TextureID sky2 );

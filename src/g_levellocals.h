@@ -991,6 +991,48 @@ public:
 	// What each band does to the pixels it covers: 1 add, 2 lift, 3 crush.
 	int SweepBandDraw[MAX_SWEEP_BANDS] = {};
 
+	// [BB] WHAT IS *INSIDE* A BAND.
+	//
+	// A band knows, for every pixel it covers, both how strongly it covers it
+	// AND where that pixel is in the world. It used to throw the second away
+	// and blend one flat colour weighted by the first -- so a band could only
+	// ever be a wash.
+	//
+	// But every shape that defines a distance also implies two TANGENT
+	// coordinates, and a pattern is just a function of those two. A bar
+	// sweeping a corridor has (height, across); a ring has (height, arc). So
+	// the same code that draws a lattice in a hallway draws a cage on an
+	// expanding cylinder, with no per-shape special casing beyond picking the
+	// two axes.
+	//
+	// PER BAND: only the fill MODE, packed into the draw mode's spare bits --
+	// see SetSweepBandDraw. That is what lets a train be a solid wall, then a
+	// grid, then a band of travelling darkness.
+	//
+	// SHARED: the style. Spacing, width, softness, rotation and the rest are
+	// frame-global, because putting them per band would mean another
+	// vec4[8] in StreamData -- and that buffer's size divides 64KB into
+	// MAX_STREAM_DATA draws, so it would cost draw batching in every frame of
+	// the game to let band 3 have a different line width from band 4.
+	int      SweepBandFill[MAX_SWEEP_BANDS] = {};
+	double   SweepFillSpacingU = 64;   // 0 = no lines in this axis
+	double   SweepFillSpacingV = 64;
+	double   SweepFillWidth = 3;       // world units, so it does not shimmer
+	double   SweepFillSoft = 1.5;      // hard laser vs glowing filament
+	double   SweepFillRotate = 0;      // degrees, in the band's own plane
+	double   SweepFillDrift = 0;       // pattern sliding as the band travels
+	double   SweepFillMajor = 0;       // every Nth line emphasised; 0 = off
+	double   SweepFillMajorBoost = 2;  // how much wider a major line is
+	double   SweepFillJitter = 0;      // emitters, not a texture
+	double   SweepFillFlicker = 0;     // individual lines dropping out
+	double   SweepFillGrad = 0;        // fade along one axis
+	int      SweepFillGradAxis = 0;    // 0 = along V (height), 1 = along U
+	double   SweepFillGap = 0;         // how much of the band colour fills the
+	                                   // gaps. 0 = only the lines are lit and
+	                                   // you see the room between them, which
+	                                   // is what reads as actual lasers.
+	PalEntry SweepFillColor = 0xFFFFFF;
+
 	// [BB] GLOW WAVE -- the missing axis.
 	//
 	// A glow already varies per pixel VERTICALLY: the fragment's distance
@@ -1048,6 +1090,42 @@ public:
 	double DarkHeightDepth = 0;     // how much darker below HeightRef
 	double DarkHeightRef = 0;       // world Z the pooling starts from
 	double DarkHeightRange = 256;
+
+	// [BB] FOG SLAB -- fog with a TOP.
+	//
+	// Sector fog is a distance tint on surfaces: the further a wall is, the
+	// more it blends toward the fog colour. Nothing is simulated in the air,
+	// which is why it has no shape -- no ceiling, no thickness you can stand
+	// in, and no way to be brighter where a light passes through it.
+	//
+	// This is a horizontal slab of participating medium with a world-space
+	// top. It is solved ANALYTICALLY rather than raymarched: for a flat-topped
+	// slab the answer is closed-form -- work out how much of the eye-to-pixel
+	// ray passed below the ceiling and fog by that length. No marching, no
+	// loop, exact.
+	//
+	// SCATTER is what makes it more than coloured haze. The flashlight cone is
+	// already described to the renderer (VolBeam* above), so fog inside that
+	// cone can be brightened without any extra tracing -- the mist lights up
+	// where the torch sweeps it.
+	//
+	// WAKE is a single point that lags behind the player on a spring. Inside
+	// its radius the slab is thinned and its top is disturbed, so walking
+	// leaves a trail that settles. One point rather than a history buffer,
+	// because a trail that fades IS a point that follows you slowly.
+	bool     FogSlabActive = false;
+	double   FogSlabTop = 0;        // world Z of the mist's surface
+	double   FogSlabDensity = 0;    // per 1000 units of travel below the top
+	double   FogSlabSoft = 24;      // how many units the top edge fades over
+	double   FogSlabScatter = 0;    // 0 = flat haze, 1 = torch lights it
+	PalEntry FogSlabColor = 0xFF3018;
+	double   FogSlabWakeStrength = 0;
+	DVector3 FogSlabWakePos;
+	double   FogSlabWakeRadius = 0;
+	// How much of the surface behind it the mist takes on. Without this the
+	// slab is a flat colour laid over the scene and reads as a filter rather
+	// than a substance -- mist in front of a red glowing wall should be red.
+	double   FogSlabPickup = 0;
 
 	// links to global game objects
 	TArray<TObjPtr<AActor *>> CorpseQueue;

@@ -589,10 +589,25 @@ public:
 
 	// What this band does to the pixels it covers: 1 add, 2 lift, 3 crush.
 	// Call after SetSweepBand, which writes the default.
-	void SetSweepBandDraw(int i, int drawmode)
+	//
+	// [BB] AND WHAT IS DRAWN INSIDE IT, PACKED INTO THE SAME FLOAT.
+	//
+	// drawmode is 0-4 and always will be -- it names the four things a band
+	// can do to a pixel. So the rest of this component is free, and the fill
+	// mode rides in it as drawmode + 16 * fill.
+	//
+	// This is the same trick this field already is: it began as a bare on/off
+	// flag hardcoded to 1.0, four bytes of nothing, and became the draw mode
+	// at no cost. Doing it again buys per-band fill without adding a
+	// vec4[8] to StreamData -- which would divide the 64KB stream buffer into
+	// fewer draws and cost batching in every frame of the game, permanently,
+	// so that band 3 could have a different pattern from band 4.
+	//
+	// Decode in the shader with a modulo and a divide. Keep fill under 16.
+	void SetSweepBandDraw(int i, int drawmode, int fill = 0)
 	{
 		if (i < 0 || i >= 8) return;
-		mStreamData.uSweepBands[i].W = (float)drawmode;
+		mStreamData.uSweepBands[i].W = (float)(drawmode + 16 * fill);
 	}
 
 	void SetSweepBand(int i, float radius, float thickness, float softness,

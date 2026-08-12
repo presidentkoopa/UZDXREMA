@@ -254,6 +254,21 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 			vec4 uDarkness;
 			vec4 uDarkness2;
 			vec4 uDarkness3;
+
+			// [BB] Fog slab -- fog with a top.
+			vec4 uFogSlab;
+			vec4 uFogSlabColor;
+			vec4 uFogSlabWake;
+			vec4 uFogBeamPos;
+			vec4 uFogBeamDir;
+			vec4 uFogBeamCol;
+			vec4 uFogSlabExtra;
+
+			// [BB] Sweep fill -- the pattern inside a band.
+			vec4 uSweepFill;
+			vec4 uSweepFill2;
+			vec4 uSweepFill3;
+			vec4 uSweepFillCol;
 		};
 
 		uniform int uTextureMode;

@@ -217,6 +217,21 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 			(float)Level->GlowWaveOrigin.X, (float)Level->GlowWaveOrigin.Z,
 			(float)Level->GlowWaveOrigin.Y, (float)Level->GlowWaveSeed };
 
+		// [BB] Sweep fill -- the pattern inside a band. Frame-global style;
+		// only the mode is per band, packed into the draw mode.
+		VPUniforms.mSweepFill = {
+			(float)Level->SweepFillSpacingU, (float)Level->SweepFillSpacingV,
+			(float)Level->SweepFillWidth,    (float)Level->SweepFillSoft };
+		VPUniforms.mSweepFill2 = {
+			(float)Level->SweepFillRotate,   (float)Level->SweepFillDrift,
+			(float)Level->SweepFillMajor,    (float)Level->SweepFillJitter };
+		VPUniforms.mSweepFill3 = {
+			(float)Level->SweepFillGrad,     (float)Level->SweepFillGradAxis,
+			(float)Level->SweepFillFlicker,  (float)Level->SweepFillMajorBoost };
+		VPUniforms.mSweepFillCol = {
+			Level->SweepFillColor.r / 255.f, Level->SweepFillColor.g / 255.f,
+			Level->SweepFillColor.b / 255.f, (float)Level->SweepFillGap };
+
 		// [BB] Darkness. Frame-global for the same reason: the curve and its
 		// gains are the same everywhere, and only the FRAGMENT it is asked
 		// about differs.
@@ -229,6 +244,51 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 		VPUniforms.mDarkness3 = {
 			(float)Level->DarkHeightDepth, (float)Level->DarkHeightRef,
 			(float)Level->DarkHeightRange, 0.0f };
+
+		// [BB] Fog slab. Doom's Z is the shader's Y, the same swizzle the
+		// sweep origin and the wave origin use -- get it wrong and the mist
+		// hangs against a wall instead of lying on the floor.
+		if (Level->FogSlabActive && Level->FogSlabDensity > 0.0)
+		{
+			VPUniforms.mFogSlab = {
+				(float)Level->FogSlabTop, (float)Level->FogSlabDensity,
+				(float)Level->FogSlabSoft, (float)Level->FogSlabScatter };
+			VPUniforms.mFogSlabColor = {
+				Level->FogSlabColor.r / 255.f, Level->FogSlabColor.g / 255.f,
+				Level->FogSlabColor.b / 255.f, (float)Level->FogSlabWakeStrength };
+			VPUniforms.mFogSlabWake = {
+				(float)Level->FogSlabWakePos.X, (float)Level->FogSlabWakePos.Z,
+				(float)Level->FogSlabWakePos.Y, (float)Level->FogSlabWakeRadius };
+			VPUniforms.mFogSlabExtra = {
+				(float)Level->FogSlabWakeStrength, (float)Level->FogSlabPickup,
+				0.0f, 0.0f };
+
+			// The torch cone in WORLD space, so the mist can be lit by it.
+			// The volumetric beam pass gets its own copy in VIEW space and
+			// cannot share -- see hw_viewpointuniforms.h.
+			if (Level->VolBeamActive)
+			{
+				VPUniforms.mFogBeamPos = {
+					(float)Level->VolBeamPos.X, (float)Level->VolBeamPos.Z,
+					(float)Level->VolBeamPos.Y, (float)Level->VolBeamLength };
+				VPUniforms.mFogBeamDir = {
+					(float)Level->VolBeamDir.X, (float)Level->VolBeamDir.Z,
+					(float)Level->VolBeamDir.Y,
+					(float)cos(Level->VolBeamInner * M_PI / 180.0) };
+				VPUniforms.mFogBeamCol = {
+					Level->VolBeamColor.r / 255.f, Level->VolBeamColor.g / 255.f,
+					Level->VolBeamColor.b / 255.f,
+					(float)cos(Level->VolBeamOuter * M_PI / 180.0) };
+			}
+			else
+			{
+				VPUniforms.mFogBeamPos = { 0.f, 0.f, 0.f, 0.f };
+			}
+		}
+		else
+		{
+			VPUniforms.mFogSlab = { 0.f, 0.f, 24.f, 0.f };
+		}
 	}
 	mClipper->SetViewpoint(Viewpoint);
 	vClipper->SetViewpoint(Viewpoint);
@@ -893,8 +953,16 @@ void HWDrawInfo::RenderScene(FRenderState &state)
 			// Same swizzle as the shared origin above: Doom's Z is the
 			// shader's Y. A band left at mode 0 falls back to the shared
 			// origin, which SetSweepOrigin already seeded into all eight.
-			if (Level->SweepBandDraw[i] > 0)
-				state.SetSweepBandDraw(i, Level->SweepBandDraw[i]);
+			// A FILL WITH NO DRAW OVERRIDE STILL HAS TO BE WRITTEN.
+			// SetSweepBand seeds mode 1 into this component, so leaving
+			// the call out when SweepBandDraw is 0 would silently drop the
+			// fill for every band that never overrode its draw mode --
+			// which is most of them.
+			if (Level->SweepBandDraw[i] > 0 || Level->SweepBandFill[i] > 0)
+			{
+				int dm = Level->SweepBandDraw[i] > 0 ? Level->SweepBandDraw[i] : 1;
+				state.SetSweepBandDraw(i, dm, Level->SweepBandFill[i]);
+			}
 
 			if (Level->SweepBandMode[i] > 0)
 			{

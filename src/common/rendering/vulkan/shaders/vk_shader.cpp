@@ -205,6 +205,21 @@ static const char *shaderBindings = R"(
 		vec4 uDarkness;
 		vec4 uDarkness2;
 		vec4 uDarkness3;
+
+		// [BB] Fog slab -- fog with a top.
+		vec4 uFogSlab;
+		vec4 uFogSlabColor;
+		vec4 uFogSlabWake;
+		vec4 uFogBeamPos;
+		vec4 uFogBeamDir;
+		vec4 uFogBeamCol;
+		vec4 uFogSlabExtra;
+
+		// [BB] Sweep fill -- the pattern inside a band.
+		vec4 uSweepFill;
+		vec4 uSweepFill2;
+		vec4 uSweepFill3;
+		vec4 uSweepFillCol;
 	};
 
 	layout(set = 1, binding = 0, std140) uniform ViewpointUBO {
@@ -230,6 +245,17 @@ static const char *shaderBindings = R"(
 	#define uDarkness viewpoints[HW_VIEWPOINT_INDEX].uDarkness
 	#define uDarkness2 viewpoints[HW_VIEWPOINT_INDEX].uDarkness2
 	#define uDarkness3 viewpoints[HW_VIEWPOINT_INDEX].uDarkness3
+	#define uFogSlab viewpoints[HW_VIEWPOINT_INDEX].uFogSlab
+	#define uFogSlabColor viewpoints[HW_VIEWPOINT_INDEX].uFogSlabColor
+	#define uFogSlabWake viewpoints[HW_VIEWPOINT_INDEX].uFogSlabWake
+	#define uFogBeamPos viewpoints[HW_VIEWPOINT_INDEX].uFogBeamPos
+	#define uFogBeamDir viewpoints[HW_VIEWPOINT_INDEX].uFogBeamDir
+	#define uFogBeamCol viewpoints[HW_VIEWPOINT_INDEX].uFogBeamCol
+	#define uFogSlabExtra viewpoints[HW_VIEWPOINT_INDEX].uFogSlabExtra
+	#define uSweepFill viewpoints[HW_VIEWPOINT_INDEX].uSweepFill
+	#define uSweepFill2 viewpoints[HW_VIEWPOINT_INDEX].uSweepFill2
+	#define uSweepFill3 viewpoints[HW_VIEWPOINT_INDEX].uSweepFill3
+	#define uSweepFillCol viewpoints[HW_VIEWPOINT_INDEX].uSweepFillCol
 
 	layout(set = 1, binding = 1, std140) uniform MatricesUBO {
 		mat4 ModelMatrix;

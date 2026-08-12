@@ -3674,6 +3674,154 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetDarknessSpace, SetDarknessSpace)
 	return 0;
 }
 
+// [BB] FOG WITH A TOP.
+//
+// Sector fog tints surfaces by distance and simulates nothing in the air, so
+// it can never have a ceiling, a thickness you stand in, or a bright patch
+// where a torch sweeps it. This is a horizontal slab of participating medium
+// with a world-space top, solved analytically in the fragment shader.
+//
+// Density 0 switches it off entirely.
+static void SetFogSlab(FLevelLocals *self, double topZ, double density,
+	double softness, double scatter, int color)
+{
+	self->FogSlabActive = density > 0.0;
+	self->FogSlabTop = topZ;
+	self->FogSlabDensity = density;
+	self->FogSlabSoft = softness;
+	self->FogSlabScatter = scatter;
+	self->FogSlabColor = (PalEntry)color;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogSlab, SetFogSlab)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(topZ); PARAM_FLOAT(density);
+	PARAM_FLOAT(softness); PARAM_FLOAT(scatter);
+	PARAM_COLOR(color);
+	SetFogSlab(self, topZ, density, softness, scatter, color);
+	return 0;
+}
+
+// The trail you kick up walking through it. ONE point that lags behind the
+// player rather than a history buffer -- a trail that settles IS a point that
+// follows you slowly, and the spring lives in script where it can be tuned.
+static void SetFogWake(FLevelLocals *self, double x, double y, double z,
+	double radius, double strength)
+{
+	self->FogSlabWakePos = DVector3(x, y, z);
+	self->FogSlabWakeRadius = radius;
+	self->FogSlabWakeStrength = strength;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogWake, SetFogWake)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(x); PARAM_FLOAT(y); PARAM_FLOAT(z);
+	PARAM_FLOAT(radius); PARAM_FLOAT(strength);
+	SetFogWake(self, x, y, z, radius, strength);
+	return 0;
+}
+
+// How much of the surface behind it the mist takes on. This is what makes the
+// slab read as a substance rather than a coloured filter over the scene.
+static void SetFogPickup(FLevelLocals *self, double amount)
+{
+	self->FogSlabPickup = amount;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogPickup, SetFogPickup)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(amount);
+	SetFogPickup(self, amount);
+	return 0;
+}
+
+// [BB] THE PATTERN INSIDE A BAND.
+//
+// Style is frame-global; only the MODE is per band. Putting the style per band
+// would mean another vec4[8] in StreamData, and that buffer's size divides
+// 64KB into MAX_STREAM_DATA draws -- so it would cost draw batching in every
+// frame of the game to let band 3 have a different line width from band 4.
+//
+// Spacing 0 in an axis means no lines in that axis, which is what collapses
+// grid, slats and a single tripwire into one mode.
+static void SetSweepFill(FLevelLocals *self, double spacingU, double spacingV,
+	double width, double soft, int color, double gap)
+{
+	self->SweepFillSpacingU = spacingU;
+	self->SweepFillSpacingV = spacingV;
+	self->SweepFillWidth = width;
+	self->SweepFillSoft = soft;
+	self->SweepFillColor = (PalEntry)color;
+	self->SweepFillGap = gap;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetSweepFill, SetSweepFill)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(spacingU); PARAM_FLOAT(spacingV);
+	PARAM_FLOAT(width); PARAM_FLOAT(soft);
+	PARAM_COLOR(color); PARAM_FLOAT(gap);
+	SetSweepFill(self, spacingU, spacingV, width, soft, color, gap);
+	return 0;
+}
+
+static void SetSweepFillMotion(FLevelLocals *self, double rotate, double drift,
+	double major, double majorBoost, double jitter, double flicker,
+	double grad, int gradAxis)
+{
+	self->SweepFillRotate = rotate;
+	self->SweepFillDrift = drift;
+	self->SweepFillMajor = major;
+	self->SweepFillMajorBoost = majorBoost;
+	self->SweepFillJitter = jitter;
+	self->SweepFillFlicker = flicker;
+	self->SweepFillGrad = grad;
+	self->SweepFillGradAxis = gradAxis;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetSweepFillMotion, SetSweepFillMotion)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(rotate); PARAM_FLOAT(drift);
+	PARAM_FLOAT(major); PARAM_FLOAT(majorBoost);
+	PARAM_FLOAT(jitter); PARAM_FLOAT(flicker);
+	PARAM_FLOAT(grad); PARAM_INT(gradAxis);
+	SetSweepFillMotion(self, rotate, drift, major, majorBoost, jitter, flicker, grad, gradAxis);
+	return 0;
+}
+
+// Per band: 0 none, 1 grid, 2 dots (where the axes cross), 3 solid slab.
+static void SetSweepBandFill(FLevelLocals *self, int index, int fill)
+{
+	if (index < 0 || index >= FLevelLocals::MAX_SWEEP_BANDS) return;
+	self->SweepBandFill[index] = fill;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetSweepBandFill, SetSweepBandFill)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(index); PARAM_INT(fill);
+	SetSweepBandFill(self, index, fill);
+	return 0;
+}
+
+static void ClearFogSlab(FLevelLocals *self)
+{
+	self->FogSlabActive = false;
+	self->FogSlabDensity = 0;
+	self->FogSlabWakeStrength = 0;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearFogSlab, ClearFogSlab)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	ClearFogSlab(self);
+	return 0;
+}
+
 static void ClearDarkness(FLevelLocals *self)
 {
 	self->DarkMode = 0;

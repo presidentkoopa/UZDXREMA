@@ -65,6 +65,58 @@ struct HWViewpointUniforms
 	FVector4 mDarkness2 = { 0.f, 0.f, 2048.f, 0.f };
 	FVector4 mDarkness3 = { 0.f, 0.f, 256.f, 0.f };
 
+	// [BB] Fog slab -- fog with a top. Same packing discipline as above.
+	//
+	//   mFogSlab       top Z, density, soft edge, scatter
+	//   mFogSlabColor  r, g, b, wake strength
+	//   mFogSlabWake   x, y, z, wake radius
+	//
+	// Density 0 means off and the fragment shader falls straight through.
+	FVector4 mFogSlab = { 0.f, 0.f, 24.f, 0.f };
+	FVector4 mFogSlabColor = { 1.f, 0.19f, 0.09f, 0.f };
+	FVector4 mFogSlabWake = { 0.f, 0.f, 0.f, 0.f };
+
+	// [BB] The flashlight cone, in WORLD space, so the fog slab can be lit by
+	// it. The volumetric beam itself is a postprocess pass working in VIEW
+	// space, and its uniforms are not reachable from main.fp -- so rather than
+	// plumb a second copy of the beam through the postprocess chain, the three
+	// numbers the scatter term needs are handed to the fragment shader here.
+	//
+	//   mFogBeamPos  xyz world position, w beam length (0 = no beam)
+	//   mFogBeamDir  xyz world direction, w cos(inner angle)
+	//   mFogBeamCol  rgb colour, w cos(outer angle)
+	FVector4 mFogBeamPos = { 0.f, 0.f, 0.f, 0.f };
+	FVector4 mFogBeamDir = { 0.f, 0.f, 1.f, 1.f };
+	FVector4 mFogBeamCol = { 1.f, 1.f, 1.f, 1.f };
+
+	// [BB] Sweep fill -- the pattern drawn INSIDE a band.
+	//
+	//   mSweepFill    spacing U, spacing V, line width, line softness
+	//   mSweepFill2   rotation (deg), drift, major every N, jitter
+	//   mSweepFill3   gradient amount, gradient axis, flicker, major boost
+	//   mSweepFillCol rgb line colour, w gap fill amount
+	//
+	// The band's OWN colour is the field; this colour is the lines. Gap 0
+	// means only the lines are lit and the room shows between them, which is
+	// what reads as lasers rather than as a lit pane.
+	//
+	// Shared rather than per band, deliberately -- per band would mean another
+	// vec4[8] in StreamData and a permanent draw-batching cost. Only the fill
+	// MODE is per band, packed into the draw mode's spare bits.
+	FVector4 mSweepFill = { 64.f, 64.f, 3.f, 1.5f };
+	FVector4 mSweepFill2 = { 0.f, 0.f, 0.f, 0.f };
+	FVector4 mSweepFill3 = { 0.f, 0.f, 0.f, 2.f };
+	FVector4 mSweepFillCol = { 1.f, 1.f, 1.f, 0.f };
+
+	// [BB] mFogSlabExtra: x wake strength, y glow pickup, zw spare.
+	//
+	// Pickup is the one that makes the slab read as a SUBSTANCE rather than a
+	// filter: mist standing in front of a red glowing wall should be red.
+	// It has its own slot rather than being packed into a spare component of
+	// something else, because the first attempt overloaded the wake strength
+	// and the two then could not be set independently.
+	FVector4 mFogSlabExtra = { 0.f, 0.f, 0.f, 0.f };
+
 	void CalcDependencies()
 	{
 		mNormalViewMatrix.computeNormalMatrix(mViewMatrix);

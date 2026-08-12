@@ -911,6 +911,220 @@ float DarknessAt(float lightLevel)
 	return clamp(mul, 0.0, 1.0);
 }
 
+//
+// [BB] FOG WITH A TOP.
+//
+// Sector fog is a distance tint on SURFACES -- the further a wall is, the more
+// it blends toward the fog colour. Nothing is simulated in the air, which is
+// why it has no shape: no ceiling, no thickness you can stand in, and no way
+// to be brighter where a light passes through it. You cannot be knee deep in
+// it, because it has no knees.
+//
+// This is a horizontal slab of participating medium with a world-space top,
+// and it is solved ANALYTICALLY rather than raymarched. For a flat-topped slab
+// the answer is closed form: find how much of the eye-to-fragment ray lay
+// below the ceiling, and fog by that length. No loop, no step count, no
+// undersampling artefacts, and the cost is a handful of ALU.
+//
+//   uFogSlab       x top Z, y density per 1000 units, z soft edge, w scatter
+//   uFogSlabColor  rgb, w wake strength
+//   uFogSlabWake   xyz wake point, w radius
+//
+// THE SOFT TOP IS NOT DECORATION. A hard cut at the ceiling reads as a plane
+// of coloured glass lying across the room. Fading the density over the last
+// few units turns it into a surface you can look down at, which is the whole
+// effect being asked for.
+//
+// SCATTER uses the flashlight cone the renderer already knows about, so mist
+// inside the beam brightens without a second trace. That is the difference
+// between fog you are standing in and fog you are standing in WITH A TORCH.
+//
+// Returns rgb = the fog's own colour for this pixel, a = how much of it.
+//
+vec4 FogSlabAt(vec3 fragPos)
+{
+	if (uFogSlab.y <= 0.0) return vec4(0.0);
+
+	vec3  eye  = uCameraPos.xyz;
+	float topZ = uFogSlab.x;
+	float soft = max(uFogSlab.z, 0.001);
+
+	// Depth below the top, softened at the boundary, at each end of the ray.
+	// smoothstep across the soft band is what gives the mist a surface rather
+	// than an edge.
+	float dEye  = smoothstep(topZ + soft, topZ - soft, eye.y);
+	float dFrag = smoothstep(topZ + soft, topZ - soft, fragPos.y);
+
+	// Average occupancy along the segment. Exact for a linear ramp, and the
+	// error against a true integral through the smoothstep is far below what
+	// the eye can see in fog.
+	float occupancy = 0.5 * (dEye + dFrag);
+	if (occupancy <= 0.0) return vec4(0.0);
+
+	float travel = distance(eye, fragPos) * occupancy;
+
+	// WAKE. Inside the radius the mist has been disturbed and is thinner --
+	// this is the trail you kick up walking through it. One point that lags
+	// behind the player, because a trail that settles IS a point that follows
+	// you slowly.
+	if (uFogSlabColor.w > 0.0 && uFogSlabWake.w > 0.0)
+	{
+		float d = distance(fragPos.xz, uFogSlabWake.xz);
+		float w = 1.0 - smoothstep(0.0, uFogSlabWake.w, d);
+		travel *= 1.0 - uFogSlabColor.w * w;
+	}
+
+	float amount = 1.0 - exp(-uFogSlab.y * travel * 0.001);
+	amount = clamp(amount, 0.0, 1.0);
+
+	vec3 col = uFogSlabColor.rgb;
+
+	// SCATTER off the torch. Cheap: how far inside the beam cone this
+	// fragment sits, using the cone the volumetric beam already describes.
+	if (uFogSlab.w > 0.0 && uFogBeamPos.w > 0.0)
+	{
+		vec3 toFrag = fragPos - uFogBeamPos.xyz;
+		float len = length(toFrag);
+		if (len > 0.001)
+		{
+			float cosA = dot(toFrag / len, uFogBeamDir.xyz);
+			float lit = smoothstep(uFogBeamCol.w, uFogBeamDir.w, cosA);
+			lit *= 1.0 - clamp(len / uFogBeamPos.w, 0.0, 1.0);
+			col += uFogBeamCol.rgb * lit * uFogSlab.w;
+		}
+	}
+
+	return vec4(col, amount);
+}
+
+//
+// [BB] WHAT IS DRAWN INSIDE A BAND.
+//
+// A band knows two things about every pixel it covers: how strongly it covers
+// it, and where that pixel is in the world. It used to discard the second and
+// blend one flat colour weighted by the first, so a band could only ever be a
+// wash.
+//
+// EVERY SHAPE THAT DEFINES A DISTANCE ALSO IMPLIES TWO TANGENT COORDINATES,
+// and a pattern is a function of those two:
+//
+//   bar east/west   distance abs(x-ox)     pattern runs in (z, y)
+//   bar north/south distance abs(z-oz)     pattern runs in (x, y)
+//   rising          distance  y-oy         pattern runs in (x, z)
+//   ring            distance length(xz-o)  pattern runs in (arc, y)
+//   shell           distance length(xyz-o) pattern runs in (longitude, y)
+//
+// So one function draws a lattice standing in a corridor AND a cage on an
+// expanding cylinder, with no per-shape casing beyond picking the two axes.
+//
+// SPACING 0 IN AN AXIS MEANS NO LINES IN THAT AXIS. That single rule collapses
+// grid, slats and a lone tripwire into one mode with one number changed, which
+// is why there is no separate enum for any of them.
+//
+// LINE WIDTH IS IN WORLD UNITS, not a fraction of the spacing. A fractional
+// width makes the lattice coarsen with distance and shimmer under motion; a
+// world width holds its real size and antialiases cleanly against fwidth.
+//
+//   uSweepFill     spacing U, spacing V, line width, softness
+//   uSweepFill2    rotation (deg), drift, major every N, jitter
+//   uSweepFill3    gradient amount, gradient axis, flicker, major boost
+//   uSweepFillCol  rgb line colour, w gap fill
+//
+// Returns line coverage 0..1.
+//
+float SweepLineAxis(float coord, float spacing, float width, float soft, float t)
+{
+	if (spacing <= 0.0) return 0.0;
+
+	float idx = floor(coord / spacing + 0.5);
+
+	// JITTER -- push each line off the lattice by a stable hash of its own
+	// index, so it reads as a row of emitters rather than a printed texture.
+	if (uSweepFill2.w > 0.0)
+	{
+		float h = fract(sin(idx * 78.233) * 43758.5453);
+		coord += (h - 0.5) * spacing * uSweepFill2.w;
+		idx = floor(coord / spacing + 0.5);
+	}
+
+	// FLICKER -- individual lines dropping out and returning. Instantly reads
+	// as failing equipment, and it is per LINE rather than per band, which is
+	// what stops it looking like the whole thing is blinking.
+	if (uSweepFill3.z > 0.0)
+	{
+		float h = fract(sin(idx * 12.9898 + floor(t * 8.0) * 3.717) * 43758.5453);
+		if (h < uSweepFill3.z) return 0.0;
+	}
+
+	// MAJOR LINES -- every Nth one wider. Graph-paper structure for one mod.
+	float w = width;
+	if (uSweepFill2.z >= 2.0 && mod(abs(idx), uSweepFill2.z) < 0.5)
+		w *= max(uSweepFill3.w, 1.0);
+
+	// Distance to the nearest line, in world units.
+	float d = abs(coord - idx * spacing);
+
+	// Antialias against the screen-space derivative as well as the authored
+	// softness, so a line a hundred units away is still one clean line rather
+	// than a moire.
+	float aa = max(fwidth(coord), 0.0001);
+	return 1.0 - smoothstep(w, w + soft + aa, d);
+}
+
+float SweepFillAt(int fill, int shape, vec3 origin)
+{
+	if (fill <= 0) return 1.0;   // no fill: the band is a wash, as before
+
+	// Pick the band's two tangent axes.
+	vec2 uv;
+	if (shape == 2)       uv = vec2(pixelpos.z, pixelpos.y);
+	else if (shape == 3)  uv = vec2(pixelpos.x, pixelpos.y);
+	else if (shape == 5)  uv = vec2(pixelpos.x, pixelpos.z);
+	else
+	{
+		// Ring and shell: arc length around the axis, and height. Arc length
+		// rather than raw angle so the spacing stays constant in world units
+		// as the band expands -- an angular grid would spread apart as it
+		// grew, which is not a cage, it is a fan.
+		vec2 rel = pixelpos.xz - origin.xz;
+		float r = max(length(rel), 0.001);
+		uv = vec2(atan(rel.y, rel.x) * r, pixelpos.y);
+	}
+
+	// DRIFT -- the pattern sliding within the band as the band travels. This
+	// is what makes it read as projected rather than painted onto the band.
+	float t = timer;
+	uv.x += t * uSweepFill2.y;
+
+	// ROTATION in the band's own plane. Animate it and you get a lattice
+	// turning inside a wall of light that is itself moving down a corridor.
+	if (uSweepFill2.x != 0.0)
+	{
+		float a = radians(uSweepFill2.x);
+		float cs = cos(a), sn = sin(a);
+		uv = vec2(uv.x * cs - uv.y * sn, uv.x * sn + uv.y * cs);
+	}
+
+	float lu = SweepLineAxis(uv.x, uSweepFill.x, uSweepFill.z, uSweepFill.w, t);
+	float lv = SweepLineAxis(uv.y, uSweepFill.y, uSweepFill.z, uSweepFill.w, t);
+	float cov = max(lu, lv);
+
+	// DOTS -- fill 2 keeps only where the two axes CROSS, so the lattice
+	// becomes a field of points. Same maths, one operator changed.
+	if (fill == 2) cov = min(lu, lv);
+
+	// GRADIENT along one axis, so the lattice can be hot at floor level and
+	// fade out overhead. Cheap, and it stops a grid looking like a decal.
+	if (uSweepFill3.x > 0.0)
+	{
+		float g = (uSweepFill3.y > 0.5) ? uv.x : uv.y;
+		g = clamp(g * 0.002 + 0.5, 0.0, 1.0);
+		cov *= mix(1.0, g, uSweepFill3.x);
+	}
+
+	return clamp(cov, 0.0, 1.0);
+}
+
 vec4 getLightColor(Material material, float fogdist, float fogfactor)
 {
 	vec4 color = vColor;
@@ -1150,7 +1364,16 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 		{
 			if (sb >= uSweepCount) break;
 			vec4 sband = uSweepBands[sb];
-			int bmode = int(sband.w);
+
+			// [BB] The draw mode and the FILL mode share this component --
+			// drawmode + 16 * fill. See SetSweepBandDraw for why: draw mode
+			// is 0-4 and always will be, so the rest of the float was free,
+			// and a vec4[8] of per-band fill in StreamData would have cost
+			// draw batching in every frame of the game.
+			int packed = int(sband.w);
+			int bmode = packed & 15;
+			int bfill = packed >> 4;
+
 			if (bmode <= 0) continue;
 			// Recolour bands already had their say, above the glow.
 			if (bmode == 4) continue;
@@ -1158,6 +1381,30 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 			float satten = SweepBandAttenAt(sb);
 			if (satten <= 0.0) continue;
 			vec4 scol = uSweepColors[sb];
+
+			// WHAT IS INSIDE THE BAND.
+			//
+			// The band's own colour is the FIELD and the fill colour is the
+			// LINES. Gap 0 means only the lines are lit and the room shows
+			// through between them, which is what reads as actual lasers --
+			// turn it up and it becomes a lit pane with structure in it,
+			// which is a completely different object.
+			//
+			// A negative gap inverts: lit gaps, dark lines. A grid of shadow.
+			if (bfill > 0)
+			{
+				float cov = SweepFillAt(bfill, int(uSweepBandOrigin[sb].w), uSweepBandOrigin[sb].xyz);
+
+				// Fill 3 is SOLID -- the band ignores its own falloff and
+				// becomes a flat slab of light with hard edges. A wall
+				// rather than a glow, and the only fill that wants no lines.
+				if (bfill == 3) { cov = 1.0; satten = satten > 0.0 ? 1.0 : 0.0; }
+
+				float gap = uSweepFillCol.w;
+				scol.rgb = mix(scol.rgb * max(gap, 0.0), uSweepFillCol.rgb, cov);
+				if (gap < 0.0) scol.rgb = mix(uSweepFillCol.rgb, scol.rgb * (-gap), cov);
+				satten *= max(cov, max(gap, 0.0));
+			}
 
 			// The wake. A band is symmetric until uSweepTrail says otherwise,
 			// and then it is simply WIDER on the side it came from -- one
@@ -1375,6 +1622,36 @@ void main()
 		}
 #endif
 		frag = ApplyFadeColor(frag);
+
+		// [BB] THE FOG SLAB GOES LAST, AND OVER EVERYTHING.
+		//
+		// This is the opposite placement to the darkness term, which runs
+		// BEFORE the glow so that emissive light survives being in a dark
+		// room. Fog is not darkness -- it is a substance sitting BETWEEN the
+		// eye and the surface, so it occludes whatever is behind it including
+		// the glow. A glowing floor seen through knee-deep mist should be a
+		// glow diffused by mist, not a glow with mist politely behind it.
+		vec4 slab = FogSlabAt(pixelpos.xyz);
+		if (slab.a > 0.0)
+		{
+			// [BB] THE MIST PICKS UP WHAT IS BEHIND IT.
+			//
+			// Without this the slab is a flat colour laid over the scene, and
+			// it reads as a filter rather than as a substance: mist standing
+			// in front of a red glowing wall stays its own colour, which is
+			// wrong in a way that is instantly obvious even if you cannot
+			// name it. Real mist near a coloured light IS that colour.
+			//
+			// A true scattering integral would gather light along the ray.
+			// This gathers it from the one place it is already known -- the
+			// pixel behind the fog, which is the wall, its glow, any sweep
+			// band crossing it, everything. So a red wall glow bleeds into
+			// the mist in front of it for one mix, no extra sampling.
+			//
+			// At pickup 0 the fog keeps its own colour exactly as before.
+			vec3 fogCol = mix(slab.rgb, slab.rgb * (0.35 + 0.65 * frag.rgb), uFogSlabExtra.y);
+			frag.rgb = mix(frag.rgb, fogCol, slab.a);
+		}
 	}
 	else // simple 2D (uses the fog color to add a color overlay)
 	{
