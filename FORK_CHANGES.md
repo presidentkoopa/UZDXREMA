@@ -21,6 +21,12 @@ anything else here.
 | [Fog slab](#11-fog-slab) | fog with a **top** — a layer of mist you stand in | — |
 | [Sweep band fill](#12-sweep-band-fill) | a band can carry a lattice, not just a wash | — |
 | [Beams](#13-beams) | segment lasers lit per pixel — continuous, and they light the room | — |
+| [The fog slab, shaped](#14-the-fog-slab-shaped) | a bottom edge, a vertical hold, and tornadoes | — |
+| [Reactive fog](#15-reactive-fog) | one disturbance primitive; mist that banks, reacts and sprouts | — |
+| [The heatmap](#16-the-heatmap) | the floor accumulates where the fighting happened | — |
+| [Selective desaturation](#17-selective-desaturation) | a grey world that still has blood in it | — |
+| [Two bugs worth recording](#18-two-bugs-worth-recording) | the volumetric cone, and the fourth uniform list | — |
+| [Direct model frame addressing](#19-direct-model-frame-addressing-on-psprites) | a HUD model's frame stops going through the sprite, and the 29-frame ceiling goes with it | — |
 
 ---
 
@@ -793,7 +799,7 @@ GLES does not implement this, consistent with §2, §8, §11, §12 and §13.
 
 ---
 
-## 15. Direct model frame addressing on psprites
+## 19. Direct model frame addressing on psprites
 
 A HUD weapon model gets its frame through the *sprite*. `psp->Frame` is a
 sprite letter index; MODELDEF's `FrameIndex` maps that letter to a model
@@ -907,6 +913,201 @@ already ships 3D weapons.
 Read it off `GetDefaultByType`, never off a live actor: `EnsureModelData`
 sets it on the *instance* as a side effect of `A_ChangeModel`, so an instance
 read reports true for anything already swapped.
+
+---
+
+## 15. Reactive fog
+
+**A wake, a ripple, an ignition, fog draining from a point and a monster
+shouldering mist aside are the same function** — a point, a radius, an age, a
+strength and a sign. They differ only in whether the radius grows with age, and
+whether the result subtracts density, adds it, or adds light.
+
+So there is one array of eight slots (`mFogDisturbA/B`, `Level.FogDisturb`)
+rather than five features, and everything reactive built on it afterwards is a
+script call with no engine change at all.
+
+| mode | shape | what it does |
+|---|---|---|
+| 0 `DISC` | fixed radius | thins the mist — wakes, and actor displacers |
+| 1 `RIPPLE` | ring at `r = age × speed` | a wave travelling out, crest and trough |
+| 2 `IGNITE` | expanding sphere | adds **light**, not density — works in clear air |
+| 3 `GOUT` | expanding disc | adds mist — a vent, a burst |
+
+The ring recycles the **oldest** slot rather than refusing a ninth. Refusing
+makes the ninth gunshot of a firefight silently do nothing, which is the exact
+moment the effect exists for.
+
+Age is resolved at **render rate**, not in script. A ring expanding in 35Hz
+steps is a visible staircase. Strength decays over the slot's life, so nothing
+is freed on a schedule — an expired slot is one whose strength reached zero.
+
+### Density stopped being one number
+
+`mFogNoise`. Uniform density was the single biggest tell that this was a filter
+rather than a substance: real mist banks, thick in corners and thin across the
+open. One noise sample scales it, and drifting the field makes the banks travel
+with nothing animated.
+
+Sampled at the **midpoint** of the eye-to-fragment segment, not at the fragment.
+The fog for a pixel is an integral along that whole line; sampling the far end
+pins the banks to the walls, so you walk through one and watch it stay put.
+
+### Tendrils, as a lattice
+
+`mFogTendril`. Wisps rising off the surface — one per cell of a `fract()` grid
+rather than one object each, so four hundred cost what one costs. It is the
+tornado's own maths at small scale, and the same trick §12's lattice uses.
+
+Each tendril's hashed offset is **bounded so it cannot leave its own cell**,
+which is what allows sampling one cell instead of the nine around it: a ninefold
+saving for a constraint nobody can see, since the offset still moves it far
+enough off the lattice that the grid does not read as a grid.
+
+### Two more, both nearly free
+
+`mFogBow` — a sweep band piles mist against its leading face and scours it out
+behind, from a distance function the band already computes.
+
+`mFogWake2` — the wake stretches along the direction of travel. **Only the
+trailing half.** Stretching both ends clears as much air in front of you as
+behind, which is a bubble rather than a wake.
+
+---
+
+## 16. The heatmap
+
+Where the fighting happened, accumulated over the whole life of a map and
+painted on the floor. `Level.HeatmapAdd`, `Level.HeatmapAt`, `Level.SetHeatmap`.
+
+**Deliberately not the disturbance array.** That is eight short-lived events in
+uniforms; this is hundreds of permanent deposits that have to be *summed*, and a
+sum wants a bucket rather than a list. So it is a 256² grid over the map's own
+bounding box (from the blockmap), and the thousandth death costs exactly what
+the first one cost. Resolution is not exposed — the deposit radius is in world
+units instead, so a slider means the same thing on a cramped map as an open one.
+
+`HeatmapAt` reads it back, which is what makes it a design tool rather than only
+a picture: a spawn director can weight against ground already fought over.
+
+### Drawn as a postprocess pass, and why
+
+`PPHeatmap` + `shaders/pp/heatmap.fp`. **Four files, none of them backend
+files.** The alternative — a sampler in the scene shader — would let the heat
+tint the *light* rather than paint over the frame, and be occluded correctly by
+translucent geometry. It would also need four coordinated Vulkan edits: a GLSL
+binding, a descriptor set layout, a descriptor **pool size**, and a per-frame
+descriptor write. Missing the pool size fails silently in review; a layout
+mismatch is a validation error on every draw. `PPRenderState` already handles
+descriptor allocation and image transitions and is backend-agnostic.
+
+The pass reconstructs world position from depth and a `ViewToWorld` matrix. Two
+traps, both live in this file's history:
+
+- The depth **sample** is a nonlinear 0..1 value, not a distance. Linearised
+  with the same two constants `lineardepth.fp` uses.
+- The ray is **scaled, not normalised**. The depth buffer measures along the
+  view axis; normalising first places every pixel too far out except at the
+  exact centre of the screen.
+
+**The grid is flat and the world is not**, so each cell stores the height of
+whatever deposited most of its heat and a fragment too far from it is rejected.
+Without that, a kill on a balcony marks the ground beneath it and every wall
+over a hot cell is painted up its full height — which is what would give away
+that this is a screen effect.
+
+Two `R32f` textures rather than one two-channel one: the CPU side already holds
+two plain float arrays and `R32f` takes them verbatim. Packing into `Rg16f`
+would mean hand-rolling half-floats to save one sampler.
+
+Sampled `Linear`, because a heatmap that reads as tiles reads as a debug
+overlay. Coloured by `sqrt` of intensity, because a heatmap is read by comparing
+regions and a linear ramp spends most of its range on the difference between
+nothing happening and one thing happening.
+
+The grid is **copied** before upload. `PPTexture` keeps its data through a
+`shared_ptr` and uploads at an unspecified later point, so handing it a pointer
+into a `TArray` the playsim is still writing would race the first time two
+monsters died in one frame.
+
+---
+
+## 17. Selective desaturation
+
+`mDesatKeep`, `Level.SetDesatKeep`. Desaturation was all or nothing, so a
+monochrome world made blood exactly as grey as the wall it was sprayed on. The
+drain is now weighted by each colour's **own** saturation.
+
+**Nothing is tagged.** No actor, sprite or texture knows it is exempt, because
+the rule is about the colour and not about the thing wearing it — which is what
+makes it work on blood, gore decals, keycards and score badges without one of
+them being touched.
+
+And it reaches all of them for one structural reason: **there is exactly one
+`dodesaturate()` in the shader** and every path goes through it — textures,
+sprites, glow, sweep bands, brightmaps, the flat-edge glow. A rule added there
+lands on every one and cannot disagree with itself. This is the payoff for a
+choke point that was already there.
+
+Saturation is chroma over brightness (HSV `S`), which is what the eye reads as
+"how colourful"; a raw channel difference would keep dark saturated colours that
+look black anyway. The hue gate is by **dominant channel** rather than a hue
+angle — no `atan`, and it answers the only question being asked: blood is
+red-dominant, nukage is green-dominant.
+
+Threshold 0 skips the whole block and the result is bit-for-bit unchanged.
+
+---
+
+## 18. Two bugs worth recording
+
+Both were silent, both survived review, and both are the kind that repeat.
+
+### The volumetric cone had never drawn a lit pixel
+
+`volumetricbeam.fp` bounded its march with a general ray/cone intersection. That
+solve is **degenerate when the apex is at the eye** — which is the normal case,
+not an edge case: `AttackPos` *is* the eye position, and the head and chest
+mounts are within a few units of it. Apex at origin → `co`, `b` and `c` all zero
+→ discriminant zero → both roots zero → `tMax <= tMin` → return black. Every
+pixel, every frame, since the pass was written.
+
+It is also the case that needs no quadratic at all. Apex at the eye means the
+ray is either inside the cone or not — one dot product — and if it is, the lit
+stretch runs from the eye to whatever stops it. **The general solve was asking a
+degenerate question robustly instead of asking an easy question.**
+
+Independently, the same shader clamped its march against the raw depth sample as
+though it were map units, capping `tMax` under one unit whenever anything was on
+screen. And `VolumetricBeamUniforms` ended `DustTime, padding0, mat4` — std140
+aligns a `mat4` to 16 and the C++ struct does not, so world-space dust was
+sampled through a matrix built from shifted floats.
+
+### There are FOUR uniform lists, not three
+
+The header said a new field in `HWViewpointUniforms` means editing three
+declarations matched by byte offset. Wrong. Vulkan reaches the block through
+`viewpoints[HW_VIEWPOINT_INDEX]`, so `vk_shader.cpp` also carries a `#define`
+per field mapping the bare name onto that array access.
+
+A field can be present and correctly aligned in all three declarations, pass
+every check of the documented three-way agreement, and **fail to compile on
+Vulkan with "undeclared identifier" while OpenGL runs perfectly** — because on
+GL the block is declared plainly and no defines exist. `uTornadoCol` shipped
+that way for a session; adding eight more fields turned the silent gap into a
+hard startup failure.
+
+The check that catches it is not "do the three lists match" but "is every field
+in the VK struct also `#define`d", and both are one line each. They are now
+written at the top of `hw_viewpointuniforms.h`.
+
+**The general lesson, and it has now cost three separate days on this fork:**
+*turning something off is a thing you do, not a thing you skip.* A push that
+returns early leaves the last value live in engine state, so the feature keeps
+costing its full per-fragment price while the switch naming it reads Off. Seen
+as eight beams standing in an empty room, as a tornado whose density uniform was
+only written when floor fog happened to be on, and as the entire render push
+freezing whenever a sweep ran with underlay off.
 
 ---
 
