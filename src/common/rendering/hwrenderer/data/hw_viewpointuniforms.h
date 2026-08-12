@@ -41,6 +41,25 @@ struct HWViewpointUniforms
 	// xyzw packing, and it has to match the ViewpointData struct in
 	// vk_shader.cpp and the ViewpointUBO block in gl_shader.cpp exactly:
 	//
+	// THERE ARE FOUR LISTS, NOT THREE. Vulkan reaches this block through
+	// `viewpoints[HW_VIEWPOINT_INDEX]`, so vk_shader.cpp also carries a
+	// `#define` per field mapping the bare name onto that array access. A
+	// field can be present and correctly aligned in all three declarations and
+	// still fail to compile on Vulkan with "undeclared identifier", while
+	// OpenGL -- where the block is declared plainly and no defines exist --
+	// runs perfectly. That is how uTornadoCol shipped broken for a session.
+	//
+	// Two checks, both one line, and the second is the one people forget:
+	//
+	//   the three declarations agree, in order:
+	//     diff <(grep -oP '(?<=FVector4 )m[A-Za-z0-9]+' hw_viewpointuniforms.h) \
+	//          <(sed -n '/vec4 uGlowWave;/,/};/p' gl_shader.cpp | grep -oP '(?<=vec4 )u[A-Za-z0-9]+')
+	//
+	//   every VK field is also #defined:
+	//     comm -23 <(...VK struct fields, sorted...) \
+	//              <(grep -oP '(?<=#define )u[A-Za-z0-9]+' vk_shader.cpp | sort -u)
+	//   Anything this prints will not compile under Vulkan.
+	//
 	//   mGlowWave        wavelength, speed, sharpness, shape
 	//   mGlowWaveDepth   reach swing, brightness swing, colour slide, detune
 	//   mGlowWavePhase   wall top, wall bottom, flat floor, flat ceiling
