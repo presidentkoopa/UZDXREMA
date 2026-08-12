@@ -235,7 +235,10 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 					Level->BeamColor[i].b / 255.f, (float)Level->BeamIntensity[i] };
 			}
 			VPUniforms.mBeamParams = { (float)nb, (float)Level->BeamGlow,
-				(float)Level->BeamFogScatter, 0.0f };
+				(float)Level->BeamFogScatter, (float)Level->BeamAirGlow };
+			VPUniforms.mBeamFX = { (float)Level->BeamScrollSpeed,
+				(float)Level->BeamScrollDepth, (float)Level->BeamTaper,
+				(float)Level->BeamFlare };
 		}
 
 		// [BB] Sweep fill -- the pattern inside a band. Frame-global style;

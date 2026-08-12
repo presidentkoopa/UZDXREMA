@@ -226,6 +226,7 @@ static const char *shaderBindings = R"(
 		vec4 uBeamB[8];
 		vec4 uBeamCol[8];
 		vec4 uBeamParams;
+		vec4 uBeamFX;
 	};
 
 	layout(set = 1, binding = 0, std140) uniform ViewpointUBO {
@@ -266,6 +267,7 @@ static const char *shaderBindings = R"(
 	#define uBeamB viewpoints[HW_VIEWPOINT_INDEX].uBeamB
 	#define uBeamCol viewpoints[HW_VIEWPOINT_INDEX].uBeamCol
 	#define uBeamParams viewpoints[HW_VIEWPOINT_INDEX].uBeamParams
+	#define uBeamFX viewpoints[HW_VIEWPOINT_INDEX].uBeamFX
 
 	layout(set = 1, binding = 1, std140) uniform MatricesUBO {
 		mat4 ModelMatrix;

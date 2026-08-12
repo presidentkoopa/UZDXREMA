@@ -829,6 +829,9 @@ struct LevelLocals native
 	// the halo reaches past it.
 	native clearscope void SetBeam(int index, Vector3 start, Vector3 end, double thick, double soft, color col, double intensity);
 	native clearscope void SetBeamCount(int count, double glow, double fogScatter);
+	// airGlow 0 = the beam only lights what it touches. Above 0 it is visible
+	// in the air as an object, depth-correct, and it feeds bloom by itself.
+	native clearscope void SetBeamLook(double airGlow, double scrollSpeed, double scrollDepth, double taper, double flare);
 	native clearscope void ClearBeams();
 
 	native String GetChecksum() const;

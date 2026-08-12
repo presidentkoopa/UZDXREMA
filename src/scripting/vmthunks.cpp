@@ -3855,6 +3855,30 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetBeamCount, SetBeamCount)
 	return 0;
 }
 
+// The beam seen IN THE AIR, and what travels along it.
+//
+// airGlow 0 means a beam only lights what it touches -- a spotlight, not a
+// laser. Everything else here rides the position along the segment, which the
+// closest-approach solve already produces, so none of it costs a second pass.
+static void SetBeamLook(FLevelLocals *self, double airGlow, double scrollSpeed,
+	double scrollDepth, double taper, double flare)
+{
+	self->BeamAirGlow = airGlow;
+	self->BeamScrollSpeed = scrollSpeed;
+	self->BeamScrollDepth = scrollDepth;
+	self->BeamTaper = taper;
+	self->BeamFlare = flare;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetBeamLook, SetBeamLook)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(airGlow); PARAM_FLOAT(scrollSpeed);
+	PARAM_FLOAT(scrollDepth); PARAM_FLOAT(taper); PARAM_FLOAT(flare);
+	SetBeamLook(self, airGlow, scrollSpeed, scrollDepth, taper, flare);
+	return 0;
+}
+
 static void ClearBeams(FLevelLocals *self)
 {
 	self->BeamCount = 0;

@@ -663,6 +663,26 @@ along the ray — an approximation, but the fog amount already scales with how
 much mist is in the way, so mist glows near a beam and does not far from one,
 which is the entire read.
 
+**Seen in the air.** `BeamLightAt` lights surfaces; `BeamAirGlow` draws the beam
+itself. That is a segment-to-ray closest approach — "how close does my line of
+sight pass to this beam" — which needs no geometry, no camera-facing quad strip,
+no sorting against translucents, and does not vanish viewed end-on.
+
+It comes out **depth-correct for free**: the closest approach has a distance
+*along* the ray, so clamping that to the distance to the fragment is the depth
+test. A beam behind a wall is simply not drawn — the one artefact the surface
+lighting genuinely cannot avoid, solved as a side effect rather than by a
+shadow pass.
+
+It feeds **bloom** without being told to, since a core burning past white is
+exactly what the bloom pass thresholds for.
+
+**Along the beam** (`SetBeamLook`): taper, scrolling energy, and an impact
+flare. All three ride the position along the segment that the closest-approach
+solve already produced, so none of them costs a second pass. Scroll matters
+more than it sounds — a held beam with nothing travelling along it goes static
+within a second and stops reading as carrying anything.
+
 Beams are applied **after** the darkness term, with the glow, because they are
 emissive. A laser that dimmed as the room got darker would be a contradiction.
 

@@ -1069,6 +1069,16 @@ public:
 	double   BeamGlow = 0.35;             // halo strength relative to the core
 	double   BeamFogScatter = 1.0;        // how much a beam lights fog it crosses
 
+	// The beam seen IN THE AIR rather than the light it casts on surfaces.
+	// 0 means it only lights what it touches, which is a spotlight; turn it up
+	// and the beam is an object hanging in space. Depth-correct for free --
+	// see BeamAirGlow in main.fp.
+	double   BeamAirGlow = 1.0;
+	double   BeamScrollSpeed = 6.0;       // energy travelling muzzle to impact
+	double   BeamScrollDepth = 0.25;      // 0 = a smooth beam
+	double   BeamTaper = 0.35;            // thinner at the muzzle than the hit
+	double   BeamFlare = 1.5;             // brightness boost where it lands
+
 	// [BB] GLOW WAVE -- the missing axis.
 	//
 	// A glow already varies per pixel VERTICALLY: the fragment's distance

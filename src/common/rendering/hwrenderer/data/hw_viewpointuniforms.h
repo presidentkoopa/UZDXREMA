@@ -123,6 +123,18 @@ struct HWViewpointUniforms
 	FVector4 mBeamCol[8];
 	FVector4 mBeamParams = { 0.f, 0.35f, 1.f, 0.f };
 
+	// [BB] What happens ALONG the beam, which is what stops it being a stick.
+	//
+	//   x  scroll speed   energy travelling from muzzle to impact
+	//   y  scroll depth   how much it modulates; 0 = a smooth beam
+	//   z  taper          how much thinner at the muzzle end than the impact
+	//   w  impact flare   brightness boost at the far end, where it lands
+	//
+	// All four ride the position ALONG the segment, which the closest-approach
+	// solve already produces -- so none of them costs a second pass over the
+	// beam, only arithmetic on a number that was already in hand.
+	FVector4 mBeamFX = { 0.f, 0.f, 0.f, 0.f };
+
 	// [BB] mFogSlabExtra: x wake strength, y glow pickup, zw spare.
 	//
 	// Pickup is the one that makes the slab read as a SUBSTANCE rather than a

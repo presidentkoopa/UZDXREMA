@@ -275,6 +275,7 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 			vec4 uBeamB[8];
 			vec4 uBeamCol[8];
 			vec4 uBeamParams;
+			vec4 uBeamFX;
 		};
 
 		uniform int uTextureMode;

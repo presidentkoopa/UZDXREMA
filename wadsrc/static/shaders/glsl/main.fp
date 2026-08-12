@@ -970,6 +970,129 @@ vec3 BeamLightAt(vec3 p)
 }
 
 //
+// [BB] THE BEAM SEEN IN THE AIR -- emissive glow, no light and no geometry.
+//
+// BeamLightAt above lights SURFACES near a beam. That is not the same as
+// seeing the beam: in a clear room it gives you a bright patch where the beam
+// lands and nothing in between, which is a spotlight, not a laser.
+//
+// Making the beam itself visible normally means geometry -- a camera-facing
+// quad strip with an additive texture -- and that brings everything a quad
+// brings: a draw call, sorting against translucents, a seam where segments
+// meet, and a beam that vanishes when viewed end-on.
+//
+// It does not need any of that. Asking "how close does my LINE OF SIGHT pass
+// to this beam" is a segment-to-ray closest approach, which is a dozen lines
+// of algebra with no object in it. Every fragment already knows where the eye
+// is and where it is; that is enough.
+//
+// AND IT COMES OUT DEPTH-CORRECT FOR FREE. The closest approach has a distance
+// ALONG the ray, so comparing that against the distance to the fragment says
+// whether the beam passes in front of this pixel or behind it. A beam behind a
+// wall is simply not drawn -- which is the one artefact the surface lighting
+// genuinely cannot avoid, solved here as a side effect of the maths rather
+// than by a shadow pass.
+//
+// It also feeds bloom without being told to. The bloom pass thresholds bright
+// pixels, and a beam core writes values well past white, so the glow blooms
+// exactly as an emissive thing should.
+//
+vec3 BeamAirGlow(vec3 fragPos)
+{
+	vec3 sum = vec3(0.0);
+	int n = int(uBeamParams.x);
+	if (n <= 0 || uBeamParams.w <= 0.0) return sum;
+
+	vec3 eye = uCameraPos.xyz;
+	vec3 toFrag = fragPos - eye;
+	float fragDist = length(toFrag);
+	if (fragDist < 0.001) return sum;
+	vec3 dir = toFrag / fragDist;
+
+	for (int i = 0; i < 8; i++)
+	{
+		if (i >= n) break;
+
+		vec3 a = uBeamA[i].xyz;
+		vec3 b = uBeamB[i].xyz;
+		vec3 v = b - a;
+		vec3 w = eye - a;
+
+		float bb = dot(dir, v);
+		float cc = dot(v, v);
+		float dd = dot(dir, w);
+		float ee = dot(v, w);
+		float den = cc - bb * bb;      // dot(dir,dir) is 1
+
+		float sc, tc;
+		if (abs(den) < 0.0001)
+		{
+			// Looking straight down the beam. Any point does; take the near
+			// end, which keeps an end-on beam a bright dot instead of the
+			// division blowing up.
+			sc = -dd;
+			tc = 0.0;
+		}
+		else
+		{
+			sc = (bb * ee - cc * dd) / den;
+			tc = (bb * -dd + ee) / den;
+		}
+
+		// Clamp to the ray in front of the eye, no further than the surface
+		// this pixel is on -- that clamp IS the depth test -- and to the
+		// segment, so the glow ends where the beam ends.
+		sc = clamp(sc, 0.0, fragDist);
+		tc = clamp(tc, 0.0, 1.0);
+
+		float dist = length((eye + dir * sc) - (a + v * tc));
+
+		float thick = max(uBeamA[i].w, 0.01);
+		float soft  = max(uBeamB[i].w, 0.01);
+
+		// ---- WHAT HAPPENS ALONG THE BEAM ------------------------------
+		//
+		// tc is where on the segment we are, 0 at the muzzle and 1 at the
+		// impact. It fell out of the closest-approach solve, so everything
+		// below is arithmetic on a number already in hand.
+		//
+		// TAPER. A perfectly parallel-sided beam reads as a drawn line. Real
+		// glare is tighter at the aperture and blooms toward what it hits.
+		float bw = mix(1.0 - uBeamFX.z, 1.0, tc);
+		thick *= bw;
+		soft  *= bw;
+
+		float bright = 1.0;
+
+		// SCROLL. Energy travelling muzzle-to-impact. Without it a held beam
+		// is completely static and the eye stops believing it is carrying
+		// anything -- this is the single thing that makes it read as a beam
+		// under load rather than a stick of light.
+		if (uBeamFX.y > 0.0)
+		{
+			float along = tc * length(v);
+			float s = sin(along * 0.06 - timer * uBeamFX.x);
+			bright *= 1.0 + uBeamFX.y * s;
+		}
+
+		// IMPACT FLARE. A beam that simply stops looks unfinished; the far
+		// end is where the energy is actually going, so it is the brightest
+		// part of the whole thing.
+		if (uBeamFX.w > 0.0)
+			bright += uBeamFX.w * pow(clamp(tc, 0.0, 1.0), 8.0);
+
+		// The same two-falloff shape the surface light uses, so the beam in
+		// the air and the light it casts agree about how thick it is.
+		float core = 1.0 - smoothstep(thick * 0.5, thick + soft, dist);
+		float halo = 1.0 - smoothstep(thick, thick + soft * 6.0 + 1.0, dist);
+
+		sum += uBeamCol[i].rgb * (core * 1.6 + halo * uBeamParams.y)
+			* uBeamCol[i].w * uBeamParams.w * bright;
+	}
+	return sum;
+}
+
+//
 // [BB] FOG WITH A TOP.
 //
 // Sector fog is a distance tint on SURFACES -- the further a wall is, the more
@@ -1731,6 +1854,17 @@ void main()
 			vec3 fogCol = mix(slab.rgb, slab.rgb * (0.35 + 0.65 * frag.rgb), uFogSlabExtra.y);
 			frag.rgb = mix(frag.rgb, fogCol, slab.a);
 		}
+
+		// [BB] THE BEAM ITSELF, SEEN IN THE AIR.
+		//
+		// Last, and after the fog on purpose. Everything before this point
+		// lights SURFACES; this is the beam as an object hanging in space,
+		// and it should not be dimmed by mist it is in front of.
+		//
+		// It is also the last thing written before the frame is handed to
+		// bloom, so a core burning past white blooms the way an emissive
+		// thing should -- without a light, a sprite, or a quad.
+		frag.rgb += BeamAirGlow(pixelpos.xyz);
 	}
 	else // simple 2D (uses the fog color to add a color overlay)
 	{
