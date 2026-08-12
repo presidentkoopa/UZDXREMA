@@ -456,6 +456,84 @@ private:
 	PPShader Beam = { "shaders/pp/volumetricbeam.fp", "", VolumetricBeamUniforms::Desc() };
 };
 
+struct HeatmapUniforms
+{
+	FVector3 HeatColorLow;
+	float HeatScale;
+	FVector3 HeatColorHigh;
+	float HeatCeiling;
+	FVector2 TanHalfFov;
+	FVector2 HeatOrigin;
+	FVector2 HeatInvSize;
+	float HeatTolerance;
+	float LinearizeDepthA;
+	float LinearizeDepthB;
+	float pad0;
+	float pad1;
+	float pad2;
+	float ViewToWorld[16];
+
+	static std::vector<UniformFieldDesc> Desc()
+	{
+		return
+		{
+			{ "HeatColorLow", UniformType::Vec3, offsetof(HeatmapUniforms, HeatColorLow) },
+			{ "HeatScale", UniformType::Float, offsetof(HeatmapUniforms, HeatScale) },
+			{ "HeatColorHigh", UniformType::Vec3, offsetof(HeatmapUniforms, HeatColorHigh) },
+			{ "HeatCeiling", UniformType::Float, offsetof(HeatmapUniforms, HeatCeiling) },
+			{ "TanHalfFov", UniformType::Vec2, offsetof(HeatmapUniforms, TanHalfFov) },
+			{ "HeatOrigin", UniformType::Vec2, offsetof(HeatmapUniforms, HeatOrigin) },
+			{ "HeatInvSize", UniformType::Vec2, offsetof(HeatmapUniforms, HeatInvSize) },
+			{ "HeatTolerance", UniformType::Float, offsetof(HeatmapUniforms, HeatTolerance) },
+			{ "LinearizeDepthA", UniformType::Float, offsetof(HeatmapUniforms, LinearizeDepthA) },
+			{ "LinearizeDepthB", UniformType::Float, offsetof(HeatmapUniforms, LinearizeDepthB) },
+			{ "pad0", UniformType::Float, offsetof(HeatmapUniforms, pad0) },
+			{ "pad1", UniformType::Float, offsetof(HeatmapUniforms, pad1) },
+			{ "pad2", UniformType::Float, offsetof(HeatmapUniforms, pad2) },
+			{ "ViewToWorld", UniformType::Mat4, offsetof(HeatmapUniforms, ViewToWorld) },
+		};
+	}
+};
+
+// [BB] Where the fighting happened, painted on the floor.
+//
+// A postprocess pass rather than a term in the scene shader. The scene-shader
+// route would let this tint the LIGHT rather than paint over the frame, at the
+// price of four coordinated edits inside the Vulkan backend where missing the
+// descriptor pool size fails silently. This touches no backend file at all.
+class PPHeatmap
+{
+public:
+	void Render(PPRenderState *renderstate, int sceneWidth, int sceneHeight);
+
+	void SetHeat(const HeatmapUniforms &u) { uniforms = u; active = true; }
+	void ClearHeat() { active = false; }
+
+	// The grid itself, re-uploaded only when it changes. Deaths are rare, so
+	// most frames this costs nothing beyond the sample.
+	void SetGrid(int res, std::shared_ptr<void> intensity, std::shared_ptr<void> height)
+	{
+		Intensity = { res, res, PixelFormat::R32f, intensity };
+		Height = { res, res, PixelFormat::R32f, height };
+		Intensity.ResetBackend();
+		Height.ResetBackend();
+		haveGrid = true;
+	}
+
+	bool HasGrid() const { return haveGrid; }
+
+private:
+	HeatmapUniforms uniforms = {};
+	bool active = false;
+	bool haveGrid = false;
+
+	PPTexture Intensity;
+	PPTexture Height;
+
+	PPShader Heat = { "shaders/pp/heatmap.fp", "", HeatmapUniforms::Desc() };
+};
+
+
 /////////////////////////////////////////////////////////////////////////////
 
 // [BB] The combine pass doubles as the downscale step, so these must be set
@@ -954,6 +1032,7 @@ class Postprocess
 public:
 	PPBloom bloom;
 	PPVolumetricBeam volbeam;
+	PPHeatmap heatmap;
 	PPLensDistort lens;
 	PPFXAA fxaa;
 	PPCameraExposure exposure;

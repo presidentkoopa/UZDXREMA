@@ -716,6 +716,104 @@ void HWDrawInfo::SetupVolumetricBeam()
 	hw_postprocess.volbeam.SetBeam(u);
 }
 
+//-----------------------------------------------------------------------------
+//
+// [BB] The heatmap: where the fighting happened, painted on the floor.
+//
+// The grid is stamped on the CPU when something dies -- see HeatmapAdd in
+// vmthunks.cpp -- and this hands it to the postprocess pass, re-uploading only
+// when it has actually changed. Deaths are rare, so almost every frame this is
+// four uniform writes and nothing else.
+//
+// A postprocess pass rather than a term in the scene shader, deliberately. The
+// scene-shader route would let the heat tint the LIGHT rather than paint over
+// the frame, and would be occluded correctly by translucent geometry, but it
+// costs four coordinated edits inside the Vulkan backend -- a GLSL binding, a
+// descriptor set layout, a descriptor POOL SIZE, and a per-frame descriptor
+// write -- and missing any one of them fails either silently or on every draw.
+// This route touches no backend file at all.
+//
+//-----------------------------------------------------------------------------
+
+void HWDrawInfo::SetupHeatmap()
+{
+	if (Level == nullptr || Level->HeatScale <= 0.0 || Level->HeatIntensity.Size() == 0)
+	{
+		hw_postprocess.heatmap.ClearHeat();
+		return;
+	}
+
+	const int R = FLevelLocals::HEAT_RES;
+
+	// DECAY, applied here rather than on a timer, because this is the one
+	// place that already knows a frame has passed and already has to re-upload
+	// when the values move. A separate decay tick would dirty the grid every
+	// frame forever even with nothing happening.
+	if (Level->HeatDecay > 0.0)
+	{
+		float drop = float(Level->HeatDecay * screen->FrameTime * 0.001);
+		if (drop > 0.0f)
+		{
+			bool moved = false;
+			for (unsigned i = 0; i < Level->HeatIntensity.Size(); i++)
+			{
+				float v = Level->HeatIntensity[i];
+				if (v <= 0.0f) continue;
+				Level->HeatIntensity[i] = std::max(v - drop, 0.0f);
+				moved = true;
+			}
+			if (moved) Level->HeatDirty = true;
+		}
+	}
+
+	if (Level->HeatDirty || !hw_postprocess.heatmap.HasGrid())
+	{
+		// Copied rather than referenced. PPTexture keeps its data alive through
+		// a shared_ptr and the backend uploads from it at an unspecified later
+		// point, so handing it a pointer into a TArray the playsim is still
+		// writing to would be a race the moment two monsters died in one frame.
+		std::shared_ptr<void> idata(new float[R * R], [](void *p) { delete[](float*)p; });
+		std::shared_ptr<void> hdata(new float[R * R], [](void *p) { delete[](float*)p; });
+		memcpy(idata.get(), &Level->HeatIntensity[0], R * R * sizeof(float));
+		memcpy(hdata.get(), &Level->HeatHeight[0], R * R * sizeof(float));
+
+		hw_postprocess.heatmap.SetGrid(R, idata, hdata);
+		Level->HeatDirty = false;
+	}
+
+	HeatmapUniforms u = {};
+	u.HeatScale = (float)Level->HeatScale;
+	u.HeatCeiling = (float)std::max(Level->HeatCeiling, 0.01);
+	u.HeatTolerance = (float)std::max(Level->HeatTolerance, 1.0);
+	u.HeatColorLow = FVector3(Level->HeatColorLow.r / 255.f,
+		Level->HeatColorLow.g / 255.f, Level->HeatColorLow.b / 255.f);
+	u.HeatColorHigh = FVector3(Level->HeatColorHigh.r / 255.f,
+		Level->HeatColorHigh.g / 255.f, Level->HeatColorHigh.b / 255.f);
+
+	// The grid covers the map's own bounding box, from the blockmap, which is
+	// the one structure that already knows it.
+	double mw = std::max((double)(Level->blockmap.bmapwidth * FBlockmap::MAPBLOCKUNITS), 1.0);
+	double mh = std::max((double)(Level->blockmap.bmapheight * FBlockmap::MAPBLOCKUNITS), 1.0);
+	u.HeatOrigin = FVector2((float)Level->blockmap.bmaporgx, (float)Level->blockmap.bmaporgy);
+	u.HeatInvSize = FVector2((float)(1.0 / mw), (float)(1.0 / mh));
+
+	// Rebuilding the pixel ray needs the frustum's shape, which is the
+	// projection matrix's first two diagonals -- same as the beam pass.
+	const float *proj = VPUniforms.mProjectionMatrix.get();
+	u.TanHalfFov = FVector2(
+		(proj[0] != 0.0f) ? 1.0f / proj[0] : 1.0f,
+		(proj[5] != 0.0f) ? 1.0f / proj[5] : 1.0f);
+
+	u.LinearizeDepthA = 1.0f / screen->GetZFar() - 1.0f / screen->GetZNear();
+	u.LinearizeDepthB = max(1.0f / screen->GetZNear(), 1.e-8f);
+
+	VSMatrix inv;
+	if (!VPUniforms.mViewMatrix.inverseMatrix(inv)) inv.loadIdentity();
+	memcpy(u.ViewToWorld, inv.get(), sizeof(float) * 16);
+
+	hw_postprocess.heatmap.SetHeat(u);
+}
+
 void HWDrawInfo::SetViewMatrix(const FRotator &angles, float vx, float vy, float vz, bool mirror, bool planemirror)
 {
 	float mult = mirror ? -1.f : 1.f;
@@ -1117,6 +1215,7 @@ void HWDrawInfo::RenderScene(FRenderState &state)
 	}
 
 	SetupVolumetricBeam();
+	SetupHeatmap();
 
 	state.EnableFog(true);
 	state.SetRenderStyle(STYLE_Source);

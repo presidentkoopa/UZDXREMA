@@ -99,6 +99,32 @@ void PPVolumetricBeam::Render(PPRenderState *renderstate, int sceneWidth, int sc
 	renderstate->PopGroup();
 }
 
+void PPHeatmap::Render(PPRenderState *renderstate, int sceneWidth, int sceneHeight)
+{
+	if (!active || !haveGrid || uniforms.HeatScale <= 0.0f)
+		return;
+
+	renderstate->PushGroup("heatmap");
+
+	renderstate->Clear();
+	renderstate->Shader = &Heat;
+	renderstate->Uniforms.Set(uniforms);
+	renderstate->Viewport = screen->mSceneViewport;
+	renderstate->SetInputSceneDepth(0);
+	// LINEAR on the grid, so the cells blend into each other. Nearest would
+	// show the lattice, and a heatmap that reads as tiles reads as a debug
+	// overlay rather than as something the ground remembers.
+	renderstate->SetInputTexture(1, &Intensity, PPFilterMode::Linear);
+	renderstate->SetInputTexture(2, &Height, PPFilterMode::Linear);
+	renderstate->SetOutputCurrent();
+	// Additive, so the pass emits only its own contribution and never has to
+	// read the scene colour back.
+	renderstate->SetAdditiveBlend();
+	renderstate->Draw();
+
+	renderstate->PopGroup();
+}
+
 void PPBloom::RenderBloom(PPRenderState *renderstate, int sceneWidth, int sceneHeight, int fixedcm)
 {
 	// Only bloom things if enabled and no special fixed light mode is active
@@ -1188,6 +1214,7 @@ void Postprocess::Pass1(PPRenderState* state, int fixedcm, int sceneWidth, int s
 	exposure.Render(state, sceneWidth, sceneHeight);
 	customShaders.Run(state, "beforebloom");
 	volbeam.Render(state, sceneWidth, sceneHeight);
+	heatmap.Render(state, sceneWidth, sceneHeight);
 	bloom.RenderBloom(state, sceneWidth, sceneHeight, fixedcm);
 }
 
