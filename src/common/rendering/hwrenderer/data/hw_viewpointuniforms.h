@@ -196,6 +196,54 @@ struct HWViewpointUniforms
 	// which is exactly when a tornado standing in clear air needs it.
 	FVector4 mTornadoCol = { 0.55f, 0.6f, 0.7f, 1.2f };
 
+	// [BB] DISTURBANCES -- one primitive, five effects.
+	//
+	// A wake, a ripple, an ignition, fog draining from a point and a monster
+	// shouldering mist aside are the same function: a point, a radius, an age,
+	// a strength and a sign. They differ only in whether the radius grows with
+	// age, and whether the result subtracts density, adds it, or adds light.
+	//
+	// So there is one array rather than five features, and everything built on
+	// it after this is a ZScript call with no engine change at all.
+	//
+	//   mFogDisturbA[i]  xyz world point (shader space), w radius
+	//   mFogDisturbB[i]  x age in seconds, y strength, z speed, w mode
+	//
+	//   mode 0 DISC      fixed radius, thins. The wake, and displacers.
+	//   mode 1 RIPPLE    a ring at r = age*speed, oscillating, decaying
+	//   mode 2 IGNITE    expanding sphere that adds LIGHT, not density
+	//   mode 3 GOUT      expanding disc that ADDS density -- a vent
+	FVector4 mFogDisturbA[8];
+	FVector4 mFogDisturbB[8];
+
+	// DENSITY IS NOT ONE NUMBER ANY MORE. Real mist pools: thick in corners,
+	// thin in the open. A noise field over the horizontal plane scaling the
+	// density is the single biggest thing separating this from a filter, and
+	// drifting it slowly makes the banks move through a room on their own.
+	//   x cell scale, y depth 0..1, z drift X, w drift Y
+	FVector4 mFogNoise = { 0.004f, 0.f, 0.f, 0.f };
+
+	// TENDRILS, as a lattice rather than as objects -- the tornado's maths at
+	// small scale, one per cell of a fract() grid, so four hundred of them
+	// cost what one costs. Same trick as the sweep's laser lattice.
+	//   mFogTendril   x cell spacing, y radius, z height, w density
+	//   mFogTendril2  x rise speed, y phase spread, z lean, w taper
+	FVector4 mFogTendril = { 96.f, 10.f, 96.f, 0.f };
+	FVector4 mFogTendril2 = { 0.6f, 1.f, 6.f, 1.6f };
+
+	// The wake, stretched along the direction of travel. A disc is a hole you
+	// carry; an ellipse is a corridor you carve.
+	//   x velocity X, y velocity Y (shader space), z stretch, w spare
+	FVector4 mFogWake2 = { 0.f, 0.f, 0.f, 0.f };
+
+	// A sweep band pushes mist ahead of it and leaves it thin behind.
+	//   x strength, y width, z thin-behind ratio, w spare
+	FVector4 mFogBow = { 0.f, 64.f, 0.6f, 0.f };
+
+	// Second colour, mixed across the layer's own thickness. Cold at the
+	// floor, warm at the top. w is how much of it to use; 0 keeps one colour.
+	FVector4 mFogColor2 = { 0.7f, 0.5f, 0.35f, 0.f };
+
 
 	void CalcDependencies()
 	{

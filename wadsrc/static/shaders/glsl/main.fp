@@ -1298,6 +1298,98 @@ vec3 SweepAirLattice(vec3 fragPos)
 //
 // Returns rgb = the fog's own colour for this pixel, a = how much of it.
 //
+//
+// [BB] Two-dimensional value noise, for the density field and the tendril
+// lattice. Deliberately the cheap kind: four hashes and three mixes. Fog does
+// not need gradient noise -- it needs "not the same everywhere", and the eye
+// cannot tell which sort of noise made a mist bank.
+//
+float GITDHash21(vec2 p)
+{
+	vec3 q = fract(vec3(p.xyx) * 0.1031);
+	q += dot(q, q.yzx + 33.33);
+	return fract((q.x + q.y) * q.z);
+}
+
+float GITDNoise2(vec2 p)
+{
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(GITDHash21(i), GITDHash21(i + vec2(1, 0)), f.x),
+	           mix(GITDHash21(i + vec2(0, 1)), GITDHash21(i + vec2(1, 1)), f.x), f.y);
+}
+
+//
+// [BB] TENDRILS, AS A LATTICE.
+//
+// Wisps rising off the mist. The obvious way is one object each, and eight of
+// them look like eight sticks; what a room wants is hundreds.
+//
+// So this is the tornado's own maths -- distance from a vertical axis, faded
+// by height -- evaluated once per CELL of a fract() grid rather than once per
+// object. Four hundred tendrils cost what one costs, which is the same trick
+// the sweep's laser lattice uses and for the same reason.
+//
+// EACH TENDRIL STAYS INSIDE ITS OWN CELL. The hashed offset is limited so the
+// column can never cross a cell boundary, which is what lets this look at one
+// cell instead of the nine around it -- a ninefold saving for a constraint
+// nobody can see, since the offset still moves it off the lattice enough to
+// stop the grid reading as a grid.
+//
+//   uFogTendril   x cell spacing, y radius, z height, w density
+//   uFogTendril2  x rise speed, y phase spread, z lean, w taper
+//
+float FogTendrilAt(vec3 p, float baseY)
+{
+	if (uFogTendril.w <= 0.0) return 0.0;
+
+	float cell = max(uFogTendril.x, 8.0);
+	float rad  = min(max(uFogTendril.y, 1.0), cell * 0.45);
+	float tall = max(uFogTendril.z, 1.0);
+
+	// How far up its own column this fragment is. Above the top there is
+	// nothing to compute, and that is most of the screen looking forward.
+	float h = (p.y - baseY) / tall;
+	if (h < 0.0 || h > 1.0) return 0.0;
+
+	vec2 cellId = floor(p.xz / cell);
+	vec2 local  = p.xz - (cellId + 0.5) * cell;
+
+	// A stable offset per cell, and a stable phase, so a given wisp is always
+	// the same wisp -- it does not swim around when you move.
+	float hx = GITDHash21(cellId);
+	float hz = GITDHash21(cellId + 17.31);
+	float hp = GITDHash21(cellId + 91.7);
+
+	float room = cell * 0.5 - rad;
+	vec2 axis = vec2(hx - 0.5, hz - 0.5) * 2.0 * room;
+
+	// LEAN, growing with height, so a tendril curls instead of standing to
+	// attention. Each one leans its own way, from its own hash.
+	float sway = timer * uFogTendril2.x + hp * 6.2831853 * uFogTendril2.y;
+	axis += vec2(sin(sway), cos(sway * 0.83)) * uFogTendril2.z * h;
+
+	float r = length(local - axis);
+
+	// TAPER. A tendril that is the same width at the top is a pipe. Narrowing
+	// as it climbs is most of what makes it read as something drifting up out
+	// of the mist rather than something planted in it.
+	float rr = rad * pow(1.0 - h, uFogTendril2.w * 0.5) ;
+	if (rr <= 0.001 || r > rr) return 0.0;
+
+	float core = 1.0 - smoothstep(rr * 0.25, rr, r);
+
+	// Fades in off the surface and out at the top, so neither end is a cut.
+	core *= smoothstep(0.0, 0.18, h);
+	core *= 1.0 - smoothstep(0.55, 1.0, h);
+
+	// Each rises on its own clock, so the field breathes instead of pulsing.
+	core *= 0.55 + 0.45 * sin(timer * uFogTendril2.x * 1.7 + hp * 6.2831853);
+
+	return max(core, 0.0) * uFogTendril.w;
+}
+
 vec4 FogSlabAt(vec3 fragPos)
 {
 	// EITHER SHAPE IS ENOUGH TO MAKE THIS WORTH RUNNING, and that is the whole
@@ -1311,7 +1403,8 @@ vec4 FogSlabAt(vec3 fragPos)
 	// are, and what colour they are.
 	bool haveSlab = uFogSlab.y > 0.0;
 	bool haveTorn = uTornado2.z > 0.0;
-	if (!haveSlab && !haveTorn) return vec4(0.0);
+	bool haveTend = uFogTendril.w > 0.0;
+	if (!haveSlab && !haveTorn && !haveTend) return vec4(0.0);
 
 	vec3  eye  = uCameraPos.xyz;
 	float topZ = uFogSlab.x;
@@ -1417,7 +1510,7 @@ vec4 FogSlabAt(vec3 fragPos)
 	// measured from a different quantity entirely, so this can only bail when
 	// there is no funnel either.
 	float occupancy = 0.5 * (dEye + dFrag);
-	if (occupancy <= 0.0 && !haveTorn) return vec4(0.0);
+	if (occupancy <= 0.0 && !haveTorn && !haveTend) return vec4(0.0);
 
 	float travel = distance(eye, fragPos) * occupancy;
 
@@ -1425,17 +1518,172 @@ vec4 FogSlabAt(vec3 fragPos)
 	// this is the trail you kick up walking through it. One point that lags
 	// behind the player, because a trail that settles IS a point that follows
 	// you slowly.
+	//
+	// STRETCHED ALONG THE WAY YOU ARE GOING. A disc is a hole you carry about
+	// with you; an ellipse drawn out behind is a corridor you carve and leave.
+	// Same one point and the same one radius -- the offset is just measured in
+	// the frame of your own velocity before its length is taken.
 	if (uFogSlabColor.w > 0.0 && uFogSlabWake.w > 0.0)
 	{
-		float d = distance(fragPos.xz, uFogSlabWake.xz);
-		float w = 1.0 - smoothstep(0.0, uFogSlabWake.w, d);
+		vec2 rel = fragPos.xz - uFogSlabWake.xz;
+		float vlen = length(uFogWake2.xy);
+		if (uFogWake2.z > 0.0 && vlen > 0.001)
+		{
+			vec2 vd = uFogWake2.xy / vlen;
+			float along  = dot(rel, vd);
+			float across = dot(rel, vec2(-vd.y, vd.x));
+			// Only the trailing half stretches. Stretching both would put as
+			// much cleared air in front of you as behind, which is a bubble
+			// rather than a wake.
+			float s = 1.0 + uFogWake2.z * clamp(-along / max(uFogSlabWake.w, 1.0), 0.0, 4.0);
+			rel = vec2(along / s, across);
+		}
+		float w = 1.0 - smoothstep(0.0, uFogSlabWake.w, length(rel));
 		travel *= 1.0 - uFogSlabColor.w * w;
 	}
 
-	float amount = 1.0 - exp(-uFogSlab.y * travel * 0.001);
+	// ---- DENSITY IS NOT ONE NUMBER ------------------------------------
+	//
+	// Uniform density is the single biggest tell that fog is a filter rather
+	// than a substance: real mist banks up, thick in the corners and thin
+	// across the open. One noise sample scaling the density fixes that, and
+	// drifting the field slowly makes the banks move through a room on their
+	// own without anything being animated.
+	//
+	// Sampled at the MIDPOINT of the eye-to-fragment segment, not at the
+	// fragment. The fog for a pixel is an integral along that whole line, and
+	// sampling at the far end makes the field appear pinned to the walls --
+	// you would walk through a bank and see it stay where the geometry is.
+	float dens = uFogSlab.y;
+	if (uFogNoise.y > 0.0)
+	{
+		vec2 mid = mix(eye.xz, fragPos.xz, 0.5) + uFogNoise.zw * timer;
+		float n = GITDNoise2(mid * uFogNoise.x);
+		// Around 1, not from 0, so the dial thins and thickens rather than
+		// only ever taking mist away.
+		dens *= mix(1.0, 0.35 + 1.3 * n, clamp(uFogNoise.y, 0.0, 1.0));
+	}
+
+	// ---- WHAT THE SWEEP DOES TO THE AIR --------------------------------
+	//
+	// A wall of light travelling through a room ought to move the room. The
+	// band already knows its own distance function, so piling mist against the
+	// leading face and thinning it behind costs one evaluation of maths that
+	// is already written -- and a sweep through fog stops being a light and
+	// becomes a physical event.
+	if (uFogBow.x > 0.0 && uSweepCount > 0)
+	{
+		float bow = 0.0;
+		for (int bb = 0; bb < 8; bb++)
+		{
+			if (bb >= uSweepCount) break;
+			int bp = int(uSweepBands[bb].w);
+			if ((bp & 15) <= 0) continue;
+
+			int bs = int(uSweepBandOrigin[bb].w);
+			vec3 bo = uSweepBandOrigin[bb].xyz;
+			float here;
+			if (bs == 2)      here = abs(fragPos.x - bo.x);
+			else if (bs == 3) here = abs(fragPos.z - bo.z);
+			else if (bs == 5) here = fragPos.y - bo.y;
+			else              here = length(fragPos.xz - bo.xz);
+
+			// Signed distance from the band surface: ahead of it is positive.
+			float sd = here - uSweepBands[bb].x;
+			float w = max(uFogBow.y, 1.0);
+			if (abs(sd) > w) continue;
+
+			// Piled in front, scoured behind. The two are the same curve with
+			// opposite signs, which is what makes it read as displacement
+			// rather than as a glow travelling with the band.
+			float f = 1.0 - abs(sd) / w;
+			bow += (sd > 0.0) ? f * f : -f * f * uFogBow.z;
+		}
+		dens *= clamp(1.0 + bow * uFogBow.x, 0.0, 8.0);
+	}
+
+	// ---- DISTURBANCES --------------------------------------------------
+	//
+	// One primitive, five effects. Everything reactive the mist does -- a
+	// gunshot ring, an explosion lighting it, a monster shouldering through
+	// it, fog draining from a point -- is this loop with a different mode.
+	//
+	// Modes 0, 1 and 3 change how much mist is in the way and so are applied
+	// to TRAVEL, before the exponential. Mode 2 adds light instead and is
+	// gathered separately, further down, because a burning cloud is brighter
+	// mist and not more of it.
+	vec3 ignite = vec3(0.0);
+	for (int di = 0; di < 8; di++)
+	{
+		float stren = uFogDisturbB[di].y;
+		if (stren <= 0.0) continue;
+
+		vec3  dp   = uFogDisturbA[di].xyz;
+		float drad = uFogDisturbA[di].w;
+		float age  = uFogDisturbB[di].x;
+		float spd  = uFogDisturbB[di].z;
+		int   mode = int(uFogDisturbB[di].w);
+
+		if (mode == 1)
+		{
+			// RIPPLE. A ring travelling out at r = age * speed, and the mist
+			// piles on the crest and thins in the trough -- which is what a
+			// wave IS. A ring that only ever removed mist would read as an
+			// expanding hole, and holes do not travel.
+			float r = distance(fragPos.xz, dp.xz);
+			float front = age * spd;
+			float band = 1.0 - smoothstep(0.0, max(drad, 1.0), abs(r - front));
+			if (band <= 0.0) continue;
+			travel *= 1.0 + stren * band * sin((r - front) * 0.06);
+		}
+		else if (mode == 2)
+		{
+			// IGNITE. An expanding sphere of burning mist. Written into the
+			// colour, so it feeds bloom on its own with nothing attached to
+			// it, and it needs no density at all to be visible.
+			float r = distance(fragPos, dp);
+			float front = drad + age * spd;
+			float shell = 1.0 - smoothstep(front * 0.35, front, r);
+			if (shell <= 0.0) continue;
+			ignite += uFogColor2.rgb * shell * stren;
+		}
+		else
+		{
+			// DISC thins, GOUT thickens, and a GOUT grows. Same three lines
+			// with a sign and a radius that may or may not depend on age.
+			float rr = (mode == 3) ? drad + age * spd : drad;
+			float r = distance(fragPos.xz, dp.xz);
+			float w = 1.0 - smoothstep(0.0, max(rr, 1.0), r);
+			if (w <= 0.0) continue;
+			travel *= (mode == 3) ? (1.0 + stren * w) : (1.0 - clamp(stren, 0.0, 1.0) * w);
+		}
+	}
+
+	float amount = 1.0 - exp(-dens * max(travel, 0.0) * 0.001);
 	amount = clamp(amount, 0.0, 1.0);
 
+	// ---- TENDRILS ------------------------------------------------------
+	//
+	// Added after the layer's own integral because a wisp is a local lump of
+	// density and not a longer path through the layer. They rise off the
+	// slab's top surface, which is why this needs topFrag rather than a
+	// constant -- a tendril growing out of a rolling surface has to roll with
+	// it or it hangs unattached in the air above the mist.
+	if (haveTend)
+		amount = clamp(amount + FogTendrilAt(fragPos, topFrag), 0.0, 1.0);
+
 	vec3 col = uFogSlabColor.rgb;
+
+	// A SECOND COLOUR ACROSS THE LAYER'S OWN THICKNESS. Cold at the floor,
+	// warm at the top, or the other way about. Measured against the layer
+	// rather than against the world, so it follows the top as it swells and
+	// means the same thing in a chest-high band as in knee-deep ground mist.
+	if (uFogColor2.w > 0.0)
+	{
+		float span = max(topFrag - botFrag, 1.0);
+		float up = clamp((fragPos.y - botFrag) / span, 0.0, 1.0);
+		col = mix(col, uFogColor2.rgb, up * clamp(uFogColor2.w, 0.0, 1.0));
+	}
 
 	// SCATTER off the torch. Cheap: how far inside the beam cone this
 	// fragment sits, using the cone the volumetric beam already describes.
@@ -1593,6 +1841,16 @@ vec4 FogSlabAt(vec3 fragPos)
 	// glows near a beam and does not far from one, which is the whole read.
 	if (uBeamParams.z > 0.0)
 		col += BeamLightAt(fragPos) * uBeamParams.z;
+
+	// IGNITED MIST, last. It is light rather than density, so it is added to
+	// the colour and it also forces a little coverage of its own -- a burning
+	// cloud has to be visible in air that had no mist in it, or an explosion
+	// in a clear room does nothing at all.
+	if (ignite.r + ignite.g + ignite.b > 0.0)
+	{
+		col += ignite;
+		amount = clamp(amount + min(ignite.r + ignite.g + ignite.b, 1.0) * 0.5, 0.0, 1.0);
+	}
 
 	return vec4(col, amount);
 }

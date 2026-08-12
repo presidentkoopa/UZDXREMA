@@ -3941,6 +3941,177 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetTornado, SetTornado)
 	return 0;
 }
 
+// [BB] ONE DISTURBANCE PRIMITIVE, FIVE EFFECTS.
+//
+// A wake, a ripple, an ignition, fog draining from a point and a monster
+// shouldering mist aside are the same function with different signs and a
+// different answer to "does the radius grow with age". So there is one native
+// and one ring buffer, and every reactive fog idea after this is a script call
+// with no engine change at all.
+//
+// The ring recycles the OLDEST slot rather than refusing a ninth. A refusal
+// makes the ninth gunshot in a firefight silently do nothing, which is the one
+// moment the effect exists for; dropping the oldest costs a disturbance that
+// has already mostly faded.
+static void FogDisturb(FLevelLocals *self, double x, double y, double z,
+	double radius, double strength, double speed, double life, int mode)
+{
+	if (strength <= 0.0 || life <= 0.0) return;
+
+	int slot = -1;
+	double now = self->maptime / (double)TICRATE;
+	double oldest = 1e30;
+
+	for (int i = 0; i < FLevelLocals::MAX_FOG_DISTURB; i++)
+	{
+		// A free slot first: one that never held anything, or one whose life
+		// has run out.
+		if (self->FogDisturbLife[i] <= 0.0 ||
+			now - self->FogDisturbBirth[i] > self->FogDisturbLife[i])
+		{
+			slot = i;
+			break;
+		}
+		if (self->FogDisturbBirth[i] < oldest)
+		{
+			oldest = self->FogDisturbBirth[i];
+			slot = i;
+		}
+	}
+	if (slot < 0) slot = 0;
+
+	self->FogDisturbPos[slot] = DVector3(x, y, z);
+	self->FogDisturbRadius[slot] = radius;
+	self->FogDisturbStrength[slot] = strength;
+	self->FogDisturbSpeed[slot] = speed;
+	self->FogDisturbLife[slot] = life;
+	self->FogDisturbBirth[slot] = now;
+	self->FogDisturbMode[slot] = clamp(mode, 0, 3);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, FogDisturb, FogDisturb)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(x); PARAM_FLOAT(y); PARAM_FLOAT(z);
+	PARAM_FLOAT(radius); PARAM_FLOAT(strength); PARAM_FLOAT(speed);
+	PARAM_FLOAT(life); PARAM_INT(mode);
+	FogDisturb(self, x, y, z, radius, strength, speed, life, mode);
+	return 0;
+}
+
+// Clearing them all at once, for a map change or a script that wants a clean
+// slate. Setting life to 0 is what marks a slot free, so nothing else needs
+// touching.
+static void ClearFogDisturb(FLevelLocals *self)
+{
+	for (int i = 0; i < FLevelLocals::MAX_FOG_DISTURB; i++)
+		self->FogDisturbLife[i] = 0;
+	self->FogDisturbNext = 0;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearFogDisturb, ClearFogDisturb)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	ClearFogDisturb(self);
+	return 0;
+}
+
+// Density stops being one number for the whole map. Depth 0 restores exactly
+// the old uniform behaviour.
+static void SetFogNoise(FLevelLocals *self, double scale, double depth,
+	double driftX, double driftY)
+{
+	self->FogNoiseScale = scale;
+	self->FogNoiseDepth = depth;
+	self->FogNoiseDrift = DVector2(driftX, driftY);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogNoise, SetFogNoise)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(scale); PARAM_FLOAT(depth);
+	PARAM_FLOAT(driftX); PARAM_FLOAT(driftY);
+	SetFogNoise(self, scale, depth, driftX, driftY);
+	return 0;
+}
+
+// Tendrils: the tornado's maths at small scale, one per cell of a lattice, so
+// the count is free and only the spacing matters. Density 0 is off.
+static void SetFogTendrils(FLevelLocals *self, double spacing, double radius,
+	double height, double density, double rise, double spread, double lean,
+	double taper)
+{
+	self->FogTendrilSpacing = spacing;
+	self->FogTendrilRadius = radius;
+	self->FogTendrilHeight = height;
+	self->FogTendrilDensity = density;
+	self->FogTendrilRise = rise;
+	self->FogTendrilSpread = spread;
+	self->FogTendrilLean = lean;
+	self->FogTendrilTaper = taper;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogTendrils, SetFogTendrils)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(spacing); PARAM_FLOAT(radius); PARAM_FLOAT(height);
+	PARAM_FLOAT(density); PARAM_FLOAT(rise); PARAM_FLOAT(spread);
+	PARAM_FLOAT(lean); PARAM_FLOAT(taper);
+	SetFogTendrils(self, spacing, radius, height, density, rise, spread, lean, taper);
+	return 0;
+}
+
+// The wake, stretched along the way you are going. A disc is a hole you carry
+// around; an ellipse is a corridor you carve and leave behind.
+static void SetFogWakeMotion(FLevelLocals *self, double velX, double velY,
+	double stretch)
+{
+	self->FogWakeVel = DVector2(velX, velY);
+	self->FogWakeStretch = stretch;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogWakeMotion, SetFogWakeMotion)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(velX); PARAM_FLOAT(velY); PARAM_FLOAT(stretch);
+	SetFogWakeMotion(self, velX, velY, stretch);
+	return 0;
+}
+
+// A sweep band pushing mist ahead of itself. Strength 0 and the sweep passes
+// through the fog without touching it, as it always did.
+static void SetFogBow(FLevelLocals *self, double strength, double width,
+	double thin)
+{
+	self->FogBowStrength = strength;
+	self->FogBowWidth = width;
+	self->FogBowThin = thin;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogBow, SetFogBow)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(strength); PARAM_FLOAT(width); PARAM_FLOAT(thin);
+	SetFogBow(self, strength, width, thin);
+	return 0;
+}
+
+// A second colour across the layer's own thickness -- cold at the floor, warm
+// at the top. Mix 0 keeps the single colour.
+static void SetFogGradient(FLevelLocals *self, int color, double mix)
+{
+	self->FogColor2 = color;
+	self->FogColor2Mix = mix;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogGradient, SetFogGradient)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_COLOR(color); PARAM_FLOAT(mix);
+	SetFogGradient(self, color, mix);
+	return 0;
+}
+
 static void SetTornadoLook(FLevelLocals *self, int color, double scatter)
 {
 	self->TornadoColor = color;

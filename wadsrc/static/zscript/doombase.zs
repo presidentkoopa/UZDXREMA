@@ -845,6 +845,23 @@ struct LevelLocals native
 	native clearscope void SetTornado(double x, double y, double baseZ, double topZ, double radBase, double radTop, double density);
 	native clearscope void SetTornadoMotion(double swirl, double spin, double twist, double lean, double leanPeriod);
 	native clearscope void SetTornadoLook(color col, double scatter);
+
+	// [BB] DISTURBANCES -- one primitive, five effects. A wake, a ripple, an
+	// ignition, fog draining from a point and a monster shouldering mist
+	// aside are the same function: a point, a radius, an age, a strength and
+	// a sign. Eight slots, oldest recycled, strength decaying over its life.
+	//
+	//   mode 0 DISC    fixed radius, thins the mist. Wakes and displacers.
+	//   mode 1 RIPPLE  a ring travelling out at r = age * speed
+	//   mode 2 IGNITE  an expanding sphere that adds LIGHT, not density
+	//   mode 3 GOUT    an expanding disc that ADDS mist -- a vent, a burst
+	native clearscope void FogDisturb(double x, double y, double z, double radius, double strength, double speed, double life, int mode);
+	native clearscope void ClearFogDisturb();
+	native clearscope void SetFogNoise(double scale, double depth, double driftX, double driftY);
+	native clearscope void SetFogTendrils(double spacing, double radius, double height, double density, double rise, double spread, double lean, double taper);
+	native clearscope void SetFogWakeMotion(double velX, double velY, double stretch);
+	native clearscope void SetFogBow(double strength, double width, double thin);
+	native clearscope void SetFogGradient(color col, double mix);
 	// The layer's bottom. Far below any map = fog on the floor, as before.
 	// Raise it for ceiling fog, a floating band, or a drain.
 	native clearscope void SetFogBottom(double botZ, double period, double roll);

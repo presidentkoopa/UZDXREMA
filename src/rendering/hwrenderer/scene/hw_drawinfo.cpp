@@ -273,6 +273,16 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 		// [BB] Fog slab. Doom's Z is the shader's Y, the same swizzle the
 		// sweep origin and the wave origin use -- get it wrong and the mist
 		// hangs against a wall instead of lying on the floor.
+		//
+		// ONLY THE SLAB IS BEHIND THIS GATE. Everything else made of mist --
+		// the tornado, the tendrils, the disturbances, the torch that lights
+		// them -- is pushed below it, unconditionally.
+		//
+		// They used to be inside, and that quietly cancelled the work that
+		// made them independent in the first place: the shader was perfectly
+		// willing to draw a funnel in clear air, and the uniform carrying its
+		// density was never written unless floor fog happened to be on. A
+		// feature can be switched off by code that does not mention it.
 		if (Level->FogSlabActive && Level->FogSlabDensity > 0.0)
 		{
 			VPUniforms.mFogSlab = {
@@ -289,47 +299,103 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 				0.0f, 0.0f };
 			VPUniforms.mFogSlab2 = { (float)Level->FogSlabBottom,
 				(float)Level->FogSlabPeriod, (float)Level->FogSlabRoll, 0.f };
-			VPUniforms.mTornado = { (float)Level->TornadoPos.X,
-				(float)Level->TornadoPos.Y, (float)Level->TornadoBase,
-				(float)Level->TornadoTop };
-			VPUniforms.mTornado2 = { (float)Level->TornadoRadBase,
-				(float)Level->TornadoRadTop, (float)Level->TornadoDensity,
-				(float)Level->TornadoSwirl };
-			VPUniforms.mTornado3 = { (float)Level->TornadoSpin,
-				(float)Level->TornadoTwist, (float)Level->TornadoLean,
-				(float)Level->TornadoLeanPeriod };
-			VPUniforms.mTornadoCol = {
-				Level->TornadoColor.r / 255.f, Level->TornadoColor.g / 255.f,
-				Level->TornadoColor.b / 255.f, (float)Level->TornadoScatter };
 			VPUniforms.mFogSurf = {
 				(float)Level->FogSurfAmp, (float)Level->FogSurfLen,
 				(float)Level->FogSurfSpeed, (float)Level->FogSurfCross };
-
-			// The torch cone in WORLD space, so the mist can be lit by it.
-			// The volumetric beam pass gets its own copy in VIEW space and
-			// cannot share -- see hw_viewpointuniforms.h.
-			if (Level->VolBeamActive)
-			{
-				VPUniforms.mFogBeamPos = {
-					(float)Level->VolBeamPos.X, (float)Level->VolBeamPos.Z,
-					(float)Level->VolBeamPos.Y, (float)Level->VolBeamLength };
-				VPUniforms.mFogBeamDir = {
-					(float)Level->VolBeamDir.X, (float)Level->VolBeamDir.Z,
-					(float)Level->VolBeamDir.Y,
-					(float)cos(Level->VolBeamInner * M_PI / 180.0) };
-				VPUniforms.mFogBeamCol = {
-					Level->VolBeamColor.r / 255.f, Level->VolBeamColor.g / 255.f,
-					Level->VolBeamColor.b / 255.f,
-					(float)cos(Level->VolBeamOuter * M_PI / 180.0) };
-			}
-			else
-			{
-				VPUniforms.mFogBeamPos = { 0.f, 0.f, 0.f, 0.f };
-			}
 		}
 		else
 		{
 			VPUniforms.mFogSlab = { 0.f, 0.f, 24.f, 0.f };
+			VPUniforms.mFogSurf = { 0.f, 256.f, 1.f, 0.f };
+		}
+
+		VPUniforms.mTornado = { (float)Level->TornadoPos.X,
+			(float)Level->TornadoPos.Y, (float)Level->TornadoBase,
+			(float)Level->TornadoTop };
+		VPUniforms.mTornado2 = { (float)Level->TornadoRadBase,
+			(float)Level->TornadoRadTop, (float)Level->TornadoDensity,
+			(float)Level->TornadoSwirl };
+		VPUniforms.mTornado3 = { (float)Level->TornadoSpin,
+			(float)Level->TornadoTwist, (float)Level->TornadoLean,
+			(float)Level->TornadoLeanPeriod };
+		VPUniforms.mTornadoCol = {
+			Level->TornadoColor.r / 255.f, Level->TornadoColor.g / 255.f,
+			Level->TornadoColor.b / 255.f, (float)Level->TornadoScatter };
+
+		// [BB] Disturbances. Age is resolved HERE rather than in script, so a
+		// ripple expands at render rate instead of in 35Hz steps -- a ring
+		// crawling outward one tic at a time is a visible staircase.
+		{
+			double now = Level->maptime / (double)TICRATE;
+			for (int i = 0; i < FLevelLocals::MAX_FOG_DISTURB; i++)
+			{
+				double life = Level->FogDisturbLife[i];
+				double age = now - Level->FogDisturbBirth[i];
+				if (life <= 0.0 || age < 0.0 || age > life)
+				{
+					VPUniforms.mFogDisturbA[i] = { 0.f, 0.f, 0.f, 0.f };
+					VPUniforms.mFogDisturbB[i] = { 0.f, 0.f, 0.f, 0.f };
+					continue;
+				}
+				// Strength decays over the slot's life, so nothing has to be
+				// freed on a schedule: an expired slot is one whose strength
+				// has already reached zero. Squared, because a linear fade on
+				// an expanding ring reads as a hard stop at the end.
+				float fade = (float)(1.0 - age / life);
+				VPUniforms.mFogDisturbA[i] = {
+					(float)Level->FogDisturbPos[i].X,
+					(float)Level->FogDisturbPos[i].Z,
+					(float)Level->FogDisturbPos[i].Y,
+					(float)Level->FogDisturbRadius[i] };
+				VPUniforms.mFogDisturbB[i] = { (float)age,
+					(float)Level->FogDisturbStrength[i] * fade * fade,
+					(float)Level->FogDisturbSpeed[i],
+					(float)Level->FogDisturbMode[i] };
+			}
+		}
+
+		VPUniforms.mFogNoise = { (float)Level->FogNoiseScale,
+			(float)Level->FogNoiseDepth, (float)Level->FogNoiseDrift.X,
+			(float)Level->FogNoiseDrift.Y };
+
+		VPUniforms.mFogTendril = { (float)Level->FogTendrilSpacing,
+			(float)Level->FogTendrilRadius, (float)Level->FogTendrilHeight,
+			(float)Level->FogTendrilDensity };
+		VPUniforms.mFogTendril2 = { (float)Level->FogTendrilRise,
+			(float)Level->FogTendrilSpread, (float)Level->FogTendrilLean,
+			(float)Level->FogTendrilTaper };
+
+		VPUniforms.mFogWake2 = { (float)Level->FogWakeVel.X,
+			(float)Level->FogWakeVel.Y, (float)Level->FogWakeStretch, 0.f };
+
+		VPUniforms.mFogBow = { (float)Level->FogBowStrength,
+			(float)Level->FogBowWidth, (float)Level->FogBowThin, 0.f };
+
+		VPUniforms.mFogColor2 = { Level->FogColor2.r / 255.f,
+			Level->FogColor2.g / 255.f, Level->FogColor2.b / 255.f,
+			(float)Level->FogColor2Mix };
+
+		// The torch cone in WORLD space, so mist can be lit by it. The
+		// volumetric beam pass gets its own copy in VIEW space and cannot
+		// share -- see hw_viewpointuniforms.h. Outside the slab gate too:
+		// a tornado standing in clear air is exactly the case that needs it.
+		if (Level->VolBeamActive)
+		{
+			VPUniforms.mFogBeamPos = {
+				(float)Level->VolBeamPos.X, (float)Level->VolBeamPos.Z,
+				(float)Level->VolBeamPos.Y, (float)Level->VolBeamLength };
+			VPUniforms.mFogBeamDir = {
+				(float)Level->VolBeamDir.X, (float)Level->VolBeamDir.Z,
+				(float)Level->VolBeamDir.Y,
+				(float)cos(Level->VolBeamInner * M_PI / 180.0) };
+			VPUniforms.mFogBeamCol = {
+				Level->VolBeamColor.r / 255.f, Level->VolBeamColor.g / 255.f,
+				Level->VolBeamColor.b / 255.f,
+				(float)cos(Level->VolBeamOuter * M_PI / 180.0) };
+		}
+		else
+		{
+			VPUniforms.mFogBeamPos = { 0.f, 0.f, 0.f, 0.f };
 		}
 	}
 	mClipper->SetViewpoint(Viewpoint);

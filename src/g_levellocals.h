@@ -1311,6 +1311,43 @@ public:
 	// blue ground mist without either being a tint of the other.
 	PalEntry TornadoColor = 0xff8c99b3;
 	double   TornadoScatter = 1.2;
+
+	// [BB] DISTURBANCES. One primitive, five effects -- see the note beside
+	// mFogDisturbA in hw_viewpointuniforms.h. A ring buffer rather than an
+	// allocation: a disturbance is a short-lived event, and the oldest slot is
+	// always the right one to reuse when a ninth arrives.
+	static const int MAX_FOG_DISTURB = 8;
+	DVector3 FogDisturbPos[MAX_FOG_DISTURB];
+	double   FogDisturbRadius[MAX_FOG_DISTURB] = {};
+	double   FogDisturbBirth[MAX_FOG_DISTURB] = {};   // level time in seconds
+	double   FogDisturbLife[MAX_FOG_DISTURB] = {};    // 0 = slot is free
+	double   FogDisturbStrength[MAX_FOG_DISTURB] = {};
+	double   FogDisturbSpeed[MAX_FOG_DISTURB] = {};
+	int      FogDisturbMode[MAX_FOG_DISTURB] = {};
+	int      FogDisturbNext = 0;                      // ring cursor
+
+	double   FogNoiseScale = 0.004;
+	double   FogNoiseDepth = 0;      // 0 = uniform density, as before
+	DVector2 FogNoiseDrift;
+
+	double   FogTendrilSpacing = 96;
+	double   FogTendrilRadius = 10;
+	double   FogTendrilHeight = 96;
+	double   FogTendrilDensity = 0;  // 0 = off
+	double   FogTendrilRise = 0.6;
+	double   FogTendrilSpread = 1.0;
+	double   FogTendrilLean = 6.0;
+	double   FogTendrilTaper = 1.6;
+
+	DVector2 FogWakeVel;
+	double   FogWakeStretch = 0;     // 0 = a plain disc, as before
+
+	double   FogBowStrength = 0;     // 0 = the sweep does not touch the mist
+	double   FogBowWidth = 64;
+	double   FogBowThin = 0.6;
+
+	PalEntry FogColor2 = 0xffb38059;
+	double   FogColor2Mix = 0;       // 0 = one colour, as before
 	double   FogSlabDensity = 0;    // per 1000 units of travel below the top
 	double   FogSlabSoft = 24;      // how many units the top edge fades over
 	double   FogSlabScatter = 0;    // 0 = flat haze, 1 = torch lights it

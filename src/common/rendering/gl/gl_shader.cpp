@@ -283,6 +283,14 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 			vec4 uTornado2;
 			vec4 uTornado3;
 			vec4 uTornadoCol;
+			vec4 uFogDisturbA[8];
+			vec4 uFogDisturbB[8];
+			vec4 uFogNoise;
+			vec4 uFogTendril;
+			vec4 uFogTendril2;
+			vec4 uFogWake2;
+			vec4 uFogBow;
+			vec4 uFogColor2;
 		};
 
 		uniform int uTextureMode;
