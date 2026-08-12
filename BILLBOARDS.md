@@ -236,6 +236,27 @@ so they are both the cheapest to drop and the least missed. View-locked
 billboards are never culled: welded to the eye, their distance is meaningless,
 and losing one to a budget would read as the interface vanishing.
 
+## A note on where the group system landed in the history
+
+**Groups and the `BBFL_VIEWLOCKED` orientation fix are inside commit
+`fdceb0abcf`, whose message says only "A uniform block is matched by offset,
+not by name".** That message is true about part of the commit and says nothing
+about the rest of it.
+
+Two lanes were working in this repo at once, and a `git add -A` from the
+lighting lane staged the billboard lane's uncommitted work along with its own.
+The commit therefore contains a Vulkan uniform-offset fix *and* a new engine
+feature *and* a VR-comfort bug fix, under a message describing the first only.
+
+It is recorded here rather than corrected in place, because the commit is
+pushed and other lanes may have pulled it; rewriting shared history to tidy a
+message costs more than the message is worth. Anyone bisecting billboard
+behaviour should know it is that commit and not a later one.
+
+**The process lesson, which is the useful part:** in a repo another lane is
+editing, stage explicitly. `git add -A` is a claim that everything in the tree
+is yours, and in a shared checkout that claim is false.
+
 ## Where it lives
 
 | File | What |
