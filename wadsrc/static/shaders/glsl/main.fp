@@ -1562,9 +1562,9 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 			// is 0-4 and always will be, so the rest of the float was free,
 			// and a vec4[8] of per-band fill in StreamData would have cost
 			// draw batching in every frame of the game.
-			int packed = int(sband.w);
-			int bmode = packed & 15;
-			int bfill = packed >> 4;
+			int bandpack = int(sband.w);
+			int bmode = bandpack & 15;
+			int bfill = bandpack >> 4;
 
 			if (bmode <= 0) continue;
 			// Recolour bands already had their say, above the glow.

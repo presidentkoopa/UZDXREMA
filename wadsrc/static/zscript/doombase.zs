@@ -715,6 +715,35 @@ struct LevelLocals native
 	// runs every tic while data and colour rarely change.
 	native void SetBillboardAlpha(int id, double alpha);
 	native void RemoveBillboard(int id);
+
+	// [BB] GROUPS -- one transform over a whole composed panel.
+	//
+	// A panel is forty quads. Scaling it means scaling each one's size AND
+	// its offset from the panel's centre; doing that from here would be
+	// eighty setter calls per step and, worse, it would STEP -- script runs
+	// at 35Hz and the renderer does not. Declare the animation once and the
+	// engine resolves it per frame:
+	//
+	//     int gid = level.AddBillboardGroup((AHEAD, 0, UP));
+	//     ... build, calling level.SetBillboardGroup(id, gid) on each element
+	//     level.AnimateBillboardGroup(gid, 0.0, 1.0, 10);   // and that is all
+	//
+	// The origin is in the MEMBERS' OWN space: an offset from the viewer for
+	// BBFL_VIEWLOCKED, from the actor for BBFL_ATTACHED, a world point
+	// otherwise. Do not mix spaces inside one group.
+	//
+	// Growth eases out with a slight overshoot, collapse eases in; the curve
+	// is the engine's and is not a parameter. Scale 0 draws nothing at all,
+	// so a group is also how you hide a panel without destroying it.
+	native int  AddBillboardGroup(Vector3 origin);
+	native void SetBillboardGroup(int id, int gid);
+	native void SetBillboardGroupScale(int gid, double scale);
+	native void AnimateBillboardGroup(int gid, double from, double to, int tics);
+	native void SetBillboardGroupOrigin(int gid, Vector3 origin);
+	// Releases every member back to untransformed. Members left pointing at a
+	// dead group would silently snap to full size, so this is not optional
+	// cleanup -- it is the correct way to end a group's life.
+	native void RemoveBillboardGroup(int gid);
 	// Ray versus billboard. Returns the nearest one the ray crosses and where
 	// on its face it landed, as 0..1 across and down -- the same UV the shader
 	// sees. Returns 0 on a miss. maxDist <= 0 means unlimited. Call as:
