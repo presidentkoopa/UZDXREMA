@@ -27,6 +27,7 @@ anything else here.
 | [Selective desaturation](#17-selective-desaturation) | a grey world that still has blood in it | — |
 | [Two bugs worth recording](#18-two-bugs-worth-recording) | the volumetric cone, and the fourth uniform list | — |
 | [Direct model frame addressing](#19-direct-model-frame-addressing-on-psprites) | a HUD model's frame stops going through the sprite, and the 29-frame ceiling goes with it | — |
+| [Texture inside the glow](#20-texture-inside-the-glow) | five terms for a lane whose coverage is too high for the wave to help | — |
 
 ---
 
@@ -1079,9 +1080,47 @@ degenerate question robustly instead of asking an easy question.**
 
 Independently, the same shader clamped its march against the raw depth sample as
 though it were map units, capping `tMax` under one unit whenever anything was on
-screen. And `VolumetricBeamUniforms` ended `DustTime, padding0, mat4` — std140
-aligns a `mat4` to 16 and the C++ struct does not, so world-space dust was
-sampled through a matrix built from shifted floats.
+screen.
+
+### And fixing one of them made the other visible
+
+The pass integrates along the ray: average contribution × density × **marched
+length**. The last multiply is correct — it turns a mean into an integral — but
+the units were never stated. Density is a per-unit figure multiplied by a length
+in map units, so a beam crossing a thousand-unit room comes out a thousand times
+its dial.
+
+Nobody saw it, because the broken depth clamp had capped that length at 1.0 and
+made the scale *accidentally sane*. Repairing the depth made the length real and
+the beam arrived correct in shape and three orders of magnitude too bright,
+straight into an additive pass that runs **before bloom**. Now normalised per
+1000 units, the same convention the fog slab uses.
+
+**When two faults cancel, repairing the first looks exactly like causing the
+second.**
+
+Then a third, from the same family: a cone seen end-on is a **disc**. Look down
+your own torch and the cross-section you look through is the whole cone, so it
+fills the middle of the screen. The integral is right and the result is useless —
+a wash centred on the crosshair carries no information about the beam, because
+the beam is where you are already looking. On a flat screen the default mainhand
+mount tracks the view, so end-on is the *only* way it is ever seen. Faded by how
+well the view axis agrees with the beam axis (`vol_beam_axisfade`); in view space
+the view direction is exactly `(0,0,-1)`, so the test is one component.
+
+### A padding comment that was wrong about itself
+
+`VolumetricBeamUniforms` ended `DustTime, padding0, mat4` — std140 aligns a
+`mat4` to 16 and the C++ struct does not, so world-space dust was sampled
+through a matrix built from shifted floats.
+
+The repair added **two** pad floats where the row needed one, pushing
+`ViewToWorld` to offset 100 where std140 expects 112 — *while its own comment
+claimed to be fixing exactly that alignment.* It was only caught when a later
+field forced a recount. The byte offsets are now written out row by row in the
+header so the next person counts instead of eyeballing.
+
+**A comment asserting an invariant is not the same as the invariant holding.**
 
 ### There are FOUR uniform lists, not three
 
@@ -1108,6 +1147,94 @@ costing its full per-fragment price while the switch naming it reads Off. Seen
 as eight beams standing in an empty room, as a tornado whose density uniform was
 only written when floor fog happened to be on, and as the entire render push
 freezing whenever a sweep ran with underlay off.
+
+---
+
+## 20. Texture inside the glow
+
+The glow wave (§8) varies a lane's **edge**. That is the right answer while the
+edge is on screen and no answer at all once coverage saturates — turn reach up
+far enough and the wall is a solid card of colour with a wave moving a boundary
+nobody can see any more. High coverage is exactly where people end up, and there
+was nothing left to reach for once they got there.
+
+Five terms that happen **inside** the lit area instead. All five are multipliers
+on the glow's finished contribution, so none of them can move a band's shape:
+*the wave owns shape, these own substance.* All off at 0, and the whole function
+early-outs on one compare when they are.
+
+Applied to all four lanes, including the flat-edge glow, seeded identically so
+the two wall lanes and the floor agree where they meet.
+
+### Sampled in world space, not surface space
+
+Every term reads `pixelpos` directly. A pattern crossing a wall/floor join
+therefore carries **through** the corner instead of restarting at it, which is
+what makes it read as something the room is made of rather than a decal stuck on
+each face. It also costs no tangent frame — the two terms that need a direction
+pick it from `vWorldNormal`, so "vertical on a wall, along X on a flat" needs one
+`abs(normal.y)` test and no per-surface basis.
+
+### The five
+
+**Noise.** A lit wall was one flat brightness across its whole face; real glowing
+material is veined and uneven. Two octaves of value noise scaling intensity, with
+a contrast dial that takes it from marble to plasma, drifting slowly so it is not
+a decal. Same move the fog's density field makes and for the same reason — *a
+uniform value is the single biggest tell that something is a filter rather than a
+substance.*
+
+**Flow.** The wave arrives *from* an origin; this travels *along* the surface,
+which is a different axis of motion entirely and reads as current through the
+material rather than weather over it.
+
+**Cells.** The sweep's lattice trick (§12) made organic. Lighting the distance to
+the nearest cell **edge** rather than the cell body — the difference between the
+two nearest sites, not the nearest one — gives veins instead of tiles, and each
+cell pulses on its own hashed clock so the network crawls rather than blinking as
+one. Free at any density, same as the laser lattice, because it is a pattern and
+not a set of objects. Nine samples rather than twenty-seven: two axes are enough
+for a surface, and the third is the one you cannot see.
+
+**The disturbance array reaches the walls.** §15's eight slots already existed
+and already fired on gunfire and death, and only the fog consumed them. A second
+consumer costs nothing to build and makes a shot visibly cross the lit surfaces
+of a room rather than only the air in it. Rings only — a disc that *dimmed* the
+wall would read as damage to the light rather than a pulse through it.
+
+**One state level.** Every glow in the level pulsing together, driven by nearby
+monsters, player health, or a scripted number. This is the only one that makes a
+lane carry *information* rather than only look good. The rate rises with the
+level as well as the depth, because **faster is what reads as urgency — brighter
+alone just reads as brighter.**
+
+### Two decisions worth stating
+
+The alarm level is resolved in ZScript, not here, because counting nearby
+monsters is a playsim read — the same split the glow wave's origin and the
+tornado's anchor already use. It is **eased** toward its target rather than set:
+a count dropping from three to zero the instant the last monster dies would snap
+every glow in the level in one tic, which reads as a bug. Eased, it reads as the
+room settling.
+
+`GITDHash21` is forward-declared here and defined further down beside the fog
+field that first needed it. Same pattern as `SweepLineAxis` for the air lattice —
+each hash stays next to the code it was written for, and GLSL gets its prototype.
+
+### Uniforms
+
+```
+uGlowTex   x noise amount, y noise scale, z drift, w contrast
+uGlowTex2  x flow amount,  y spacing,     z speed, w sharpness
+uGlowTex3  x cell amount,  y cell scale,  z pulse speed, w vein width
+uGlowTex4  x disturbance reach, y state pulse depth, z state level, w -
+```
+
+Appended to `HWViewpointUniforms` — **all four lists**, including the Vulkan
+`#define` block that §18 exists to warn about. Both checks were run before
+building and are recorded in the header.
+
+GLES does not implement this, consistent with §2, §8, §11, §12, §13 and §14.
 
 ---
 
