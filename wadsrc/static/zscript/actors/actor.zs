@@ -114,6 +114,12 @@ class Actor : Thinker native
 	native double FloatSpeed;
 	native SpriteID sprite;
 	native uint8 frame;
+	// RS fork -- true when this class appears in MODELDEF at all. Set on the
+	// CLASS DEFAULTS by the modeldef parser, and it is the same flag
+	// FindModelFrameRaw gates on. Read it off GetDefaultByType, never off a
+	// live actor: A_ChangeModel sets it on the instance as a side effect, so
+	// an instance read reports true for anything already model-swapped.
+	native readonly bool hasmodel;
 	native vector2 Scale;
 	native TextureID picnum;
 	native double Alpha;

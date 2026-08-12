@@ -56,13 +56,22 @@ float dustNoise(vec3 p)
 
 void main()
 {
-	// Scene depth for this pixel: how far along the ray the world is. The
-	// beam must stop there, or it would shine through walls.
-	float sceneDepth = texture(DepthTexture, TexCoord).x;
-
 	// View-space ray for this pixel. Origin is the eye, at (0,0,0).
 	vec2 ndc = TexCoord * 2.0 - 1.0;
 	vec3 rayDir = normalize(vec3(ndc * TanHalfFov, -1.0));
+
+	// Scene depth for this pixel: how far along the ray the world is. The
+	// beam must stop there, or it would shine through walls.
+	//
+	// THE SAMPLE IS NOT A DISTANCE. It is a nonlinear 0..1 depth-buffer value,
+	// and this used to clamp the march against it directly as though it were
+	// view-space map units -- so any geometry at all in front of the camera
+	// capped tMax at under one unit and the integral covered nothing. Convert
+	// it the way lineardepth.fp does, then turn the along-Z distance into a
+	// distance along THIS ray, which is what tMin/tMax are measured in.
+	float rawDepth = texture(DepthTexture, TexCoord).x;
+	float linearZ = 1.0 / (clamp(rawDepth, 0.0, 1.0) * LinearizeDepthA + LinearizeDepthB);
+	float sceneDepth = linearZ / max(-rayDir.z, 1e-4);
 
 	// --- analytic ray/cone intersection --------------------------------
 	// Bounds the march to the segment that can possibly be lit. Solves the
@@ -82,7 +91,31 @@ void main()
 	float tMin = 0.0;
 	float tMax = 0.0;
 
-	if (abs(a) < 1e-6)
+	// ---------------------------------------------------------------------
+	// THE APEX IS USUALLY AT THE EYE, AND THAT KILLED THE WHOLE PASS.
+	//
+	// A torch held at head height, or on the head, or read from AttackPos --
+	// which IS the eye position -- puts the cone's apex within a hair of the
+	// view origin. Then co is zero, so b and c are zero, so the discriminant
+	// is zero, so both roots are zero, so tMin == tMax == 0, so the guard
+	// below returned black. For every pixel. On every frame. The beam has
+	// never drawn a single lit fragment in this configuration, which is the
+	// default one.
+	//
+	// It is also the case that needs no quadratic at all. With the apex at
+	// the eye the ray either lies inside the cone or it does not -- one dot
+	// product -- and if it does, the lit stretch is the whole ray from the
+	// eye to whatever stops it. Solving that as a general ray/cone problem
+	// was asking a degenerate question a robust way instead of asking an
+	// easy question at all.
+	// ---------------------------------------------------------------------
+	if (dot(BeamPos, BeamPos) < 1.0)
+	{
+		if (dv <= cosT) { FragColor = vec4(0.0); return; }
+		tMin = 0.0;
+		tMax = min(BeamLength, sceneDepth);
+	}
+	else if (abs(a) < 1e-6)
 	{
 		// Ray parallel to the cone surface: one root, or none worth having.
 		if (abs(b) < 1e-6) { FragColor = vec4(0.0); return; }
@@ -100,10 +133,6 @@ void main()
 		tMin = min(t0, t1);
 		tMax = max(t0, t1);
 	}
-
-	// The quadratic also solves the mirror cone behind the apex. Reject any
-	// stretch of the segment that is on the wrong side.
-	float midCheck = dot(BeamPos + rayDir * max(tMin, 0.0) * 0.0, BeamDir);
 
 	tMin = max(tMin, 0.0);
 	tMax = min(tMax, min(BeamLength, sceneDepth));

@@ -3036,6 +3036,14 @@ class PSprite : Object native play
 	native readonly PlayerInfo Owner;
 	native SpriteID Sprite;
 	native int Frame;
+	// RS fork -- direct model frame addressing. Frame above is a SPRITE letter
+	// index and caps at 29 (MAX_SPRITE_FRAMES); these address a model frame
+	// directly, so a 75-frame mesh is fully reachable. -1 = stock behaviour.
+	// ModelFrameLerp in 0..1 blends ModelFrame -> ModelFrameNext explicitly,
+	// instead of the renderer deriving a blend from state tics.
+	native int ModelFrame;
+	native int ModelFrameNext;
+	native float ModelFrameLerp;
 	//native readonly int RenderStyle;	had to be blocked because the internal representation was not ok. Renderstyle is still pending a proper solution.
 	native readonly int ID;
 	native Bool processPending;

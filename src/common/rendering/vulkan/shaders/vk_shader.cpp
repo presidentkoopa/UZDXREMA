@@ -233,6 +233,7 @@ static const char *shaderBindings = R"(
 		vec4 uTornado;
 		vec4 uTornado2;
 		vec4 uTornado3;
+		vec4 uTornadoCol;
 	};
 
 	layout(set = 1, binding = 0, std140) uniform ViewpointUBO {

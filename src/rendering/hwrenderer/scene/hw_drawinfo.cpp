@@ -298,6 +298,9 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 			VPUniforms.mTornado3 = { (float)Level->TornadoSpin,
 				(float)Level->TornadoTwist, (float)Level->TornadoLean,
 				(float)Level->TornadoLeanPeriod };
+			VPUniforms.mTornadoCol = {
+				Level->TornadoColor.r / 255.f, Level->TornadoColor.g / 255.f,
+				Level->TornadoColor.b / 255.f, (float)Level->TornadoScatter };
 			VPUniforms.mFogSurf = {
 				(float)Level->FogSurfAmp, (float)Level->FogSurfLen,
 				(float)Level->FogSurfSpeed, (float)Level->FogSurfCross };
@@ -631,6 +634,14 @@ void HWDrawInfo::SetupVolumetricBeam()
 	u.DustScale = (float)Level->VolBeamDustScale;
 	u.DustDrift = (float)Level->VolBeamDustDrift;
 	u.DustTime = (float)(screen->FrameTime * 0.001);
+
+	// The two constants that turn a raw depth sample back into a view-space
+	// distance, identical to the pair PPAmbientOcclusion feeds lineardepth.fp.
+	// The pass was comparing the raw 0..1 sample against a march distance in
+	// map units, so anything in front of the camera pinned the march to under
+	// one unit and the beam integrated across nothing at all.
+	u.LinearizeDepthA = 1.0f / screen->GetZFar() - 1.0f / screen->GetZNear();
+	u.LinearizeDepthB = max(1.0f / screen->GetZNear(), 1.e-8f);
 
 	VSMatrix inv;
 	if (!VPUniforms.mViewMatrix.inverseMatrix(inv)) inv.loadIdentity();

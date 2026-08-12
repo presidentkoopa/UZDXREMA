@@ -844,6 +844,7 @@ struct LevelLocals native
 	// Density 0 = off.
 	native clearscope void SetTornado(double x, double y, double baseZ, double topZ, double radBase, double radTop, double density);
 	native clearscope void SetTornadoMotion(double swirl, double spin, double twist, double lean, double leanPeriod);
+	native clearscope void SetTornadoLook(color col, double scatter);
 	// The layer's bottom. Far below any map = fog on the floor, as before.
 	// Raise it for ceiling fog, a floating band, or a drain.
 	native clearscope void SetFogBottom(double botZ, double period, double roll);

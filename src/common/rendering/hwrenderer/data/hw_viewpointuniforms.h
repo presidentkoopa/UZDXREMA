@@ -190,6 +190,12 @@ struct HWViewpointUniforms
 	FVector4 mTornado2 = { 48.f, 320.f, 0.f, 0.5f };
 	FVector4 mTornado3 = { 2.f, 8.f, 0.f, 6.f };
 
+	// The funnel's OWN colour, and its own torch response in .w. Without
+	// this it could only ever be a tint of the fog layer, and its scatter
+	// came from a dial that is zero whenever floor fog is switched off --
+	// which is exactly when a tornado standing in clear air needs it.
+	FVector4 mTornadoCol = { 0.55f, 0.6f, 0.7f, 1.2f };
+
 
 	void CalcDependencies()
 	{

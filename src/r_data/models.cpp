@@ -65,7 +65,7 @@ EXTERN_CVAR(Float, vr_3dweaponOffsetZ);
 extern TDeletingArray<FVoxel *> Voxels;
 extern TDeletingArray<FVoxelDef *> VoxelDefs;
 
-void RenderFrameModels(FModelRenderer* renderer, FLevelLocals* Level, const FSpriteModelFrame *smf, const FState* curState, const int curTics, FTranslationID translation, AActor* actor);
+void RenderFrameModels(FModelRenderer* renderer, FLevelLocals* Level, const FSpriteModelFrame *smf, const FState* curState, const int curTics, FTranslationID translation, AActor* actor, const DPSprite* psp = nullptr);
 
 
 void RenderModel(FModelRenderer *renderer, float x, float y, float z, FSpriteModelFrame *smf, AActor *actor, double ticFrac)
@@ -282,7 +282,7 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	auto trans = psp->GetTranslation();
 	if ((psp->Flags & PSPF_PLAYERTRANSLATED)) trans = psp->Owner->mo->Translation;
 
-	RenderFrameModels(renderer, playermo->Level, smf, psp->GetState(), psp->GetTics(), trans, psp->Caller);
+	RenderFrameModels(renderer, playermo->Level, smf, psp->GetState(), psp->GetTics(), trans, psp->Caller, psp);
 	renderer->EndDrawHUDModel(playermo->RenderStyle, smf_flags);
 }
 
@@ -339,7 +339,7 @@ void calcFrames(const ModelAnim &curAnim, double tic, ModelAnimFrameInterp &to, 
 	}
 }
 
-CalcModelFrameInfo CalcModelFrame(FLevelLocals *Level, const FSpriteModelFrame *smf, const FState *curState, const int curTics, DActorModelData* data, AActor* actor, bool is_decoupled, double tic)
+CalcModelFrameInfo CalcModelFrame(FLevelLocals *Level, const FSpriteModelFrame *smf, const FState *curState, const int curTics, DActorModelData* data, AActor* actor, bool is_decoupled, double tic, const DPSprite* psp)
 {
 	// [BB] Frame interpolation: Find the FSpriteModelFrame smfNext which follows after smf in the animation
 	// and the scalar value inter ( element of [0,1) ), both necessary to determine the interpolated frame.
@@ -406,6 +406,28 @@ CalcModelFrameInfo CalcModelFrame(FLevelLocals *Level, const FSpriteModelFrame *
 		}
 	}
 
+	// RS FORK -- EXPLICIT INTERPOLATION.
+	// Everything above derives 'inter' from state tics and only tweens across a
+	// state transition. That is useless when one of OUR model animations is
+	// being played across THEIR state timings -- the blend would restart on
+	// every state change and sit at zero in between, so the model would snap
+	// from pose to pose. When the psprite supplies a lerp we take it verbatim.
+	//
+	// smfNext must be non-null or RenderModelFrame's nextFrame test fails and
+	// 'inter' is discarded. Same definition, different frame number, so smf
+	// itself is the correct "next" here.
+	//
+	// Deliberately placed AFTER the gl_interpolate_model_frames /
+	// MDL_NOINTERPOLATION branch so an explicit blend is not silently dropped
+	// when a user turns that CVar off.
+	if (psp && psp->ModelFrameLerp >= 0.f)
+	{
+		float f = psp->ModelFrameLerp;
+		if (f > 1.f) f = 1.f;
+		inter   = f;
+		smfNext = smf;
+	}
+
 	unsigned modelsamount = smf->modelsAmount;
 	//[SM] - if we added any models for the frame to also render, then we also need to update modelsAmount for this smf
 	if (data != nullptr)
@@ -426,7 +448,7 @@ CalcModelFrameInfo CalcModelFrame(FLevelLocals *Level, const FSpriteModelFrame *
 	};
 }
 
-bool CalcModelOverrides(int i, const FSpriteModelFrame *smf, DActorModelData* data, const CalcModelFrameInfo &info, ModelDrawInfo &out, bool is_decoupled)
+bool CalcModelOverrides(int i, const FSpriteModelFrame *smf, DActorModelData* data, const CalcModelFrameInfo &info, ModelDrawInfo &out, bool is_decoupled, const DPSprite* psp)
 {
 	//reset drawinfo
 	out.modelid = -1;
@@ -535,6 +557,30 @@ bool CalcModelOverrides(int i, const FSpriteModelFrame *smf, DActorModelData* da
 		out.skinid = smf->skinIDs[i];
 	}
 
+	// RS FORK -- DIRECT MODEL FRAME ADDRESSING.
+	// Every branch above resolved the frame through the sprite: a letter index
+	// capped at MAX_SPRITE_FRAMES (29) fed through MODELDEF's FrameIndex table.
+	// Our weapon meshes run past 70 frames, so most of their animation had no
+	// letter to name it with and could not be reached at all.
+	//
+	// The psprite's ModelFrame replaces the NUMBER only. Everything else the
+	// smf carries -- scale, offsets, angle/pitch/roll, skins, flags -- still
+	// comes from the sprite lookup, which is why FindModelFrame must still
+	// resolve upstream of here.
+	//
+	// Applied to every model index. A donor with several models is showing
+	// frames of one animation, so they advance together; per-index divergence
+	// would need an array and no donor needs it yet.
+	//
+	// Out of range is not clamped on purpose: FMD3Model::RenderFrame rejects
+	// (unsigned)frameno >= Frames.Size() and draws nothing, which is a visible
+	// failure. Silently clamping to the last frame would hide the bug.
+	if (psp && psp->ModelFrame >= 0)
+	{
+		out.modelframe     = psp->ModelFrame;
+		out.modelframenext = (psp->ModelFrameNext >= 0) ? psp->ModelFrameNext : psp->ModelFrame;
+	}
+
 	return (out.modelid >= 0 && out.modelid < Models.size());
 }
 
@@ -610,7 +656,7 @@ static inline void RenderModelFrame(FModelRenderer *renderer, int i, const FSpri
 	mdl->RenderFrame(renderer, tex, drawinfo.modelframe, nextFrame ? drawinfo.modelframenext : drawinfo.modelframe, nextFrame ? frameinfo.inter : -1.f, translation, ssidp, boneStartingPosition);
 }
 
-void RenderFrameModels(FModelRenderer *renderer, FLevelLocals *Level, const FSpriteModelFrame *smf, const FState *curState, const int curTics, FTranslationID translation, AActor* actor)
+void RenderFrameModels(FModelRenderer *renderer, FLevelLocals *Level, const FSpriteModelFrame *smf, const FState *curState, const int curTics, FTranslationID translation, AActor* actor, const DPSprite* psp)
 {
 	double tic = actor->Level->totaltime;
 	if ((ConsoleState == c_up || ConsoleState == c_rising) && (menuactive == MENU_Off || menuactive == MENU_OnNoPause) && !actor->isFrozen())
@@ -622,7 +668,7 @@ void RenderFrameModels(FModelRenderer *renderer, FLevelLocals *Level, const FSpr
 
 	DActorModelData* modelData = actor ? actor->modelData.ForceGet() : nullptr;
 
-	CalcModelFrameInfo frameinfo = CalcModelFrame(Level, smf, curState, curTics, modelData, actor, is_decoupled, tic);
+	CalcModelFrameInfo frameinfo = CalcModelFrame(Level, smf, curState, curTics, modelData, actor, is_decoupled, tic, psp);
 	ModelDrawInfo drawinfo;
 
 	int boneStartingPosition = -1;
@@ -630,7 +676,7 @@ void RenderFrameModels(FModelRenderer *renderer, FLevelLocals *Level, const FSpr
 
 	for (unsigned i = 0; i < frameinfo.modelsamount; i++)
 	{
-		if (CalcModelOverrides(i, smf, modelData, frameinfo, drawinfo, is_decoupled))
+		if (CalcModelOverrides(i, smf, modelData, frameinfo, drawinfo, is_decoupled, psp))
 		{
 			RenderModelFrame(renderer, i, smf, modelData, frameinfo, drawinfo, is_decoupled, tic, translation, boneStartingPosition, evaluatedSingle);
 		}

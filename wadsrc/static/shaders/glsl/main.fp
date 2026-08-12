@@ -1180,7 +1180,19 @@ vec3 SweepAirLattice(vec3 fragPos)
 		int bandpack = int(sband.w);
 		int bmode = bandpack & 15;
 		int bfill = bandpack >> 4;
-		if (bmode <= 0 || bfill <= 0) continue;
+		if (bmode <= 0) continue;
+
+		// AIR STRENGTH IS ITSELF THE SWITCH.
+		//
+		// This used to also require a per-band fill mode, so asking for lasers
+		// in the air meant setting two unrelated things on two parts of one
+		// page, and setting only the obvious one drew nothing at all. A band
+		// that is drawing, in a sweep whose air lattice is on, means lasers --
+		// the grid is the default because it is the only answer that is ever
+		// wanted from those two facts.
+		//
+		// A band that explicitly asks for dots or a solid slab still gets them.
+		if (bfill <= 0) bfill = 1;
 
 		int shape = int(uSweepBandOrigin[sb].w);
 		vec3 o = uSweepBandOrigin[sb].xyz;
@@ -1205,16 +1217,29 @@ vec3 SweepAirLattice(vec3 fragPos)
 		// Parallel view: the ray never crosses, so there is nothing to draw.
 		if (abs(planeAxisDir) < 0.0001) continue;
 
-		float t = (target - planeAxisEye) / planeAxisDir;
-		if (t <= 0.0 || t >= fragDist) continue;   // behind you, or behind a wall
+		// THE BAND IS A SLAB, NOT A SHEET, so solve for the whole crossing
+		// rather than one plane. Where the ray enters its front face, where it
+		// leaves the back, and how much of that is actually in front of the
+		// pixel we are shading.
+		//
+		// The previous version intersected the centre plane and then measured
+		// how far the hit was from that plane -- which is zero by construction,
+		// every time. The softening it was reaching for never happened, and a
+		// grid clipped by a wall popped out of existence instead of fading.
+		float halfT = max(thick, 1.0) * 0.5;
+		float tA = (target - halfT - planeAxisEye) / planeAxisDir;
+		float tB = (target + halfT - planeAxisEye) / planeAxisDir;
+		float t0 = max(min(tA, tB), 0.0);
+		float t1 = min(max(tA, tB), fragDist);
+		if (t1 <= t0) continue;   // entirely behind you, or entirely behind a wall
+
+		// Sample at the middle of the crossing, and weigh by how much of the
+		// slab survived the clip. A grazing view crosses more of it and pins at
+		// full; a crossing half eaten by geometry fades out instead of popping.
+		float t = 0.5 * (t0 + t1);
+		float slab = clamp((t1 - t0) / max(thick, 1.0), 0.0, 1.0);
 
 		vec3 hit = eye + dir * t;
-
-		// Soften across the band's own thickness, so a thick band reads as a
-		// slab of lattice rather than an infinitely thin sheet of it.
-		float depth = abs(hit[shape == 2 ? 0 : (shape == 3 ? 2 : 1)] - target);
-		float slab = 1.0 - smoothstep(thick * 0.5, thick, depth);
-		if (slab <= 0.0) continue;
 
 		// The same two tangent axes the surface fill uses, so the lattice in
 		// the air and the lattice on the wall line up exactly rather than
@@ -1275,7 +1300,18 @@ vec3 SweepAirLattice(vec3 fragPos)
 //
 vec4 FogSlabAt(vec3 fragPos)
 {
-	if (uFogSlab.y <= 0.0) return vec4(0.0);
+	// EITHER SHAPE IS ENOUGH TO MAKE THIS WORTH RUNNING, and that is the whole
+	// of what "independent" means here. The funnel is not a feature of the
+	// layer -- it is a second shape made of the same mist, and gating it on the
+	// layer's density made a tornado in clear air impossible to ask for.
+	//
+	// They keep the ray setup, the torch, the glow pickup and the compositing
+	// in common, because those are properties of MIST and not of either shape.
+	// What they do not share any more is whether they exist, how thick they
+	// are, and what colour they are.
+	bool haveSlab = uFogSlab.y > 0.0;
+	bool haveTorn = uTornado2.z > 0.0;
+	if (!haveSlab && !haveTorn) return vec4(0.0);
 
 	vec3  eye  = uCameraPos.xyz;
 	float topZ = uFogSlab.x;
@@ -1377,8 +1413,11 @@ vec4 FogSlabAt(vec3 fragPos)
 	// Average occupancy along the segment. Exact for a linear ramp, and the
 	// error against a true integral through the smoothstep is far below what
 	// the eye can see in fog.
+	// Nothing of the LAYER is here -- but the funnel may still be, and it is
+	// measured from a different quantity entirely, so this can only bail when
+	// there is no funnel either.
 	float occupancy = 0.5 * (dEye + dFrag);
-	if (occupancy <= 0.0) return vec4(0.0);
+	if (occupancy <= 0.0 && !haveTorn) return vec4(0.0);
 
 	float travel = distance(eye, fragPos) * occupancy;
 
@@ -1412,6 +1451,11 @@ vec4 FogSlabAt(vec3 fragPos)
 			col += uFogBeamCol.rgb * lit * uFogSlab.w;
 		}
 	}
+
+	// The funnel's own accumulator. It is NOT added into the layer's, because
+	// the two carry different colours and a single number cannot say which of
+	// them a pixel's mist came from. Kept separate here and merged once, below.
+	float tam = 0.0;
 
 	// ---- TORNADOES -----------------------------------------------------
 	//
@@ -1495,9 +1539,48 @@ vec4 FogSlabAt(vec3 fragPos)
 				d *= smoothstep(baseY - 32.0, baseY + 48.0, fragPos.y);
 				d *= 1.0 - smoothstep(topY - 96.0, topY + 32.0, fragPos.y);
 
-				amount = clamp(amount + max(d, 0.0) * uTornado2.z, 0.0, 1.0);
+				tam = clamp(tam + max(d, 0.0) * uTornado2.z, 0.0, 1.0);
 			}
 		}
+	}
+
+	// ---- TWO SHAPES, TWO COLOURS, ONE PIXEL ----------------------------
+	//
+	// The funnel gets its own colour and its own torch response, so a red
+	// column can stand in blue ground mist and neither one has to be a tint of
+	// the other. That is the whole request, and it costs one uniform.
+	if (haveTorn)
+	{
+		vec3 tcol = uTornadoCol.rgb;
+
+		// Its own scatter dial rather than the layer's, because the layer's is
+		// pushed by SetFogSlab and is therefore zero whenever floor fog is off
+		// -- which is exactly when a tornado standing alone needs it most.
+		if (uTornadoCol.w > 0.0 && uFogBeamPos.w > 0.0)
+		{
+			vec3 toFrag = fragPos - uFogBeamPos.xyz;
+			float len = length(toFrag);
+			if (len > 0.001)
+			{
+				float cosA = dot(toFrag / len, uFogBeamDir.xyz);
+				float lit = smoothstep(uFogBeamCol.w, uFogBeamDir.w, cosA);
+				lit *= 1.0 - clamp(len / uFogBeamPos.w, 0.0, 1.0);
+				tcol += uFogBeamCol.rgb * lit * uTornadoCol.w;
+			}
+		}
+
+		// UNION, NOT SUM. Mist you are looking through twice does not become
+		// twice as opaque -- what gets through is what gets through both, so
+		// the survivals multiply and the coverages combine as a+b-ab. Adding
+		// them instead would drive the overlap straight to solid the moment a
+		// funnel crossed a fog layer, which is the one place it must not.
+		float total = amount + tam - amount * tam;
+
+		// Colour weighted by how much each shape actually contributed, so the
+		// overlap reads as the two mists mingling rather than one winning.
+		float wsum = amount + tam;
+		col = (wsum > 0.0001) ? (col * amount + tcol * tam) / wsum : tcol;
+		amount = total;
 	}
 
 	// AND BEAMS LIGHT THE MIST THEY CROSS.
@@ -1726,7 +1809,12 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 	for (int rb = 0; rb < 8; rb++)
 	{
 		if (rb >= uSweepCount) break;
-		if (int(uSweepBands[rb].w) != 4) continue;
+		// MASK, because .w is a PACKED WORD -- drawmode + 16 * fill, the same
+		// pair every other decode site here splits with & 15. Comparing the
+		// whole word against 4 meant a recolour band stopped recolouring the
+		// instant it was given any fill, since mode 4 with fill 1 packs as 20.
+		// Two features that each worked alone and silently cancelled together.
+		if ((int(uSweepBands[rb].w) & 15) != 4) continue;
 		float ra = SweepBandAttenAt(rb) * uSweepColors[rb].a;
 		if (ra > sweepTintW) { sweepTintW = ra; sweepTint = uSweepColors[rb].rgb; }
 	}

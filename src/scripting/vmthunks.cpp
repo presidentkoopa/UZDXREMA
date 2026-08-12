@@ -3941,6 +3941,20 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetTornado, SetTornado)
 	return 0;
 }
 
+static void SetTornadoLook(FLevelLocals *self, int color, double scatter)
+{
+	self->TornadoColor = color;
+	self->TornadoScatter = scatter;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetTornadoLook, SetTornadoLook)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_COLOR(color); PARAM_FLOAT(scatter);
+	SetTornadoLook(self, color, scatter);
+	return 0;
+}
+
 static void SetTornadoMotion(FLevelLocals *self, double swirl, double spin,
 	double twist, double lean, double leanPeriod)
 {

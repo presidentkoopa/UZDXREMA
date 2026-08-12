@@ -164,7 +164,13 @@ static bool VRWheel_Available(const VRMode* vrmode)
 }
 using s3d::OpenXR_GetThumbstick;
 
-void RenderFrameModels(FModelRenderer* renderer, FLevelLocals* Level, const FSpriteModelFrame* smf, const FState* curState, const int curTics, FTranslationID translation, AActor* actor);
+// NOTE: this file deliberately does not include models.h, so this declaration
+// is a duplicate of the one in models.cpp and MUST be kept in step with it --
+// a signature change here is a link error, not a compile error. The trailing
+// DPSprite* is the RS fork's direct model-frame override; the wheel renders
+// world items, not psprites, so it always takes the default.
+class DPSprite;
+void RenderFrameModels(FModelRenderer* renderer, FLevelLocals* Level, const FSpriteModelFrame* smf, const FState* curState, const int curTics, FTranslationID translation, AActor* actor, const DPSprite* psp = nullptr);
 
 namespace
 {

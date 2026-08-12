@@ -392,7 +392,24 @@ struct VolumetricBeamUniforms
 	float DustScale;
 	float DustDrift;
 	float DustTime;
+
+	// TURNING THE DEPTH BUFFER INTO A DISTANCE.
+	//
+	// The pass used to clamp its march against the RAW depth sample, which is
+	// a nonlinear value in 0..1, as though it were a view-space distance in map
+	// units. Anything at all in front of the camera therefore capped the march
+	// at under one map unit, and the beam integrated across almost nothing.
+	// Same two constants lineardepth.fp uses, computed the same way.
+	float LinearizeDepthA;
+	float LinearizeDepthB;
+
+	// KEEPS THE MATRIX ON A 16-BYTE BOUNDARY. std140 aligns a mat4 to 16 and
+	// the C++ struct does not, so without a full final row here the two
+	// disagree about where ViewToWorld starts and world-space dust is sampled
+	// through a matrix assembled from the wrong floats.
 	float padding0;
+	float padding1;
+
 	float ViewToWorld[16];   // plain floats: VSMatrix is not visible in this header
 
 	static std::vector<UniformFieldDesc> Desc()
@@ -413,7 +430,10 @@ struct VolumetricBeamUniforms
 			{ "DustScale", UniformType::Float, offsetof(VolumetricBeamUniforms, DustScale) },
 			{ "DustDrift", UniformType::Float, offsetof(VolumetricBeamUniforms, DustDrift) },
 			{ "DustTime", UniformType::Float, offsetof(VolumetricBeamUniforms, DustTime) },
+			{ "LinearizeDepthA", UniformType::Float, offsetof(VolumetricBeamUniforms, LinearizeDepthA) },
+			{ "LinearizeDepthB", UniformType::Float, offsetof(VolumetricBeamUniforms, LinearizeDepthB) },
 			{ "padding0", UniformType::Float, offsetof(VolumetricBeamUniforms, padding0) },
+			{ "padding1", UniformType::Float, offsetof(VolumetricBeamUniforms, padding1) },
 			{ "ViewToWorld", UniformType::Mat4, offsetof(VolumetricBeamUniforms, ViewToWorld) },
 		};
 	}

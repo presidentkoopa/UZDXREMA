@@ -2068,6 +2068,7 @@ DEFINE_FIELD(AActor, Speed)
 DEFINE_FIELD(AActor, FloatSpeed)
 DEFINE_FIELD(AActor, sprite)
 DEFINE_FIELD(AActor, frame)
+DEFINE_FIELD(AActor, hasmodel)   // RS fork -- see actor.zs
 DEFINE_FIELD(AActor, Scale)
 DEFINE_FIELD_NAMED(AActor, Scale.X, scalex)
 DEFINE_FIELD_NAMED(AActor, Scale.Y, scaley)

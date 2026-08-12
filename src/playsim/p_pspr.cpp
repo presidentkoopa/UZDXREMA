@@ -146,8 +146,11 @@ DEFINE_FIELD(DPSprite, Frame)
 DEFINE_FIELD(DPSprite, Flags)
 DEFINE_FIELD(DPSprite, ID)
 DEFINE_FIELD(DPSprite, processPending)
-DEFINE_FIELD(DPSprite, Tint)      // RS fork
-DEFINE_FIELD(DPSprite, Glow)      // RS fork
+DEFINE_FIELD(DPSprite, Tint)             // RS fork
+DEFINE_FIELD(DPSprite, Glow)             // RS fork
+DEFINE_FIELD(DPSprite, ModelFrame)       // RS fork
+DEFINE_FIELD(DPSprite, ModelFrameNext)   // RS fork
+DEFINE_FIELD(DPSprite, ModelFrameLerp)   // RS fork
 DEFINE_FIELD(DPSprite, x)
 DEFINE_FIELD(DPSprite, y)
 DEFINE_FIELD(DPSprite, oldx)
@@ -1406,6 +1409,9 @@ void DPSprite::Serialize(FSerializer &arc)
 		("alpha", alpha)
 		("tint", Tint)      // RS fork
 		("glow", Glow)      // RS fork
+		("modelframe", ModelFrame)          // RS fork
+		("modelframenext", ModelFrameNext)  // RS fork
+		("modelframelerp", ModelFrameLerp)  // RS fork
 		("pivot", pivot)
 		("scale", scale)
 		("rotation", rotation)

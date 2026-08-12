@@ -161,6 +161,42 @@ public:
 	PalEntry Tint = 0xffffffff;   // multiply, 0xffffffff = untinted
 	PalEntry Glow = 0;            // additive, 0x00000000 = none
 
+	// RS FORK -- DIRECT MODEL FRAME ADDRESSING.
+	//
+	// A HUD model's frame normally arrives through the SPRITE: psp->Frame is
+	// a sprite letter index, MODELDEF's FrameIndex maps that letter to a model
+	// frame, and FindModelFrame looks the pair up. That channel is one
+	// character wide -- MAX_SPRITE_FRAMES is 29, inherited from Doom's
+	// 8-character lump names where Boom pushed the frame char as far as ']'.
+	//
+	// Model meshes have no such limit. Our weapon models run to 75 frames, so
+	// most of every reload and fire animation was simply unaddressable: there
+	// was no letter left to name it with. Raising MAX_SPRITE_FRAMES does not
+	// help -- three more ASCII characters and then lowercase, which lump names
+	// case-fold away.
+	//
+	// So skip the encoding. When ModelFrame >= 0 the HUD model path uses it
+	// verbatim instead of the sprite-derived frame, and 75 costs no more than
+	// 5. FindModelFrame must still resolve (scale, offsets, skins and flags
+	// all come from the FSpriteModelFrame it returns) -- only the frame NUMBER
+	// is replaced.
+	//
+	// ModelFrameNext + ModelFrameLerp drive interpolation explicitly. Stock
+	// tweening is derived from state tics and only happens across a state
+	// transition, which is useless when one of OUR animations is being played
+	// across THEIR state timings: it would snap between poses. Set the lerp
+	// and the renderer blends ModelFrame -> ModelFrameNext by it, ignoring
+	// gl_interpolate_model_frames and MDL_NOINTERPOLATION.
+	//
+	// IN-CLASS INITIALISERS FOR THE SAME REASON AS Tint/Glow ABOVE: the
+	// private savegame constructor runs no constructor body, and a garbage
+	// ModelFrame indexes a model's frame array with a random int.
+	//
+	// -1 on all three = inactive, stock behaviour.
+	int   ModelFrame     = -1;   // model frame to show, bypassing the sprite
+	int   ModelFrameNext = -1;   // frame to blend toward
+	float ModelFrameLerp = -1.f; // 0..1 blend factor; <0 = use stock timing
+
 private:
 	DPSprite () {}
 

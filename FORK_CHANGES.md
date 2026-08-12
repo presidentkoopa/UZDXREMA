@@ -793,6 +793,123 @@ GLES does not implement this, consistent with §2, §8, §11, §12 and §13.
 
 ---
 
+## 15. Direct model frame addressing on psprites
+
+A HUD weapon model gets its frame through the *sprite*. `psp->Frame` is a
+sprite letter index; MODELDEF's `FrameIndex` maps that letter to a model
+frame; `FindModelFrame` looks the pair up and hands back an
+`FSpriteModelFrame` carrying scale, offsets, skins, flags — and the frame
+number.
+
+That channel is one character wide. `MAX_SPRITE_FRAMES` is **29**, inherited
+from Doom's 8-character lump names where the frame is a single character and
+Boom pushed it as far as `]`. Model meshes have no such limit: the weapon
+models this fork ships run to 75 frames. Everything past the 29th was
+unreachable — not awkward, *unaddressable*, because there was no letter left
+to name it with.
+
+That is fine for a weapon whose own states drive its own model. It is fatal
+for playing one weapon's animation on a different weapon's timing, which is
+what the model-swap program does: it puts our meshes on weapons from other
+mods and needs to drive Raise/Ready/Lower/Fire/AltFire/Reload frame ranges
+against whatever tic counts the foreign weapon happens to use.
+
+Raising `MAX_SPRITE_FRAMES` is not the fix. Three more ASCII characters exist
+after `]` and then it is lowercase, which lump names case-fold away — call it
+32 against a requirement of 75. It is also baked into
+`spriteframewithrotate sprtemp[MAX_SPRITE_FRAMES]` and the lump-name scanner
+in `sprites.cpp`, so it would change how every sprite in the game parses to
+buy something only the model path wants.
+
+So the encoding is skipped rather than stretched.
+
+### Three fields on DPSprite
+
+`p_pspr.h`, next to `Tint`/`Glow` and for the same reasons:
+
+```
+int   ModelFrame     = -1;   // model frame to show, bypassing the sprite
+int   ModelFrameNext = -1;   // frame to blend toward
+float ModelFrameLerp = -1.f; // 0..1 blend factor; <0 = stock timing
+```
+
+**In-class initialisers, not constructor-body ones.** Identical trap to §
+Tint/Glow: `DPSprite` has a private argument-less constructor used only by
+savegame deserialisation, which runs none of the public constructor's body,
+and the serialiser leaves unknown fields alone when reading an older save. A
+garbage `ModelFrame` indexes a model's frame array with a random int.
+
+They live on the psprite rather than the weapon actor so the two hands animate
+independently — mainhand and offhand are separate layers (`PSP_WEAPON` /
+`PSP_OFFHANDWEAPON`), and `AActor::modelData` is per-actor.
+
+Serialised in `DPSprite::Serialize`, exported via `DEFINE_FIELD`, declared
+`native` in `player.zs`.
+
+### Where the frame is replaced
+
+`CalcModelOverrides` (`models.cpp`), after every existing branch — the
+`modelFrameGenerators` path, the plain `data` path and the no-`data` path all
+resolve their frame first and are then overridden together.
+
+Only the frame *number* is replaced. Scale, offsets, angle/pitch/roll, skins
+and flags still come from the `FSpriteModelFrame` the sprite lookup returned,
+which is why `FindModelFrame` must still succeed upstream. This is an override
+of one integer, not a bypass of the model system.
+
+The override applies to every model index. A donor with several models is
+showing frames of one animation, so they advance together; per-index
+divergence would need an array and nothing needs it yet.
+
+Out-of-range frames are **not** clamped, deliberately.
+`FMD3Model::RenderFrame` rejects `(unsigned)frameno >= Frames.Size()` and
+draws nothing — a visible failure. Clamping to the last frame would hide the
+bug, and there are already two live cases of exactly this mistake in
+hand-written MODELDEF (`RS_PS_Chainsaw` maps `SAWF C/D` to frames 6–7 of a
+6-frame mesh; `RS_PS_SSG` maps `SSGA A/B` to 12–13 of a 12-frame mesh).
+
+### Explicit interpolation
+
+Stock `inter` is derived from state tics in `CalcModelFrame` and only tweens
+across a state transition. Playing our animation across someone else's state
+timings, that blend restarts on every state change and sits at zero between
+them, so the model snaps from pose to pose.
+
+When `ModelFrameLerp >= 0` it is taken verbatim. Two details make it work:
+
+- `smfNext` is forced to `smf`. `RenderModelFrame` discards `inter` unless
+  `frameinfo.smfNext` is non-null; same definition, different frame number, so
+  `smf` is the correct "next" here.
+- The override sits *after* the `gl_interpolate_model_frames` /
+  `MDL_NOINTERPOLATION` branch, so an explicit blend is not silently dropped
+  when a user turns that CVar off.
+
+### The threading, and the landmine in it
+
+`RenderHUDModel` had the `DPSprite` in hand and passed only `psp->Caller`, so
+the psprite never reached the code that picks a frame. It is now threaded
+`RenderFrameModels` → `CalcModelFrame` → `CalcModelOverrides` as a trailing
+`const DPSprite* = nullptr`. World models pass the default and are unaffected.
+
+**`hw_vrwheel.cpp` carries its own forward declaration of
+`RenderFrameModels`** and does not include `models.h`. A signature change
+there is a link error, not a compile error, and the two must be kept in step.
+The declaration is commented to say so.
+
+### hasmodel exported
+
+`AActor::hasmodel` is now a `native readonly bool` in `actor.zs`. It is set on
+the class defaults by the MODELDEF parser and is the same flag
+`FindModelFrameRaw` gates on, so it answers "does this class have a model at
+all" — which is what the swapper needs in order not to paint over a mod that
+already ships 3D weapons.
+
+Read it off `GetDefaultByType`, never off a live actor: `EnsureModelData`
+sets it on the *instance* as a side effect of `A_ChangeModel`, so an instance
+read reports true for anything already swapped.
+
+---
+
 ## Building
 
 `auto-setup-windows-vr.cmd` locates Visual Studio's bundled CMake via

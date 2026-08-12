@@ -1307,6 +1307,10 @@ public:
 	double   TornadoTwist = 8.0;
 	double   TornadoLean = 0;
 	double   TornadoLeanPeriod = 6.0;
+	// Its own colour and its own torch response, so a red funnel can stand in
+	// blue ground mist without either being a tint of the other.
+	PalEntry TornadoColor = 0xff8c99b3;
+	double   TornadoScatter = 1.2;
 	double   FogSlabDensity = 0;    // per 1000 units of travel below the top
 	double   FogSlabSoft = 24;      // how many units the top edge fades over
 	double   FogSlabScatter = 0;    // 0 = flat haze, 1 = torch lights it
