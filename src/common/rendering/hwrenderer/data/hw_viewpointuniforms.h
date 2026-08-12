@@ -161,6 +161,13 @@ struct HWViewpointUniforms
 	// true.
 	FVector4 mFogSurf = { 0.f, 256.f, 1.f, 0.6f };
 
+	// [BB] mSweepAir: x how strongly the band's lattice is drawn IN THE AIR,
+	// as opposed to on the surfaces it lands on. 0 is the old behaviour.
+	// Everything else about it -- colour, density, width, softness, rotation,
+	// drift, flicker, jitter, major lines -- comes from the same uniforms the
+	// painted version uses, so one page drives both and they cannot drift.
+	FVector4 mSweepAir = { 0.f, 0.f, 0.f, 0.f };
+
 
 	void CalcDependencies()
 	{

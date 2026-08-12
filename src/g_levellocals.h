@@ -1150,6 +1150,9 @@ public:
 	                                   // you see the room between them, which
 	                                   // is what reads as actual lasers.
 	PalEntry SweepFillColor = 0xFFFFFF;
+	// How strongly the lattice is drawn IN THE AIR inside the band, rather
+	// than only on the surfaces the band lands on. 0 = the old behaviour.
+	double   SweepFillAir = 0;
 
 	// [BB] REAL BEAMS.
 	//

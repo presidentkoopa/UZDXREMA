@@ -3928,6 +3928,24 @@ static void SetSweepFill(FLevelLocals *self, double spacingU, double spacingV,
 	self->SweepFillGap = gap;
 }
 
+// How strongly the lattice is drawn IN THE AIR inside the band, rather than
+// only on the surfaces it lands on. Everything else about it -- colour,
+// density, width, softness, rotation, drift, flicker, jitter, major lines --
+// is shared with the painted version, so one set of controls drives both and
+// the two cannot drift apart.
+static void SetSweepFillAir(FLevelLocals *self, double amount)
+{
+	self->SweepFillAir = amount;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetSweepFillAir, SetSweepFillAir)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(amount);
+	SetSweepFillAir(self, amount);
+	return 0;
+}
+
 DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetSweepFill, SetSweepFill)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);

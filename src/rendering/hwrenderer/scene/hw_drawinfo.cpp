@@ -255,6 +255,7 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 		VPUniforms.mSweepFillCol = {
 			Level->SweepFillColor.r / 255.f, Level->SweepFillColor.g / 255.f,
 			Level->SweepFillColor.b / 255.f, (float)Level->SweepFillGap };
+		VPUniforms.mSweepAir = { (float)Level->SweepFillAir, 0.f, 0.f, 0.f };
 
 		// [BB] Darkness. Frame-global for the same reason: the curve and its
 		// gains are the same everywhere, and only the FRAGMENT it is asked

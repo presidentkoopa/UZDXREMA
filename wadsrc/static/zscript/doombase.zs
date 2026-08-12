@@ -852,6 +852,9 @@ struct LevelLocals native
 	native clearscope void SetSweepFill(double spacingU, double spacingV, double width, double soft, color col, double gap);
 	native clearscope void SetSweepFillMotion(double rotate, double drift, double major, double majorBoost, double jitter, double flicker, double grad, int gradAxis);
 	native clearscope void SetSweepBandFill(int index, int fill);
+	// How strongly the band's lattice is drawn IN THE AIR rather than only on
+	// the surfaces it lands on. 0 = painted only.
+	native clearscope void SetSweepFillAir(double amount);
 
 	// [BB] Real beams. A segment lit per pixel by distance from it, so it is
 	// continuous at any length, wraps floor/wall/ceiling as one object, and

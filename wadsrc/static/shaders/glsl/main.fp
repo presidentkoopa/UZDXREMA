@@ -1126,6 +1126,118 @@ vec3 BeamAirGlow(vec3 fragPos)
 }
 
 //
+// [BB] THE LATTICE SEEN IN THE AIR, INSIDE A SWEEP BAND.
+//
+// SweepFillAt patterns the band where it lands on a SURFACE. That is a grid
+// painted on the walls: it wraps corners, and there is nothing between them.
+// Walk into it and you walk through a picture of a laser grid.
+//
+// The beam system draws real lines in the air, and it caps at eight -- which
+// is a fence, not a screen door, and raising the cap makes it worse because
+// each beam is another segment solve for every fragment.
+//
+// SO DO NOT DRAW LINES. DRAW A LATTICE.
+//
+// A bar band is a PLANE. A view ray crosses a plane at exactly one point. So:
+// find that point, evaluate a repeating grid there, and draw. Four lines by
+// four and four hundred by four hundred cost exactly the same -- one
+// intersection and one pattern lookup -- because a repeating pattern is
+// fract(), not a loop.
+//
+// That is the whole trick, and it is the same one the sweep itself uses: ask
+// each pixel a question about where it is, instead of building the thing out
+// of objects.
+//
+// Ring and shell are not handled here. A ray meets a cylinder in two places
+// and the near one needs a quadratic; the bars are what a corridor wants and
+// what was actually asked for, so the others fall through to the surface fill
+// they already had.
+//
+vec3 SweepAirLattice(vec3 fragPos)
+{
+	vec3 sum = vec3(0.0);
+	if (uSweepCount <= 0) return sum;
+	if (uSweepAir.x <= 0.0) return sum;
+	if (uSweepFill.x <= 0.0 && uSweepFill.y <= 0.0) return sum;
+
+	vec3 eye = uCameraPos.xyz;
+	vec3 toFrag = fragPos - eye;
+	float fragDist = length(toFrag);
+	if (fragDist < 0.001) return sum;
+	vec3 dir = toFrag / fragDist;
+
+	for (int sb = 0; sb < 8; sb++)
+	{
+		if (sb >= uSweepCount) break;
+
+		vec4 sband = uSweepBands[sb];
+		int bandpack = int(sband.w);
+		int bmode = bandpack & 15;
+		int bfill = bandpack >> 4;
+		if (bmode <= 0 || bfill <= 0) continue;
+
+		int shape = int(uSweepBandOrigin[sb].w);
+		vec3 o = uSweepBandOrigin[sb].xyz;
+		float radius = sband.x;
+		float thick = max(sband.y, 1.0);
+
+		// Which axis the plane is perpendicular to, and where along the ray
+		// it sits. Shape 2 is the east/west bar, 3 north/south, 5 the rising
+		// sheet -- in shader space those are x, z and y.
+		float planeAxisEye, planeAxisDir, planeAt;
+		if (shape == 2)      { planeAxisEye = eye.x; planeAxisDir = dir.x; planeAt = o.x; }
+		else if (shape == 3) { planeAxisEye = eye.z; planeAxisDir = dir.z; planeAt = o.z; }
+		else if (shape == 5) { planeAxisEye = eye.y; planeAxisDir = dir.y; planeAt = o.y; }
+		else continue;
+
+		// A band sits at +radius AND -radius from its origin, since distance
+		// is unsigned. Test whichever side the eye is on -- that is the one
+		// coming at you rather than the one already gone past.
+		float side = (planeAxisEye >= planeAt) ? 1.0 : -1.0;
+		float target = planeAt + radius * side;
+
+		// Parallel view: the ray never crosses, so there is nothing to draw.
+		if (abs(planeAxisDir) < 0.0001) continue;
+
+		float t = (target - planeAxisEye) / planeAxisDir;
+		if (t <= 0.0 || t >= fragDist) continue;   // behind you, or behind a wall
+
+		vec3 hit = eye + dir * t;
+
+		// Soften across the band's own thickness, so a thick band reads as a
+		// slab of lattice rather than an infinitely thin sheet of it.
+		float depth = abs(hit[shape == 2 ? 0 : (shape == 3 ? 2 : 1)] - target);
+		float slab = 1.0 - smoothstep(thick * 0.5, thick, depth);
+		if (slab <= 0.0) continue;
+
+		// The same two tangent axes the surface fill uses, so the lattice in
+		// the air and the lattice on the wall line up exactly rather than
+		// being two grids that nearly agree.
+		vec2 uv;
+		if (shape == 2)      uv = vec2(hit.z, hit.y);
+		else if (shape == 3) uv = vec2(hit.x, hit.y);
+		else                 uv = vec2(hit.x, hit.z);
+
+		float tt = timer;
+		uv.x += tt * uSweepFill2.y;
+		if (uSweepFill2.x != 0.0)
+		{
+			float a = radians(uSweepFill2.x);
+			float cs = cos(a), sn = sin(a);
+			uv = vec2(uv.x * cs - uv.y * sn, uv.x * sn + uv.y * cs);
+		}
+
+		float lu = SweepLineAxis(uv.x, uSweepFill.x, uSweepFill.z, uSweepFill.w, tt);
+		float lv = SweepLineAxis(uv.y, uSweepFill.y, uSweepFill.z, uSweepFill.w, tt);
+		float cov = (bfill == 2) ? min(lu, lv) : max(lu, lv);
+		if (bfill == 3) cov = 1.0;
+
+		sum += uSweepFillCol.rgb * cov * slab * uSweepColors[sb].a * uSweepAir.x;
+	}
+	return sum;
+}
+
+//
 // [BB] FOG WITH A TOP.
 //
 // Sector fog is a distance tint on SURFACES -- the further a wall is, the more
@@ -1927,6 +2039,10 @@ void main()
 		// It is also the last thing written before the frame is handed to
 		// bloom, so a core burning past white blooms the way an emissive
 		// thing should -- without a light, a sprite, or a quad.
+		// [BB] And the sweep's own lattice, hanging in the air inside the band
+		// rather than painted on what the band lands on.
+		frag.rgb += SweepAirLattice(pixelpos.xyz);
+
 		frag.rgb += BeamAirGlow(pixelpos.xyz);
 	}
 	else // simple 2D (uses the fog color to add a color overlay)
