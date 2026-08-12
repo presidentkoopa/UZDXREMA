@@ -108,6 +108,21 @@ struct HWViewpointUniforms
 	FVector4 mSweepFill3 = { 0.f, 0.f, 0.f, 2.f };
 	FVector4 mSweepFillCol = { 1.f, 1.f, 1.f, 0.f };
 
+	// [BB] Beams -- real ones. A segment lit per pixel by distance, so it is
+	// continuous at any length, wraps every surface, and lights what it passes.
+	//
+	//   mBeamA[i]    xyz start, w core thickness
+	//   mBeamB[i]    xyz end,   w softness (how far the halo reaches)
+	//   mBeamCol[i]  rgb colour, w intensity
+	//   mBeamParams  x count, y halo strength, z fog scatter, w spare
+	//
+	// In the viewpoint block rather than StreamData: these are scene-global,
+	// and StreamData's size divides 64KB into MAX_STREAM_DATA draws.
+	FVector4 mBeamA[8];
+	FVector4 mBeamB[8];
+	FVector4 mBeamCol[8];
+	FVector4 mBeamParams = { 0.f, 0.35f, 1.f, 0.f };
+
 	// [BB] mFogSlabExtra: x wake strength, y glow pickup, zw spare.
 	//
 	// Pickup is the one that makes the slab read as a SUBSTANCE rather than a

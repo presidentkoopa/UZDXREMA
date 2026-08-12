@@ -3808,6 +3808,65 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetSweepBandFill, SetSweepBandFill)
 	return 0;
 }
 
+// [BB] REAL BEAMS. A segment lit per pixel by distance from it -- continuous
+// at any length, wrapping every surface, and lighting what it passes, because
+// the shader tests surfaces against the segment itself rather than against a
+// sprite standing in for one.
+//
+// Set the count, then each beam. Beams persist until changed or cleared, so a
+// tripwire grid is set once and a weapon beam is re-set as it moves.
+static void SetBeam(FLevelLocals *self, int index,
+	double ax, double ay, double az, double bx, double by, double bz,
+	double thick, double soft, int color, double intensity)
+{
+	if (index < 0 || index >= FLevelLocals::MAX_BEAMS) return;
+	self->BeamStart[index] = DVector3(ax, ay, az);
+	self->BeamEnd[index] = DVector3(bx, by, bz);
+	self->BeamThick[index] = thick;
+	self->BeamSoft[index] = soft;
+	self->BeamColor[index] = (PalEntry)color;
+	self->BeamIntensity[index] = intensity;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetBeam, SetBeam)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(index);
+	PARAM_FLOAT(ax); PARAM_FLOAT(ay); PARAM_FLOAT(az);
+	PARAM_FLOAT(bx); PARAM_FLOAT(by); PARAM_FLOAT(bz);
+	PARAM_FLOAT(thick); PARAM_FLOAT(soft);
+	PARAM_COLOR(color); PARAM_FLOAT(intensity);
+	SetBeam(self, index, ax, ay, az, bx, by, bz, thick, soft, color, intensity);
+	return 0;
+}
+
+static void SetBeamCount(FLevelLocals *self, int count, double glow, double fogScatter)
+{
+	self->BeamCount = clamp(count, 0, FLevelLocals::MAX_BEAMS);
+	self->BeamGlow = glow;
+	self->BeamFogScatter = fogScatter;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetBeamCount, SetBeamCount)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(count); PARAM_FLOAT(glow); PARAM_FLOAT(fogScatter);
+	SetBeamCount(self, count, glow, fogScatter);
+	return 0;
+}
+
+static void ClearBeams(FLevelLocals *self)
+{
+	self->BeamCount = 0;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearBeams, ClearBeams)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	ClearBeams(self);
+	return 0;
+}
+
 static void ClearFogSlab(FLevelLocals *self)
 {
 	self->FogSlabActive = false;

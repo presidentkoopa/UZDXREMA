@@ -20,6 +20,7 @@ anything else here.
 | [Non-pausing menus](#10-non-pausing-menus) | a settings page can let the world run behind it | — |
 | [Fog slab](#11-fog-slab) | fog with a **top** — a layer of mist you stand in | — |
 | [Sweep band fill](#12-sweep-band-fill) | a band can carry a lattice, not just a wash | — |
+| [Beams](#13-beams) | segment lasers lit per pixel — continuous, and they light the room | — |
 
 ---
 
@@ -606,6 +607,66 @@ component — so a band with a fill but no draw override would have had its fill
 silently dropped. The call site now fires when **either** is set.
 
 GLES does not implement this, consistent with §2, §8 and §11.
+
+## 13. Beams
+
+A laser in Doom is usually a sprite, or a chain of puffs spawned close enough
+together to read as a line. Both show what they are: the sprite lights nothing,
+and the chain stitches, gaps at long range, and costs an actor per segment.
+
+A beam is a **segment**, and the honest way to draw one is the way a sweep band
+is drawn — light every pixel by its distance from the thing. The only
+difference is which distance:
+
+```
+sweep band   distance from a POINT     length(p - origin)
+beam         distance from a SEGMENT   length(p - closest(a,b))
+```
+
+```
+Level.SetBeam(index, start, end, thick, soft, col, intensity)
+Level.SetBeamCount(count, glow, fogScatter)
+Level.ClearBeams()
+```
+
+Because it is per pixel in world space, everything else follows without being
+asked for. The beam is **continuous** at any length, with no repeat and no
+stitching. It **wraps** floor, wall and ceiling as one unbroken object. And the
+surfaces near it brighten because they *are* near it, not because something
+also spawned a dynamic light to fake that.
+
+### Two falloffs from one distance
+
+This is what separates a beam that looks hot from a bright line: a hard narrow
+**core** a couple of units across, and a wide soft **halo** around it. Either
+alone reads as a drawn line or a smear. Together they read as incandescent.
+
+The closest point is clamped to the **segment**, not the infinite line — that
+clamp is what makes a beam end where it ends instead of lighting everything
+along its axis to the edge of the map.
+
+### Not a sweep band, deliberately
+
+A band's radius is a distance that grows. A beam does not travel; it simply
+is. Sharing the sweep's slots would have meant a per-band endpoint — another
+`vec4[8]` in `StreamData` — for a thing that is not a band.
+
+Eight beams, in the viewpoint block: enough for a weapon beam plus a tripwire
+grid, and the per-fragment cost is eight cheap segment tests.
+
+### They light fog
+
+When the fog slab (§11) is on, beams add into it, so a laser through knee-deep
+mist is a visible shaft along its whole length rather than a bright line on
+whatever it eventually hits. Evaluated at the fragment rather than integrated
+along the ray — an approximation, but the fog amount already scales with how
+much mist is in the way, so mist glows near a beam and does not far from one,
+which is the entire read.
+
+Beams are applied **after** the darkness term, with the glow, because they are
+emissive. A laser that dimmed as the room got darker would be a contradiction.
+
+GLES does not implement this, consistent with §2, §8, §11 and §12.
 
 ---
 

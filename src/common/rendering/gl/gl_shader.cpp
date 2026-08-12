@@ -269,6 +269,12 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 			vec4 uSweepFill2;
 			vec4 uSweepFill3;
 			vec4 uSweepFillCol;
+
+			// [BB] Beams -- real segment lasers.
+			vec4 uBeamA[8];
+			vec4 uBeamB[8];
+			vec4 uBeamCol[8];
+			vec4 uBeamParams;
 		};
 
 		uniform int uTextureMode;

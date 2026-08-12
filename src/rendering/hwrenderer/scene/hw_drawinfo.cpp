@@ -217,6 +217,27 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 			(float)Level->GlowWaveOrigin.X, (float)Level->GlowWaveOrigin.Z,
 			(float)Level->GlowWaveOrigin.Y, (float)Level->GlowWaveSeed };
 
+		// [BB] Beams. Swizzled like everything else here: Doom's Z is the
+		// shader's Y. A beam laid along a corridor with the axes crossed
+		// becomes a beam standing in a wall, which is a memorable bug.
+		{
+			int nb = clamp(Level->BeamCount, 0, FLevelLocals::MAX_BEAMS);
+			for (int i = 0; i < nb; i++)
+			{
+				VPUniforms.mBeamA[i] = {
+					(float)Level->BeamStart[i].X, (float)Level->BeamStart[i].Z,
+					(float)Level->BeamStart[i].Y, (float)Level->BeamThick[i] };
+				VPUniforms.mBeamB[i] = {
+					(float)Level->BeamEnd[i].X, (float)Level->BeamEnd[i].Z,
+					(float)Level->BeamEnd[i].Y, (float)Level->BeamSoft[i] };
+				VPUniforms.mBeamCol[i] = {
+					Level->BeamColor[i].r / 255.f, Level->BeamColor[i].g / 255.f,
+					Level->BeamColor[i].b / 255.f, (float)Level->BeamIntensity[i] };
+			}
+			VPUniforms.mBeamParams = { (float)nb, (float)Level->BeamGlow,
+				(float)Level->BeamFogScatter, 0.0f };
+		}
+
 		// [BB] Sweep fill -- the pattern inside a band. Frame-global style;
 		// only the mode is per band, packed into the draw mode.
 		VPUniforms.mSweepFill = {

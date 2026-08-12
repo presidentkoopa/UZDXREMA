@@ -220,6 +220,12 @@ static const char *shaderBindings = R"(
 		vec4 uSweepFill2;
 		vec4 uSweepFill3;
 		vec4 uSweepFillCol;
+
+		// [BB] Beams -- real segment lasers.
+		vec4 uBeamA[8];
+		vec4 uBeamB[8];
+		vec4 uBeamCol[8];
+		vec4 uBeamParams;
 	};
 
 	layout(set = 1, binding = 0, std140) uniform ViewpointUBO {
@@ -256,6 +262,10 @@ static const char *shaderBindings = R"(
 	#define uSweepFill2 viewpoints[HW_VIEWPOINT_INDEX].uSweepFill2
 	#define uSweepFill3 viewpoints[HW_VIEWPOINT_INDEX].uSweepFill3
 	#define uSweepFillCol viewpoints[HW_VIEWPOINT_INDEX].uSweepFillCol
+	#define uBeamA viewpoints[HW_VIEWPOINT_INDEX].uBeamA
+	#define uBeamB viewpoints[HW_VIEWPOINT_INDEX].uBeamB
+	#define uBeamCol viewpoints[HW_VIEWPOINT_INDEX].uBeamCol
+	#define uBeamParams viewpoints[HW_VIEWPOINT_INDEX].uBeamParams
 
 	layout(set = 1, binding = 1, std140) uniform MatricesUBO {
 		mat4 ModelMatrix;

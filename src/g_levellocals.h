@@ -1033,6 +1033,42 @@ public:
 	                                   // is what reads as actual lasers.
 	PalEntry SweepFillColor = 0xFFFFFF;
 
+	// [BB] REAL BEAMS.
+	//
+	// A laser in Doom is usually a sprite, or a chain of puffs spawned close
+	// enough together to read as a line. Both are fakes and both show it: the
+	// sprite does not light anything, and the chain stitches, gaps at long
+	// range, and costs an actor per segment.
+	//
+	// A beam is a SEGMENT, and the honest way to draw one is the same way a
+	// sweep band is drawn -- light every pixel by its distance from the thing.
+	// The only difference is which distance:
+	//
+	//   sweep band   distance from a POINT     length(p - origin)
+	//   beam         distance from a SEGMENT   length(p - closest(a,b))
+	//
+	// Everything else follows for free, because it is per pixel in world
+	// space: the beam wraps across floor, wall and ceiling as one unbroken
+	// object, it is continuous at any length, and the surfaces near it
+	// brighten because they ARE near it rather than because something also
+	// spawned a dynamic light.
+	//
+	// Not a sweep band, though, and deliberately so: a band's radius is a
+	// distance that grows, and a beam does not travel. It simply is.
+	//
+	// Eight, because that is enough for a weapon beam plus a tripwire grid,
+	// and the per-fragment cost is eight cheap segment tests.
+	static const int MAX_BEAMS = 8;
+	int      BeamCount = 0;
+	DVector3 BeamStart[MAX_BEAMS];
+	DVector3 BeamEnd[MAX_BEAMS];
+	double   BeamThick[MAX_BEAMS] = {};   // the hot core, world units
+	double   BeamSoft[MAX_BEAMS] = {};    // how far the halo reaches past it
+	PalEntry BeamColor[MAX_BEAMS] = {};
+	double   BeamIntensity[MAX_BEAMS] = {};
+	double   BeamGlow = 0.35;             // halo strength relative to the core
+	double   BeamFogScatter = 1.0;        // how much a beam lights fog it crosses
+
 	// [BB] GLOW WAVE -- the missing axis.
 	//
 	// A glow already varies per pixel VERTICALLY: the fragment's distance

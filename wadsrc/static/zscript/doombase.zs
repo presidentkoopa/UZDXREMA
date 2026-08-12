@@ -822,6 +822,15 @@ struct LevelLocals native
 	native clearscope void SetSweepFillMotion(double rotate, double drift, double major, double majorBoost, double jitter, double flicker, double grad, int gradAxis);
 	native clearscope void SetSweepBandFill(int index, int fill);
 
+	// [BB] Real beams. A segment lit per pixel by distance from it, so it is
+	// continuous at any length, wraps floor/wall/ceiling as one object, and
+	// lights the surfaces it passes -- no sprite, no chain of puffs, no
+	// separate dynamic light. Up to 8. thick is the hot core, soft is how far
+	// the halo reaches past it.
+	native clearscope void SetBeam(int index, Vector3 start, Vector3 end, double thick, double soft, color col, double intensity);
+	native clearscope void SetBeamCount(int count, double glow, double fogScatter);
+	native clearscope void ClearBeams();
+
 	native String GetChecksum() const;
 
 	native void ChangeSky(TextureID sky1, TextureID sky2 );

@@ -912,6 +912,64 @@ float DarknessAt(float lightLevel)
 }
 
 //
+// [BB] REAL BEAMS.
+//
+// A laser in Doom is usually a sprite, or a chain of puffs spawned close
+// enough together to read as a line. Both show what they are: the sprite
+// lights nothing, and the chain stitches, gaps at long range, and costs an
+// actor per segment.
+//
+// A beam is a SEGMENT. Light every pixel by its distance from that segment
+// and you get the real thing -- the same idea as a sweep band, with the only
+// difference being which distance is measured:
+//
+//   sweep band   distance from a POINT     length(p - origin)
+//   beam         distance from a SEGMENT   length(p - closest(a,b))
+//
+// Because it is per pixel in world space, everything else follows without
+// being asked for. The beam is continuous at any length with no repeat and no
+// stitching. It wraps across floor, wall and ceiling as one unbroken object.
+// And the surfaces near it brighten because they ARE near it, not because
+// something also spawned a dynamic light to fake that.
+//
+// TWO FALLOFFS FROM ONE DISTANCE, and this is what separates a beam that
+// looks hot from a bright line. A hard narrow CORE a couple of units across,
+// and a wide soft HALO around it. One without the other reads as either a
+// drawn line or a smear; together they read as something incandescent.
+//
+vec3 BeamLightAt(vec3 p)
+{
+	vec3 sum = vec3(0.0);
+	int n = int(uBeamParams.x);
+	if (n <= 0) return sum;
+
+	for (int i = 0; i < 8; i++)
+	{
+		if (i >= n) break;
+
+		vec3 a = uBeamA[i].xyz;
+		vec3 b = uBeamB[i].xyz;
+		vec3 ab = b - a;
+		vec3 ap = p - a;
+
+		// Closest point on the SEGMENT, not the infinite line -- the clamp is
+		// what makes a beam end where it ends instead of lighting everything
+		// along its axis out to the edge of the map.
+		float t = clamp(dot(ap, ab) / max(dot(ab, ab), 0.0001), 0.0, 1.0);
+		float d = length(ap - ab * t);
+
+		float thick = max(uBeamA[i].w, 0.01);
+		float soft  = max(uBeamB[i].w, 0.01);
+
+		float core = 1.0 - smoothstep(thick, thick + soft, d);
+		float halo = 1.0 - smoothstep(thick, thick + soft * 8.0 + 1.0, d);
+
+		sum += uBeamCol[i].rgb * (core + halo * uBeamParams.y) * uBeamCol[i].w;
+	}
+	return sum;
+}
+
+//
 // [BB] FOG WITH A TOP.
 //
 // Sector fog is a distance tint on SURFACES -- the further a wall is, the more
@@ -993,6 +1051,17 @@ vec4 FogSlabAt(vec3 fragPos)
 			col += uFogBeamCol.rgb * lit * uFogSlab.w;
 		}
 	}
+
+	// AND BEAMS LIGHT THE MIST THEY CROSS.
+	//
+	// This is the shot worth having: a laser through knee-deep fog should be
+	// visible as a shaft along its whole length, not just as a bright line on
+	// whatever it eventually hits. Evaluated at the fragment rather than
+	// integrated along the ray, which is an approximation -- but the fog
+	// amount already scales with how much mist is in the way, so the mist
+	// glows near a beam and does not far from one, which is the whole read.
+	if (uBeamParams.z > 0.0)
+		col += BeamLightAt(fragPos) * uBeamParams.z;
 
 	return vec4(col, amount);
 }
@@ -1441,6 +1510,16 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 		}
 
 	}
+
+	// [BB] BEAMS. Additive, and here for the same reason the glow is here:
+	// they are EMISSIVE. The darkness term ran further up, before all of
+	// this, precisely so that light this mod adds survives being in a dark
+	// room -- a laser that got dimmer as the room got darker would be a
+	// contradiction.
+	//
+	// Surfaces near a beam brighten because they are near it. Nothing else
+	// had to be spawned to make that happen.
+	color.rgb += BeamLightAt(pixelpos.xyz);
 #endif
 	color = min(color, 1.0);
 
