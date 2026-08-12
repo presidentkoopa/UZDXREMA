@@ -863,6 +863,15 @@ struct LevelLocals native
 	native clearscope void SetFogBow(double strength, double width, double thin);
 	native clearscope void SetFogGradient(color col, double mix);
 
+	// [BB] TEXTURE INSIDE THE GLOW. The wave varies a glow's EDGE and has
+	// nothing left to say once reach saturates and the edge is off screen.
+	// These happen WITHIN the lit area, as multipliers on its contribution,
+	// so none of them can move a band's shape. All off at 0.
+	native clearscope void SetGlowTexture(double noise, double scale, double drift, double contrast);
+	native clearscope void SetGlowFlow(double amount, double spacing, double speed, double sharp);
+	native clearscope void SetGlowCells(double amount, double scale, double speed, double width);
+	native clearscope void SetGlowReact(double react, double pulse, double level);
+
 	// [BB] WHAT SURVIVES A COLOUR DRAIN. Desaturation was all or nothing, so a
 	// monochrome world made blood exactly as grey as the wall behind it.
 	// Weighting the drain by each colour's own saturation keeps the vivid

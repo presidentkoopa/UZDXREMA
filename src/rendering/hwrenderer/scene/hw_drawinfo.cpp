@@ -384,6 +384,18 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 
 		VPUniforms.mDesatKeep = { (float)Level->DesatKeep,
 			(float)Level->DesatKeepSoft, (float)Level->DesatKeepHue, 0.f };
+		VPUniforms.mGlowTex = { (float)Level->GlowTexNoise,
+			(float)Level->GlowTexScale, (float)Level->GlowTexDrift,
+			(float)Level->GlowTexContrast };
+		VPUniforms.mGlowTex2 = { (float)Level->GlowFlow,
+			(float)Level->GlowFlowSpacing, (float)Level->GlowFlowSpeed,
+			(float)Level->GlowFlowSharp };
+		VPUniforms.mGlowTex3 = { (float)Level->GlowCell,
+			(float)Level->GlowCellScale, (float)Level->GlowCellSpeed,
+			(float)Level->GlowCellWidth };
+		VPUniforms.mGlowTex4 = { (float)Level->GlowReact,
+			(float)Level->GlowPulse, (float)Level->GlowPulseLevel, 0.f };
+
 		VPUniforms.mFogColor2 = { Level->FogColor2.r / 255.f,
 			Level->FogColor2.g / 255.f, Level->FogColor2.b / 255.f,
 			(float)Level->FogColor2Mix };

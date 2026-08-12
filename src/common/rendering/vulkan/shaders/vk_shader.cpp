@@ -242,6 +242,10 @@ static const char *shaderBindings = R"(
 		vec4 uFogWake2;
 		vec4 uFogBow;
 		vec4 uFogColor2;
+		vec4 uGlowTex;
+		vec4 uGlowTex2;
+		vec4 uGlowTex3;
+		vec4 uGlowTex4;
 		vec4 uDesatKeep;
 	};
 
@@ -299,6 +303,10 @@ static const char *shaderBindings = R"(
 	#define uFogWake2 viewpoints[HW_VIEWPOINT_INDEX].uFogWake2
 	#define uFogBow viewpoints[HW_VIEWPOINT_INDEX].uFogBow
 	#define uFogColor2 viewpoints[HW_VIEWPOINT_INDEX].uFogColor2
+	#define uGlowTex viewpoints[HW_VIEWPOINT_INDEX].uGlowTex
+	#define uGlowTex2 viewpoints[HW_VIEWPOINT_INDEX].uGlowTex2
+	#define uGlowTex3 viewpoints[HW_VIEWPOINT_INDEX].uGlowTex3
+	#define uGlowTex4 viewpoints[HW_VIEWPOINT_INDEX].uGlowTex4
 	#define uDesatKeep viewpoints[HW_VIEWPOINT_INDEX].uDesatKeep
 
 	layout(set = 1, binding = 1, std140) uniform MatricesUBO {

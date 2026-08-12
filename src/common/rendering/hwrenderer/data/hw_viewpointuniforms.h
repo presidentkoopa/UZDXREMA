@@ -263,6 +263,18 @@ struct HWViewpointUniforms
 	// floor, warm at the top. w is how much of it to use; 0 keeps one colour.
 	FVector4 mFogColor2 = { 0.7f, 0.5f, 0.35f, 0.f };
 
+	// [BB] TEXTURE INSIDE THE GLOW -- see GlowTextureAt in main.fp. The wave
+	// varies a glow's EDGE, which is no answer at all once coverage is high
+	// enough that the edge is off screen. These happen inside the lit area.
+	//   mGlowTex   x noise amount, y noise scale, z drift, w contrast
+	//   mGlowTex2  x flow amount, y spacing, z speed, w sharpness
+	//   mGlowTex3  x cell amount, y cell scale, z pulse speed, w vein width
+	//   mGlowTex4  x disturbance reach, y state pulse depth, z state level, w -
+	FVector4 mGlowTex = { 0.f, 0.02f, 1.f, 1.f };
+	FVector4 mGlowTex2 = { 0.f, 64.f, 0.4f, 2.f };
+	FVector4 mGlowTex3 = { 0.f, 96.f, 1.2f, 0.08f };
+	FVector4 mGlowTex4 = { 0.f, 0.f, 0.f, 0.f };
+
 	// [BB] WHAT SURVIVES THE COLOUR DRAIN.
 	//
 	// Desaturation used to be all or nothing: a monochrome preset was

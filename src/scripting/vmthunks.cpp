@@ -3942,6 +3942,91 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetTornado, SetTornado)
 }
 
 // ===========================================================================
+// [BB] TEXTURE INSIDE THE GLOW.
+//
+// The glow wave varies a lane's EDGE, which is the right answer while the
+// edge is on screen and no answer at all once reach saturates -- a maxed lane
+// is a solid card of colour with a wave moving a boundary nobody can see.
+// Everything here happens WITHIN the lit area instead, so a saturated lane
+// still has somewhere to go.
+//
+// Five terms, all multipliers on the glow's finished contribution so none of
+// them can move a band's shape: noise for material, flow for current along
+// the surface, cells for veins, the disturbance array so gunfire crosses the
+// walls, and one state level so the room can look alarmed.
+static void SetGlowTexture(FLevelLocals *self, double noise, double scale,
+	double drift, double contrast)
+{
+	self->GlowTexNoise = noise;
+	self->GlowTexScale = scale;
+	self->GlowTexDrift = drift;
+	self->GlowTexContrast = contrast;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetGlowTexture, SetGlowTexture)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(noise); PARAM_FLOAT(scale);
+	PARAM_FLOAT(drift); PARAM_FLOAT(contrast);
+	SetGlowTexture(self, noise, scale, drift, contrast);
+	return 0;
+}
+
+static void SetGlowFlow(FLevelLocals *self, double amount, double spacing,
+	double speed, double sharp)
+{
+	self->GlowFlow = amount;
+	self->GlowFlowSpacing = spacing;
+	self->GlowFlowSpeed = speed;
+	self->GlowFlowSharp = sharp;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetGlowFlow, SetGlowFlow)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(amount); PARAM_FLOAT(spacing);
+	PARAM_FLOAT(speed); PARAM_FLOAT(sharp);
+	SetGlowFlow(self, amount, spacing, speed, sharp);
+	return 0;
+}
+
+static void SetGlowCells(FLevelLocals *self, double amount, double scale,
+	double speed, double width)
+{
+	self->GlowCell = amount;
+	self->GlowCellScale = scale;
+	self->GlowCellSpeed = speed;
+	self->GlowCellWidth = width;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetGlowCells, SetGlowCells)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(amount); PARAM_FLOAT(scale);
+	PARAM_FLOAT(speed); PARAM_FLOAT(width);
+	SetGlowCells(self, amount, scale, speed, width);
+	return 0;
+}
+
+// React is the disturbance array reaching the walls; pulse and level are the
+// room's own alarm. Kept together because both are "the glow responding to
+// something" rather than "the glow having a texture".
+static void SetGlowReact(FLevelLocals *self, double react, double pulse,
+	double level)
+{
+	self->GlowReact = react;
+	self->GlowPulse = pulse;
+	self->GlowPulseLevel = level;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetGlowReact, SetGlowReact)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(react); PARAM_FLOAT(pulse); PARAM_FLOAT(level);
+	SetGlowReact(self, react, pulse, level);
+	return 0;
+}
+
 // [BB] THE HEATMAP -- where the fighting happened.
 //
 // Deliberately NOT the disturbance array. A disturbance is a handful of

@@ -867,6 +867,207 @@ float GlowWaveSeedOff(float src)
 }
 
 //
+// [BB] TEXTURE INSIDE THE GLOW.
+//
+// The wave varies a glow's EDGE. That is the right answer while the edge is
+// visible, and no answer at all once coverage saturates -- turn reach up far
+// enough and the wall is a solid card of colour with a wave moving an edge
+// that is no longer on screen. Everything below happens INSIDE the lit area
+// instead, so a maxed-out lane has somewhere left to go.
+//
+// All of it is a multiplier on the glow's own contribution, so nothing here
+// can move a band's shape and every term is off at 0.
+//
+//   uGlowTex   x noise amount, y noise scale, z drift, w contrast
+//   uGlowTex2  x flow amount, y flow spacing, z flow speed, w flow sharpness
+//   uGlowTex3  x cell amount, y cell scale, z cell speed, w cell edge width
+//   uGlowTex4  x disturbance reach, y state pulse depth, z state level, w -
+//
+// Sampled in WORLD space, not surface space. A wall and the floor it meets
+// then agree about the pattern crossing the join, which is what makes it read
+// as something the room is made of rather than as a decal applied per
+// surface. It also costs no tangent frame.
+//
+
+// Forward declaration. GITDHash21 is defined further down beside the fog
+// field that first needed it, and GLSL will not call a function it has not
+// seen. Declaring it here rather than moving the definition keeps each hash
+// next to the code it was written for -- same reason SweepLineAxis is
+// forward-declared for the air lattice.
+float GITDHash21(vec2 p);
+
+// Cheap 3D value noise, the same shape as the fog's 2D one. Two octaves,
+// because one reads as blobs and two reads as material.
+float GITDHash31(vec3 p)
+{
+	p = fract(p * 0.1031);
+	p += dot(p, p.zyx + 31.32);
+	return fract((p.x + p.y) * p.z);
+}
+
+float GITDNoise3(vec3 p)
+{
+	vec3 i = floor(p);
+	vec3 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	return mix(
+		mix(mix(GITDHash31(i + vec3(0,0,0)), GITDHash31(i + vec3(1,0,0)), f.x),
+		    mix(GITDHash31(i + vec3(0,1,0)), GITDHash31(i + vec3(1,1,0)), f.x), f.y),
+		mix(mix(GITDHash31(i + vec3(0,0,1)), GITDHash31(i + vec3(1,0,1)), f.x),
+		    mix(GITDHash31(i + vec3(0,1,1)), GITDHash31(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+
+float GlowTextureAt(float seedOff)
+{
+	// Everything off is the common case and it must cost one compare.
+	if (uGlowTex.x <= 0.0 && uGlowTex2.x <= 0.0 && uGlowTex3.x <= 0.0
+	    && uGlowTex4.x <= 0.0 && uGlowTex4.y <= 0.0) return 1.0;
+
+	vec3 p = pixelpos.xyz;
+	float mul = 1.0;
+
+	// ---- 1. NOISE, so the wash has body -------------------------------
+	//
+	// A lit wall is one flat brightness across its whole face. Real glowing
+	// material is not: it is veined, uneven, brighter in patches. This is the
+	// same move the fog's density field makes, and for the same reason -- a
+	// uniform value is the single biggest tell that something is a filter
+	// rather than a substance.
+	if (uGlowTex.x > 0.0)
+	{
+		vec3 q = p * max(uGlowTex.y, 0.00001);
+		q.y += timer * uGlowTex.z * 0.05;      // drifts, so it is not a decal
+		float n = GITDNoise3(q) * 0.65 + GITDNoise3(q * 2.7 + 11.3) * 0.35;
+
+		// Contrast pushes it from a gentle mottle toward hard patches of lit
+		// and unlit, which is the difference between marble and plasma.
+		n = clamp(0.5 + (n - 0.5) * max(uGlowTex.w, 0.001), 0.0, 1.0);
+		mul *= mix(1.0, 0.25 + 1.5 * n, clamp(uGlowTex.x, 0.0, 1.0));
+	}
+
+	// ---- 2. FLOW, along the surface rather than across the room --------
+	//
+	// The wave arrives FROM an origin. This travels ALONG the surface, which
+	// is a different axis of motion entirely and reads as current running
+	// through the material rather than as weather passing over it.
+	//
+	// The axis is chosen from the normal so it means the same thing on every
+	// surface: on a wall it runs vertically, on a floor or ceiling it runs
+	// along world X. No tangent frame needed, and a wall and its floor still
+	// agree because both are world-space quantities.
+	if (uGlowTex2.x > 0.0)
+	{
+		float upness = abs(normalize(vWorldNormal.xyz + vec3(0.0, 0.0001, 0.0)).y);
+		float axis = (upness > 0.7) ? p.x : p.y;
+
+		float sp = max(uGlowTex2.y, 1.0);
+		float t = axis / sp - timer * uGlowTex2.z + seedOff;
+		float band = 0.5 + 0.5 * sin(t * 6.2831853);
+		band = pow(band, max(uGlowTex2.w, 0.001));
+		mul *= mix(1.0, 0.3 + 1.4 * band, clamp(uGlowTex2.x, 0.0, 1.0));
+	}
+
+	// ---- 3. CELLS, with light travelling their edges -------------------
+	//
+	// The lattice trick from the sweep, made organic. A hashed offset per
+	// cell turns a grid into something irregular, and lighting the DISTANCE
+	// TO THE NEAREST CELL EDGE rather than the cell itself gives veins
+	// instead of tiles. Each cell pulses on its own clock, so the light
+	// crawls rather than blinking together.
+	//
+	// Free at any density, exactly like the laser lattice -- this is a
+	// pattern, not a set of objects.
+	if (uGlowTex3.x > 0.0)
+	{
+		float cs = max(uGlowTex3.y, 1.0);
+		vec3 cp = p / cs;
+		vec3 base = floor(cp);
+
+		// Nearest of the 3x3x3 neighbourhood would be 27 samples. Two axes
+		// is enough for a surface and costs 9, and on a wall or a flat the
+		// third axis is the one you cannot see anyway.
+		float upness = abs(normalize(vWorldNormal.xyz + vec3(0.0, 0.0001, 0.0)).y);
+		vec2 uv = (upness > 0.7) ? cp.xz : vec2(cp.x + cp.z, cp.y);
+		vec2 cell = floor(uv);
+		vec2 lf = fract(uv);
+
+		float d1 = 8.0, d2 = 8.0;
+		for (int gy = -1; gy <= 1; gy++)
+		{
+			for (int gx = -1; gx <= 1; gx++)
+			{
+				vec2 g = vec2(float(gx), float(gy));
+				vec2 id = cell + g;
+				float h = GITDHash21(id);
+				float h2 = GITDHash21(id + 37.7);
+				vec2 site = g + vec2(h, h2);
+				float d = length(site - lf);
+				// Keep the two nearest: their DIFFERENCE is the edge, which
+				// is what turns cells into veins.
+				if (d < d1) { d2 = d1; d1 = d; }
+				else if (d < d2) { d2 = d; }
+			}
+		}
+
+		float edge = d2 - d1;
+		float w = max(uGlowTex3.w, 0.01);
+		float vein = 1.0 - smoothstep(0.0, w, edge);
+
+		// Each cell on its own clock, from its own hash, so the network
+		// crawls instead of flashing as one.
+		float ph = GITDHash21(cell + 91.7) * 6.2831853;
+		vein *= 0.45 + 0.55 * (0.5 + 0.5 * sin(timer * uGlowTex3.z + ph));
+
+		mul *= mix(1.0, 0.35 + 1.9 * vein, clamp(uGlowTex3.x, 0.0, 1.0));
+	}
+
+	// ---- 4. THE WALLS REACT TOO ---------------------------------------
+	//
+	// The disturbance array already exists, already fires on gunfire and on
+	// death, and until now only the fog consumed it. Feeding the same eight
+	// slots into the glow costs nothing to build and makes a shot visibly
+	// travel across the lit surfaces of the room rather than only through
+	// the air in it.
+	//
+	// Rings only. A disc that dimmed the wall would read as damage to the
+	// light rather than as a pulse through it.
+	if (uGlowTex4.x > 0.0)
+	{
+		float pulse = 0.0;
+		for (int di = 0; di < 8; di++)
+		{
+			float stren = uFogDisturbB[di].y;
+			if (stren <= 0.0) continue;
+
+			float age = uFogDisturbB[di].x;
+			float front = age * max(uFogDisturbB[di].z, 1.0);
+			float r = distance(p, uFogDisturbA[di].xyz);
+			float band = 1.0 - smoothstep(0.0, max(uFogDisturbA[di].w, 1.0), abs(r - front));
+			pulse += band * stren;
+		}
+		mul *= 1.0 + clamp(pulse, 0.0, 4.0) * uGlowTex4.x;
+	}
+
+	// ---- 5. THE ROOM KNOWS SOMETHING IS WRONG --------------------------
+	//
+	// One level pushed from script -- monsters near you, your health, an
+	// alarm -- driving a pulse through every glow at once. The lane stops
+	// being decoration and starts carrying information, which is the thing
+	// none of the four terms above can do no matter how good they look.
+	if (uGlowTex4.y > 0.0)
+	{
+		// Rate rises with the level, so it is not just brighter when things
+		// are bad -- it is FASTER, which is what reads as urgency.
+		float lvl = clamp(uGlowTex4.z, 0.0, 1.0);
+		float rate = 1.0 + 6.0 * lvl;
+		float beat = 0.5 + 0.5 * sin(timer * rate * 6.2831853 * 0.35);
+		mul *= 1.0 + uGlowTex4.y * lvl * (beat - 0.5) * 2.0;
+	}
+
+	return max(mul, 0.0);
+}
+
+//
 // [BB] DARKNESS, PER FRAGMENT.
 //
 // A darkness mod scales each SECTOR's colour: one multiplier, one room, wall
@@ -2149,6 +2350,13 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 	float wTop = GlowWaveRaw(uGlowWavePhase.x, GlowWaveSeedOff(uGlowTopPlane.w));
 	float wBot = GlowWaveRaw(uGlowWavePhase.y, GlowWaveSeedOff(uGlowBottomPlane.w));
 
+	// [BB] And the texture INSIDE the glow, which is where a lane goes once
+	// its reach is high enough that the edge the wave moves is off screen.
+	// Applied to the finished contribution rather than to reach, so it can
+	// never move a band's shape -- the wave owns shape, this owns substance.
+	float gTexTop = GlowTextureAt(GlowWaveSeedOff(uGlowTopPlane.w));
+	float gTexBot = GlowTextureAt(GlowWaveSeedOff(uGlowBottomPlane.w));
+
 	float topReach = uGlowTopColor.a * (1.0 + uGlowWaveDepth.x * wTop);
 	if (uGlowTopColor.a > 0.0 && glowdist.x < topReach)
 	{
@@ -2165,7 +2373,7 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 			gtop = mix(uGlowTopFar.rgb, gtop, clamp(topatten + uGlowWaveDepth.z * wTop, 0.0, 1.0));
 		gtop = mix(gtop, sweepTint, sweepTintW);
 		color.rgb += desaturate(vec4(gtop * topatten * uGlowTopIntensity
-			* (1.0 + uGlowWaveDepth.y * wTop), 1.0)).rgb;
+			* (1.0 + uGlowWaveDepth.y * wTop) * gTexTop, 1.0)).rgb;
 	}
 	float botReach = uGlowBottomColor.a * (1.0 + uGlowWaveDepth.x * wBot);
 	if (uGlowBottomColor.a > 0.0 && glowdist.y < botReach)
@@ -2181,7 +2389,7 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 			gbot = mix(uGlowBottomFar.rgb, gbot, clamp(botatten + uGlowWaveDepth.z * wBot, 0.0, 1.0));
 		gbot = mix(gbot, sweepTint, sweepTintW);
 		color.rgb += desaturate(vec4(gbot * botatten * uGlowBottomIntensity
-			* (1.0 + uGlowWaveDepth.y * wBot), 1.0)).rgb;
+			* (1.0 + uGlowWaveDepth.y * wBot) * gTexBot, 1.0)).rgb;
 	}
 
 	//
@@ -2237,8 +2445,12 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 			// ceiling on the old palette -- visible as the band crossing a
 			// corner and stopping dead at it.
 			gflat = mix(gflat, sweepTint, sweepTintW);
+			// Same texture the walls get, seeded the same way, so a pattern
+			// crossing a wall/floor join does not restart at the corner.
 			color.rgb += desaturate(vec4(gflat * atten
-				* (1.0 + uGlowWaveDepth.y * wFlat), 1.0)).rgb;
+				* (1.0 + uGlowWaveDepth.y * wFlat)
+				* GlowTextureAt(GlowWaveSeedOff(uFlatGlowLines[0].x + uFlatGlowLines[0].y)),
+				1.0)).rgb;
 		}
 	}
 

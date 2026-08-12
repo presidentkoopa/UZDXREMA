@@ -1355,6 +1355,25 @@ public:
 	PalEntry FogColor2 = 0xffb38059;
 	double   FogColor2Mix = 0;       // 0 = one colour, as before
 
+	// [BB] Texture inside the glow -- see GlowTextureAt in main.fp. The wave
+	// varies a glow's EDGE and has nothing to say once coverage saturates;
+	// these happen within the lit area instead. All off at 0.
+	double   GlowTexNoise = 0;
+	double   GlowTexScale = 0.02;
+	double   GlowTexDrift = 1.0;
+	double   GlowTexContrast = 1.0;
+	double   GlowFlow = 0;
+	double   GlowFlowSpacing = 64;
+	double   GlowFlowSpeed = 0.4;
+	double   GlowFlowSharp = 2.0;
+	double   GlowCell = 0;
+	double   GlowCellScale = 96;
+	double   GlowCellSpeed = 1.2;
+	double   GlowCellWidth = 0.08;
+	double   GlowReact = 0;      // the walls take the disturbance array too
+	double   GlowPulse = 0;      // depth of the state pulse
+	double   GlowPulseLevel = 0; // and how alarmed the room currently is
+
 	// [BB] THE HEATMAP.
 	//
 	// Where the fighting happened, drawn on the floor and accumulated over the
