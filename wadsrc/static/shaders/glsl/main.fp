@@ -1130,11 +1130,41 @@ vec4 FogSlabAt(vec3 fragPos)
 	float topZ = uFogSlab.x;
 	float soft = max(uFogSlab.z, 0.001);
 
+	// THE SURFACE MOVES.
+	//
+	// A flat top is a horizontal plane, and once you can see it clearly that
+	// is exactly what it reads as -- a sheet, not a body of mist. Making the
+	// height a function of position and time instead of a constant is the same
+	// move the glow wave makes on a glow's edge, for the same reason.
+	//
+	// TWO WAVES AT AN ANGLE. One sine corrugates: parallel ridges marching in
+	// a single direction, which reads as machinery. A second at an angle and a
+	// different wavelength makes them interfere, and interference is what
+	// looks like a surface rolling rather than a pattern scrolling.
+	//
+	// Sampled SEPARATELY at the eye and at the fragment, because the height at
+	// your feet and the height across the room are genuinely different now --
+	// which is the whole point, and is what makes the boundary undulate as you
+	// look along it.
+	float topEye  = topZ;
+	float topFrag = topZ;
+	if (uFogSurf.x > 0.0)
+	{
+		float wl = max(uFogSurf.y, 1.0);
+		float t  = timer * uFogSurf.z;
+		float cr = uFogSurf.w;
+
+		topEye  += uFogSurf.x * (sin(eye.x / wl + t)
+		         + cr * sin((eye.z * 0.77 + eye.x * 0.31) / wl - t * 1.31));
+		topFrag += uFogSurf.x * (sin(fragPos.x / wl + t)
+		         + cr * sin((fragPos.z * 0.77 + fragPos.x * 0.31) / wl - t * 1.31));
+	}
+
 	// Depth below the top, softened at the boundary, at each end of the ray.
 	// smoothstep across the soft band is what gives the mist a surface rather
 	// than an edge.
-	float dEye  = smoothstep(topZ + soft, topZ - soft, eye.y);
-	float dFrag = smoothstep(topZ + soft, topZ - soft, fragPos.y);
+	float dEye  = smoothstep(topEye + soft, topEye - soft, eye.y);
+	float dFrag = smoothstep(topFrag + soft, topFrag - soft, fragPos.y);
 
 	// Average occupancy along the segment. Exact for a linear ramp, and the
 	// error against a true integral through the smoothstep is far below what

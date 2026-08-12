@@ -1290,6 +1290,11 @@ public:
 	// slab is a flat colour laid over the scene and reads as a filter rather
 	// than a substance -- mist in front of a red glowing wall should be red.
 	double   FogSlabPickup = 0;
+	// The surface itself, animated. Amplitude 0 leaves the top flat.
+	double   FogSurfAmp = 0;
+	double   FogSurfLen = 256;
+	double   FogSurfSpeed = 1.0;
+	double   FogSurfCross = 0.6;
 
 	// links to global game objects
 	TArray<TObjPtr<AActor *>> CorpseQueue;

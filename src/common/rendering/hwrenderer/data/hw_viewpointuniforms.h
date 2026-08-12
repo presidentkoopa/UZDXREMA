@@ -146,6 +146,21 @@ struct HWViewpointUniforms
 	// beam, only arithmetic on a number that was already in hand.
 	FVector4 mBeamFX = { 0.f, 0.f, 0.f, 0.f };
 
+	// [BB] The fog slab's SURFACE, animated.
+	//
+	//   x amplitude (world units the top rises and falls)
+	//   y wavelength
+	//   z speed
+	//   w cross-swell ratio -- a second wave at an angle to the first, so the
+	//     surface rolls rather than corrugating in one direction
+	//
+	// Amplitude 0 leaves the top perfectly flat, exactly as before.
+	//
+	// Appended LAST here and last in both GLSL copies, in one change. See
+	// mFogSlabExtra above for what happens when those two facts stop being
+	// true.
+	FVector4 mFogSurf = { 0.f, 256.f, 1.f, 0.6f };
+
 
 	void CalcDependencies()
 	{

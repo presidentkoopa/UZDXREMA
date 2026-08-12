@@ -3873,6 +3873,28 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogWake, SetFogWake)
 
 // How much of the surface behind it the mist takes on. This is what makes the
 // slab read as a substance rather than a coloured filter over the scene.
+// The slab's surface, animated. A flat top reads as a sheet once you can
+// see it clearly; two waves at an angle to each other interfere, and
+// interference is what looks like a surface rolling rather than a pattern
+// scrolling. Amplitude 0 leaves it perfectly flat.
+static void SetFogSurface(FLevelLocals *self, double amp, double wavelength,
+	double speed, double cross)
+{
+	self->FogSurfAmp = amp;
+	self->FogSurfLen = wavelength;
+	self->FogSurfSpeed = speed;
+	self->FogSurfCross = cross;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogSurface, SetFogSurface)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(amp); PARAM_FLOAT(wavelength);
+	PARAM_FLOAT(speed); PARAM_FLOAT(cross);
+	SetFogSurface(self, amp, wavelength, speed, cross);
+	return 0;
+}
+
 static void SetFogPickup(FLevelLocals *self, double amount)
 {
 	self->FogSlabPickup = amount;

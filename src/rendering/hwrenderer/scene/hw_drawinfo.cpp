@@ -286,6 +286,9 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 			VPUniforms.mFogSlabExtra = {
 				(float)Level->FogSlabWakeStrength, (float)Level->FogSlabPickup,
 				0.0f, 0.0f };
+			VPUniforms.mFogSurf = {
+				(float)Level->FogSurfAmp, (float)Level->FogSurfLen,
+				(float)Level->FogSurfSpeed, (float)Level->FogSurfCross };
 
 			// The torch cone in WORLD space, so the mist can be lit by it.
 			// The volumetric beam pass gets its own copy in VIEW space and
