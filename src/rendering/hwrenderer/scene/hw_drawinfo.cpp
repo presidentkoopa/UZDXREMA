@@ -388,6 +388,17 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 		// staircase, and it is the one part of the effect anyone looks at.
 		{
 			double now = Level->maptime / (double)TICRATE;
+
+			// THE HIGH-WATER MARK, and it is why a 128-slot array is
+			// affordable. The shader loops to this rather than to the cap, so
+			// the array's size costs nothing until it is actually used.
+			//
+			// Recomputed here rather than tracked on add and remove: a slot
+			// can also fall vacant by simply ageing out, which no caller
+			// observes, and a counter that only some of the ways of becoming
+			// empty know about is a counter that drifts.
+			int live = 0;
+
 			for (int i = 0; i < FLevelLocals::MAX_SHAPES; i++)
 			{
 				double base = Level->ShapeSize[i];
@@ -402,6 +413,8 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 					VPUniforms.mShapeCol[i] = { 0.f, 0.f, 0.f, 0.f };
 					continue;
 				}
+
+				live = i + 1;
 
 				float fade = (life > 0.0) ? (float)(1.0 - age / life) : 1.0f;
 				float size = (float)(base + Level->ShapeGrow[i] * age);
@@ -420,10 +433,11 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 					Level->ShapeColor[i].b / 255.f,
 					(float)Level->ShapeIntensity[i] * fade };
 			}
-		}
 
-		VPUniforms.mShapeParams = { (float)Level->ShapeSoft,
-			(float)Level->ShapeHeightFade, (float)Level->ShapeReach, 0.f };
+			VPUniforms.mShapeParams = { (float)Level->ShapeSoft,
+				(float)Level->ShapeHeightFade, (float)Level->ShapeReach,
+				(float)live };
+		}
 		VPUniforms.mShapeUnder = { Level->ShapeUnder.r / 255.f,
 			Level->ShapeUnder.g / 255.f, Level->ShapeUnder.b / 255.f, 0.f };
 

@@ -314,11 +314,14 @@ struct HWViewpointUniforms
 	// The distance functions themselves are named and separate in main.fp
 	// rather than inlined, so a later ZScript mirror is a transcription
 	// instead of an excavation.
-	FVector4 mShapeA[16];
-	FVector4 mShapeB[16];
-	FVector4 mShapeCol[16];
+	FVector4 mShapeA[128];
+	FVector4 mShapeB[128];
+	FVector4 mShapeCol[128];
 
-	// x edge softness, y height fade, z glow reach past the edge, w unused
+	// x edge softness, y height fade, z glow reach past the edge,
+	// w HOW MANY SLOTS ARE LIVE -- the loop runs to this, not to the cap.
+	// Without it a 128-slot array would cost 128 iterations per fragment
+	// whether three shapes existed or none did.
 	FVector4 mShapeParams = { 2.f, 24.f, 0.f, 0.f };
 
 	// What a seam reveals underneath. rgb, w unused.

@@ -296,9 +296,9 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 			vec4 uGlowTex3;
 			vec4 uGlowTex4;
 			vec4 uDesatKeep;
-			vec4 uShapeA[16];
-			vec4 uShapeB[16];
-			vec4 uShapeCol[16];
+			vec4 uShapeA[128];
+			vec4 uShapeB[128];
+			vec4 uShapeCol[128];
 			vec4 uShapeParams;
 			vec4 uShapeUnder;
 		};

@@ -1047,10 +1047,36 @@ vec3 ShapesAt(vec3 fragPos, vec3 nrm)
 	float up = nrm.y;                 // +1 on a floor, 0 on a wall, -1 ceiling
 	bool isFlat = abs(up) > 0.7;
 
-	for (int i = 0; i < 16; i++)
+	// HOW MANY SLOTS ARE ACTUALLY IN USE, and this is what makes a large cap
+	// affordable. The array is 128 long; the loop runs to the high-water mark
+	// instead, so three shapes cost three iterations and not a hundred and
+	// twenty-five wasted compares on every pixel of every frame.
+	//
+	// Raising MAX_SHAPES without this would have been the whole cost with none
+	// of the benefit -- the loop is per fragment, so the cap is multiplied by
+	// five million before it reaches the frame time.
+	int nshapes = int(uShapeParams.w);
+	if (nshapes <= 0) return sum;
+
+	for (int i = 0; i < 128; i++)
 	{
+		if (i >= nshapes) break;
+
 		float size = uShapeA[i].w;
 		if (size <= 0.0) continue;
+
+		// CHEAP REJECT FIRST, before the orientation test, the rotation or any
+		// distance function. A shape covers a small part of a room and a pixel
+		// is near almost none of them, so this squared-radius compare is what
+		// the loop actually spends its time on -- and when a whole warp misses
+		// the same shape, which is the usual case because neighbouring pixels
+		// are in the same place, the rest of the body is genuinely skipped.
+		//
+		// Squared on both sides: no sqrt, and the reach is the largest the
+		// shape can grow to including its softness and its glow.
+		vec3 rel3 = fragPos - uShapeA[i].xyz;
+		float reach = size + soft + uShapeParams.z + 1.0;
+		if (dot(rel3, rel3) > reach * reach) continue;
 
 		int packed_kind = int(uShapeB[i].x);
 		int kind = packed_kind & 15;

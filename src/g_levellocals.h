@@ -1183,7 +1183,7 @@ public:
 	// system where every slot costs a segment solve per fragment. A shape is a
 	// couple of ALU behind an early reject, so the old cap was being copied
 	// rather than reasoned about.
-	static const int MAX_SHAPES = 16;
+	static const int MAX_SHAPES = 128;
 	DVector3 ShapePos[MAX_SHAPES];
 	double   ShapeSize[MAX_SHAPES] = {};      // 0 = the slot is free
 	int      ShapeKind[MAX_SHAPES] = {};      // 0 off, see hw_viewpointuniforms.h
