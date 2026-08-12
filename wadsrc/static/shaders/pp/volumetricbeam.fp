@@ -220,5 +220,35 @@ void main()
 	accum *= Density / float(steps);
 	accum *= (tMax - tMin) * 0.001;
 
+	// ---------------------------------------------------------------------
+	// A CONE SEEN END-ON IS A DISC.
+	//
+	// Look straight down your own torch and the cross-section you are looking
+	// through is the whole cone, so it fills the middle of the screen as a
+	// soft bright circle. That is not a bug in the integral -- it is what the
+	// integral correctly says -- but it is useless: a wash centred on the
+	// crosshair carries no information about the beam, because the beam is
+	// exactly where you are already looking.
+	//
+	// And on a flat screen it is the ONLY way you ever see it. The default
+	// mainhand mount reads AttackPos/AttackAngle, which track the view, so
+	// the cone is permanently aligned with the camera. What you get is not a
+	// beam, it is a permanent bloom-fed halo over the centre of the frame.
+	//
+	// So fade by how well the view axis agrees with the beam axis. In view
+	// space the view direction is exactly (0,0,-1), which makes the whole
+	// test one component and no extra uniform to pass. Squared, so only the
+	// genuinely near-aligned case is touched and a torch held off to one side
+	// -- the shot actually worth having -- keeps its full strength.
+	//
+	// This is a dial rather than a rule because in VR the hands are tracked
+	// separately and a hand torch pointed forward is a real thing somebody
+	// might want to see.
+	if (AxisFade > 0.0)
+	{
+		float align = clamp(-BeamDir.z, 0.0, 1.0);
+		accum *= 1.0 - AxisFade * align * align;
+	}
+
 	FragColor = vec4(BeamColor * accum, 1.0);
 }

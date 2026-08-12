@@ -403,13 +403,31 @@ struct VolumetricBeamUniforms
 	float LinearizeDepthA;
 	float LinearizeDepthB;
 
-	// KEEPS THE MATRIX ON A 16-BYTE BOUNDARY. std140 aligns a mat4 to 16 and
-	// the C++ struct does not, so without a full final row here the two
-	// disagree about where ViewToWorld starts and world-space dust is sampled
-	// through a matrix assembled from the wrong floats.
-	float padding0;
-	float padding1;
+	// How much the beam fades as your VIEW lines up with it. See the note in
+	// volumetricbeam.fp -- a cone seen end-on is a disc, and on a flat screen
+	// the default mount points exactly where you look, so end-on is the only
+	// way you ever see it. 0 restores the old behaviour.
+	float AxisFade;
 
+	// ---- AND THE ROW ENDS EXACTLY HERE ------------------------------------
+	//
+	// std140 aligns a mat4 to sixteen bytes and the C++ struct does not, so
+	// the three floats above have to fill out the row DustTime opened, and
+	// ViewToWorld then starts at 96, which is 16 x 6, in both.
+	//
+	// Count it, do not eyeball it. The previous attempt at this comment added
+	// TWO pad floats instead of one, pushing the matrix to offset 100 where
+	// std140 expects 112, and it did that while claiming in its own text to be
+	// fixing the alignment. World-space dust was being sampled through a
+	// matrix assembled from twelve bytes of the wrong floats for a day.
+	//
+	//   BeamPos 0    BeamLength 12                        -> row 0 ends 16
+	//   BeamDir 16   CosInner 28                          -> row 1 ends 32
+	//   BeamColor 32 CosOuter 44                           -> row 2 ends 48
+	//   TanHalfFov 48 Density 56 Falloff 60                -> row 3 ends 64
+	//   StepCount 64 DustAmount 68 DustScale 72 Drift 76   -> row 4 ends 80
+	//   DustTime 80  DepthA 84  DepthB 88  AxisFade 92     -> row 5 ends 96
+	//   ViewToWorld 96                                     -> aligned
 	float ViewToWorld[16];   // plain floats: VSMatrix is not visible in this header
 
 	static std::vector<UniformFieldDesc> Desc()
@@ -432,8 +450,7 @@ struct VolumetricBeamUniforms
 			{ "DustTime", UniformType::Float, offsetof(VolumetricBeamUniforms, DustTime) },
 			{ "LinearizeDepthA", UniformType::Float, offsetof(VolumetricBeamUniforms, LinearizeDepthA) },
 			{ "LinearizeDepthB", UniformType::Float, offsetof(VolumetricBeamUniforms, LinearizeDepthB) },
-			{ "padding0", UniformType::Float, offsetof(VolumetricBeamUniforms, padding0) },
-			{ "padding1", UniformType::Float, offsetof(VolumetricBeamUniforms, padding1) },
+			{ "AxisFade", UniformType::Float, offsetof(VolumetricBeamUniforms, AxisFade) },
 			{ "ViewToWorld", UniformType::Mat4, offsetof(VolumetricBeamUniforms, ViewToWorld) },
 		};
 	}

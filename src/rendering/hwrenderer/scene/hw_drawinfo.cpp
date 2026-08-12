@@ -74,6 +74,17 @@ CVAR(Bool, gl_coronas, true, CVAR_ARCHIVE);
 // coarser haze, not a dimmer beam, because the march normalises by count.
 CVAR(Int, vol_beam_quality, 24, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 
+// [BB] How much the volumetric cone fades as your VIEW lines up with it.
+//
+// A cone seen end-on is a disc, and on a flat screen the default mount points
+// exactly where you look -- so without this the beam is a permanent soft halo
+// over the middle of the frame, fed straight into bloom, carrying no
+// information at all because it marks the place you are already looking.
+//
+// Not a rule, because in VR a tracked hand pointed forward is a real thing
+// somebody might want to see. 0 restores the unfaded behaviour.
+CVAR(Float, vol_beam_axisfade, 0.85f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
 sector_t * hw_FakeFlat(sector_t * sec, sector_t * dest, area_t in_area, bool back);
 
 std::pair<PalEntry, PalEntry>& R_GetSkyCapColor(FGameTexture* tex);
@@ -702,6 +713,7 @@ void HWDrawInfo::SetupVolumetricBeam()
 	u.DustScale = (float)Level->VolBeamDustScale;
 	u.DustDrift = (float)Level->VolBeamDustDrift;
 	u.DustTime = (float)(screen->FrameTime * 0.001);
+	u.AxisFade = (float)clamp<double>(vol_beam_axisfade, 0.0, 1.0);
 
 	// The two constants that turn a raw depth sample back into a view-space
 	// distance, identical to the pair PPAmbientOcclusion feeds lineardepth.fp.
