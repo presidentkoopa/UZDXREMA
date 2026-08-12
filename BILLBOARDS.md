@@ -126,6 +126,86 @@ int, Vector2, double SweepBillboard (Vector3 from, Vector3 to, double radius = 0
 `AddBillboard` issues no handle. It is the cheapest form — use it for anything
 you will never address again.
 
+## Groups
+
+A panel is not a quad. It is forty of them — a shell, a face, every rule, every
+glyph of every label — and a group is how you treat that as one object.
+
+```
+int  AddBillboardGroup       (Vector3 origin)          returns a handle
+void SetBillboardGroup       (int id, int gid)         gid 0 takes it out of one
+void SetBillboardGroupScale  (int gid, double scale)   snap; also cancels an animation
+void AnimateBillboardGroup   (int gid, double from, double to, int tics)
+void SetBillboardGroupOrigin (int gid, Vector3 origin)
+void RemoveBillboardGroup    (int gid)
+```
+
+Three calls and then nothing:
+
+```
+int gid = level.AddBillboardGroup((AHEAD, 0, UP));   // the pivot
+... build the panel, level.SetBillboardGroup(id, gid) on each element
+level.AnimateBillboardGroup(gid, 0.0, 1.0, 10);      // grow, once
+```
+
+**Why this is not script's job.** `ResizeBillboard` and `MoveBillboard` both
+exist, so script *could* do it — but scaling a composed panel means scaling each
+member's size *and* its offset from the pivot, which is eighty setter calls per
+step, each an O(n) scan of the billboard array. Worse, it would **step**: script
+runs at 35Hz and the renderer does not. A UI element scaling in twelve visible
+jumps a foot from someone's face is worse than not animating it at all. A group
+resolves in `DispatchBillboards` from a start tic and a duration, so the motion
+is frame-rate smooth and script writes one number and walks away — the same
+argument `BBFL_VIEWLOCKED` makes for position.
+
+**The origin is in the members' own space** — an offset from the viewer for
+`BBFL_VIEWLOCKED`, from the actor for `BBFL_ATTACHED`, a world point otherwise.
+A group whose members do not all share a space draws as nonsense; there is no
+cheap way to detect that and no attempt is made.
+
+**The curve is the engine's, not a parameter.** Growth eases out with a slight
+overshoot and settles — a panel that arrives at exactly its final size and stops
+reads as a texture being swapped in, where a few percent past and back reads as
+an object arriving. A collapse eases *in*, accelerating away, because a thing
+leaving should not linger and certainly should not bounce.
+
+Scale 0 draws nothing, so a group is also how you hide a panel without
+destroying it and re-issuing every handle. `RemoveBillboardGroup` releases its
+members rather than orphaning them: an unknown gid resolves to scale 1.0, so a
+member left pointing at a dead group would silently **snap to full size** rather
+than disappear.
+
+Groups serialize with the level, and an animation saved mid-flight resumes where
+it was rather than restarting.
+
+## View-locked orientation
+
+`BBFL_VIEWLOCKED` resolves **both** position and orientation against the
+viewpoint. The orientation half was missing until `fdceb0abcf` (see the history
+note below), and its absence is worth describing, because the symptoms point
+nowhere near the cause.
+
+Position was view-relative while yaw stayed in world space, so a head-locked
+panel followed the viewer around the room while permanently facing world-east.
+You could walk around your own HUD. Off-axis it foreshortened until it was a
+third of its authored width; from behind you were reading its back, which
+renders as **every glyph mirrored** — and that sends you hunting through
+`bb_flipu` and the `right`-vector derivation, neither of which is wrong.
+
+It is a **yaw bias**, not a camera-facing mode, and the difference matters.
+`BBF_CAMERAYAW` makes each quad yaw about its own position, which bows a
+composed panel into a cylinder and collapses hinged assemblies. Adding the view
+yaw to each billboard's *stored* yaw keeps every element's angle relative to
+every other, so a flat panel stays flat and the assembly turns with the head as
+one rigid object.
+
+The bias is `view yaw + 180`, because yaw is *which way the face points* and a
+view-locked panel is parked ahead of the eye along the view vector — biasing by
+the view yaw alone aims its face the same way the viewer is looking, i.e.
+straight away from them. Applied in the renderer and in all three of
+`AimBillboard` / `TouchBillboard` / `SweepBillboard`, so the clickable region
+cannot drift away from the picture.
+
 ## Pointing at one
 
 Both queries answer the same question: **which billboard, and where on its
@@ -190,6 +270,11 @@ whose actor did not survive loads as null and the next tic drops that billboard
 exactly as it would have live.
 
 `drawPos` is deliberately not saved — the first frame after a load rewrites it.
+
+Groups travel with their members. Dropping them would not error — an unknown gid
+resolves to scale 1.0 — so every grouped billboard would silently come back full
+size at its unscaled offset, which on a panel saved mid-animation is a pile of
+quads in the wrong places.
 
 ## Cvars
 
@@ -261,13 +346,22 @@ is yours, and in a shared checkout that claim is false.
 
 | File | What |
 | --- | --- |
-| `src/g_levellocals.h` | `FBillboard`, the enums, storage on the level |
-| `src/p_tick.cpp` | `TickBillboards` — attachment, expiry |
-| `src/scripting/vmthunks.cpp` | every native, including aim and touch |
+| `src/g_levellocals.h` | `FBillboard`, `FBillboardGroup`, `BillboardBasis`, `BillboardGroupScale`, the enums, storage on the level |
+| `src/p_tick.cpp` | `TickBillboards` — attachment, expiry; `bb_clear` |
+| `src/scripting/vmthunks.cpp` | every native, including aim/touch and the group setters |
 | `wadsrc/static/zscript/doombase.zs` | the ZScript declarations |
-| `src/rendering/hwrenderer/scene/hw_drawinfo.cpp` | `DispatchBillboards`, culling |
+| `src/rendering/hwrenderer/scene/hw_drawinfo.cpp` | `DispatchBillboards`, culling, the group transform |
 | `src/rendering/hwrenderer/scene/hw_sprites.cpp` | `ProcessBillboard`, the quad |
-| `src/p_saveg.cpp` | serialization |
+| `src/p_saveg.cpp` | serialization, billboards and groups |
+
+Two things worth knowing before you change any of it. The orientation solver is
+`BillboardBasis` and there is **one** copy on purpose — the renderer and all
+three queries call it with the same cvars, because when it was three hand-copied
+pairs of lines all three were wrong at once and a pointer that lands somewhere
+other than where the panel draws is invisible until someone notices. And there
+are **no getters**: script cannot read a billboard's size, position or alpha
+back, so a caller must mirror anything it sets, and `flags` and `payload` cannot
+be changed after creation at all.
 
 ## Not done
 
