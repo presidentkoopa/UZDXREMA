@@ -841,7 +841,7 @@ struct LevelLocals native
 	native void SetFogWake(Vector3 pos, double radius, double strength);
 	native clearscope void SetFogPickup(double amount);
 	// The mist's surface, animated. Amplitude 0 = a flat top.
-	native clearscope void SetFogSurface(double amp, double wavelength, double speed, double cross);
+	native clearscope void SetFogSurface(double amp, double wavelength, double speed, double crossSwell);
 	native clearscope void ClearFogSlab();
 
 	// [BB] The pattern drawn INSIDE a sweep band. Spacing 0 in an axis means
