@@ -263,6 +263,25 @@ struct HWViewpointUniforms
 	// floor, warm at the top. w is how much of it to use; 0 keeps one colour.
 	FVector4 mFogColor2 = { 0.7f, 0.5f, 0.35f, 0.f };
 
+	// [BB] WHAT SURVIVES THE COLOUR DRAIN.
+	//
+	// Desaturation used to be all or nothing: a monochrome preset was
+	// monochrome, full stop, and blood came out the same grey as the wall it
+	// was sprayed on. This makes the drain conditional on a colour's OWN
+	// saturation, so a world can be grey and still keep the vivid things in it.
+	// Sin City rather than Ingmar Bergman.
+	//
+	// It works because there is exactly ONE dodesaturate() in the shader and
+	// every path goes through it -- textures, sprites, glow, sweeps, brightmaps,
+	// the lot. A rule added there reaches all of them without a single call
+	// site needing to know it exists.
+	//
+	//   x threshold: saturation above which colour survives (0 = old behaviour)
+	//   y softness of that threshold
+	//   z hue gate: 0 any hue, 1 red-dominant only, 2 green, 3 blue
+	//   w spare
+	FVector4 mDesatKeep = { 0.f, 0.15f, 0.f, 0.f };
+
 
 	void CalcDependencies()
 	{

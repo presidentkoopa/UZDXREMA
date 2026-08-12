@@ -91,6 +91,52 @@ vec4 dodesaturate(vec4 texel, float factor)
 	if (factor != 0.0)
 	{
 		float gray = grayscale(texel);
+
+		// [BB] WHAT SURVIVES THE DRAIN.
+		//
+		// Desaturation was all or nothing, so a monochrome preset made blood
+		// exactly as grey as the wall it was sprayed on. Weighting the drain by
+		// a colour's OWN saturation means a world can be grey and still keep
+		// the vivid things in it -- blood, a keycard, a kill badge -- without
+		// one actor, sprite or texture being tagged.
+		//
+		// THIS FUNCTION IS THE ONLY DESATURATION IN THE SHADER. Textures,
+		// sprites, glow, sweep bands, brightmaps and the flat-edge glow all
+		// route through it, so the rule lands on every one of them and cannot
+		// disagree with itself.
+		//
+		//   uDesatKeep  x threshold, y softness, z hue gate, w spare
+		//
+		// Threshold 0 skips the whole block and the result is bit-for-bit what
+		// it was before.
+		if (uDesatKeep.x > 0.0)
+		{
+			// Chroma as a fraction of brightness -- HSV saturation. Cheap, and
+			// it is the quantity the eye actually reads as "how colourful",
+			// which a channel difference alone is not.
+			float mx = max(max(texel.r, texel.g), texel.b);
+			float mn = min(min(texel.r, texel.g), texel.b);
+			float sat = (mx > 0.0001) ? (mx - mn) / mx : 0.0;
+
+			// HUE GATE, by dominant channel. Crude next to a real hue angle
+			// and it needs no atan: blood is red-dominant, nukage is
+			// green-dominant, and that is the whole question being asked.
+			// Without it every saturated thing survives, which is a different
+			// and also useful look -- so 0 means "any hue".
+			int gate = int(uDesatKeep.z);
+			bool hueOk = (gate == 0)
+				|| (gate == 1 && texel.r >= mx)
+				|| (gate == 2 && texel.g >= mx)
+				|| (gate == 3 && texel.b >= mx);
+
+			if (hueOk)
+			{
+				float lo = uDesatKeep.x;
+				float hi = min(lo + max(uDesatKeep.y, 0.001), 1.0);
+				factor *= 1.0 - smoothstep(lo, hi, sat);
+			}
+		}
+
 		return mix (texel, vec4(gray,gray,gray,texel.a), factor);
 	}
 	else

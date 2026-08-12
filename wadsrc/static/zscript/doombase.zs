@@ -863,6 +863,15 @@ struct LevelLocals native
 	native clearscope void SetFogBow(double strength, double width, double thin);
 	native clearscope void SetFogGradient(color col, double mix);
 
+	// [BB] WHAT SURVIVES A COLOUR DRAIN. Desaturation was all or nothing, so a
+	// monochrome world made blood exactly as grey as the wall behind it.
+	// Weighting the drain by each colour's own saturation keeps the vivid
+	// things and drains everything else, with nothing tagged.
+	//
+	// hue: 0 any, 1 red-dominant only, 2 green, 3 blue.
+	// threshold 0 restores the old behaviour exactly.
+	native clearscope void SetDesatKeep(double threshold, double soft, int hue);
+
 	// [BB] THE HEATMAP -- where the fighting happened, accumulated over the
 	// whole life of a map and drawn on the floor. A grid rather than a slot
 	// array, because the question it answers is a spatial SUM: the thousandth

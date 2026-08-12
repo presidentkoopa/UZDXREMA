@@ -4063,6 +4063,24 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, HeatmapClear, HeatmapClear)
 // How it is drawn. Scale 0 switches it off without discarding what has been
 // accumulated, so a player can toggle it on to see the shape of a fight they
 // have already had.
+// What survives a colour drain. The drain itself is the sector desaturation
+// that has always been there; this only decides which colours it is allowed to
+// take. Threshold 0 restores the old all-or-nothing behaviour exactly.
+static void SetDesatKeep(FLevelLocals *self, double threshold, double soft, int hue)
+{
+	self->DesatKeep = threshold;
+	self->DesatKeepSoft = soft;
+	self->DesatKeepHue = hue;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetDesatKeep, SetDesatKeep)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(threshold); PARAM_FLOAT(soft); PARAM_INT(hue);
+	SetDesatKeep(self, threshold, soft, hue);
+	return 0;
+}
+
 static void SetHeatmap(FLevelLocals *self, double scale, int lowCol,
 	int highCol, double ceiling, double decay, double tolerance)
 {

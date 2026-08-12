@@ -371,6 +371,8 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 		VPUniforms.mFogBow = { (float)Level->FogBowStrength,
 			(float)Level->FogBowWidth, (float)Level->FogBowThin, 0.f };
 
+		VPUniforms.mDesatKeep = { (float)Level->DesatKeep,
+			(float)Level->DesatKeepSoft, (float)Level->DesatKeepHue, 0.f };
 		VPUniforms.mFogColor2 = { Level->FogColor2.r / 255.f,
 			Level->FogColor2.g / 255.f, Level->FogColor2.b / 255.f,
 			(float)Level->FogColor2Mix };

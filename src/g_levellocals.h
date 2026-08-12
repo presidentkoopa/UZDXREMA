@@ -1346,6 +1346,12 @@ public:
 	double   FogBowWidth = 64;
 	double   FogBowThin = 0.6;
 
+	// [BB] What survives the colour drain. Threshold 0 = the old all-or-nothing
+	// behaviour, exactly.
+	double   DesatKeep = 0;
+	double   DesatKeepSoft = 0.15;
+	int      DesatKeepHue = 0;   // 0 any, 1 red, 2 green, 3 blue
+
 	PalEntry FogColor2 = 0xffb38059;
 	double   FogColor2Mix = 0;       // 0 = one colour, as before
 
