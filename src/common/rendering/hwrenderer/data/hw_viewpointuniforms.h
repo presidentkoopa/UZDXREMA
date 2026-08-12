@@ -89,6 +89,17 @@ struct HWViewpointUniforms
 	FVector4 mFogBeamDir = { 0.f, 0.f, 1.f, 1.f };
 	FVector4 mFogBeamCol = { 1.f, 1.f, 1.f, 1.f };
 
+	// [BB] mFogSlabExtra: x wake strength, y glow pickup, zw spare.
+	//
+	// POSITION IS LOAD-BEARING. This sits between mFogBeamCol and mSweepFill
+	// because that is where both GLSL copies put it, and a uniform block is
+	// matched by OFFSET, not by name. It was declared at the end of this
+	// struct once: every field after uFogBeamCol then read the one before it,
+	// so beam count came from mBeamFX, resolved as zero, and no beam ever drew
+	// -- silently, with no error anywhere, because a mismatched block is still
+	// a valid block.
+	FVector4 mFogSlabExtra = { 0.f, 0.f, 0.f, 0.f };
+
 	// [BB] Sweep fill -- the pattern drawn INSIDE a band.
 	//
 	//   mSweepFill    spacing U, spacing V, line width, line softness
@@ -135,14 +146,6 @@ struct HWViewpointUniforms
 	// beam, only arithmetic on a number that was already in hand.
 	FVector4 mBeamFX = { 0.f, 0.f, 0.f, 0.f };
 
-	// [BB] mFogSlabExtra: x wake strength, y glow pickup, zw spare.
-	//
-	// Pickup is the one that makes the slab read as a SUBSTANCE rather than a
-	// filter: mist standing in front of a red glowing wall should be red.
-	// It has its own slot rather than being packed into a spare component of
-	// something else, because the first attempt overloaded the wake strength
-	// and the two then could not be set independently.
-	FVector4 mFogSlabExtra = { 0.f, 0.f, 0.f, 0.f };
 
 	void CalcDependencies()
 	{

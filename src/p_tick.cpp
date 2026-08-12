@@ -270,8 +270,15 @@ CCMD(bb_clear)
 	}
 	auto Level = players[consoleplayer].mo->Level;
 	unsigned n = Level->Billboards.Size();
+	unsigned g = Level->BillboardGroups.Size();
 	Level->Billboards.Clear();
-	Printf("bb_clear: removed %u\n", n);
+	// Groups go too. Leaving them would leak a transform with no members and,
+	// since ids are never recycled, would be invisible rather than harmful --
+	// but "clear" that leaves half the system standing is a lie in a debug
+	// command, which is exactly where you least want one.
+	Level->BillboardGroups.Clear();
+	Printf("bb_clear: removed %u billboard%s, %u group%s\n",
+		n, n == 1 ? "" : "s", g, g == 1 ? "" : "s");
 }
 
 //

@@ -111,6 +111,36 @@ FSerializer &Serialize(FSerializer &arc, const char *key, FBillboard &bb, FBillb
 			("spawntic", bb.spawntic)
 			("attachedto", bb.attachedTo)
 			("attachoffset", bb.attachOffset)
+			("group", bb.group)
+			.EndObject();
+	}
+	return arc;
+}
+
+//============================================================================
+//
+// [BB] Groups travel with their members, or a loaded panel comes back
+// untransformed. BillboardGroupScale answers 1.0 for an id it cannot find, so
+// dropping these from the save would not error -- every grouped billboard
+// would just silently snap to full size at its unscaled offset, which on a
+// panel saved mid-animation is a pile of quads in the wrong places.
+//
+// startTic is level time and so is still meaningful after a load. An
+// animation saved in flight resumes where it was rather than restarting,
+// which is the same contract the rest of the level's timers keep.
+//
+//============================================================================
+
+FSerializer &Serialize(FSerializer &arc, const char *key, FBillboardGroup &g, FBillboardGroup *def)
+{
+	if (arc.BeginObject(key))
+	{
+		arc("id", g.id)
+			("origin", g.origin)
+			("from", g.from)
+			("to", g.to)
+			("starttic", g.startTic)
+			("durtics", g.durTics)
 			.EndObject();
 	}
 	return arc;
@@ -1046,7 +1076,9 @@ void FLevelLocals::Serialize(FSerializer &arc, bool hubload)
 	// billboard exactly as it would have done live. NextBillboardID travels
 	// so handles stay unique across a load.
 	arc("billboards", Billboards)
-		("nextbillboardid", NextBillboardID);
+		("nextbillboardid", NextBillboardID)
+		("billboardgroups", BillboardGroups)
+		("nextbillboardgroupid", NextBillboardGroupID);
 
 
 	// Hub transitions must keep the current total time

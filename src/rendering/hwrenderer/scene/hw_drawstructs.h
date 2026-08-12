@@ -439,7 +439,7 @@ public:
 
 	// [BB] a billboard as a real in-scene quad: depth-tested and
 	// translucency-sorted through the same lists as sprites.
-	void ProcessBillboard(HWDrawInfo *di, const struct FBillboard *bb, const DVector3 &bpos, sector_t *sector);
+	void ProcessBillboard(HWDrawInfo *di, const struct FBillboard *bb, const DVector3 &bpos, sector_t *sector, double groupScale = 1.0);
 	// [BB] What a billboard draws on itself. Takes a callback rather than
 	// drawing directly because a payload may emit several quads -- a bar is a
 	// track and a fill, a number is a row of glyphs -- and that is what lets

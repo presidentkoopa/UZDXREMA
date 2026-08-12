@@ -2422,7 +2422,7 @@ void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double
 //
 //==========================================================================
 
-void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVector3 &bpos, sector_t *sector)
+void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVector3 &bpos, sector_t *sector, double groupScale)
 {
 	if (!sector || !bb) return;
 
@@ -2501,7 +2501,13 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 	// the picture cannot drift apart again.
 	DVector3 right, up, normal;
 	double halfw, halfh;
-	BillboardBasis(*bb, bpos, vp.Pos, bb_tiltbias, bb_scale, right, up, normal, halfw, halfh);
+	BillboardBasis(*bb, bpos, vp.Pos, bb_tiltbias, bb_scale * groupScale, right, up, normal, halfw, halfh,
+		// +180: yaw is WHICH WAY THE FACE POINTS, and a view-locked panel is
+		// parked AHEAD of the eye along the view vector. Biasing by the view
+		// yaw alone aims its face the same way the viewer is looking -- i.e.
+		// straight away from them -- so the panel welds to the head and shows
+		// its BACK, which reads as every glyph mirrored.
+		(bb->flags & BBFL_VIEWLOCKED) ? vp.Angles.Yaw.Degrees() + 180.0 : 0.0);
 
 	DVector3 rw = right * halfw;
 	DVector3 uh = up * halfh;

@@ -243,6 +243,11 @@ struct FBillboard
 	double   lifetime = 0.0;       // seconds; <= 0 = permanent. Moot once persistent/attached.
 	int      spawntic = 0;         // level.maptime at creation, for transient expiry
 
+	// [BB] Which group's transform this rides, 0 for none. See
+	// FBillboardGroup -- the short version is that a composed panel is forty
+	// quads and scaling it is one number, not eighty setter calls.
+	int      group = 0;
+
 	// A raw AActor* would dangle across a GC sweep. TObjPtr does not, and
 	// does not itself keep the actor alive -- "attached billboards die with
 	// their actor" means exactly that: once this resolves null the billboard
@@ -258,6 +263,45 @@ struct FBillboard
 	// renderer, read by the aim/touch queries; not serialized, since the
 	// first frame after a load rewrites it.
 	DVector3 drawPos;
+};
+
+// [BB] A SHARED TRANSFORM FOR A COMPOSED PANEL.
+//
+// A panel is not a quad, it is forty of them: a shell, a face, every rule,
+// every glyph of every label. Scaling that as one object means scaling each
+// member's SIZE and its OFFSET FROM THE PANEL'S CENTRE together -- shrink the
+// quads without shrinking the gaps and you get forty tiny elements in the
+// original layout, which is not a smaller panel, it is a broken one.
+//
+// Script could do that: ResizeBillboard and MoveBillboard both exist. It
+// would be eighty calls per step, each an O(n) scan of the billboard array,
+// and -- the part that actually matters -- it would step at 35Hz, because
+// that is when script runs. A UI element scaling in twelve visible jumps in
+// front of someone's face is worse than not animating it at all.
+//
+// So the transform lives here and resolves in the renderer, at frame rate,
+// from a start tic and a duration. Script says "grow from 0 to 1 over ten
+// tics" ONCE and never touches it again. Same argument BBFL_VIEWLOCKED makes
+// for position: anything welded to the eye that updates at tic rate reads as
+// lag, and in a headset lag reads as nausea.
+//
+// The origin is in the MEMBERS' OWN SPACE, whatever that is for them -- an
+// offset from the viewer for BBFL_VIEWLOCKED, an offset from the actor for
+// BBFL_ATTACHED, a world point otherwise. A group whose members do not all
+// share a space is a caller error and draws as nonsense; there is no cheap
+// way to detect it and no attempt is made.
+struct FBillboardGroup
+{
+	int      id = 0;               // handle; 0 is never issued
+	DVector3 origin;               // the point members scale about, in their own space
+
+	// The animation, as a declaration rather than a state machine. durTics 0
+	// means settled and the scale is simply `to`, which is also how a plain
+	// SetBillboardGroupScale is stored.
+	double   from = 1.0;
+	double   to = 1.0;
+	int      startTic = 0;         // level.maptime when it began
+	int      durTics = 0;          // 0 = settled
 };
 
 // [BB] THE ONE TRUE BILLBOARD BASIS. Renderer, aim ray, touch test and sweep
@@ -290,14 +334,29 @@ struct FBillboard
 // than the picture. That was a real defect -- the queries used bb.width
 // unscaled while the renderer scaled it, so raising bb_scale to make a panel
 // readable grew the panel and left its new edges dead.
+// yawBias is the VIEW-LOCKED half of the same idea as tiltBias, and it is not
+// optional for BBFL_VIEWLOCKED. That flag resolves POSITION against the
+// viewpoint; without this it left ORIENTATION in world space, so a head-locked
+// panel followed you around the room while permanently facing world-east. You
+// could walk around your own HUD. Off-axis it foreshortened until it was a
+// third of its authored width, and from behind it drew its back -- which reads
+// as every glyph mirrored, and cost an afternoon chasing bb_flipu.
+//
+// A BIAS rather than "face the camera", deliberately. BBF_CAMERAYAW makes each
+// quad yaw about its OWN position, which bows a composed panel into a cylinder
+// and breaks hinged assemblies. Adding the view yaw to the STORED yaw keeps
+// every element's angle RELATIVE to every other, so a flat panel stays flat, a
+// hinge stays hinged, and the whole assembly turns with the head as one rigid
+// object -- which is what view-locked was always supposed to mean.
 inline void BillboardBasis(const FBillboard &bb, const DVector3 &bpos, const DVector3 &eye,
 	double tiltBias, double scale,
-	DVector3 &right, DVector3 &up, DVector3 &normal, double &halfw, double &halfh)
+	DVector3 &right, DVector3 &up, DVector3 &normal, double &halfw, double &halfh,
+	double yawBias = 0.0)
 {
 	const double DEG2RAD = 0.01745329251994329576923690768489;
 	const double RAD2DEG = 57.29577951308232087679815481410517;
 
-	double useYaw = bb.yaw;
+	double useYaw = bb.yaw + yawBias;
 	double useTilt = bb.tilt;
 
 	// An attached billboard can hold its yaw relative to the actor it rides,
@@ -941,6 +1000,65 @@ public:
 	TArray<FBillboard> Billboards;
 	int NextBillboardID = 1;
 	void TickBillboards();
+
+	// [BB] Shared transforms for composed panels. See FBillboardGroup.
+	TArray<FBillboardGroup> BillboardGroups;
+	int NextBillboardGroupID = 1;
+
+	FBillboardGroup *FindBillboardGroupByID(int gid)
+	{
+		if (gid == 0) return nullptr;
+		for (auto &g : BillboardGroups) if (g.id == gid) return &g;
+		return nullptr;
+	}
+
+	// [BB] The group's scale RIGHT NOW, eased, at render resolution.
+	//
+	// ticFrac is the renderer's fraction through the current tic, so this
+	// returns a different number on every drawn frame while an animation is
+	// running -- which is the whole point of the group living in the engine
+	// rather than in script.
+	//
+	// TWO CURVES, chosen by direction, because growing and collapsing are not
+	// the same gesture. Growth overshoots slightly and settles: a panel that
+	// arrives at exactly its final size and stops reads as a texture being
+	// swapped in, whereas a few percent past and back reads as an object
+	// arriving. A collapse does the opposite -- it accelerates away, because a
+	// thing leaving should not linger and should certainly not bounce.
+	//
+	// Returns `to` and does no work at all once the animation is spent, so a
+	// settled group costs one comparison per billboard per frame.
+	double BillboardGroupScale(int gid, double ticFrac, DVector3 *origin = nullptr)
+	{
+		const FBillboardGroup *g = FindBillboardGroupByID(gid);
+		if (!g) return 1.0;
+		if (origin) *origin = g->origin;
+
+		if (g->durTics <= 0) return g->to;
+
+		double elapsed = (double(maptime) + ticFrac) - double(g->startTic);
+		double t = elapsed / double(g->durTics);
+		if (t <= 0.0) return g->from;
+		if (t >= 1.0) return g->to;
+
+		double e;
+		if (g->to >= g->from)
+		{
+			// Ease-out back. c is the classic 1.70158 taken down to about a
+			// third: full strength overshoots ~10% and on a panel a foot from
+			// someone's eyes that is a wobble, not a flourish.
+			const double c = 0.6;
+			const double u = t - 1.0;
+			e = 1.0 + (c + 1.0) * u * u * u + c * u * u;
+		}
+		else
+		{
+			e = t * t;		// ease-in quad: leaves faster than it arrived
+		}
+
+		double s = g->from + (g->to - g->from) * e;
+		return s > 0.0 ? s : 0.0;
+	}
 
 	// [BB] Sweep: a thin band of light at a fixed distance from an origin,
 	// measured in WORLD space and tested on every surface. Because the test

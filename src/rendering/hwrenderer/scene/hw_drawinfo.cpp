@@ -848,7 +848,28 @@ void HWDrawInfo::DispatchBillboards()
 
 	for (auto &bb : Level->Billboards)
 	{
-		DVector3 bpos = bb.pos;
+		// [BB] The group transform, resolved HERE so it moves at frame rate.
+		//
+		// It scales the member's LOCAL offset -- before the view-lock or the
+		// attachment is resolved -- because the group origin is expressed in
+		// that same local space. Scaling the world position instead would
+		// drag a head-locked panel toward the map origin as it shrank.
+		//
+		// Attached billboards carry their offset in attachOffset rather than
+		// pos, so that is what gets scaled for them.
+		double gscale = 1.0;
+		DVector3 gorigin(0, 0, 0);
+		DVector3 lpos = bb.pos;
+		DVector3 lattach = bb.attachOffset;
+		if (bb.group)
+		{
+			gscale = Level->BillboardGroupScale(bb.group, vp.TicFrac, &gorigin);
+			if (gscale <= 0.0) continue;		// fully collapsed: nothing to submit
+			lpos    = gorigin + (lpos - gorigin) * gscale;
+			lattach = gorigin + (lattach - gorigin) * gscale;
+		}
+
+		DVector3 bpos = lpos;
 
 		if (bb.flags & BBFL_VIEWLOCKED)
 		{
@@ -861,13 +882,13 @@ void HWDrawInfo::DispatchBillboards()
 			double yawRad = vp.Angles.Yaw.Radians();
 			double cy = cos(yawRad), sy = sin(yawRad);
 			bpos = vp.Pos
-				+ DVector3(cy, sy, 0.0) * bb.pos.X		// ahead
-				+ DVector3(-sy, cy, 0.0) * bb.pos.Y		// right
-				+ DVector3(0.0, 0.0, 1.0) * bb.pos.Z;	// up
+				+ DVector3(cy, sy, 0.0) * lpos.X		// ahead
+				+ DVector3(-sy, cy, 0.0) * lpos.Y		// right
+				+ DVector3(0.0, 0.0, 1.0) * lpos.Z;		// up
 		}
 		else if ((bb.flags & BBFL_ATTACHED) && bb.attachedTo != nullptr)
 		{
-			bpos = bb.attachedTo->InterpolatedPosition(Viewpoint.TicFrac) + bb.attachOffset;
+			bpos = bb.attachedTo->InterpolatedPosition(Viewpoint.TicFrac) + lattach;
 		}
 
 		// Remember where it landed so the aim and touch queries test against
@@ -888,7 +909,7 @@ void HWDrawInfo::DispatchBillboards()
 		if (!sector) continue;
 
 		HWSprite sprite;
-		sprite.ProcessBillboard(this, &bb, bpos, sector);
+		sprite.ProcessBillboard(this, &bb, bpos, sector, gscale);
 	}
 }
 

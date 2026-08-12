@@ -46,6 +46,7 @@
 #include "actorptrselect.h"
 #include "a_weapons.h"
 #include "d_player.h"
+#include "r_utility.h"		// [BB] r_viewpoint, for the view-locked yaw bias in the billboard queries
 #include "p_setup.h"
 #include "am_map.h"
 #include "v_video.h"
@@ -3320,6 +3321,153 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, RemoveBillboard, RemoveBillboard)
 	return 0;
 }
 
+//==========================================================================
+//
+// [BB] BILLBOARD GROUPS -- one transform over many quads. See
+// FBillboardGroup in g_levellocals.h for why this is not script's job.
+//
+// Usage is three calls and then nothing:
+//
+//     int gid = level.AddBillboardGroup((AHEAD, 0, UP));   // the pivot
+//     ... build the panel, level.SetBillboardGroup(id, gid) on each element
+//     level.AnimateBillboardGroup(gid, 0.0, 1.0, 10);      // grow, once
+//
+// The animation then runs in the renderer at frame rate. Script does not
+// tick it, does not poll it, and does not need to know it finished.
+//
+//==========================================================================
+
+static int AddBillboardGroup(FLevelLocals *self, double ox, double oy, double oz)
+{
+	FBillboardGroup g;
+	g.id = self->NextBillboardGroupID++;
+	g.origin = DVector3(ox, oy, oz);
+	self->BillboardGroups.Push(g);
+	return g.id;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, AddBillboardGroup, AddBillboardGroup)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(ox); PARAM_FLOAT(oy); PARAM_FLOAT(oz);
+	ACTION_RETURN_INT(AddBillboardGroup(self, ox, oy, oz));
+}
+
+// Join a billboard to a group, or pass gid 0 to take it out of one. Deliberately
+// a setter rather than a parameter on the six different Add functions: those
+// are already at the argument count that crashes the ZScript compiler (see the
+// warning above AddBillboard's declaration in doombase.zs).
+static void SetBillboardGroup(FLevelLocals *self, int id, int gid)
+{
+	FBillboard *bb = FindBillboardByID(self, id);
+	if (bb == nullptr) return;
+	bb->group = gid;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetBillboardGroup, SetBillboardGroup)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(id);
+	PARAM_INT(gid);
+	SetBillboardGroup(self, id, gid);
+	return 0;
+}
+
+// Snap to a scale with no animation. Also the way to cancel one mid-flight.
+static void SetBillboardGroupScale(FLevelLocals *self, int gid, double scale)
+{
+	FBillboardGroup *g = self->FindBillboardGroupByID(gid);
+	if (g == nullptr) return;
+	g->from = g->to = scale > 0.0 ? scale : 0.0;
+	g->durTics = 0;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetBillboardGroupScale, SetBillboardGroupScale)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(gid);
+	PARAM_FLOAT(scale);
+	SetBillboardGroupScale(self, gid, scale);
+	return 0;
+}
+
+// The one that matters: declare the whole animation and walk away.
+//
+// tics <= 0 is treated as a snap to `to` rather than as an error, so a caller
+// driving duration off a cvar cannot accidentally create a division by zero
+// or an animation that never resolves.
+static void AnimateBillboardGroup(FLevelLocals *self, int gid, double from, double to, int tics)
+{
+	FBillboardGroup *g = self->FindBillboardGroupByID(gid);
+	if (g == nullptr) return;
+	g->from     = from > 0.0 ? from : 0.0;
+	g->to       = to   > 0.0 ? to   : 0.0;
+	g->startTic = self->maptime;
+	g->durTics  = tics > 0 ? tics : 0;
+	if (g->durTics == 0) g->from = g->to;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, AnimateBillboardGroup, AnimateBillboardGroup)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(gid);
+	PARAM_FLOAT(from);
+	PARAM_FLOAT(to);
+	PARAM_INT(tics);
+	AnimateBillboardGroup(self, gid, from, to, tics);
+	return 0;
+}
+
+// Move the pivot. A panel that is repositioned as a whole wants its origin to
+// follow, or the next animation will scale it toward wherever it used to be.
+static void SetBillboardGroupOrigin(FLevelLocals *self, int gid, double ox, double oy, double oz)
+{
+	FBillboardGroup *g = self->FindBillboardGroupByID(gid);
+	if (g == nullptr) return;
+	g->origin = DVector3(ox, oy, oz);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetBillboardGroupOrigin, SetBillboardGroupOrigin)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(gid);
+	PARAM_FLOAT(ox); PARAM_FLOAT(oy); PARAM_FLOAT(oz);
+	SetBillboardGroupOrigin(self, gid, ox, oy, oz);
+	return 0;
+}
+
+// Drops the group and releases every member back to an untransformed state.
+//
+// The release matters. A group is found by a linear scan that returns nullptr
+// for an unknown id, and BillboardGroupScale answers 1.0 in that case -- so an
+// orphaned member would silently SNAP back to full size rather than
+// disappearing. Clearing the field makes that explicit instead of incidental,
+// and means a stale group id can never be reused against live billboards.
+static void RemoveBillboardGroup(FLevelLocals *self, int gid)
+{
+	if (gid <= 0) return;
+	for (auto &bb : self->Billboards)
+	{
+		if (bb.group == gid) bb.group = 0;
+	}
+	for (unsigned i = 0; i < self->BillboardGroups.Size(); i++)
+	{
+		if (self->BillboardGroups[i].id == gid)
+		{
+			self->BillboardGroups.Delete(i);
+			return;
+		}
+	}
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, RemoveBillboardGroup, RemoveBillboardGroup)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(gid);
+	RemoveBillboardGroup(self, gid);
+	return 0;
+}
+
 // [BB] Volumetric beam -- a cone of light visible in the air itself, not just
 // on the surfaces it lands on. Published each tic by whatever owns the
 // flashlight; the renderer resolves it into view space per eye, so stereo and
@@ -3945,6 +4093,34 @@ static inline bool BillboardHittable(const FBillboard &bb)
 	return bb.id != 0 && (bb.flags & BBFL_NOHIT) == 0;
 }
 
+// [BB] The extent multiplier a query must use, matching the renderer.
+//
+// bb_scale is a comfort dial that changes what is DRAWN, so a query ignoring
+// it puts the clickable region somewhere other than the picture -- that was a
+// real defect once and the comment on BillboardBasis records it. A group
+// scale is the same hazard with a second cause: a panel caught mid-grow draws
+// at 60% and would answer at 100%, so its edges would be live in empty air.
+//
+// ticFrac 1.0 rather than the renderer's fraction, because a query runs in
+// the playsim where the tic is over. Half a tic of disagreement during an
+// animation is not worth a viewpoint dependency here, and every group this
+// engine has is settled at 1.0 by the time anything is meant to be aimed at.
+static inline double BillboardQueryScale(FLevelLocals *self, const FBillboard &bb)
+{
+	if (!bb.group) return bb_scale;
+	return bb_scale * self->BillboardGroupScale(bb.group, 1.0);
+}
+
+// The orientation half of the same obligation. A view-locked billboard's yaw
+// is relative to the view, so a query that solved it in world space would put
+// the clickable face at a different angle from the drawn one -- the panel
+// would turn with your head and its hit region would not.
+static inline double BillboardQueryYawBias(const FBillboard &bb)
+{
+	if (!(bb.flags & BBFL_VIEWLOCKED)) return 0.0;
+	return r_viewpoint.Angles.Yaw.Degrees() + 180.0;	// see the renderer's note
+}
+
 // [BB] Ray versus billboard. Returns the id of the nearest billboard the ray
 // crosses and where on its face it landed, as 0..1 across and down -- so a
 // caller gets back the same UV the shader sees and can decide what was
@@ -3979,7 +4155,7 @@ static int AimBillboard(FLevelLocals *self, double sx, double sy, double sz,
 		// Same solver, same cvars, as the renderer. See BillboardBasis.
 		DVector3 right, up, normal;
 		double halfw, halfh;
-		BillboardBasis(bb, bpos, start, bb_tiltbias, bb_scale, right, up, normal, halfw, halfh);
+		BillboardBasis(bb, bpos, start, bb_tiltbias, BillboardQueryScale(self, bb), right, up, normal, halfw, halfh, BillboardQueryYawBias(bb));
 
 		double denom = normal | dir;
 		if (fabs(denom) < EQUAL_EPSILON) continue;	// parallel to the face
@@ -4034,7 +4210,7 @@ static int TouchBillboard(FLevelLocals *self, double px, double py, double pz,
 
 		DVector3 right, up, normal;
 		double halfw, halfh;
-		BillboardBasis(bb, bpos, p, bb_tiltbias, bb_scale, right, up, normal, halfw, halfh);
+		BillboardBasis(bb, bpos, p, bb_tiltbias, BillboardQueryScale(self, bb), right, up, normal, halfw, halfh, BillboardQueryYawBias(bb));
 
 		DVector3 rel = p - bpos;
 
@@ -4110,7 +4286,7 @@ static int SweepBillboard(FLevelLocals *self, double fx, double fy, double fz,
 		// already turned away from.
 		DVector3 right, up, normal;
 		double halfw, halfh;
-		BillboardBasis(bb, bpos, to, bb_tiltbias, bb_scale, right, up, normal, halfw, halfh);
+		BillboardBasis(bb, bpos, to, bb_tiltbias, BillboardQueryScale(self, bb), right, up, normal, halfw, halfh, BillboardQueryYawBias(bb));
 
 		// Signed distance off the face at each end of the sweep.
 		double d0 = normal | (from - bpos);
