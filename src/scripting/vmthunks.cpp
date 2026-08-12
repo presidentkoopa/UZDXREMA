@@ -3895,6 +3895,71 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogSurface, SetFogSurface)
 	return 0;
 }
 
+// The layer's BOTTOM. Far below any map is a half-space -- fog on the floor,
+// which is all this could do before. Raise it and the slab becomes a layer:
+// ceiling fog, a band floating at chest height, or a drain by walking the
+// bottom up toward the top.
+static void SetFogBottom(FLevelLocals *self, double botZ, double period, double roll)
+{
+	self->FogSlabBottom = botZ;
+	self->FogSlabPeriod = period;
+	self->FogSlabRoll = roll;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogBottom, SetFogBottom)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(botZ); PARAM_FLOAT(period); PARAM_FLOAT(roll);
+	SetFogBottom(self, botZ, period, roll);
+	return 0;
+}
+
+// A tornado. Doom Z is the shader Y, same swizzle as everything else here.
+//
+// Density 0 switches it off. Radius flares from base to top on a curve rather
+// than a straight taper, because the pinch near the ground is most of the
+// silhouette; swirl is what reads as rotation; lean is what stops it being a
+// traffic cone.
+static void SetTornado(FLevelLocals *self, double x, double y,
+	double baseZ, double topZ, double radBase, double radTop, double density)
+{
+	self->TornadoPos = DVector2(x, y);
+	self->TornadoBase = baseZ;
+	self->TornadoTop = topZ;
+	self->TornadoRadBase = radBase;
+	self->TornadoRadTop = radTop;
+	self->TornadoDensity = density;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetTornado, SetTornado)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(x); PARAM_FLOAT(y);
+	PARAM_FLOAT(baseZ); PARAM_FLOAT(topZ);
+	PARAM_FLOAT(radBase); PARAM_FLOAT(radTop); PARAM_FLOAT(density);
+	SetTornado(self, x, y, baseZ, topZ, radBase, radTop, density);
+	return 0;
+}
+
+static void SetTornadoMotion(FLevelLocals *self, double swirl, double spin,
+	double twist, double lean, double leanPeriod)
+{
+	self->TornadoSwirl = swirl;
+	self->TornadoSpin = spin;
+	self->TornadoTwist = twist;
+	self->TornadoLean = lean;
+	self->TornadoLeanPeriod = leanPeriod;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetTornadoMotion, SetTornadoMotion)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(swirl); PARAM_FLOAT(spin); PARAM_FLOAT(twist);
+	PARAM_FLOAT(lean); PARAM_FLOAT(leanPeriod);
+	SetTornadoMotion(self, swirl, spin, twist, lean, leanPeriod);
+	return 0;
+}
+
 static void SetFogPickup(FLevelLocals *self, double amount)
 {
 	self->FogSlabPickup = amount;

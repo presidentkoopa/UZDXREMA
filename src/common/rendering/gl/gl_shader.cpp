@@ -278,6 +278,10 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 			vec4 uBeamFX;
 			vec4 uFogSurf;
 			vec4 uSweepAir;
+			vec4 uFogSlab2;
+			vec4 uTornado;
+			vec4 uTornado2;
+			vec4 uTornado3;
 		};
 
 		uniform int uTextureMode;

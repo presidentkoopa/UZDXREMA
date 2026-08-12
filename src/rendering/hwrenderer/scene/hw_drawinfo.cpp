@@ -287,6 +287,17 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 			VPUniforms.mFogSlabExtra = {
 				(float)Level->FogSlabWakeStrength, (float)Level->FogSlabPickup,
 				0.0f, 0.0f };
+			VPUniforms.mFogSlab2 = { (float)Level->FogSlabBottom,
+				(float)Level->FogSlabPeriod, (float)Level->FogSlabRoll, 0.f };
+			VPUniforms.mTornado = { (float)Level->TornadoPos.X,
+				(float)Level->TornadoPos.Y, (float)Level->TornadoBase,
+				(float)Level->TornadoTop };
+			VPUniforms.mTornado2 = { (float)Level->TornadoRadBase,
+				(float)Level->TornadoRadTop, (float)Level->TornadoDensity,
+				(float)Level->TornadoSwirl };
+			VPUniforms.mTornado3 = { (float)Level->TornadoSpin,
+				(float)Level->TornadoTwist, (float)Level->TornadoLean,
+				(float)Level->TornadoLeanPeriod };
 			VPUniforms.mFogSurf = {
 				(float)Level->FogSurfAmp, (float)Level->FogSurfLen,
 				(float)Level->FogSurfSpeed, (float)Level->FogSurfCross };

@@ -1282,6 +1282,31 @@ public:
 	// because a trail that fades IS a point that follows you slowly.
 	bool     FogSlabActive = false;
 	double   FogSlabTop = 0;        // world Z of the mist's surface
+	// The layer's BOTTOM. Far below any map by default, which is a half-space
+	// and the old behaviour. Raise it for ceiling fog or a floating band.
+	double   FogSlabBottom = -32768;
+	// VERTICAL HOLD. With a period set the layer repeats up the room and the
+	// whole stack rolls -- the old television fault. One mod() from the single
+	// layer case, and it costs the same, because a repeating thing is
+	// arithmetic rather than a loop.
+	double   FogSlabPeriod = 0;
+	double   FogSlabRoll = 0;
+
+	// [BB] A tornado -- the same fog, shaped into a funnel you can stand in.
+	// Density 0 is off, and it is tested first: this is the most expensive
+	// thing in the fragment shader, because unlike a knee-high layer it does
+	// not early out for most of the screen when you are looking at one.
+	DVector2 TornadoPos;
+	double   TornadoBase = 0;
+	double   TornadoTop = 512;
+	double   TornadoRadBase = 48;
+	double   TornadoRadTop = 320;
+	double   TornadoDensity = 0;
+	double   TornadoSwirl = 0.5;
+	double   TornadoSpin = 2.0;
+	double   TornadoTwist = 8.0;
+	double   TornadoLean = 0;
+	double   TornadoLeanPeriod = 6.0;
 	double   FogSlabDensity = 0;    // per 1000 units of travel below the top
 	double   FogSlabSoft = 24;      // how many units the top edge fades over
 	double   FogSlabScatter = 0;    // 0 = flat haze, 1 = torch lights it

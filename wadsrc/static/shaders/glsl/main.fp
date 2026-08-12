@@ -1153,6 +1153,12 @@ vec3 BeamAirGlow(vec3 fragPos)
 // what was actually asked for, so the others fall through to the surface fill
 // they already had.
 //
+// Forward declaration. SweepLineAxis is defined further down, beside the
+// surface fill it was written for, and GLSL will not call a function it has
+// not seen. Declaring it here rather than moving the definition keeps the two
+// lattice paths -- painted and in the air -- next to the code they belong to.
+float SweepLineAxis(float coord, float spacing, float width, float soft, float t);
+
 vec3 SweepAirLattice(vec3 fragPos)
 {
 	vec3 sum = vec3(0.0);
@@ -1305,11 +1311,68 @@ vec4 FogSlabAt(vec3 fragPos)
 		         + cr * sin((fragPos.z * 0.77 + fragPos.x * 0.31) / wl - t * 1.31));
 	}
 
-	// Depth below the top, softened at the boundary, at each end of the ray.
-	// smoothstep across the soft band is what gives the mist a surface rather
-	// than an edge.
-	float dEye  = smoothstep(topEye + soft, topEye - soft, eye.y);
-	float dFrag = smoothstep(topFrag + soft, topFrag - soft, fragPos.y);
+	// AND IT HAS A BOTTOM.
+	//
+	// Without one the slab is a half-space -- everything below a height --
+	// which can only ever be fog lying on the floor. With one it is a LAYER,
+	// and that single change is four effects rather than one:
+	//
+	//   floor fog     bottom far below, top at the knee (the old behaviour)
+	//   CEILING FOG   bottom near the ceiling, top above it
+	//   a floating band at chest height, which was not expressible at all
+	//   DRAIN and FILL, by animating one edge toward the other
+	//
+	// The bottom takes the same swell as the top, so a ceiling layer's
+	// UNDERSIDE undulates -- which is the surface you actually see from below,
+	// and animating only the top would have left it a flat plate.
+	float botZ = uFogSlab2.x;
+	float botEye = botZ, botFrag = botZ;
+	if (uFogSurf.x > 0.0)
+	{
+		botEye  += topEye  - topZ;
+		botFrag += topFrag - topZ;
+	}
+
+	// VERTICAL HOLD.
+	//
+	// With a period set, the layer REPEATS up the room -- a stack of them, all
+	// rolling together, wrapping at the top and coming back in at the bottom.
+	// That is the old television fault, and it is one mod() away from the
+	// single-layer case rather than a second system.
+	//
+	// The whole stack costs exactly what one layer costs, because a repeating
+	// thing is arithmetic, not a loop. Same reason the lattice can be a screen
+	// door.
+	float period = uFogSlab2.y;
+	float dEye, dFrag;
+
+	if (period > 1.0)
+	{
+		float thickness = max(topEye - botEye, 0.0);
+		float roll = timer * uFogSlab2.z;
+
+		// Wrap each end's height into one period, measured from the bottom,
+		// then test it against the layer's own thickness. Sampled separately
+		// at the eye and the fragment so the stack has depth rather than
+		// being a flat repeat.
+		float yEye  = mod(eye.y - botEye - roll, period);
+		float yFrag = mod(fragPos.y - botFrag - roll, period);
+
+		dEye  = smoothstep(thickness + soft, thickness - soft, yEye)
+		      * smoothstep(-soft, soft, yEye);
+		dFrag = smoothstep(thickness + soft, thickness - soft, yFrag)
+		      * smoothstep(-soft, soft, yFrag);
+	}
+	else
+	{
+		// Inside the layer is below the top AND above the bottom. The default
+		// bottom sits far below any map, so the second term is 1 and the old
+		// half-space behaviour is byte for byte what it was.
+		dEye  = smoothstep(topEye + soft, topEye - soft, eye.y)
+		      * smoothstep(botEye - soft, botEye + soft, eye.y);
+		dFrag = smoothstep(topFrag + soft, topFrag - soft, fragPos.y)
+		      * smoothstep(botFrag - soft, botFrag + soft, fragPos.y);
+	}
 
 	// Average occupancy along the segment. Exact for a linear ramp, and the
 	// error against a true integral through the smoothstep is far below what
@@ -1347,6 +1410,93 @@ vec4 FogSlabAt(vec3 fragPos)
 			float lit = smoothstep(uFogBeamCol.w, uFogBeamDir.w, cosA);
 			lit *= 1.0 - clamp(len / uFogBeamPos.w, 0.0, 1.0);
 			col += uFogBeamCol.rgb * lit * uFogSlab.w;
+		}
+	}
+
+	// ---- TORNADOES -----------------------------------------------------
+	//
+	// A funnel you can stand inside, and it is the fog system rather than a
+	// second one: density near a vertical axis instead of density below a
+	// plane. The distance solve is the beam's, with the segment standing up.
+	//
+	// Three things turn a cylinder into a tornado, and none of them is noise:
+	//
+	//   RADIUS BY HEIGHT. Constant radius is a pillar. The profile is what
+	//   gives it a waist -- tight at the ground, flaring up, on a curve rather
+	//   than a straight taper.
+	//
+	//   SWIRL. Angle around the axis, plus height times twist, plus time times
+	//   spin, through a sine. Spiral bands winding up the column, and THAT is
+	//   what the eye reads as rotation. Without it you have a cone of haze.
+	//
+	//   LEAN. The axis is not vertical: it drifts with height, and that drift
+	//   is itself a slow sine, so the column writhes. This is the difference
+	//   between something alive and a traffic cone.
+	//
+	// Inside one you are surrounded on all sides with the bands wrapping past
+	// you, and it takes the torch, the glow pickup and any beam crossing it,
+	// because it is the same density the rest of this function is made of.
+	//
+	//   uTornado   x world X, y world Z(doom Y), z base height, w top height
+	//   uTornado2  x base radius, y top radius, z density, w swirl depth
+	//   uTornado3  x spin, y twist, z lean, w lean period
+	//
+	if (uTornado2.z > 0.0)
+	{
+		float baseY = uTornado.z;
+		float topY  = uTornado.w;
+		float h = clamp((fragPos.y - baseY) / max(topY - baseY, 1.0), 0.0, 1.0);
+
+		if (fragPos.y >= baseY - 32.0 && fragPos.y <= topY + 32.0)
+		{
+			// LEAN, and it is a function of height, so the column BENDS
+			// rather than sliding sideways as a whole. The offset is scaled
+			// by h, which is what pins the foot of it to one spot on the
+			// floor while the top wanders.
+			//
+			// Two axes at slightly different rates, so the top traces a
+			// wobbling ellipse rather than a circle -- a circle reads as a
+			// mechanism turning, and this is meant to read as weather.
+			//
+			// The period is in seconds, not radians: it is what the slider
+			// says it is, so nobody has to know 2pi to use it. The h term
+			// inside the sine is what makes the column bend along its
+			// length instead of tilting like a rigid pole.
+			float lt = timer * 6.2831853 / max(uTornado3.w, 0.1);
+			vec2 axis = uTornado.xy
+				+ vec2(sin(lt + h * 2.0), cos(lt * 0.83 + h * 2.0))
+				* uTornado3.z * h;
+
+			vec2 rel = fragPos.xz - axis;
+			float r = length(rel);
+
+			// The profile. pow rather than mix, because a straight taper is a
+			// cone and the pinch near the ground is most of the silhouette.
+			float radius = mix(uTornado2.x, uTornado2.y, pow(h, 0.55));
+
+			if (r < radius)
+			{
+				// Densest at the wall of the funnel, hollow in the middle --
+				// which is what lets you be INSIDE one and still see out.
+				float shell = smoothstep(0.0, radius * 0.55, r);
+				float edge  = 1.0 - smoothstep(radius * 0.8, radius, r);
+				float d = shell * edge;
+
+				// SWIRL.
+				if (uTornado2.w > 0.0)
+				{
+					float ang = atan(rel.y, rel.x);
+					float s = sin(ang * 3.0 + h * uTornado3.y - timer * uTornado3.x);
+					d *= 1.0 + uTornado2.w * s;
+				}
+
+				// Fades out at both ends so it does not stop dead against the
+				// floor or the ceiling.
+				d *= smoothstep(baseY - 32.0, baseY + 48.0, fragPos.y);
+				d *= 1.0 - smoothstep(topY - 96.0, topY + 32.0, fragPos.y);
+
+				amount = clamp(amount + max(d, 0.0) * uTornado2.z, 0.0, 1.0);
+			}
 		}
 	}
 

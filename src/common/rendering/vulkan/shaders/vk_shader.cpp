@@ -229,6 +229,10 @@ static const char *shaderBindings = R"(
 		vec4 uBeamFX;
 		vec4 uFogSurf;
 		vec4 uSweepAir;
+		vec4 uFogSlab2;
+		vec4 uTornado;
+		vec4 uTornado2;
+		vec4 uTornado3;
 	};
 
 	layout(set = 1, binding = 0, std140) uniform ViewpointUBO {
@@ -272,6 +276,10 @@ static const char *shaderBindings = R"(
 	#define uBeamFX viewpoints[HW_VIEWPOINT_INDEX].uBeamFX
 	#define uFogSurf viewpoints[HW_VIEWPOINT_INDEX].uFogSurf
 	#define uSweepAir viewpoints[HW_VIEWPOINT_INDEX].uSweepAir
+	#define uFogSlab2 viewpoints[HW_VIEWPOINT_INDEX].uFogSlab2
+	#define uTornado viewpoints[HW_VIEWPOINT_INDEX].uTornado
+	#define uTornado2 viewpoints[HW_VIEWPOINT_INDEX].uTornado2
+	#define uTornado3 viewpoints[HW_VIEWPOINT_INDEX].uTornado3
 
 	layout(set = 1, binding = 1, std140) uniform MatricesUBO {
 		mat4 ModelMatrix;

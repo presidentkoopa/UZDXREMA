@@ -168,6 +168,28 @@ struct HWViewpointUniforms
 	// painted version uses, so one page drives both and they cannot drift.
 	FVector4 mSweepAir = { 0.f, 0.f, 0.f, 0.f };
 
+	// [BB] mFogSlab2: x the layer's BOTTOM, yzw spare.
+	//
+	// Default is far below any map, which makes the second smoothstep 1 and
+	// leaves the old half-space behaviour untouched. Raise it and the slab
+	// becomes a layer: ceiling fog, a floating band, or a drain by walking it
+	// up toward the top.
+	FVector4 mFogSlab2 = { -32768.f, 0.f, 0.f, 0.f };
+
+	// [BB] A tornado. Density near a vertical axis instead of below a plane --
+	// the same fog, shaped into a funnel you can stand inside.
+	//
+	//   mTornado   x world X, y world Z, z base height, w top height
+	//   mTornado2  x base radius, y top radius, z density, w swirl depth
+	//   mTornado3  x spin, y twist, z lean, w lean period
+	//
+	// Density 0 is off, and it is the FIRST thing tested -- this is the most
+	// expensive effect in the file, because unlike a knee-high layer it does
+	// not early out for most of the screen when you are looking at one.
+	FVector4 mTornado = { 0.f, 0.f, 0.f, 512.f };
+	FVector4 mTornado2 = { 48.f, 320.f, 0.f, 0.5f };
+	FVector4 mTornado3 = { 2.f, 8.f, 0.f, 6.f };
+
 
 	void CalcDependencies()
 	{

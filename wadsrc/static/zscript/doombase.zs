@@ -840,6 +840,13 @@ struct LevelLocals native
 	native clearscope void SetFogSlab(double topZ, double density, double softness, double scatter, color col);
 	native void SetFogWake(Vector3 pos, double radius, double strength);
 	native clearscope void SetFogPickup(double amount);
+	// A tornado -- the same fog shaped into a funnel you can stand inside.
+	// Density 0 = off.
+	native clearscope void SetTornado(double x, double y, double baseZ, double topZ, double radBase, double radTop, double density);
+	native clearscope void SetTornadoMotion(double swirl, double spin, double twist, double lean, double leanPeriod);
+	// The layer's bottom. Far below any map = fog on the floor, as before.
+	// Raise it for ceiling fog, a floating band, or a drain.
+	native clearscope void SetFogBottom(double botZ, double period, double roll);
 	// The mist's surface, animated. Amplitude 0 = a flat top.
 	native clearscope void SetFogSurface(double amp, double wavelength, double speed, double crossSwell);
 	native clearscope void ClearFogSlab();

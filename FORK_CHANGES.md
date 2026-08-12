@@ -690,6 +690,109 @@ GLES does not implement this, consistent with §2, §8, §11 and §12.
 
 ---
 
+## 14. The fog slab, shaped
+
+Three additions to §11, all of them changes to *where the density is* rather
+than new systems. That distinction is the point of this section: the fog's
+colour, its softness, the scatter it takes from the torch, the glow it picks up
+off the walls and the light it takes from a beam crossing it are written once
+and are not duplicated by any of the below. Each of these only answers the
+question `FogSlabAt` was already asking — *how much mist is between the eye and
+this pixel* — from a different shape.
+
+### A bottom edge, and what one number bought
+
+`FogSlabBottom` (`SetFogBottom`, `uFogSlab2.x`). Without it the slab is a
+half-space: everything below a height, which can only ever be mist lying on a
+floor. With it the slab is a **layer**, and the same code path is now four
+effects depending on where the two edges sit:
+
+| bottom | top | what it is |
+|---|---|---|
+| far below the map | at the knee | floor fog, the previous behaviour exactly |
+| near the ceiling | above it | **ceiling fog** |
+| both mid-room | just above | a band floating at chest height |
+| animated toward the other | — | **drain** and **fill** |
+
+The default is `-32768`, which is below any map, so the second test is always 1
+and the old single-edge behaviour is bit-identical. Nothing that existed before
+had to be told about this.
+
+The bottom takes the **same swell** as the top, so a ceiling layer's underside
+undulates. That is the surface you actually see from below, and animating only
+the top would have left it a flat plate — a bug that would have shipped
+invisibly, because from above it looks right.
+
+### Vertical hold
+
+`FogSlabPeriod` / `FogSlabRoll` (`uFogSlab2.yz`). With a period set, the layer
+**repeats up the room** — a stack of them at that spacing, all rolling together,
+wrapping at the top and re-entering at the bottom. The old television fault.
+
+It is one `mod()` away from the single-layer case, not a second system, and the
+whole stack costs **exactly what one layer costs**. Twenty decks or one is the
+same instruction count, for the same reason the lattice in §12 can be a screen
+door: a repeating thing is arithmetic, not a loop.
+
+Sampled separately at the eye and at the fragment, so the stack has depth
+rather than being a flat repeat pasted over the view.
+
+### The tornado
+
+`Tornado*` (`SetTornado`, `SetTornadoMotion`, `uTornado`/`2`/`3`). Density near
+a **vertical axis** instead of below a plane. That is the entire difference; it
+is added into the same `amount` the slab accumulates, so it takes the torch, the
+pickup, and any beam crossing it, because it *is* the same mist.
+
+Four decisions worth stating:
+
+**The centre is hollow.** Density peaks at the wall of the funnel and falls to
+nothing in the middle (`smoothstep(0, radius*0.55, r)` against
+`1 - smoothstep(radius*0.8, radius, r)`). This is not a performance concession —
+it is what lets you **stand inside one** and see out through the far wall with
+the room beyond it still legible. A solid cone would be an opaque box you cannot
+be in.
+
+**The radius flares on a curve** (`mix(base, top, pow(h, 0.55))`) rather than a
+straight taper, because a straight taper is a cone and the pinch near the ground
+is most of what makes the silhouette read.
+
+**Swirl is what reads as rotation**, not spin. Three arms of density around the
+axis, wound up over the height by `twist` and turned over time by `spin`. With
+swirl at 0 the funnel is a smooth cone of haze and does not appear to rotate at
+any speed, because there is nothing on it to watch go past.
+
+**Lean scales with height**, so the column bends rather than tilting like a
+rigid pole, and the foot stays where it was put while the top wanders. Two axes
+at slightly different rates (`lt` and `lt*0.83`), so the top traces a wobbling
+ellipse; a circle reads as a mechanism turning.
+
+The one cost worth flagging to anyone consuming this: **it does not early out
+the way a floor layer does**. A knee-high slab stops mattering the moment the
+player looks up. A funnel is on screen from every angle that can see it. Density
+0 is tested before any of the maths, so off is genuinely free, but on is the most
+expensive thing in this shader. It is off by default and the menu says so.
+
+### Uniforms
+
+Appended to `HWViewpointUniforms`, all three copies (C++, `gl_shader.cpp`,
+`vk_shader.cpp`) — remember these are matched **by byte offset, not by name**:
+
+```
+uFogSlab2   x bottom Z, y repeat period, z roll speed, w unused
+uTornado    x world X, y world Y, z base height, w top height
+uTornado2   x base radius, y top radius, z density (0 = off), w swirl depth
+uTornado3   x spin, y twist, z lean, w lean period in SECONDS
+```
+
+`uTornado3.w` is a period in seconds rather than an angular rate, converted to
+radians in the shader, so the slider driving it means what it says without the
+person moving it needing to know 2π.
+
+GLES does not implement this, consistent with §2, §8, §11, §12 and §13.
+
+---
+
 ## Building
 
 `auto-setup-windows-vr.cmd` locates Visual Studio's bundled CMake via
