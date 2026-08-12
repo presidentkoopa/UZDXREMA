@@ -862,6 +862,19 @@ struct LevelLocals native
 	native clearscope void SetFogWakeMotion(double velX, double velY, double stretch);
 	native clearscope void SetFogBow(double strength, double width, double thin);
 	native clearscope void SetFogGradient(color col, double mix);
+
+	// [BB] THE HEATMAP -- where the fighting happened, accumulated over the
+	// whole life of a map and drawn on the floor. A grid rather than a slot
+	// array, because the question it answers is a spatial SUM: the thousandth
+	// death costs what the first one cost.
+	//
+	// HeatmapAt reads it back, so a spawn director can weight against ground
+	// that has already been fought over. That is what makes it a design tool
+	// rather than only a picture.
+	native void HeatmapAdd(double x, double y, double z, double radius, double amount);
+	native void HeatmapClear();
+	native clearscope void SetHeatmap(double scale, color low, color high, double ceiling, double decay, double tolerance);
+	native clearscope double HeatmapAt(double x, double y);
 	// The layer's bottom. Far below any map = fog on the floor, as before.
 	// Raise it for ceiling fog, a floating band, or a drain.
 	native clearscope void SetFogBottom(double botZ, double period, double roll);

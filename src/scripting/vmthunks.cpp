@@ -3941,6 +3941,171 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetTornado, SetTornado)
 	return 0;
 }
 
+// ===========================================================================
+// [BB] THE HEATMAP -- where the fighting happened.
+//
+// Deliberately NOT the disturbance array. A disturbance is a handful of
+// short-lived events and belongs in uniforms; a heatmap is hundreds of
+// permanent deposits that have to be SUMMED, and eight slots cannot express
+// that any more than eighty could. A sum wants a bucket, not a list, so this
+// is a coarse grid over the map's own extent -- and the thousandth death costs
+// exactly what the first one cost.
+//
+// Stamped on the CPU because deaths are rare. A few a second at worst, and a
+// stamp is a couple of thousand float adds, which is nothing next to doing it
+// per pixel per frame forever.
+// ===========================================================================
+
+// The map's own bounding box, from the blockmap, which is the one structure
+// that already knows it. Falls back to something harmless on a level with no
+// blockmap rather than dividing by zero.
+static void HeatBounds(FLevelLocals *self, double &ox, double &oy,
+	double &w, double &h)
+{
+	ox = self->blockmap.bmaporgx;
+	oy = self->blockmap.bmaporgy;
+	w = std::max((double)(self->blockmap.bmapwidth * FBlockmap::MAPBLOCKUNITS), 1.0);
+	h = std::max((double)(self->blockmap.bmapheight * FBlockmap::MAPBLOCKUNITS), 1.0);
+}
+
+static void HeatEnsure(FLevelLocals *self)
+{
+	if (self->HeatIntensity.Size() == (unsigned)(FLevelLocals::HEAT_RES * FLevelLocals::HEAT_RES))
+		return;
+	self->HeatIntensity.Resize(FLevelLocals::HEAT_RES * FLevelLocals::HEAT_RES);
+	self->HeatHeight.Resize(FLevelLocals::HEAT_RES * FLevelLocals::HEAT_RES);
+	memset(&self->HeatIntensity[0], 0, self->HeatIntensity.Size() * sizeof(float));
+	memset(&self->HeatHeight[0], 0, self->HeatHeight.Size() * sizeof(float));
+	self->HeatEverUsed = true;
+	self->HeatDirty = true;
+}
+
+// One deposit. Radius is in WORLD units, not cells, so a slider means the same
+// thing on a cramped map as on an open one -- which is the whole reason the
+// grid resolution is not exposed.
+static void HeatmapAdd(FLevelLocals *self, double x, double y, double z,
+	double radius, double amount)
+{
+	if (amount <= 0.0) return;
+	HeatEnsure(self);
+
+	double ox, oy, mw, mh;
+	HeatBounds(self, ox, oy, mw, mh);
+
+	const int R = FLevelLocals::HEAT_RES;
+	double cellW = mw / R, cellH = mh / R;
+
+	double cx = (x - ox) / cellW;
+	double cy = (y - oy) / cellH;
+
+	// Radius converted per axis, because a map's bounding box is rarely square
+	// and one cell is not the same size in both directions.
+	int spanX = std::max(int(ceil(radius / cellW)), 1);
+	int spanY = std::max(int(ceil(radius / cellH)), 1);
+
+	int i0 = clamp(int(cx) - spanX, 0, R - 1), i1 = clamp(int(cx) + spanX, 0, R - 1);
+	int j0 = clamp(int(cy) - spanY, 0, R - 1), j1 = clamp(int(cy) + spanY, 0, R - 1);
+
+	for (int j = j0; j <= j1; j++)
+	{
+		for (int i = i0; i <= i1; i++)
+		{
+			// Measured back in world units so the falloff is round on screen
+			// rather than round in cell space, which would be an ellipse.
+			double dx = (i + 0.5 - cx) * cellW;
+			double dy = (j + 0.5 - cy) * cellH;
+			double d = sqrt(dx * dx + dy * dy);
+			if (d > radius) continue;
+
+			// Smooth, not flat. A flat disc accumulates into visible tiles
+			// with hard edges the moment two deposits overlap.
+			double f = 1.0 - d / radius;
+			f = f * f * (3.0 - 2.0 * f);
+
+			int idx = j * R + i;
+			float before = self->HeatIntensity[idx];
+			self->HeatIntensity[idx] = float(before + amount * f);
+
+			// The height follows whichever deposit is contributing most, so a
+			// cell that has only ever seen one storey reports that storey. Two
+			// storeys stacked exactly will fight, and that is a fair trade for
+			// not storing a list per cell.
+			if (amount * f > before) self->HeatHeight[idx] = float(z);
+		}
+	}
+	self->HeatDirty = true;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, HeatmapAdd, HeatmapAdd)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(x); PARAM_FLOAT(y); PARAM_FLOAT(z);
+	PARAM_FLOAT(radius); PARAM_FLOAT(amount);
+	HeatmapAdd(self, x, y, z, radius, amount);
+	return 0;
+}
+
+static void HeatmapClear(FLevelLocals *self)
+{
+	if (self->HeatIntensity.Size() == 0) return;
+	memset(&self->HeatIntensity[0], 0, self->HeatIntensity.Size() * sizeof(float));
+	memset(&self->HeatHeight[0], 0, self->HeatHeight.Size() * sizeof(float));
+	self->HeatDirty = true;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, HeatmapClear, HeatmapClear)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	HeatmapClear(self);
+	return 0;
+}
+
+// How it is drawn. Scale 0 switches it off without discarding what has been
+// accumulated, so a player can toggle it on to see the shape of a fight they
+// have already had.
+static void SetHeatmap(FLevelLocals *self, double scale, int lowCol,
+	int highCol, double ceiling, double decay, double tolerance)
+{
+	self->HeatScale = scale;
+	self->HeatColorLow = lowCol;
+	self->HeatColorHigh = highCol;
+	self->HeatCeiling = std::max(ceiling, 0.01);
+	self->HeatDecay = decay;
+	self->HeatTolerance = tolerance;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetHeatmap, SetHeatmap)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(scale); PARAM_COLOR(lowCol); PARAM_COLOR(highCol);
+	PARAM_FLOAT(ceiling); PARAM_FLOAT(decay); PARAM_FLOAT(tolerance);
+	SetHeatmap(self, scale, lowCol, highCol, ceiling, decay, tolerance);
+	return 0;
+}
+
+// Reading it back, so script can ask "how bad was it here" -- which is what
+// makes this a design tool and not only a picture. A spawn director can weight
+// against cells that have already seen a lot.
+static double HeatmapAt(FLevelLocals *self, double x, double y)
+{
+	if (self->HeatIntensity.Size() == 0) return 0.0;
+
+	double ox, oy, mw, mh;
+	HeatBounds(self, ox, oy, mw, mh);
+	const int R = FLevelLocals::HEAT_RES;
+
+	int i = clamp(int((x - ox) / (mw / R)), 0, R - 1);
+	int j = clamp(int((y - oy) / (mh / R)), 0, R - 1);
+	return self->HeatIntensity[j * R + i];
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, HeatmapAt, HeatmapAt)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(x); PARAM_FLOAT(y);
+	ACTION_RETURN_FLOAT(HeatmapAt(self, x, y));
+}
+
 // [BB] ONE DISTURBANCE PRIMITIVE, FIVE EFFECTS.
 //
 // A wake, a ripple, an ignition, fog draining from a point and a monster

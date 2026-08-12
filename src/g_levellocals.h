@@ -1348,6 +1348,38 @@ public:
 
 	PalEntry FogColor2 = 0xffb38059;
 	double   FogColor2Mix = 0;       // 0 = one colour, as before
+
+	// [BB] THE HEATMAP.
+	//
+	// Where the fighting happened, drawn on the floor and accumulated over the
+	// whole life of a map. This is emphatically NOT the disturbance array: a
+	// disturbance is a handful of short-lived events and lives in uniforms, and
+	// a heatmap is hundreds of permanent deposits that have to be summed. Eight
+	// slots cannot express it and neither can eighty.
+	//
+	// So it is a coarse GRID over the map's own extent, stamped on the CPU when
+	// something dies and sampled per fragment. A grid is the right shape for
+	// this because the question a heatmap answers -- "how much happened near
+	// here" -- is a spatial sum, and a sum wants a bucket, not a list. Adding
+	// the thousandth death costs exactly what the first one cost.
+	//
+	// Resolution is fixed rather than exposed: 256 squared over a map's bounding
+	// box is a handful of world units per cell on anything Doom-sized, the
+	// texture is a megabyte, and the eye cannot use more from something this
+	// deliberately blurry.
+	static const int HEAT_RES = 256;
+	TArray<float> HeatIntensity;    // HEAT_RES * HEAT_RES, accumulated
+	TArray<float> HeatHeight;       // world Z of the deposits in that cell
+	bool     HeatDirty = false;     // needs re-uploading to the GPU
+	bool     HeatEverUsed = false;  // nothing allocated until first asked for
+
+	double   HeatScale = 0;         // 0 = off
+	double   HeatDecay = 0;         // units of intensity lost per second
+	double   HeatTolerance = 96;    // how far off in Z before a floor is
+	                                // considered a different storey
+	PalEntry HeatColorLow = 0xff2040ff;
+	PalEntry HeatColorHigh = 0xffff2000;
+	double   HeatCeiling = 8.0;     // intensity that maps to the high colour
 	double   FogSlabDensity = 0;    // per 1000 units of travel below the top
 	double   FogSlabSoft = 24;      // how many units the top edge fades over
 	double   FogSlabScatter = 0;    // 0 = flat haze, 1 = torch lights it

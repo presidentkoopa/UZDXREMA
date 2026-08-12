@@ -289,6 +289,15 @@ static const char *shaderBindings = R"(
 	#define uTornado viewpoints[HW_VIEWPOINT_INDEX].uTornado
 	#define uTornado2 viewpoints[HW_VIEWPOINT_INDEX].uTornado2
 	#define uTornado3 viewpoints[HW_VIEWPOINT_INDEX].uTornado3
+	#define uTornadoCol viewpoints[HW_VIEWPOINT_INDEX].uTornadoCol
+	#define uFogDisturbA viewpoints[HW_VIEWPOINT_INDEX].uFogDisturbA
+	#define uFogDisturbB viewpoints[HW_VIEWPOINT_INDEX].uFogDisturbB
+	#define uFogNoise viewpoints[HW_VIEWPOINT_INDEX].uFogNoise
+	#define uFogTendril viewpoints[HW_VIEWPOINT_INDEX].uFogTendril
+	#define uFogTendril2 viewpoints[HW_VIEWPOINT_INDEX].uFogTendril2
+	#define uFogWake2 viewpoints[HW_VIEWPOINT_INDEX].uFogWake2
+	#define uFogBow viewpoints[HW_VIEWPOINT_INDEX].uFogBow
+	#define uFogColor2 viewpoints[HW_VIEWPOINT_INDEX].uFogColor2
 
 	layout(set = 1, binding = 1, std140) uniform MatricesUBO {
 		mat4 ModelMatrix;
