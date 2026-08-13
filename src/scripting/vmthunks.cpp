@@ -4541,6 +4541,34 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogWakeMotion, SetFogWakeMotion)
 
 // A sweep band pushing mist ahead of itself. Strength 0 and the sweep passes
 // through the fog without touching it, as it always did.
+// [BB] Which reference each fog edge follows, and how gently.
+//
+// A slab with one world Z is flat across the whole map. What "fog on the
+// floor" means is a constant height ABOVE THE GROUND, and those are different
+// questions -- the second one climbs a staircase.
+//
+// One signed number per edge, sign picking the plane: 0 absolute, positive
+// follows the floor, negative follows the ceiling. The magnitude is the
+// gentleness, and it is the part worth having -- at 0.3 the surface rises
+// three units for every ten the floor does, so a staircase reads as a slope
+// rather than as a flight of steps.
+//
+// Top follows floor is floor fog. Bottom follows ceiling is ceiling fog. Both
+// following the floor is a chest-high band that walks upstairs with you.
+static void SetFogFollow(FLevelLocals *self, double top, double bottom)
+{
+	self->FogFollowTop = clamp(top, -1.0, 1.0);
+	self->FogFollowBottom = clamp(bottom, -1.0, 1.0);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogFollow, SetFogFollow)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(top); PARAM_FLOAT(bottom);
+	SetFogFollow(self, top, bottom);
+	return 0;
+}
+
 static void SetFogBow(FLevelLocals *self, double strength, double width,
 	double thin)
 {

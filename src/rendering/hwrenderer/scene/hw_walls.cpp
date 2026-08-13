@@ -297,8 +297,22 @@ void HWWall::RenderTexturedWall(HWWallDispatcher*di, FRenderState &state, int rf
 			frontsector->GetGlowIntensity(sector_t::ceiling) > 0.f ? frontsector->GetGlowIntensity(sector_t::ceiling) : 1.0f,
 			frontsector->GetGlowFalloff(sector_t::floor),
 			frontsector->GetGlowIntensity(sector_t::floor) > 0.f ? frontsector->GetGlowIntensity(sector_t::floor) : 1.0f);
-		SetGlowPlanes(state, frontsector->ceilingplane, frontsector->floorplane);
 	}
+
+	// [BB] ALWAYS, not only when this wall glows.
+	//
+	// These two planes were set inside the glow branch because glow was the
+	// only thing that read them. The fog slab now reads them as well, to put
+	// its surface a fixed height above the FLOOR rather than at a fixed world
+	// Z -- which is what makes it climb a staircase instead of lying flat
+	// across the map and drowning the low half of it.
+	//
+	// Free: both already live in StreamData and were being written on most
+	// draws anyway. Setting them unconditionally costs two stores on the
+	// draws that previously skipped them, and buys a fog surface that does not
+	// vanish the moment a wall happens to have no glow on it.
+	SetGlowPlanes(state, frontsector->ceilingplane, frontsector->floorplane);
+
 	state.SetMaterial(texture, UF_Texture, 0, flags & 3, NO_TRANSLATION, -1);
 #ifdef NPOT_EMULATION
 	// Test code, could be reactivated as a compatibility option in the unlikely event that some old vanilla map eve needs it.

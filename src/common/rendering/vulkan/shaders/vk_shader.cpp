@@ -253,6 +253,7 @@ static const char *shaderBindings = R"(
 		vec4 uShapeD[128];
 		vec4 uShapeParams;
 		vec4 uShapeUnder;
+		vec4 uFogFollow;
 	};
 
 	layout(set = 1, binding = 0, std140) uniform ViewpointUBO {
@@ -320,6 +321,7 @@ static const char *shaderBindings = R"(
 	#define uShapeD viewpoints[HW_VIEWPOINT_INDEX].uShapeD
 	#define uShapeParams viewpoints[HW_VIEWPOINT_INDEX].uShapeParams
 	#define uShapeUnder viewpoints[HW_VIEWPOINT_INDEX].uShapeUnder
+	#define uFogFollow viewpoints[HW_VIEWPOINT_INDEX].uFogFollow
 
 	layout(set = 1, binding = 1, std140) uniform MatricesUBO {
 		mat4 ModelMatrix;

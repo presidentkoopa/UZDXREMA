@@ -394,6 +394,22 @@ void HWFlat::DrawFlat(HWDrawInfo *di, FRenderState &state, bool translucent)
 
 	int rel = getExtraLight();
 
+	// [BB] The sector's own floor and ceiling, for the fog slab.
+	//
+	// Flats never set these -- glow was the only reader and a flat does not
+	// glow from its own edge -- so a floor fragment inherited whatever plane
+	// the last WALL happened to leave behind. Harmless while nothing read it
+	// on a flat; wrong the moment the fog surface started sitting a fixed
+	// height above the floor, because looking down at the mist is exactly
+	// where a stale plane shows.
+	{
+		auto tp = sector->ceilingplane;
+		auto bp = sector->floorplane;
+		state.SetGlowPlanes(
+			FVector4(tp.Normal().X, tp.Normal().Y, tp.negiC, tp.fD()),
+			FVector4(bp.Normal().X, bp.Normal().Y, bp.negiC, bp.fD()));
+	}
+
 	state.SetNormal(plane.plane.Normal().X, plane.plane.Normal().Z, plane.plane.Normal().Y);
 	double zshift = (plane.plane.Normal().Z > 0.0 ? 0.01f : -0.01f); // The HWPlaneMirrorPortal::DrawPortalStencil() z-fights with flats
 

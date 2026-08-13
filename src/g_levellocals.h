@@ -1378,6 +1378,12 @@ public:
 	double   FogBowWidth = 64;
 	double   FogBowThin = 0.6;
 
+	// Which reference each fog edge follows, and how gently. 0 is absolute
+	// world Z; positive follows the FLOOR by that fraction, negative follows
+	// the CEILING. The magnitude is what turns a staircase into a slope.
+	double   FogFollowTop = 0;
+	double   FogFollowBottom = 0;
+
 	// [BB] What survives the colour drain. Threshold 0 = the old all-or-nothing
 	// behaviour, exactly.
 	double   DesatKeep = 0;

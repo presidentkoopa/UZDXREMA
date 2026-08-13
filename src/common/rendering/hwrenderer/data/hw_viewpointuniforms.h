@@ -342,6 +342,34 @@ struct HWViewpointUniforms
 	// What a seam reveals underneath. rgb, w unused.
 	FVector4 mShapeUnder = { 1.f, 0.15f, 0.05f, 0.f };
 
+	// [BB] THE FOG FOLLOWS THE ARCHITECTURE.
+	//
+	// A slab with one world Z for its top is flat across the whole map: knee
+	// deep in one room, overhead in the pit next door, and it does not climb a
+	// staircase. What people picture when they say "fog on the floor" is a
+	// constant height ABOVE THE GROUND, which is a different question.
+	//
+	// ONE SIGNED NUMBER PER EDGE, and the sign picks the reference:
+	//   0    absolute world Z, exactly as before
+	//   > 0  follow the FLOOR, by this much
+	//   < 0  follow the CEILING, by this much
+	//
+	// The magnitude is the gentleness, and it is the useful part. At 1 the
+	// surface tracks every step exactly; at 0.3 it rises three units for every
+	// ten the floor does, so it climbs a staircase as a slope rather than as a
+	// flight of steps. A fog surface that steps looks like geometry; one that
+	// lags looks like weather.
+	//
+	// Top follows floor is floor fog. Bottom follows ceiling is ceiling fog.
+	// Both follow floor is a chest-high band that walks upstairs with you.
+	//
+	//   x top edge, y bottom edge, z floor under the eye, w ceiling over it
+	//
+	// The eye pair is pushed rather than derived: the plane uniforms describe
+	// the FRAGMENT's sector, and using those for the eye end of the ray would
+	// make fog swallow you the moment you looked at a wall on a higher floor.
+	FVector4 mFogFollow = { 0.f, 0.f, 0.f, 0.f };
+
 
 	void CalcDependencies()
 	{

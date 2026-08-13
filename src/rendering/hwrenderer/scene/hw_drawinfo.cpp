@@ -336,8 +336,14 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 		// [BB] Disturbances. Age is resolved HERE rather than in script, so a
 		// ripple expands at render rate instead of in 35Hz steps -- a ring
 		// crawling outward one tic at a time is a visible staircase.
+		// Counted so the shader can know, from ONE compare, whether any
+		// disturbance is live. Ignite adds light rather than mist and has to
+		// work in a room with the fog switched off -- without this the whole
+		// function early-outs before the loop that would draw it.
+		int liveDisturb = 0;
 		{
 			double now = Level->maptime / (double)TICRATE;
+
 			for (int i = 0; i < FLevelLocals::MAX_FOG_DISTURB; i++)
 			{
 				double life = Level->FogDisturbLife[i];
@@ -362,6 +368,7 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 					(float)Level->FogDisturbStrength[i] * fade * fade,
 					(float)Level->FogDisturbSpeed[i],
 					(float)Level->FogDisturbMode[i] };
+				liveDisturb++;
 			}
 		}
 
@@ -380,7 +387,26 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 			(float)Level->FogWakeVel.Y, (float)Level->FogWakeStretch, 0.f };
 
 		VPUniforms.mFogBow = { (float)Level->FogBowStrength,
-			(float)Level->FogBowWidth, (float)Level->FogBowThin, 0.f };
+			(float)Level->FogBowWidth, (float)Level->FogBowThin,
+			(float)liveDisturb };
+
+		// [BB] What each fog edge follows, and the floor and ceiling AT THE EYE.
+		//
+		// The eye pair is resolved here rather than in the shader because the
+		// plane uniforms describe the FRAGMENT's sector. Using those for the
+		// eye end of the ray would raise the fog around your head the moment
+		// you looked at a wall on the floor above.
+		{
+			double eyeFloor = 0.0, eyeCeil = 0.0;
+			auto vsec = Level->PointInSector(Viewpoint.Pos);
+			if (vsec)
+			{
+				eyeFloor = vsec->floorplane.ZatPoint(Viewpoint.Pos);
+				eyeCeil = vsec->ceilingplane.ZatPoint(Viewpoint.Pos);
+			}
+			VPUniforms.mFogFollow = { (float)Level->FogFollowTop,
+				(float)Level->FogFollowBottom, (float)eyeFloor, (float)eyeCeil };
+		}
 
 		// [BB] Shapes. Size, growth and the seam all resolve HERE rather than
 		// in script, so a mark that opens does it at render rate instead of in

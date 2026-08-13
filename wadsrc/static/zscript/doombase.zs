@@ -861,6 +861,10 @@ struct LevelLocals native
 	native clearscope void SetFogTendrils(double spacing, double radius, double height, double density, double rise, double spread, double lean, double taper);
 	native clearscope void SetFogWakeMotion(double velX, double velY, double stretch);
 	native clearscope void SetFogBow(double strength, double width, double thin);
+	// Which reference each fog edge follows, and how gently. 0 absolute,
+	// positive follows the floor, negative the ceiling. The magnitude is the
+	// gentleness -- 0.3 turns a staircase into a slope rather than steps.
+	native clearscope void SetFogFollow(double top, double bottom);
 	native clearscope void SetFogGradient(color col, double mix);
 
 	// [BB] SHAPES -- signed distance fields drawn onto surfaces. Sixteen

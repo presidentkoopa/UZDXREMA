@@ -302,6 +302,7 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 			vec4 uShapeD[128];
 			vec4 uShapeParams;
 			vec4 uShapeUnder;
+			vec4 uFogFollow;
 		};
 
 		uniform int uTextureMode;

@@ -1906,6 +1906,14 @@ float FogTendrilAt(vec3 p, float baseY)
 	return max(core, 0.0) * uFogTendril.w;
 }
 
+// [BB] The height of a sector plane at a point. Same expression main.vp uses
+// to find a fragment's distance from a glow -- the plane equation, so it is
+// exact on a slope and not just on a step.
+float FogPlaneAt(vec4 pl, vec3 p)
+{
+	return (pl.w + pl.x * p.x + pl.y * p.z) * pl.z;
+}
+
 vec4 FogSlabAt(vec3 fragPos)
 {
 	// EITHER SHAPE IS ENOUGH TO MAKE THIS WORTH RUNNING, and that is the whole
@@ -1920,7 +1928,21 @@ vec4 FogSlabAt(vec3 fragPos)
 	bool haveSlab = uFogSlab.y > 0.0;
 	bool haveTorn = uTornado2.z > 0.0;
 	bool haveTend = uFogTendril.w > 0.0;
-	if (!haveSlab && !haveTorn && !haveTend) return vec4(0.0);
+
+	// IGNITE HAS TO SURVIVE AN EMPTY ROOM, and this line is why it did not.
+	//
+	// The claim everywhere else -- in the menu, the cvar note and the README
+	// -- is that Ignite adds LIGHT rather than mist and therefore works in
+	// clear air. It did not. The guard returned before the disturbance loop
+	// whenever there was no slab, no funnel and no wisps, so an explosion in a
+	// room with the fog switched off lit nothing at all and the documentation
+	// was describing an intention.
+	//
+	// uFogBow.w was the one genuinely spare slot, and it is pushed outside the
+	// slab gate, which is what this needs -- a count that only exists while the
+	// fog is on would be no use to the case it is here to rescue.
+	bool haveDist = uFogBow.w > 0.0;
+	if (!haveSlab && !haveTorn && !haveTend && !haveDist) return vec4(0.0);
 
 	vec3  eye  = uCameraPos.xyz;
 	float topZ = uFogSlab.x;
@@ -1942,7 +1964,41 @@ vec4 FogSlabAt(vec3 fragPos)
 	// your feet and the height across the room are genuinely different now --
 	// which is the whole point, and is what makes the boundary undulate as you
 	// look along it.
-	float topEye  = topZ;
+	// ---- THE SURFACE FOLLOWS THE ARCHITECTURE -------------------------
+	//
+	// A single world Z is flat across the whole map: knee deep in one room and
+	// overhead in the pit next door, and it does not climb a staircase. What
+	// "fog on the floor" actually means is a constant height ABOVE THE GROUND.
+	//
+	// The floor and ceiling planes are already here per draw -- the vertex
+	// shader uses the same two to find how far a fragment is from a glow. The
+	// height of a plane at a point is one multiply-add each, and it is exact
+	// on slopes as well as steps because it is the plane equation and not a
+	// sampled height.
+	//
+	// THE AMOUNT IS THE GENTLENESS. At 1 the surface tracks every step
+	// exactly; at 0.3 it rises three units for every ten the floor does, so a
+	// staircase reads as a slope rather than as a flight of steps. Fog that
+	// steps looks like geometry. Fog that lags looks like weather.
+	//
+	// The EYE end is pushed as a number rather than read from these planes,
+	// and that is not a shortcut -- the planes describe the FRAGMENT's sector.
+	// Using them for the eye would mean that looking at a wall on the floor
+	// above raised the fog around your head to match it.
+	float topOffFrag = 0.0, topOffEye = 0.0;
+	if (uFogFollow.x > 0.0)
+	{
+		topOffFrag = FogPlaneAt(uGlowBottomPlane, fragPos) * uFogFollow.x;
+		topOffEye  = uFogFollow.z * uFogFollow.x;
+	}
+	else if (uFogFollow.x < 0.0)
+	{
+		topOffFrag = FogPlaneAt(uGlowTopPlane, fragPos) * -uFogFollow.x;
+		topOffEye  = uFogFollow.w * -uFogFollow.x;
+	}
+	topZ += topOffFrag;
+
+	float topEye  = topZ - topOffFrag + topOffEye;
 	float topFrag = topZ;
 	if (uFogSurf.x > 0.0)
 	{
@@ -1970,11 +2026,27 @@ vec4 FogSlabAt(vec3 fragPos)
 	// The bottom takes the same swell as the top, so a ceiling layer's
 	// UNDERSIDE undulates -- which is the surface you actually see from below,
 	// and animating only the top would have left it a flat plate.
+	// The bottom edge follows on its own terms, and it has to: CEILING FOG is
+	// the bottom edge tracking the ceiling while the top sits above it. One
+	// shared follow setting could express floor fog or ceiling fog but never
+	// a band that does both, and never the layer walking upstairs intact.
 	float botZ = uFogSlab2.x;
-	float botEye = botZ, botFrag = botZ;
+	float botOffFrag = 0.0, botOffEye = 0.0;
+	if (uFogFollow.y > 0.0)
+	{
+		botOffFrag = FogPlaneAt(uGlowBottomPlane, fragPos) * uFogFollow.y;
+		botOffEye  = uFogFollow.z * uFogFollow.y;
+	}
+	else if (uFogFollow.y < 0.0)
+	{
+		botOffFrag = FogPlaneAt(uGlowTopPlane, fragPos) * -uFogFollow.y;
+		botOffEye  = uFogFollow.w * -uFogFollow.y;
+	}
+
+	float botEye = botZ + botOffEye, botFrag = botZ + botOffFrag;
 	if (uFogSurf.x > 0.0)
 	{
-		botEye  += topEye  - topZ;
+		botEye  += topEye  - topZ - topOffEye + topOffFrag;
 		botFrag += topFrag - topZ;
 	}
 
@@ -2026,7 +2098,7 @@ vec4 FogSlabAt(vec3 fragPos)
 	// measured from a different quantity entirely, so this can only bail when
 	// there is no funnel either.
 	float occupancy = 0.5 * (dEye + dFrag);
-	if (occupancy <= 0.0 && !haveTorn && !haveTend) return vec4(0.0);
+	if (occupancy <= 0.0 && !haveTorn && !haveTend && !haveDist) return vec4(0.0);
 
 	float travel = distance(eye, fragPos) * occupancy;
 
