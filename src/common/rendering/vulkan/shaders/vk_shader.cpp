@@ -250,6 +250,7 @@ static const char *shaderBindings = R"(
 		vec4 uShapeA[128];
 		vec4 uShapeB[128];
 		vec4 uShapeCol[128];
+		vec4 uShapeD[128];
 		vec4 uShapeParams;
 		vec4 uShapeUnder;
 	};
@@ -316,6 +317,7 @@ static const char *shaderBindings = R"(
 	#define uShapeA viewpoints[HW_VIEWPOINT_INDEX].uShapeA
 	#define uShapeB viewpoints[HW_VIEWPOINT_INDEX].uShapeB
 	#define uShapeCol viewpoints[HW_VIEWPOINT_INDEX].uShapeCol
+	#define uShapeD viewpoints[HW_VIEWPOINT_INDEX].uShapeD
 	#define uShapeParams viewpoints[HW_VIEWPOINT_INDEX].uShapeParams
 	#define uShapeUnder viewpoints[HW_VIEWPOINT_INDEX].uShapeUnder
 

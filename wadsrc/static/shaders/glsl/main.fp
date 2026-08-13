@@ -1074,8 +1074,16 @@ vec3 ShapesAt(vec3 fragPos, vec3 nrm)
 		//
 		// Squared on both sides: no sqrt, and the reach is the largest the
 		// shape can grow to including its softness and its glow.
+		// The reach has to include the FORMATION, not just the shape: a ring
+		// of eight reaches its orbit radius, a tile field reaches its extent.
+		// Rejecting on the shape's own size alone would clip a pattern to a
+		// small disc around its anchor and look like the far copies were
+		// missing rather than culled.
+		float rmode = uShapeD[i].x;
+		float spread = (rmode >= 1.0) ? max(uShapeD[i].y, uShapeD[i].z) : 0.0;
+
 		vec3 rel3 = fragPos - uShapeA[i].xyz;
-		float reach = size + soft + uShapeParams.z + 1.0;
+		float reach = size + spread + soft + uShapeParams.z + 1.0;
 		if (dot(rel3, rel3) > reach * reach) continue;
 
 		int packed_kind = int(uShapeB[i].x);
@@ -1101,6 +1109,46 @@ vec3 ShapesAt(vec3 fragPos, vec3 nrm)
 
 		uv = opRotate(uv, uShapeB[i].y);
 
+		// ---- REPEAT: one slot, many copies -------------------------------
+		//
+		// Folding the COORDINATE rather than drawing the shape N times. Eight
+		// copies and eight hundred cost the same, because what changes is
+		// where the point thinks it is, not how many distance tests run.
+		//
+		// It is the trick the laser lattice and the tendril field already
+		// use, and the reason it does not replace the slots is that every
+		// copy is necessarily identical -- same age, same colour, same fade.
+		// A kill mark needs its own clock, so those stay one slot each.
+		//
+		// The anchor is the slot's own position, so a formation follows an
+		// actor exactly as a single shape does. Dynamic and repeated are not
+		// opposites.
+		float patFade = 1.0;
+		if (rmode >= 0.5 && rmode < 1.5)
+		{
+			// RADIAL. Fold the angle into one sector and every sector draws
+			// the same shape -- N around a circle for the price of one.
+			float cnt = max(floor(uShapeD[i].y), 1.0);
+			float orbit = uShapeD[i].z;
+			float ang = atan(uv.y, uv.x) + radians(uShapeD[i].w * timer);
+			float sector = 6.2831853 / cnt;
+			ang = mod(ang + sector * 0.5, sector) - sector * 0.5;
+			uv = vec2(cos(ang), sin(ang)) * length(uv) - vec2(orbit, 0.0);
+		}
+		else if (rmode >= 1.5)
+		{
+			// GRID. mod() the plane into tiles. Infinite by nature, so it is
+			// faded toward the stated extent rather than cut at it -- a hard
+			// edge on a tiling field reads as the pattern being clipped by
+			// something invisible.
+			float ext = max(uShapeD[i].y, 1.0);
+			float sp = max(uShapeD[i].z, 1.0);
+			patFade = 1.0 - smoothstep(ext * 0.6, ext, length(uv));
+			if (patFade <= 0.0) continue;
+			uv += uShapeD[i].w * timer;
+			uv = mod(uv + sp * 0.5, sp) - sp * 0.5;
+		}
+
 		float thick = max(uShapeB[i].z, 0.01);
 		float d;
 		if      (kind == 1) d = sdCircle(uv, size);
@@ -1124,7 +1172,7 @@ vec3 ShapesAt(vec3 fragPos, vec3 nrm)
 			float gap = abs(uv.x) - seam * size;
 			float gcov = (1.0 - smoothstep(0.0, soft, gap)) * cov;
 			cov -= gcov;
-			sum += uShapeUnder.rgb * gcov * fade;
+			sum += uShapeUnder.rgb * gcov * fade * patFade;
 		}
 
 		// A little reach past the edge, so a hard shape still sits in the room
@@ -1133,7 +1181,7 @@ vec3 ShapesAt(vec3 fragPos, vec3 nrm)
 			cov += (1.0 - smoothstep(0.0, uShapeParams.z, max(d, 0.0)))
 			     * uShapeParams.z * 0.02;
 
-		sum += col * max(cov, 0.0) * fade;
+		sum += col * max(cov, 0.0) * fade * patFade;
 	}
 	return sum;
 }

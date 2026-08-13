@@ -318,6 +318,21 @@ struct HWViewpointUniforms
 	FVector4 mShapeB[128];
 	FVector4 mShapeCol[128];
 
+	// [BB] REPEAT -- one slot, many copies.
+	//
+	// A pattern cannot give each copy its own age or colour, which is what a
+	// kill mark needs, so this does not replace the slots. What it does is
+	// make ONE slot draw a formation, at any density, for the price of one --
+	// and because the anchor is the slot's own position it still follows an
+	// actor, so "eight runes orbiting this thing, spinning" is one slot and
+	// fully dynamic.
+	//
+	//   x mode: 0 single, 1 radial, 2 grid
+	//   y radial: how many. grid: how far the tiling reaches
+	//   z radial: orbit radius. grid: tile spacing
+	//   w spin (deg/sec) or drift (units/sec)
+	FVector4 mShapeD[128];
+
 	// x edge softness, y height fade, z glow reach past the edge,
 	// w HOW MANY SLOTS ARE LIVE -- the loop runs to this, not to the cap.
 	// Without it a 128-slot array would cost 128 iterations per fragment

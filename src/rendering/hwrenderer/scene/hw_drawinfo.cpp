@@ -411,6 +411,7 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 					VPUniforms.mShapeA[i] = { 0.f, 0.f, 0.f, 0.f };
 					VPUniforms.mShapeB[i] = { 0.f, 0.f, 0.f, 0.f };
 					VPUniforms.mShapeCol[i] = { 0.f, 0.f, 0.f, 0.f };
+					VPUniforms.mShapeD[i] = { 0.f, 0.f, 0.f, 0.f };
 					continue;
 				}
 
@@ -432,6 +433,9 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 					Level->ShapeColor[i].r / 255.f, Level->ShapeColor[i].g / 255.f,
 					Level->ShapeColor[i].b / 255.f,
 					(float)Level->ShapeIntensity[i] * fade };
+				VPUniforms.mShapeD[i] = { (float)Level->ShapeRepeat[i],
+					(float)Level->ShapeRepCount[i], (float)Level->ShapeRepSpace[i],
+					(float)Level->ShapeRepSpin[i] };
 			}
 
 			VPUniforms.mShapeParams = { (float)Level->ShapeSoft,

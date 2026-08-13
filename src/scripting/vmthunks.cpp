@@ -4268,6 +4268,7 @@ static int AddShape(FLevelLocals *self, int kind, int orient,
 	self->ShapeSeam[i] = 0;
 	self->ShapeSeamRate[i] = 0;
 	self->ShapeGrow[i] = 0;
+	self->ShapeRepeat[i] = 0;
 	return i;
 }
 
@@ -4305,6 +4306,38 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetShapeMotion, SetShapeMotion)
 
 // Moving one that already exists, so a shape can follow an actor without
 // being re-added every tic and losing its age with it.
+// ONE SLOT, MANY COPIES. The coordinate is folded rather than the shape being
+// drawn N times, so eight copies and eight hundred cost the same.
+//
+// This does not replace the slots and is not meant to: every copy in a
+// formation is necessarily identical -- same age, same colour, same fade --
+// and a kill mark needs its own clock. Slots are for distinct events; this is
+// for many of the same thing at once.
+//
+// The anchor is the slot's own position, so a formation follows an actor
+// exactly as a single shape does. Dynamic and repeated are not opposites.
+//
+//   mode 1 RADIAL  count copies around a circle of radius space, spinning
+//   mode 2 GRID    tiled every space units, out to count, drifting
+static void SetShapeRepeat(FLevelLocals *self, int slot, int mode,
+	double count, double space, double spin)
+{
+	if (slot < 0 || slot >= FLevelLocals::MAX_SHAPES) return;
+	self->ShapeRepeat[slot] = clamp(mode, 0, 2);
+	self->ShapeRepCount[slot] = count;
+	self->ShapeRepSpace[slot] = space;
+	self->ShapeRepSpin[slot] = spin;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetShapeRepeat, SetShapeRepeat)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(slot); PARAM_INT(mode);
+	PARAM_FLOAT(count); PARAM_FLOAT(space); PARAM_FLOAT(spin);
+	SetShapeRepeat(self, slot, mode, count, space, spin);
+	return 0;
+}
+
 static void MoveShape(FLevelLocals *self, int slot, double x, double y, double z)
 {
 	if (slot < 0 || slot >= FLevelLocals::MAX_SHAPES) return;

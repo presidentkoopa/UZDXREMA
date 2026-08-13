@@ -1200,6 +1200,12 @@ public:
 	double   ShapeGrow[MAX_SHAPES] = {};       // size added per second
 	double   ShapeSeamRate[MAX_SHAPES] = {};   // seam opened per second
 
+	// Repeat: one slot drawing a formation. Mode 0 is a single shape.
+	int      ShapeRepeat[MAX_SHAPES] = {};     // 0 single, 1 radial, 2 grid
+	double   ShapeRepCount[MAX_SHAPES] = {};   // radial: how many. grid: extent
+	double   ShapeRepSpace[MAX_SHAPES] = {};   // radial: orbit. grid: spacing
+	double   ShapeRepSpin[MAX_SHAPES] = {};    // deg/sec, or drift units/sec
+
 	double   ShapeSoft = 2.0;
 	double   ShapeHeightFade = 24.0;
 	double   ShapeReach = 0.0;

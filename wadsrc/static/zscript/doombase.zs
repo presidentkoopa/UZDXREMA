@@ -876,6 +876,12 @@ struct LevelLocals native
 	// through the gap -- subtraction, masked by the shape it came out of.
 	native int AddShape(int kind, int orient, double x, double y, double z, double size, double angle, double thick, color col, double intensity, double life);
 	native void SetShapeMotion(int slot, double seam, double seamRate, double grow);
+	// One slot, many copies. mode 1 radial (count around a circle of radius
+	// space, spinning), mode 2 grid (tiled every space units, out to count).
+	// Folds the coordinate rather than drawing N shapes, so eight and eight
+	// hundred cost the same -- but every copy is identical, which is why this
+	// does not replace a slot per distinct event.
+	native void SetShapeRepeat(int slot, int mode, double count, double space, double spin);
 	native void MoveShape(int slot, double x, double y, double z);
 	native void RemoveShape(int slot);
 	native void ClearShapes();
