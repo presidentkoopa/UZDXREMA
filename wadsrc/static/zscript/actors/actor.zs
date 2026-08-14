@@ -1250,6 +1250,15 @@ class Actor : Thinker native
 	native bool RegisterModelStateFrame(State st, int frameNum, int frameNext);
 	native void ClearModelStateFrames();
 
+	// Full state-label enumeration, sorted by state address (= source
+	// declaration order). FindState can only probe names known in advance;
+	// this returns every label the class actually defines, including
+	// mod-custom ones, so a walker can attribute "RealFire" or "Work1" to
+	// the standard label they were written under. Null-state labels are
+	// skipped; top level only.
+	native static int CountStateLabels(class<Actor> cls);
+	native static Name, State GetStateLabelAt(class<Actor> cls, int index);
+
 	void A_SetFriendly (bool set)
 	{
 		if (CountsAsKill() && health > 0) level.total_monsters--;

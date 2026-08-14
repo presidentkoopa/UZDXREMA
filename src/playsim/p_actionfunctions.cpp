@@ -5630,6 +5630,62 @@ DEFINE_ACTION_FUNCTION(AActor, ClearModelStateFrames)
 	return 0;
 }
 
+// RS FORK -- FULL LABEL ENUMERATION for the state remap. ZScript's FindState
+// can only probe label names it already knows, which makes every mod-custom
+// label -- Ashes' RealFire and Work1, BD's Reload3 -- structurally invisible
+// to a script-side walk. The class's own label table has them all. Returned
+// one at a time, SORTED BY STATE ADDRESS: owned states are stored in source
+// declaration order, so address order lets the caller attribute each custom
+// label to the standard label it was written under. Top-level labels only;
+// null-state labels are skipped.
+static void CollectSortedLabels(PClassActor *cls, TArray<FStateLabel*> &out)
+{
+	out.Clear();
+	FStateLabels *list = cls->GetStateLabels();
+	if (list == nullptr) return;
+	for (int i = 0; i < list->NumLabels; i++)
+	{
+		if (list->Labels[i].State != nullptr) out.Push(&list->Labels[i]);
+	}
+	std::sort(out.begin(), out.end(), [](FStateLabel *a, FStateLabel *b)
+	{
+		return a->State < b->State;
+	});
+}
+
+DEFINE_ACTION_FUNCTION(AActor, CountStateLabels)
+{
+	PARAM_PROLOGUE;
+	PARAM_CLASS(cls, AActor);
+	if (cls == nullptr) ACTION_RETURN_INT(0);
+	TArray<FStateLabel*> sorted;
+	CollectSortedLabels(cls, sorted);
+	ACTION_RETURN_INT(int(sorted.Size()));
+}
+
+DEFINE_ACTION_FUNCTION(AActor, GetStateLabelAt)
+{
+	PARAM_PROLOGUE;
+	PARAM_CLASS(cls, AActor);
+	PARAM_INT(index);
+
+	FName resName = NAME_None;
+	FState *resState = nullptr;
+	if (cls != nullptr)
+	{
+		TArray<FStateLabel*> sorted;
+		CollectSortedLabels(cls, sorted);
+		if (index >= 0 && (unsigned)index < sorted.Size())
+		{
+			resName  = sorted[index]->Label;
+			resState = sorted[index]->State;
+		}
+	}
+	if (numret > 0) ret[0].SetInt(resName.GetIndex());
+	if (numret > 1) ret[1].SetPointer(resState);
+	return numret < 2 ? numret : 2;
+}
+
 // One line of truth per hand: does the weapon in it have a remap table, and
 // does the state it is in RIGHT NOW resolve. The debugging story for the
 // whole remap system -- when something looks wrong, this says what, without
