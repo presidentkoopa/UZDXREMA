@@ -72,6 +72,7 @@
 #include "model.h"
 #include "shadowinlines.h"
 #include "i_time.h"
+#include "c_dispatch.h"
 
 static FRandom pr_camissile ("CustomActorfire");
 static FRandom pr_cabullet ("CustomBullet");
@@ -5596,6 +5597,88 @@ DEFINE_ACTION_FUNCTION_NATIVE(AActor, A_ChangeModel, ChangeModelNative)
 	ChangeModelNative(self,stateowner,stateinfo,modeldef.GetIndex(),modelindex,modelpath,model.GetIndex(),skinindex,skinpath,skin.GetIndex(),flags,generatorindex,animationindex,animationpath,animation.GetIndex());
 
 	return 0;
+}
+
+// RS FORK -- NATIVE STATE REMAP registration (FORK_CHANGES.md, "Native state
+// remap"). ZScript builds a weapon's state -> mesh-frame table once at bind
+// time and registers it row by row; from then on the renderer resolves frames
+// against the psprite's own current state with zero per-tick script involved.
+// Requires modelData to exist already, i.e. A_ChangeModel must have run first.
+DEFINE_ACTION_FUNCTION(AActor, RegisterModelStateFrame)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_POINTER(st, FState);
+	PARAM_INT(frameNum);
+	PARAM_INT(frameNext);
+
+	if (self->modelData == nullptr || st == nullptr || frameNum < 0 || frameNext < 0)
+	{
+		ACTION_RETURN_BOOL(false);
+	}
+	int64_t packed = (int64_t(uint32_t(frameNum)) << 32) | uint32_t(frameNext);
+	self->modelData->stateRemap.Insert(intptr_t(st), packed);
+	ACTION_RETURN_BOOL(true);
+}
+
+DEFINE_ACTION_FUNCTION(AActor, ClearModelStateFrames)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	if (self->modelData != nullptr)
+	{
+		self->modelData->stateRemap.Clear();
+	}
+	return 0;
+}
+
+// One line of truth per hand: does the weapon in it have a remap table, and
+// does the state it is in RIGHT NOW resolve. The debugging story for the
+// whole remap system -- when something looks wrong, this says what, without
+// relaunching anything.
+CCMD(rs_remap_dump)
+{
+	if (gamestate != GS_LEVEL)
+	{
+		Printf("rs_remap_dump: not in a level.\n");
+		return;
+	}
+	player_t *pl = &players[consoleplayer];
+	for (int hand = 0; hand < 2; hand++)
+	{
+		AActor *w = hand ? pl->OffhandWeapon : pl->ReadyWeapon;
+		const char *hn = hand ? "offhand" : "mainhand";
+		if (w == nullptr)
+		{
+			Printf("[%s] no weapon\n", hn);
+			continue;
+		}
+		if (w->modelData == nullptr)
+		{
+			Printf("[%s] %s: NO modelData (never bound)\n", hn, w->GetClass()->TypeName.GetChars());
+			continue;
+		}
+		unsigned count = w->modelData->stateRemap.CountUsed();
+		DPSprite *psp = pl->FindPSprite(hand ? PSP_OFFHANDWEAPON : PSP_WEAPON);
+		if (psp == nullptr || psp->GetState() == nullptr)
+		{
+			Printf("[%s] %s: table=%u, no psprite/state\n", hn, w->GetClass()->TypeName.GetChars(), count);
+			continue;
+		}
+		FState *st = psp->GetState();
+		int64_t *v = w->modelData->stateRemap.CheckKey(intptr_t(st));
+		if (v)
+		{
+			Printf("[%s] %s: table=%u, state %s HIT -> frame %d..%d\n",
+				hn, w->GetClass()->TypeName.GetChars(), count,
+				FState::StaticGetStateName(st).GetChars(),
+				int(uint32_t(*v >> 32)), int(uint32_t(*v & 0xffffffff)));
+		}
+		else
+		{
+			Printf("[%s] %s: table=%u, state %s MISS (tics=%d)\n",
+				hn, w->GetClass()->TypeName.GetChars(), count,
+				FState::StaticGetStateName(st).GetChars(), st->Tics);
+		}
+	}
 }
 
 DEFINE_ACTION_FUNCTION_NATIVE(AActor, SetAnimation, SetAnimationNative)

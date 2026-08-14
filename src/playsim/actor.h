@@ -745,6 +745,16 @@ public:
 	ModelAnim curAnim;
 	ModelAnimFrame prevAnim; // used for interpolation when switching anims
 
+	// RS FORK -- state -> model frame remap (FORK_CHANGES.md, "Native state
+	// remap"). Keyed by FState pointer cast to intptr_t; the value packs two
+	// non-negative int32s: (frame << 32) | next. Filled from ZScript at bind
+	// time via Actor.RegisterModelStateFrame; consulted every rendered frame
+	// by CalcModelFrame / CalcModelOverrides, which makes the psprite's own
+	// current state the animation clock -- no per-tick script anywhere.
+	// Deliberately NOT serialized: state pointers do not survive a session,
+	// and binds re-register the table on load anyway.
+	TMap<intptr_t, int64_t>		stateRemap;
+
 	DActorModelData() = default;
 	virtual void Serialize(FSerializer& arc) override;
 	virtual void OnDestroy() override;

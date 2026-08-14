@@ -1238,6 +1238,56 @@ GLES does not implement this, consistent with §2, §8, §11, §12, §13 and §1
 
 ---
 
+## 21. Native state remap
+
+ModelSwapper's animation engine, moved into the engine — where it should have
+lived from the start. §19 gave ZScript per-tick fields to force a model frame
+onto a psprite; that made the *script* the animation clock, with everything
+that entails: event ordering, tick timing, and silent failure when any link
+in the script chain broke. This section makes the **psprite's own current
+state** the clock, natively.
+
+**The table.** `DActorModelData` (the per-instance data `A_ChangeModel`
+creates) gains `TMap<intptr_t, int64_t> stateRemap` — `FState*` cast to
+`intptr_t` mapping to two packed non-negative int32s: `(frame << 32) | next`.
+Not serialized: state pointers don't survive a session, and binds re-register
+on load.
+
+**Registration** (`p_actionfunctions.cpp`, ZScript-callable on Actor):
+
+```
+native bool RegisterModelStateFrame(State st, int frameNum, int frameNext);
+native void ClearModelStateFrames();
+```
+
+Registration fails until `modelData` exists — call `A_ChangeModel` first.
+A bind registers a weapon's whole table once; after that no script runs in
+the animation path at all.
+
+**Consult points** (`models.cpp`, both shared by VR and flat, mainhand and
+offhand):
+
+- `CalcModelFrame`: when the psprite's current state is in the table,
+  `inter` = intra-state progress — `(Tics - curTics + ticFrac) / Tics` —
+  computed with the renderer's own frame fraction, so interpolation runs at
+  display rate, not 35Hz. `smfNext = smf`, same trick as §19.
+- `CalcModelOverrides`: table hit replaces `modelframe`/`modelframenext`.
+  Placed after the §19 fields on purpose: a live table beats stale serialized
+  per-tick values from older builds. Unmapped states fall through to the
+  sprite-derived resolution (the pinned anchor's rest pose) — a pause, never
+  garbage.
+
+**Debugging** — `rs_remap_dump` (ccmd): one line per hand — weapon class,
+table row count, and whether the state in the psprite *right now* resolves,
+to which frames. When something looks wrong, this says what, in one line,
+without relaunching anything.
+
+§19 stays intact — the explicit per-tick fields still work and still win when
+a script sets them and no table exists. The two compose: table for the normal
+path, fields for manual overrides.
+
+---
+
 ## Building
 
 `auto-setup-windows-vr.cmd` locates Visual Studio's bundled CMake via

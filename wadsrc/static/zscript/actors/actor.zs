@@ -1241,6 +1241,15 @@ class Actor : Thinker native
 	native void A_ChangeCountFlags(int kill = FLAG_NO_CHANGE, int item = FLAG_NO_CHANGE, int secret = FLAG_NO_CHANGE);
 	action native void A_ChangeModel(name modeldef, int modelindex = 0, string modelpath = "", name model = "", int skinindex = 0, string skinpath = "", name skin = "", int flags = 0, int generatorindex = -1, int animationindex = 0, string animationpath = "", name animation = "");
 
+	// RS FORK -- native state remap (FORK_CHANGES.md, "Native state remap").
+	// After A_ChangeModel has bound a model, register which mesh frame each
+	// of this actor's states should display; the renderer then resolves
+	// frames against the psprite's own current state natively, with no
+	// per-tick script. Registration fails (returns false) until modelData
+	// exists, i.e. call A_ChangeModel first.
+	native bool RegisterModelStateFrame(State st, int frameNum, int frameNext);
+	native void ClearModelStateFrames();
+
 	void A_SetFriendly (bool set)
 	{
 		if (CountsAsKill() && health > 0) level.total_monsters--;

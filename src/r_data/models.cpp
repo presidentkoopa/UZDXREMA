@@ -428,6 +428,30 @@ CalcModelFrameInfo CalcModelFrame(FLevelLocals *Level, const FSpriteModelFrame *
 		smfNext = smf;
 	}
 
+	// RS FORK -- NATIVE STATE REMAP interpolation (FORK_CHANGES.md, "Native
+	// state remap"). When the weapon carries a state->frame table, the
+	// psprite's own state IS the animation clock, and intra-state progress
+	// comes straight from its tic countdown plus the render fraction --
+	// true display-rate smoothness, computed where the display rate lives.
+	// Runs after every other inter derivation so the table, when present,
+	// is authoritative; unmapped states simply keep whatever resolved above.
+	if (psp && data && data->stateRemap.CountUsed() > 0 && curState != nullptr)
+	{
+		if (data->stateRemap.CheckKey(intptr_t(curState)) && curState->Tics > 0)
+		{
+			float ticFraction = 0.f;
+			if ((ConsoleState == c_up || ConsoleState == c_rising) && (menuactive == MENU_Off || menuactive == MENU_OnNoPause) && !Level->isFrozen())
+			{
+				ticFraction = I_GetTimeFrac();
+			}
+			float f = (float(curState->Tics - curTics) + ticFraction) / float(curState->Tics);
+			if (f < 0.f) f = 0.f;
+			if (f > 1.f) f = 1.f;
+			inter   = f;
+			smfNext = smf;
+		}
+	}
+
 	unsigned modelsamount = smf->modelsAmount;
 	//[SM] - if we added any models for the frame to also render, then we also need to update modelsAmount for this smf
 	if (data != nullptr)
@@ -579,6 +603,28 @@ bool CalcModelOverrides(int i, const FSpriteModelFrame *smf, DActorModelData* da
 	{
 		out.modelframe     = psp->ModelFrame;
 		out.modelframenext = (psp->ModelFrameNext >= 0) ? psp->ModelFrameNext : psp->ModelFrame;
+	}
+
+	// RS FORK -- NATIVE STATE REMAP frame resolution (FORK_CHANGES.md,
+	// "Native state remap"). The table maps the psprite's CURRENT state
+	// directly to mesh frames, registered once at bind time from ZScript.
+	// Placed last on purpose: when a table exists it beats both the sprite
+	// lookup and the legacy per-tick ModelFrame fields (which can linger,
+	// serialized, from older builds). Unmapped states fall through to
+	// whatever resolved above -- the pinned anchor's rest pose -- so a
+	// state the walk couldn't see reads as a pause, never as garbage.
+	if (psp && data && data->stateRemap.CountUsed() > 0)
+	{
+		FState *st = psp->GetState();
+		if (st != nullptr)
+		{
+			int64_t *v = data->stateRemap.CheckKey(intptr_t(st));
+			if (v != nullptr)
+			{
+				out.modelframe     = int(uint32_t(*v >> 32));
+				out.modelframenext = int(uint32_t(*v & 0xffffffff));
+			}
+		}
 	}
 
 	return (out.modelid >= 0 && out.modelid < Models.size());
