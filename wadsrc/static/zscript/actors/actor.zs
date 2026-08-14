@@ -1256,8 +1256,8 @@ class Actor : Thinker native
 	// mod-custom ones, so a walker can attribute "RealFire" or "Work1" to
 	// the standard label they were written under. Null-state labels are
 	// skipped; top level only.
-	native static int CountStateLabels(class<Actor> cls);
-	native static Name, State GetStateLabelAt(class<Actor> cls, int index);
+	clearscope native static int CountStateLabels(class<Actor> cls);
+	clearscope native static Name, State GetStateLabelAt(class<Actor> cls, int index);
 
 	void A_SetFriendly (bool set)
 	{
