@@ -1,5 +1,5 @@
 # UZDXREMA — a QZDoom/GZDoom fork with engine changes
-
+--upcoming major features: gravity manipulation, portal stacking--
 **This repository is a fork of [`emawind84/gzdoom`](https://github.com/emawind84/gzdoom)
 (branch `questzdoom`) carrying renderer and scripting changes to the engine
 itself.** It is not a mod, a texture pack, or a config. The C++ is modified.
