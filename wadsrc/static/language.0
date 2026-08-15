@@ -1278,6 +1278,7 @@ Origin Z Offset,VRLASERMNU_SOURCE_OFFSET_Z,,,,Posun počátku Z,Forskydning af o
 Beam Glow,VRLASERMNU_BEAM_GLOW,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
 Emissive Glow,VRLASERMNU_BEAM_EMISSIVE,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
 Beam Taper,VRLASERMNU_BEAM_TAPER,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+Beam Fade Distance,VRLASERMNU_BEAM_FADE,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
 Target Lock,VRLASERMNU_LOCK_OPTIONS,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
 React to Targets,VRLASERMNU_LOCK,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
 Lock Tighten,VRLASERMNU_LOCK_TIGHTEN,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
