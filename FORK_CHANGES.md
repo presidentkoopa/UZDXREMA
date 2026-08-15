@@ -28,6 +28,8 @@ anything else here.
 | [Two bugs worth recording](#18-two-bugs-worth-recording) | the volumetric cone, and the fourth uniform list | — |
 | [Direct model frame addressing](#19-direct-model-frame-addressing-on-psprites) | a HUD model's frame stops going through the sprite, and the 29-frame ceiling goes with it | — |
 | [Texture inside the glow](#20-texture-inside-the-glow) | five terms for a lane whose coverage is too high for the wave to help | — |
+| [Billboard hit tests](#22-billboard-hit-tests-two-defects-found-by-their-first-consumer) | **bug fixes** — the group transform moved the picture and not the target, and a hidden panel stayed clickable | — |
+| [Psprite model scale](#23-a-psprites-scale-reaches-the-model-path) | a HUD model can finally be resized from script | — |
 
 ---
 
@@ -534,6 +536,39 @@ overloaded `uFogSlabColor.w`, which was already wake strength, and the two then
 could not be set independently. Worth stating because the temptation to reuse a
 spare `w` is exactly how that happens.
 
+**Correction, verified against the source.** That last paragraph describes an
+intention the code did not follow through on. `hw_drawinfo.cpp` still writes the
+wake strength into **both** `mFogSlabColor.w` and `mFogSlabExtra.x`, and
+`main.fp` reads `uFogSlabExtra` exactly once — at the pickup mix, taking `.y`.
+`uFogSlabExtra.x` is uploaded every frame and never read anywhere in the shader;
+the wake gate still tests `uFogSlabColor.w`. So the independence the slot was
+added for was never actually taken up. Do not build anything on
+`uFogSlabExtra.x`, and do not assume the wake can be silenced by zeroing it.
+
+**Sprites were fogged against the wrong plane. Fixed.** `FogSlabAt` resolves the
+slab's top through `uGlowTopPlane` / `uGlowBottomPlane` (see §14 on
+`SetFogFollow`), and those are set per draw by `hw_walls.cpp` and
+`hw_flats.cpp` — but were never set by `hw_sprites.cpp`, which called neither
+`SetGlowPlanes` nor `EnableGlow`. `FRenderState::Reset` zeroes them, and
+`FogSlabAt` is invoked at `main.fp:3106`, *before* the
+`dot(vWorldNormal, vWorldNormal) > 0.5` sprite guard further down. So with a
+non-zero follow, an actor standing in a pit was fogged as though the mist top
+were computed from whichever wall or flat happened to be drawn before it, or
+from zero after a state reset — reading as over-fogged by roughly the pit's own
+depth, and changing with draw order.
+
+`HWSprite::DrawSprite` now sets the planes from the sprite's own sector before
+drawing: `actor->Sector` for a thing, `particle->subsector->sector` for a
+particle, nothing if it has neither. `SetGlowPlanes` is declared locally in
+`hw_sprites.cpp` because it lives in `hw_walls.cpp` and was never in a header —
+until now nothing outside that file wanted it.
+
+**Planes only.** `EnableGlow` is deliberately not touched, so sprites still do
+not receive sector glow: that is gated on `uGlowTopColor.a` /
+`uGlowBottomColor.a` rather than on the planes, and walls set it back to false
+after themselves (`hw_walls.cpp:432`). The planes are the fog's input here and
+nothing else's.
+
 Density 0 switches the whole thing off and the fragment shader returns
 immediately.
 
@@ -939,9 +974,24 @@ The ring recycles the **oldest** slot rather than refusing a ninth. Refusing
 makes the ninth gunshot of a firefight silently do nothing, which is the exact
 moment the effect exists for.
 
-Age is resolved at **render rate**, not in script. A ring expanding in 35Hz
-steps is a visible staircase. Strength decays over the slot's life, so nothing
-is freed on a schedule — an expired slot is one whose strength reached zero.
+Age is resolved outside script rather than being counted down by the caller.
+Strength decays over the slot's life, so nothing is freed on a schedule — an
+expired slot is one whose strength reached zero.
+
+**Fixed, having been wrong since it was written.** This section and the comment
+beside the code both claimed the age resolved at *render rate* so a ring would
+not expand in visible 35Hz steps. It did not — `hw_drawinfo.cpp` computed
+`double now = Level->maptime / (double)TICRATE;` with no `TicFrac` term, at both
+the disturbance site and the shape site, while the beam block ~130 lines earlier
+had taken `Viewpoint.TicFrac` explicitly all along. The staircase the paragraph
+warns about was real for small fast rings, and for a shape's growth and seam.
+
+Both sites now read `(Level->maptime + Viewpoint.TicFrac) / (double)TICRATE`.
+Unlike the beam path this is not put behind `r_beam_interpolate`: that cvar is
+about beam *positions* stuttering against moving geometry, which is a different
+question from an age advancing smoothly, and `cl_capfps` / `r_NoInterpolate`
+already pin `TicFrac` to 1.0 upstream so those cases collapse to the previous
+behaviour on their own.
 
 ### Density stopped being one number
 
@@ -1285,6 +1335,104 @@ without relaunching anything.
 §19 stays intact — the explicit per-tick fields still work and still win when
 a script sets them and no table exists. The two compose: table for the normal
 path, fields for manual overrides.
+
+---
+
+## 22. Billboard hit tests: two defects found by their first consumer
+
+Both found the night the billboard queries got their first caller ever — a
+ZScript VR weapon wheel. Neither could have been noticed before, because
+`AimBillboard`, `TouchBillboard` and `SweepBillboard` had shipped with **zero
+callers in the tree**. Both are in `src/scripting/vmthunks.cpp`.
+
+The queries and the renderer already share `BillboardBasis` for orientation and
+extent — that consolidation is recorded in `BILLBOARDS.md`. These are the two
+places where they still disagreed.
+
+### The group transform moved the picture and not the target
+
+`BillboardWorldPos` returned `bb.pos` verbatim. The renderer does not draw it
+there: a grouped billboard is scaled **about its group's origin**, position as
+well as extent (`hw_drawinfo.cpp`, `lpos = gorigin + (lpos - gorigin) * gscale`).
+`BillboardQueryScale` already mirrored the extent half, so the quad was tested
+at full-size offsets with scaled extent — displaced from the picture by
+`(pos - origin) * (1 - gscale)`.
+
+Consequence: `AnimateBillboardGroup` was unusable for anything clickable. A
+panel opening with a grow animation was wrong for the whole animation, which is
+exactly when the player is already reaching for it.
+
+`BillboardWorldPos` now takes the level and applies the same transform.
+Attached members scale their `attachOffset` instead, matching the renderer's
+`lattach` — their `pos` is rewritten unscaled every tic by `p_tick.cpp`, so
+scaling that would compound. View-locked members are deliberately excluded: the
+renderer scales those in view-local space before resolving them against the
+viewpoint, and the existing `drawPos` branch already carries the result.
+
+The function returns by value now rather than a const reference, so the three
+call sites hold a value.
+
+### A group collapsed to zero was invisible and still clickable
+
+The renderer drops a group at scale ≤ 0 before submitting it
+(`hw_drawinfo.cpp`, `if (gscale <= 0.0) continue`), and `SetBillboardGroupScale(gid, 0)`
+is the documented way to hide a panel. The queries had no equivalent, and
+`BillboardBasis` floors scale at 0.01 rather than zero — so a hidden panel kept
+a tiny hit box sitting at its full-size offset, and could win a hit against the
+visible panel in front of it.
+
+`BillboardHittable` now takes the level and rejects `bb.group` whose scale is
+≤ 0, which is the same test the renderer uses to skip drawing it.
+
+### Confirmed by the thing that found them
+
+A probe map spawned four panels — fixed, camera-facing, half-scaled-group, and
+zero-scaled-group — and printed what each query returned. Before: the
+half-scaled panel missed at its drawn centre and hit at its *unscaled* position;
+the zero-scaled panel answered rays while drawing nothing. After: both correct,
+and the fixed and camera-facing controls unchanged.
+
+A third defect was **predicted and did not reproduce**: an audit argued that
+camera-facing billboards are tested against the wrong orientation because the
+queries pass their own origin where the renderer passes the eye. The probe's
+camera-facing panel passed both aim and touch. Worth knowing before anyone
+"fixes" it.
+
+---
+
+## 23. A psprite's scale reaches the model path
+
+`src/r_data/models.cpp`, `RenderHUDModel`.
+
+`psp->scale` was read only by the 2D weapon-sprite path (`hw_weapon.cpp`). A mod
+that shrank a psprite saw nothing happen to a weapon drawn as a **model** — and
+there was no other way to resize one from script at all, since model scale comes
+from `MODELDEF` and the sprite frame.
+
+`RenderHUDModel`'s scaling step now folds it in:
+
+```cpp
+float pspScale = 1.0f;
+if (!psp->scale.isZero()) pspScale = (float)psp->scale.X;
+objectToWorldMatrix.scale(smf->xscale * pspScale, smf->zscale * pspScale,
+                          (smf->yscale / fovscale) * pspScale);
+```
+
+`scale` defaults to `(0,0)` and the sprite path already treats zero as "unset",
+so this is a free channel — every existing model is untouched unless something
+opts in, and no content that does not can be affected.
+
+X alone, applied uniformly. A model scaled unevenly on two axes shears rather
+than resizes, and "half size" is one number in every caller's head.
+
+Written for a VR weapon menu that shrinks the held weapon while it is open, so
+the hand reads as a pointer rather than a gun. Any script wanting a smaller HUD
+model gets it.
+
+**Related and worth knowing:** a HUD model is looked up as
+`FindModelFrame(psp->Caller, psp->GetSprite(), psp->GetFrame())`. The **Caller**
+is half the key, so swapping only a psprite's sprite leaves a model-drawn weapon
+showing its own model. Script must repoint `Caller` too.
 
 ---
 

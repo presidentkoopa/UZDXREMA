@@ -133,12 +133,43 @@ CUSTOM_CVAR(Int, gl_fuzztype, 8, CVAR_ARCHIVE)
 //
 //==========================================================================
 
+// [BB] Defined in hw_walls.cpp, which is where every other caller lives. It is
+// not in a header because until now nothing outside that file wanted it.
+void SetGlowPlanes(FRenderState &state, const secplane_t& top, const secplane_t& bottom);
+
 void HWSprite::DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent)
 {
 	bool additivefog = false;
 	bool foglayer = false;
 	int rel = fullbright ? 0 : getExtraLight();
-	auto &vp = di->Viewpoint;	
+	auto &vp = di->Viewpoint;
+
+	// [BB] THE FOG SLAB NEEDS THIS SPRITE'S OWN FLOOR.
+	//
+	// SetFogFollow resolves the slab's top against uGlowBottomPlane, per
+	// fragment -- that is the whole mechanism by which mist sits at a
+	// different world height in every room without anyone scripting it.
+	//
+	// Walls set those planes (hw_walls.cpp) and flats set them
+	// (hw_flats.cpp). Sprites never did. FRenderState::Reset zeroes them, and
+	// FogSlabAt runs in main.fp BEFORE the vWorldNormal test that would have
+	// told it this fragment is a sprite -- so an actor was fogged against
+	// whichever wall or flat happened to be drawn before it, or against zero
+	// after a reset. A monster standing in a pit was fogged for the walkway
+	// above it, which is the one place the error is most visible.
+	//
+	// PLANES ONLY, deliberately. EnableGlow stays off and is not touched here;
+	// the sector glow itself is gated on uGlowTopColor.a / uGlowBottomColor.a
+	// rather than on these planes, so a sprite still does not pick up a
+	// sector's glow colour. This is the fog's input and nothing else's.
+	{
+		sector_t *fogsec = nullptr;
+		if (actor != nullptr) fogsec = actor->Sector;
+		else if (particle != nullptr && particle->subsector != nullptr) fogsec = particle->subsector->sector;
+
+		if (fogsec != nullptr)
+			SetGlowPlanes(state, fogsec->ceilingplane, fogsec->floorplane);
+	}
 
 	if (translucent)
 	{

@@ -382,7 +382,15 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 		// function early-outs before the loop that would draw it.
 		int liveDisturb = 0;
 		{
-			double now = Level->maptime / (double)TICRATE;
+			// [BB] TicFrac, which this had always claimed to do and did not.
+			//
+			// The comment above has said "resolved HERE rather than in script,
+			// so a ring expands at render rate" since this was written, but the
+			// clock was plain maptime -- so a disturbance did crawl outward one
+			// tic at a time, and a small fast ripple showed exactly the
+			// staircase the comment warns about. Same treatment the beam block
+			// above already gets from Viewpoint.TicFrac.
+			double now = (Level->maptime + Viewpoint.TicFrac) / (double)TICRATE;
 
 			for (int i = 0; i < FLevelLocals::MAX_FOG_DISTURB; i++)
 			{
@@ -452,8 +460,12 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 		// in script, so a mark that opens does it at render rate instead of in
 		// 35Hz steps -- a seam crawling apart one tic at a time is a visible
 		// staircase, and it is the one part of the effect anyone looks at.
+		//
+		// [BB] TicFrac added. As with the disturbances above, this claimed
+		// render rate and was reading plain maptime, so growth and the seam
+		// stepped at 35Hz regardless.
 		{
-			double now = Level->maptime / (double)TICRATE;
+			double now = (Level->maptime + Viewpoint.TicFrac) / (double)TICRATE;
 
 			// THE HIGH-WATER MARK, and it is why a 128-slot array is
 			// affordable. The shader loops to this rather than to the cap, so
