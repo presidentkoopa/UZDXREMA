@@ -28,9 +28,14 @@ anything else here.
 | [Two bugs worth recording](#18-two-bugs-worth-recording) | the volumetric cone, and the fourth uniform list | — |
 | [Direct model frame addressing](#19-direct-model-frame-addressing-on-psprites) | a HUD model's frame stops going through the sprite, and the 29-frame ceiling goes with it | — |
 | [Texture inside the glow](#20-texture-inside-the-glow) | five terms for a lane whose coverage is too high for the wave to help | — |
+| [Native state remap](#21-native-state-remap) | a psprite's own state becomes the model's animation clock | — |
+| [Shapes](#21b-shapes--signed-distance-fields-painted-onto-surfaces) | 128 SDF glyphs painted onto surfaces; they grow, split open, and repeat into formations | — |
 | [Billboard hit tests](#22-billboard-hit-tests-two-defects-found-by-their-first-consumer) | **bug fixes** — the group transform moved the picture and not the target, and a hidden panel stayed clickable | — |
 | [Psprite model scale](#23-a-psprites-scale-reaches-the-model-path) | a HUD model can finally be resized from script | — |
 | [Script VR input suppression](#24-script-side-vr-input-suppression) | a mod's own in-world menu can claim the sticks, so snap turn stops firing mid-choice | — |
+| [The laser as a borrowed cursor](#25-the-laser-as-a-borrowed-cursor) | a script menu can force the laser on one named hand and stop it at a billboard | — |
+| [Haptics reach ZScript](#26-haptics-reach-zscript) | the controllers can finally be buzzed from script — and `VR_HapticEvent` turns out to be a stub | — |
+| [Everything else this fork adds](#27-everything-else-this-fork-adds) | the laser sight itself, tracers, the psprite recursion guard, and every native with no API entry | — |
 
 ---
 
@@ -50,10 +55,33 @@ Level.TouchBillboard(point, r)  -> hit id, UV, distance
 Level.SweepBillboard(from,to,r) -> hit id, UV, fraction along the segment
 ```
 
-Six payloads: `BB_PANEL`, `BB_TEXTURE`, `BB_DIGITS`, `BB_GLYPH`, `BB_RING`,
-`BB_BAR`. All six draw. Also: view-locking (resolved at *render* rate, not tic
-rate, which is what makes a head-locked panel not swim), per-billboard alpha,
-`BBFL_NODEPTH`, `BBFL_FOLLOWANGLE`, save/load, budget and distance culling.
+**Ten payloads**, not the six this paragraph claimed until the fork was audited
+against itself: `BB_PANEL`, `BB_TEXTURE`, `BB_DIGITS`, `BB_GLYPH`, `BB_RING`,
+`BB_BAR`, then `BB_SEGMENT` (a 16-segment display drawn procedurally, no atlas),
+`BB_SEGLCD` (its inverse — a lit plate with the digits punched out of it),
+`BB_SEAM` (a glowing slit you open with `ResizeBillboard`; with the void flag the
+opening is a *hole* with a bright rim rather than a lit slab), and `BB_WG13` (a
+transcribed kill badge, plate and digits in one pass). Index 6 is unused, so the
+enum runs 0–10. All ten draw. `BILLBOARDS.md:81` documents them properly.
+
+Also: view-locking (resolved at *render* rate, not tic rate, which is what makes
+a head-locked panel not swim), per-billboard alpha, `BBFL_NODEPTH`,
+`BBFL_FOLLOWANGLE`, save/load, budget and distance culling.
+
+**Groups.** One transform — origin, scale, and an engine-eased animated scale —
+over a whole composed panel of many quads, so a forty-quad readout grows as one
+object instead of forty. `AddBillboardGroup`, `SetBillboardGroup`,
+`SetBillboardGroupScale`, `AnimateBillboardGroup`, `SetBillboardGroupOrigin`,
+`RemoveBillboardGroup`. §22 fixes two group bugs without this section ever having
+introduced them; it does now.
+
+**Text is signed-distance, with its own font system.** `FSDFFont` /
+`FSDFFontRoster` (`hw_sdffont.h`), a glyph cache flushed on texture reload
+(`d_main.cpp:3798`), and measuring natives so a caller can size a panel to its
+text before drawing it: `MeasureBillboardText`, `MeasureBillboardTextBlock`,
+`SetBillboardFont`, `RollBillboardFonts`, `BillboardFontCount`,
+`BillboardFontName`. The roster is **reshuffled every game**, so a font slot
+names a role and never a typeface.
 
 `TextureID.GetIndex()` was exposed for this, and the payload/facing/flag
 constants are named on `LevelLocals` so callers don't invent their own copies.
@@ -547,8 +575,9 @@ added for was never actually taken up. Do not build anything on
 `uFogSlabExtra.x`, and do not assume the wake can be silenced by zeroing it.
 
 **Sprites were fogged against the wrong plane. Fixed.** `FogSlabAt` resolves the
-slab's top through `uGlowTopPlane` / `uGlowBottomPlane` (see §14 on
-`SetFogFollow`), and those are set per draw by `hw_walls.cpp` and
+slab's top through `uGlowTopPlane` / `uGlowBottomPlane` (`SetFogFollow` — listed
+in §27, since no section ever gave it an API entry), and those are set per draw
+by `hw_walls.cpp` and
 `hw_flats.cpp` — but were never set by `hw_sprites.cpp`, which called neither
 `SetGlowPlanes` nor `EnableGlow`. `FRenderState::Reset` zeroes them, and
 `FogSlabAt` is invoked at `main.fp:3106`, *before* the
@@ -694,8 +723,32 @@ A band's radius is a distance that grows. A beam does not travel; it simply
 is. Sharing the sweep's slots would have meant a per-band endpoint — another
 `vec4[8]` in `StreamData` — for a thing that is not a band.
 
-Eight beams, in the viewpoint block: enough for a weapon beam plus a tripwire
-grid, and the per-fragment cost is eight cheap segment tests.
+**128 beams**, in the viewpoint block. This said "eight" until the fork was
+audited against itself; eight was the original count and `a6182489c2` raised it
+so a real firefight can have bolts crossing in both directions.
+
+Cost is per **active** beam, not per slot: both shader loops break at the live
+count and each survivor gets a bounding-sphere reject before the real solve, so
+an empty slot costs nothing. 3 arrays × 128 × 16B = 6KB per viewpoint, 12KB for
+two eyes against a 64KB range.
+
+The index space is **caller-managed with no allocator** — two mods writing beams
+will overwrite each other silently. Agree a range.
+
+**Interpolated between tics.** Script sets beams at 35Hz and the upload runs
+every frame, so without a lerp a beam holds still for a whole tic and then jumps,
+which at 90–120Hz reads as stuttering against smoothly moving geometry.
+`PrevBeamStart/End/Intensity` are snapshotted each tic (`p_tick.cpp:377`) and
+blended at render rate (`hw_drawinfo.cpp:245`), behind `r_beam_interpolate`. Only
+a beam that was already lit **and still is** gets interpolated — callers park a
+released slot at the origin, and lerping toward that would draw a beam whipping
+across the map on the frame it was switched off. Beams are also cleared on map
+change (`p_setup.cpp:307`) so nothing interpolates from the level you just left.
+
+Raising the count is also what produced the misalignment recorded in §18: the
+C++ array and `main.fp` were widened and the two GLSL declaration lists were
+not, so for several commits every uniform after the beams read at the wrong
+offset on both backends. Fixed in `f228cc23ea`. **Four lists, not three.**
 
 ### They light fog
 
@@ -1360,6 +1413,47 @@ path, fields for manual overrides.
 
 ---
 
+## 21b. Shapes — signed distance fields painted onto surfaces
+
+**Undocumented until the fork was audited against itself.** This is the largest
+system in the renderer with no section, which is worth recording as its own
+finding: it has 128 slots, seven primitives, seven natives and a shader function
+of its own, and nothing in this file mentioned it.
+
+`Level.AddShape`, `SetShapeMotion`, `SetShapeRepeat`, `MoveShape`,
+`RemoveShape`, `ClearShapes`, `SetShapeLook`. State at `g_levellocals.h:1186`,
+thunks at `vmthunks.cpp:4329`, upload at `hw_drawinfo.cpp:480`, `ShapesAt()` in
+`main.fp`.
+
+A shape is a **flat emissive glyph projected onto whatever surface passes
+through it** — disc, ring, square, square outline, cross, hexagon, triangle. It
+lies *on* the floor or wall rather than hanging in the air, faded by the
+fragment's height offset, and it is added after lighting, so a mark does not dim
+in a dark room. Sprites are skipped deliberately: they have no world normal, and
+without that exclusion a shape would smear across every monster standing in it.
+
+Three things separate it from a decal:
+
+**It can grow, and it can split.** `SetShapeMotion` gives a shape a growth rate
+and a **seam** — the shape opens down its middle, revealing a second colour
+masked by the original outline. Both resolve at render rate rather than in 35Hz
+steps, for the same reason the disturbances do: a seam crawling apart one tic at
+a time is a visible staircase, and it is the part anyone actually looks at.
+
+**One slot can draw a formation.** `SetShapeRepeat` mode 1 puts N copies in a
+ring that orbits and spins; mode 2 tiles an infinite drifting grid. The
+coordinate is folded before the distance test, so eight hundred copies cost what
+one costs — the same trick as the sweep's lattice and the fog's tendrils.
+
+**Cost is bounded by the highest live index, not the live count.** The shader
+loops to a high-water mark, so a single permanent shape parked at slot 120 costs
+121 iterations per fragment for the rest of the map while 119 slots sit empty.
+Keep anything with `life 0` at low indices. Related trap: the allocator recycles
+the oldest *expiring* shape, so if every slot holds a permanent there is nothing
+to recycle and it returns slot 0 and overwrites it rather than refusing.
+
+---
+
 ## 22. Billboard hit tests: two defects found by their first consumer
 
 Both found the night the billboard queries got their first caller ever — a
@@ -1504,8 +1598,251 @@ need the same one-line guard.
 
 ---
 
+## 25. The laser as a borrowed cursor
+
+An in-world menu made of billboards needs a pointer, and the fork already draws
+a very good one: the VR laser sight, with a beam, a dot, glow, per-hand colours
+and a trace behind it. Rather than have every mod build its own, three natives
+let a script borrow the real one.
+
+```
+Level.ForceVRLaser(bool on, int hand = -1)   // -1 both, 0 main, 1 off
+Level.SetVRLaserRange(double range)          // map units; 0 = engine decides
+```
+
+### An override, never a cvar write
+
+`vr_laser_sight` and friends are **archived**. A mod that switched them on for
+the duration of its menu would be editing the player's saved settings to draw a
+line for four seconds, and the VM refuses the write anyway — *"Attempt to change
+CVAR outside of menu code"*, correctly. So the state is a separate global the
+renderer consults **on top of** the cvars, touching none of them. Drop the
+override and the player's own preference is exactly where they left it.
+
+Transient, for the same reason §24 is: no persistence, no archiving. A menu that
+died mid-frame must not leave a laser welded on.
+
+### Named to one hand
+
+`hand` is the point. The first version forced both, which put a second beam on
+the hand still holding a gun — pointing at nothing, clamped to the menu's
+arm's-length range. `VR_IsScriptLaserForcedFor(offhand)` is asked separately for
+each hand in `hw_weapon.cpp`, so the unnamed hand keeps whatever the player's own
+cvars give it, including nothing.
+
+Naming the hand does one more thing, and it is the reason the off-hand case
+worked at all. `drawHand` bails early for a hand holding **no weapon**, or a
+**melee** weapon, when `vr_laser_show_melee` is off:
+
+```cpp
+AActor* weapon = offhand ? player->OffhandWeapon : player->ReadyWeapon;
+if (weapon == nullptr) { if (!vr_laser_show_melee && !forcedHere) return; }
+```
+
+Both gates ask *is this hand worth drawing a laser for*, and for a gun that is a
+sensible question. For a **cursor** it is the wrong question entirely — an empty
+off hand is precisely the hand an off-hand menu is most likely to be worn on, and
+without the `forcedHere` exemption that menu has no pointer at all. So a hand
+that has been explicitly claimed by script skips both gates.
+
+### Stopping at something the engine cannot see
+
+The laser's trace knows level geometry and actors. A billboard is neither, so a
+beam aimed at a panel passes straight through and lands on the wall behind it —
+which reads as the laser ignoring the very thing it is selecting.
+
+Teaching the trace about billboards would mean putting a UI concern inside
+`P_LineTrace`. Instead the script, which has *just done the hit test anyway*,
+publishes the distance and the renderer clamps to it:
+
+```cpp
+const double scriptRange = VR_IsScriptLaserForcedFor(offhand) ? VR_GetScriptLaserRange() : 0.0;
+if (scriptRange > 0.0) visibleDistance = std::min(visibleDistance, scriptRange);
+```
+
+**Shortening only** — `std::min` against the world's own answer, so this can
+never be used to put a laser through a wall. Scoped to the forced hand, so an
+ordinary laser sight on the other hand is not cut short by a menu it has nothing
+to do with. Republished every tic; a stale value cannot outlive its menu.
+
+### Touched
+
+- `hw_vrmodes.h/.cpp` — `VR_SetScriptLaserForced(bool, int)`,
+  `VR_IsScriptLaserForced()`, `VR_IsScriptLaserForcedFor(bool)`,
+  `VR_SetScriptLaserRange`/`VR_GetScriptLaserRange`
+- `hw_weapon.cpp` — the `forcedHere` exemption in `drawHand`, per-hand
+  `allowPointer`/`allowBeamToggle`, and the range clamp in
+  `GetLaserBeamEndpoints`
+- `vmthunks.cpp`, `doombase.zs` — the two natives
+
+Adding a native to `doombase.zs` means **both** targets have to be rebuilt:
+`src/zdoom.vcxproj` for the engine and `wadsrc/doomxr_pk3.vcxproj` for the
+declarations. Building only the first gives a clean compile and a script error
+at load.
+
+---
+
+## 26. Haptics reach ZScript
+
+```
+Level.VRHaptic(int hand, double intensity, double durationMs)
+```
+
+The fork already had complete per-hand OpenXR haptics: a vibration action bound
+for the Touch, Index, Vive and simple interaction profiles, with left and right
+output paths, an amplitude/duration pair tracked per hand, and a stop path.
+`VKOpenXRDeviceMode::Vibrate(duration, channel, intensity)` drives all of it.
+**Script could not reach any of it.** An in-world menu could draw itself and
+could be pointed at, and it could not make your hand feel anything.
+
+### The stub worth knowing about
+
+There is an existing engine-wide entry point, `VR_HapticEvent`, called from a
+dozen places across the playsim — `p_interaction.cpp` for fire and slime damage,
+`a_weapons.cpp` on weapon pickup, `sbar_mugshot.cpp`, the door code. On this
+platform its body is **empty**:
+
+```cpp
+void VR_HapticEvent(const char* event, int position, int intensity, float angle, float yHeight )
+{
+}
+```
+
+So none of those call sites do anything, and routing a new native through it
+would have produced a function that compiled, ran, reported success and buzzed
+nothing. `VRMode::Vibrate` is the live path.
+
+### Abstract hand in, physical side out
+
+`Vibrate`'s `channel` is a **physical** side — 0 left, 1 right. Everything
+script-facing is addressed as main/off. Getting that backwards is a miserable
+bug to chase because it still works, just on the other arm, so the swap is done
+once inside the engine rather than in each caller:
+
+```cpp
+const bool rightHanded = vr_control_scheme < 10;
+const int channel = rightHanded ? (hand == VR_MAINHAND ? 1 : 0) : hand;
+```
+
+Same swap the native wheel does in `hw_vrwheel.cpp`, now with one owner.
+
+Intensity is clamped to 0..1 and duration to 500 ms. A script asking for a
+two-second pulse at full strength is a script with a bug, and the controller has
+no way to refuse it. `vr_enable_haptics` is still checked inside `Vibrate`, so a
+player who has turned haptics off cannot be overridden by a mod.
+
+### Touched
+
+- `hw_vrmodes.h/.cpp` — `VR_ScriptHaptic(int hand, double intensity, double durationMs)`
+- `vmthunks.cpp`, `doombase.zs` — the native
+
+Both build targets, as in §25.
+
+---
+
 ## Building
 
 `auto-setup-windows-vr.cmd` locates Visual Studio's bundled CMake via
 `vswhere` — CMake is generally not on PATH. Build output lands in
 `build-dxr/RelWithDebInfo/`.
+
+---
+
+## 27. Everything else this fork adds
+
+Found by auditing the source against this document rather than the other way
+round. Each of these was shipping and working with no entry here — which is the
+finding as much as any individual item, since a change nobody wrote down is a
+change the next person removes.
+
+### The VR laser sight itself
+
+§25 documents a script *borrowing* the laser. It never documents the laser.
+
+`hw_weapon.cpp`, `DrawLaserSightWorld` / `GetLaserBeamEndpoints`, ~50
+`vr_laser_*` cvars, `CCMD toggle_laser_sight` (`g_game.cpp:1491`).
+
+Sixteen segments rather than eight, because eight is an octagon at the distance
+a VR player holds a gun from their face. A bright **core** inside a soft
+**halo**, tapered on the halo only — the core is what you aim with. Emissive
+with no dynamic light at all: the scene target is half-float and the bloom
+threshold is 1.0, so pushing the core past white lets the existing bloom pass
+pick it up on its own. Core only; an overbright halo hazes the view instead of
+looking hot.
+
+A **target lock** built from information the trace was already discarding: the
+trace runs with `MF_SHOOTABLE` and `FTraceResults` carries the actor. On
+something alive the dot tightens, brightens and breathes while its glow swells
+*outward* — opposite directions, which is what makes it read as pressure rather
+than as a size change.
+
+Colour resolves in four tiers, highest first: the weapon's own
+`Weapon.LaserBeamColor`, the per-slot colour, then a mode ladder of one colour /
+per hand / all four. `LaserBeamColor` is an **int with a -1 sentinel rather than
+a Color**, because `Color` has no spare value — the property parser routes
+strings through `V_GetColor`, which fills RGB and leaves alpha 0, so `PalEntry 0`
+means both "unset" and "black".
+
+### Hitscan tracers and ricochet
+
+`hw_weapon.cpp:1179`, `Weapon.HitscanTracerOffset`, nine `vr_hitscan_*` cvars.
+Visible tracer rounds for hitscan weapons with a per-weapon muzzle offset and a
+ricochet chance.
+
+### A psprite state-change re-entrancy guard
+
+`p_pspr.cpp`, `FPSpriteDepthGuard`, depth cap 64.
+
+`DPSprite::SetState` had only `statelooplimit` — a *local* counter that catches
+an iterative state chain but is **reset by any state whose action calls
+`P_SetPsprite`**. So a recursive chain ran until the stack died, with no message.
+The trigger was this fork's own two-handing suppression returning early from
+`A_WeaponReady`/`FireWeapon` before the ready flags were set; it reproduced every
+time on VanillaVRPlus's rifle. Now it stops at 64 and prints the state's name.
+
+### Natives with no API listing anywhere
+
+- `Actor.CountStateLabels(cls)` / `Actor.GetStateLabelAt(cls, i)`
+  (`p_actionfunctions.cpp:5656`) — walk a class's whole state-label table. The
+  model-remap walker needs this to register frame binds without hardcoding label
+  names.
+- `Actor.GetSpriteTextureID(rotation)` — the current sprite frame as a
+  `TextureID`, so a caller can ask `TexMan.GetSize()` for the **artwork** size.
+  Sizing off `Height` measures the collision cylinder, which is wrong by a lot on
+  tall monsters.
+- `SetFogSurface`, `SetFogFollow`, `SetFogGradient`, `SetTornadoLook`,
+  `SetSweepFillAir`, `SetSweepCount`, `SetSweepBandAt`, `SetSweepBandDraw` — all
+  described in prose somewhere, none listed as callable API.
+- `SetGlowTexture`, `SetGlowFlow`, `SetGlowCells`, `SetGlowReact`
+  (`vmthunks.cpp:3996`) — §20 explains all five terms at length and never names
+  the four functions that drive them.
+
+### Console commands and budget cvars
+
+`bb_spawn`, `bb_text`, `bb_clear` (`p_tick.cpp:130`) for poking billboards
+without a mod. `rs_bb_cullradius`, `rs_bb_maxpanels`, `bb_scale`, `bb_tiltbias`,
+`bb_flipu`, `bb_sdffont`.
+
+### VR mount systems
+
+Sixteen `vr_automap_*` cvars — a complete parallel mount for the automap
+mirroring the HUD's (distance, scale, pitch/roll/yaw, offsets, border, stereo,
+fixed-pitch, and a "use hud" mode). Plus `vr_overlayscreen*` and
+`CCMD toggleportablehud` (`hw_vrmodes.cpp:922`), `CCMD togglecheatmenu`.
+
+Largely inherited from DoomXR rather than authored here, but a real delta from
+stock and worth knowing exists before someone rebuilds it.
+
+### Bloom, beyond §5
+
+§5 names threshold, knee, anamorphic, tint and chromatic. Also live:
+`gl_bloom_amount`, `gl_bloom_kernel_size`, `gl_bloom_anamorphic_ratio`, and the
+tint is **three cvars** (`gl_bloom_tint_r/g/b`), not one.
+
+### Known-dead things, recorded so they are not mistaken for load-bearing
+
+- `uFogSlabExtra.x` is written every frame with the wake strength and **read by
+  nothing** — the wake gate tests `uFogSlabColor.w`. §11's rationale for the slot
+  describes an intention the code never followed through on.
+- `uSweepPad1` is reserved for sky scaling in the per-fragment darkness path,
+  which is not implemented (§9 records the gap).

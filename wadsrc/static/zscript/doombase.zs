@@ -762,12 +762,25 @@ struct LevelLocals native
 	// Force the laser sight on for as long as a script-side menu is up. An
 	// override, not a settings change -- the archived cvars are untouched and the
 	// player gets their own preference back the moment it is dropped.
-	native void ForceVRLaser(bool on);
+	//
+	// hand: -1 both, 0 main, 1 off. Name the hand wearing the menu -- the other
+	// hand keeps whatever the player's own settings give it. The forced hand also
+	// ignores the empty-hand and melee gates, so a menu on a bare off hand still
+	// gets a cursor.
+	native void ForceVRLaser(bool on, int hand = -1);
 
 	// Stop the laser at a distance only script knows -- the engine trace cannot
 	// see billboards, so without this the beam passes through the panel it is
 	// selecting. Shortening only; 0 hands the decision back to the engine.
+	// Applies to the hand named in ForceVRLaser, so an ordinary laser sight on
+	// the other hand is not cut short by a menu it has nothing to do with.
 	native void SetVRLaserRange(double range);
+
+	// Buzz a controller. hand is 0 main, 1 off -- the abstract hand, not a
+	// physical side; the handedness swap happens engine-side. intensity 0..1,
+	// duration in milliseconds, both clamped. Honours vr_enable_haptics.
+	native void VRHaptic(int hand, double intensity, double durationMs);
+
 	native bool IsVRInputSuppressed();
 
 	native int, Vector2 AimBillboard(Vector3 start, Vector3 dir, double maxDist = 0);
@@ -889,9 +902,17 @@ struct LevelLocals native
 	native clearscope void SetFogFollow(double top, double bottom);
 	native clearscope void SetFogGradient(color col, double mix);
 
-	// [BB] SHAPES -- signed distance fields drawn onto surfaces. Sixteen
-	// slots, oldest recycled. AddShape returns its slot so the other four
-	// can address it later; -1 means it was refused.
+	// [BB] SHAPES -- signed distance fields drawn onto surfaces. 128 slots,
+	// oldest EXPIRING one recycled. AddShape returns its slot so the other
+	// four can address it later; -1 means it was refused.
+	//
+	// COST IS BOUNDED BY THE HIGHEST LIVE INDEX, not by the live count: the
+	// shader loops to a high-water mark. So one permanent shape parked at slot
+	// 120 costs 121 iterations per fragment for the rest of the map. Keep
+	// anything with life 0 at low indices.
+	//
+	// And if every slot holds a life-0 permanent there is nothing to recycle,
+	// so the allocator returns slot 0 and overwrites it rather than refusing.
 	//
 	//   kind    1 disc, 2 ring, 3 square, 4 square outline,
 	//           5 cross, 6 hexagon, 7 triangle
@@ -969,8 +990,15 @@ struct LevelLocals native
 	// [BB] Real beams. A segment lit per pixel by distance from it, so it is
 	// continuous at any length, wraps floor/wall/ceiling as one object, and
 	// lights the surfaces it passes -- no sprite, no chain of puffs, no
-	// separate dynamic light. Up to 8. thick is the hot core, soft is how far
-	// the halo reaches past it.
+	// separate dynamic light. Up to 128. thick is the hot core, soft is how
+	// far the halo reaches past it.
+	//
+	// Cost is per ACTIVE beam, not per slot: both shader loops break at the
+	// live count and each survivor gets a bounding-sphere reject first. An
+	// empty slot costs nothing.
+	//
+	// The index space is CALLER-MANAGED with no allocator, so two mods writing
+	// beams will silently overwrite each other. Agree a range.
 	native clearscope void SetBeam(int index, Vector3 start, Vector3 end, double thick, double soft, color col, double intensity);
 	native clearscope void SetBeamCount(int count, double glow, double fogScatter);
 	// airGlow 0 = the beam only lights what it touches. Above 0 it is visible
