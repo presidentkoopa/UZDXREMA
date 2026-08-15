@@ -516,8 +516,69 @@ void DPSprite::NewTick()
 //
 //---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------
+// RE-ENTRANCY GUARD -- the one the statelooplimit below cannot be.
+//
+// THE BUG THIS FIXES. Two-handing certain weapons (reproducible every time
+// on VanillaVRPlus's rifle) crashed with a STACK OVERFLOW, not a hang: the
+// dump showed a five-function cycle across three code regions repeating
+// 616 times, which is the ZScript VM re-entering itself --
+// VMExec -> native trampoline -> VMCall -> VMExec.
+//
+// WHY THE EXISTING GUARD MISSES IT. `statelooplimit` a few lines below is a
+// LOCAL counter in a `do` loop. It catches a state chaining to another
+// state ITERATIVELY, which is the classic zero-duration DECORATE loop. It
+// cannot catch a state whose ACTION calls P_SetPsprite, because that
+// re-enters SetState from the top and gets a brand new counter every time.
+// Iterative loops are caught at 300000; recursive ones run until the stack
+// is gone.
+//
+// WHY TWO-HANDING TRIPS IT. This fork suppresses the offhand while
+// stabilised, returning early from A_WeaponReady (weapons.zs:426),
+// FireWeapon/FireWeaponAlt (player.zs:393/426) and P_CheckWeaponButtons
+// (below) BEFORE the ready flags are set. A weapon written with zero-tic
+// frames -- `CHGG B 0 A_ReFire` and friends -- can then chain forever,
+// because the condition it was waiting on never becomes true. It is
+// weapon-specific purely because it depends on how each weapon's Ready
+// loop is authored, which is why one rifle dies and others do not.
+//
+// SIXTY-FOUR is far above anything legitimate. Real weapons nest a couple
+// of levels at most (a state action setting the flash layer, say). Well
+// behaved content will never see this; broken content gets a red line in
+// the console naming the state, exactly like the iterative guard, instead
+// of taking the process down with no message at all.
+//
+// RAII rather than a bare counter, because SetState has seven early
+// returns and several call Destroy(). A scope guard cannot be skipped by
+// any of them, and it touches no member state, so it stays valid even
+// after the object has destroyed itself.
+namespace
+{
+	struct FPSpriteDepthGuard
+	{
+		static int Depth;
+		FPSpriteDepthGuard()  { ++Depth; }
+		~FPSpriteDepthGuard() { --Depth; }
+	};
+	int FPSpriteDepthGuard::Depth = 0;
+
+	constexpr int kMaxPSpriteStateDepth = 64;
+}
+
 void DPSprite::SetState(FState *newstate, bool pending)
 {
+	FPSpriteDepthGuard depthGuard;
+	if (FPSpriteDepthGuard::Depth > kMaxPSpriteStateDepth)
+	{
+		Printf(TEXTCOLOR_RED "Recursive weapon state loop in '%s' -- aborted at depth %d\n",
+			FState::StaticGetStateName(State).GetChars(), FPSpriteDepthGuard::Depth);
+		// Stop this layer rather than the game. Leaving State alone would
+		// let the very next tic walk straight back into the same recursion.
+		State = nullptr;
+		Destroy();
+		return;
+	}
+
 	if (ID == PSP_WEAPON)
 	{ // A_WeaponReady will re-set these as needed
 		Owner->WeaponState &= ~(WF_WEAPONREADY | WF_WEAPONREADYALT | WF_WEAPONBOBBING | WF_WEAPONSWITCHOK | WF_WEAPONRELOADOK | WF_WEAPONZOOMOK |
