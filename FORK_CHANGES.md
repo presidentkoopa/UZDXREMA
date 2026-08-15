@@ -30,6 +30,7 @@ anything else here.
 | [Texture inside the glow](#20-texture-inside-the-glow) | five terms for a lane whose coverage is too high for the wave to help | — |
 | [Billboard hit tests](#22-billboard-hit-tests-two-defects-found-by-their-first-consumer) | **bug fixes** — the group transform moved the picture and not the target, and a hidden panel stayed clickable | — |
 | [Psprite model scale](#23-a-psprites-scale-reaches-the-model-path) | a HUD model can finally be resized from script | — |
+| [Script VR input suppression](#24-script-side-vr-input-suppression) | a mod's own in-world menu can claim the sticks, so snap turn stops firing mid-choice | — |
 
 ---
 
@@ -1106,6 +1107,27 @@ look black anyway. The hue gate is by **dominant channel** rather than a hue
 angle — no `atan`, and it answers the only question being asked: blood is
 red-dominant, nukage is green-dominant.
 
+### The drain itself, scene-global
+
+`Level.SetDesatGlobal(amount)`, `FLevelLocals::DesatGlobal`, carried in the
+**`w` component of `mDesatKeep`** — which the upload site had been writing as a
+literal `0.f`, so this costs no new uniform and no layout change.
+
+`SetDesatKeep` decides what *survives* desaturation. This is how much
+desaturation there is to survive. Until it existed, the only way to grey a map
+from script was to walk every sector and rewrite its colormap byte — which is
+the same per-sector mutation `SetDarkness` (§10) exists to spare a mod, and it
+carries the same costs: it fights anything else that touches sector colour, a
+savegame stores the *modified* values, and switching the effect off means
+restoring every sector by hand rather than passing a zero.
+
+The shader takes `max(uDesaturationFactor, uDesatKeep.w)` rather than adding or
+replacing, so a sector a mapper deliberately drained harder than the global
+stays drained harder, and dropping the global back to 0 restores it exactly.
+
+Clamped in the thunk rather than the shader: a caller passing `2.0` means "as
+grey as possible" and should get that, not a wrapped value.
+
 Threshold 0 skips the whole block and the result is bit-for-bit unchanged.
 
 ---
@@ -1433,6 +1455,52 @@ model gets it.
 `FindModelFrame(psp->Caller, psp->GetSprite(), psp->GetFrame())`. The **Caller**
 is half the key, so swapping only a psprite's sprite leaves a model-drawn weapon
 showing its own model. Script must repoint `Caller` too.
+
+---
+
+## 24. Script-side VR input suppression
+
+`hw_vrmodes.h/.cpp`, `vk_openxrdevice.cpp`, `g_game.cpp`, `vmthunks.cpp`,
+`doombase.zs`.
+
+Snap turn and stick movement are decided deep in the VR input path, long before
+any script sees a button. The native wheel already suppresses both while it is
+open — `VRWheel_ShouldSuppressStickMove`, `VRWheel_ShouldSuppressHandInput` —
+but every one of those lives in C++ with no ZScript reach, and a grep of
+`wadsrc/static/zscript/` for `VRWheel` returns nothing.
+
+So a mod with its own in-world selector had no way to say *the stick is mine
+right now*. Driving a menu with the thumbstick spun and walked the player while
+they were choosing, which is about the most disorienting thing a VR menu can do,
+and no amount of script could stop it.
+
+```
+Level.SuppressVRInput(bool)
+Level.IsVRInputSuppressed()
+```
+
+One flag, checked in the same two places the native wheel is checked:
+
+- **Turning** — `vk_openxrdevice.cpp`, the `if (gameplayMode)` block that owns
+  both analogue smooth turn and the latched snap. Suppressed takes an early
+  branch that also **resets the latches and the analogue rate**, so a stick held
+  over during suppression does not fire the moment it lifts.
+- **Movement** — `g_game.cpp:1117`, ANDed into the existing
+  `VRWheel_ShouldSuppressStickMove()` test rather than replacing it, so the two
+  compose and the native wheel is unaffected.
+
+**Not a cvar, deliberately.** This is transient state, not a preference. A value
+that survived a crash or got archived would leave someone unable to turn with
+nothing to blame — so it is a plain global with no persistence, and the mod that
+sets it is expected to clear it on close, on level end and on death.
+
+Head-driven turning is untouched. Leaning is posture, not input, and freezing it
+is its own kind of wrong — the same reasoning the stick-move comment already
+records at that site.
+
+**Only the Vulkan OpenXR path is gated.** That is what this fork runs. The GL
+OpenXR and OpenVR devices have their own copies of the turn block and would each
+need the same one-line guard.
 
 ---
 

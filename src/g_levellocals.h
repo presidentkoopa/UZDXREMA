@@ -1422,6 +1422,20 @@ public:
 	double   DesatKeepSoft = 0.15;
 	int      DesatKeepHue = 0;   // 0 any, 1 red, 2 green, 3 blue
 
+	// [BB] THE DRAIN, as a scene-global rather than per sector.
+	//
+	// DesatKeep above decides what SURVIVES desaturation. This is the amount
+	// of desaturation there is to survive, and until now the only way to set
+	// it was the sector's own colormap byte -- which meant a mod wanting a
+	// monochrome world had to walk every sector in the map and mutate it,
+	// exactly the way DarkDoomZ had to walk every sector to darken one.
+	//
+	// Same fix as SetDarkness: one number for the frame, applied per fragment.
+	// max()'d against the per-sector factor in the shader rather than
+	// replacing it, so a sector a mapper deliberately drained harder stays
+	// drained harder.
+	double   DesatGlobal = 0;    // 0..1
+
 	PalEntry FogColor2 = 0xffb38059;
 	double   FogColor2Mix = 0;       // 0 = one colour, as before
 

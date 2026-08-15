@@ -154,7 +154,17 @@ vec4 dodesaturate(vec4 texel, float factor)
 
 vec4 desaturate(vec4 texel)
 {
-	return dodesaturate(texel, uDesaturationFactor);
+	// [BB] TWO SOURCES, AND THE STRONGER ONE WINS.
+	//
+	// uDesaturationFactor is the sector's own colormap byte, per draw.
+	// uDesatKeep.w is a scene-global drain a mod can set with one call --
+	// which is the difference between "grey this map" costing one number and
+	// costing a walk over every sector in it.
+	//
+	// max() rather than add or replace: a sector the mapper deliberately
+	// drained harder than the global stays drained harder, and turning the
+	// global off restores it rather than flattening it.
+	return dodesaturate(texel, max(uDesaturationFactor, uDesatKeep.w));
 }
 
 //===========================================================================

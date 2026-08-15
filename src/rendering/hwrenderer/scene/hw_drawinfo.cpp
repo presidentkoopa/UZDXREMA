@@ -523,8 +523,10 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 		VPUniforms.mShapeUnder = { Level->ShapeUnder.r / 255.f,
 			Level->ShapeUnder.g / 255.f, Level->ShapeUnder.b / 255.f, 0.f };
 
+		// w was spare and is now the global drain. See FLevelLocals::DesatGlobal.
 		VPUniforms.mDesatKeep = { (float)Level->DesatKeep,
-			(float)Level->DesatKeepSoft, (float)Level->DesatKeepHue, 0.f };
+			(float)Level->DesatKeepSoft, (float)Level->DesatKeepHue,
+			(float)Level->DesatGlobal };
 		VPUniforms.mGlowTex = { (float)Level->GlowTexNoise,
 			(float)Level->GlowTexScale, (float)Level->GlowTexDrift,
 			(float)Level->GlowTexContrast };

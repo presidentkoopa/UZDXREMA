@@ -28,6 +28,7 @@
 //
 //-----------------------------------------------------------------------------
 
+#include "hw_vrmodes.h"
 #include <time.h>
 #include "vm.h"
 #include "r_defs.h"
@@ -2809,9 +2810,38 @@ EXTERN_CVAR(Float, bb_tiltbias)
 // renderer each frame -- so queries have to use what was last drawn or the
 // pointer disagrees with what the player sees. Everything else just uses pos.
 // Before a billboard's first frame drawPos is still zero, so fall back.
-static inline const DVector3 &BillboardWorldPos(const FBillboard &bb)
+static inline DVector3 BillboardWorldPos(FLevelLocals *self, const FBillboard &bb)
 {
 	if ((bb.flags & BBFL_VIEWLOCKED) && !bb.drawPos.isZero()) return bb.drawPos;
+
+	// [BB] A group scales its members ABOUT ITS ORIGIN, and the renderer moves
+	// the centre as well as the extent (hw_drawinfo.cpp, "lpos = gorigin +
+	// (lpos - gorigin) * gscale"). BillboardQueryScale already mirrors the
+	// extent half of that; this is the other half. Without it a grouped
+	// billboard is hit-tested at full-size offsets with scaled extent, so its
+	// clickable region sits (pos - origin) * (1 - gscale) away from the picture
+	// -- and a wheel that opens with a grow animation is wrong for the whole
+	// animation, which is exactly when the player is already pointing at it.
+	//
+	// View-locked members are excluded on purpose: the renderer scales those in
+	// view-local space before resolving them against the viewpoint, and the
+	// drawPos branch above already carries that result.
+	if (bb.group)
+	{
+		DVector3 gorigin(0, 0, 0);
+		const double gscale = self->BillboardGroupScale(bb.group, 1.0, &gorigin);
+
+		// Attached billboards keep their offset in attachOffset and have their
+		// pos rewritten unscaled every tic (p_tick.cpp), so the offset is what
+		// gets scaled for them -- matching the renderer's lattach.
+		if ((bb.flags & BBFL_ATTACHED) && bb.attachedTo != nullptr)
+		{
+			return bb.attachedTo->Pos() + (gorigin + (bb.attachOffset - gorigin) * gscale);
+		}
+
+		return gorigin + (bb.pos - gorigin) * gscale;
+	}
+
 	return bb.pos;
 }
 
@@ -4166,6 +4196,30 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetDesatKeep, SetDesatKeep)
 	return 0;
 }
 
+// [BB] The DRAIN, as one number for the frame.
+//
+// SetDesatKeep decides what survives desaturation; this is how much
+// desaturation there is to survive. Before it, the only way to grey a map from
+// script was to walk every sector and rewrite its colormap byte -- the same
+// per-sector mutation SetDarkness exists to spare a mod, with the same costs:
+// it fights anything else that touches sector colour, and it has to be undone
+// by hand rather than simply stopped.
+//
+// Clamped here rather than in the shader because a caller passing 2.0 means
+// "as grey as possible" and should get it, not a wrapped value.
+static void SetDesatGlobal(FLevelLocals *self, double amount)
+{
+	self->DesatGlobal = clamp(amount, 0.0, 1.0);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetDesatGlobal, SetDesatGlobal)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(amount);
+	SetDesatGlobal(self, amount);
+	return 0;
+}
+
 static void SetHeatmap(FLevelLocals *self, double scale, int lowCol,
 	int highCol, double ceiling, double decay, double tolerance)
 {
@@ -4867,9 +4921,19 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearSweep, ClearSweep)
 // happened. BBFL_NOHIT is decoration the caller has declared unclickable --
 // the letters painted on a panel, a bar's track -- and without it the nearest
 // hit is always the text rather than the panel it is written on.
-static inline bool BillboardHittable(const FBillboard &bb)
+static inline bool BillboardHittable(FLevelLocals *self, const FBillboard &bb)
 {
-	return bb.id != 0 && (bb.flags & BBFL_NOHIT) == 0;
+	if (bb.id == 0 || (bb.flags & BBFL_NOHIT) != 0) return false;
+
+	// [BB] A group collapsed to zero is the documented way to hide a panel, and
+	// the renderer drops those before they are ever submitted ("if (gscale <=
+	// 0.0) continue"). The queries had no equivalent, and BillboardBasis floors
+	// the scale at 0.01 rather than zero -- so a hidden panel kept a tiny,
+	// invisible hit box sitting at its full-size offset, and could win a hit
+	// against the visible panel in front of it.
+	if (bb.group && self->BillboardGroupScale(bb.group, 1.0) <= 0.0) return false;
+
+	return true;
 }
 
 // [BB] The extent multiplier a query must use, matching the renderer.
@@ -4927,9 +4991,9 @@ static int AimBillboard(FLevelLocals *self, double sx, double sy, double sz,
 
 	for (auto &bb : self->Billboards)
 	{
-		if (!BillboardHittable(bb)) continue;
+		if (!BillboardHittable(self, bb)) continue;
 
-		const DVector3 &bpos = BillboardWorldPos(bb);
+		const DVector3 bpos = BillboardWorldPos(self, bb);
 
 		// Same solver, same cvars, as the renderer. See BillboardBasis.
 		DVector3 right, up, normal;
@@ -4983,9 +5047,9 @@ static int TouchBillboard(FLevelLocals *self, double px, double py, double pz,
 
 	for (auto &bb : self->Billboards)
 	{
-		if (!BillboardHittable(bb)) continue;
+		if (!BillboardHittable(self, bb)) continue;
 
-		const DVector3 &bpos = BillboardWorldPos(bb);
+		const DVector3 bpos = BillboardWorldPos(self, bb);
 
 		DVector3 right, up, normal;
 		double halfw, halfh;
@@ -5056,9 +5120,9 @@ static int SweepBillboard(FLevelLocals *self, double fx, double fy, double fz,
 
 	for (auto &bb : self->Billboards)
 	{
-		if (!BillboardHittable(bb)) continue;
+		if (!BillboardHittable(self, bb)) continue;
 
-		const DVector3 &bpos = BillboardWorldPos(bb);
+		const DVector3 bpos = BillboardWorldPos(self, bb);
 
 		// Resolved against where the hand ENDED, so a camera-facing panel is
 		// tested against the orientation it holds now rather than one it has
@@ -5140,6 +5204,86 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, TouchBillboard, TouchBillboard)
 	if (numret > 1) ret[1].SetVector2(uv);
 	if (numret > 2) ret[2].SetFloat(dist);
 	return min(numret, 3);
+}
+
+// [BB] Let a mod claim the VR sticks while its own selector is open.
+//
+// Snap turn and stick movement are handled deep in the VR input path, long
+// before any script sees a button, so a mod with an in-world menu could not stop
+// the same thumbstick from spinning and walking the player while it was being
+// used to choose something. The native wheel has had this since it was written
+// -- it just had no way out to ZScript.
+//
+// Set on open, clear on close. It is not a cvar on purpose: transient state that
+// survived a crash would leave someone unable to turn with nothing to blame.
+static void SuppressVRInput(FLevelLocals *self, int suppressed)
+{
+	VR_SetScriptInputSuppressed(suppressed != 0);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SuppressVRInput, SuppressVRInput)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_BOOL(suppressed);
+	SuppressVRInput(self, suppressed);
+	return 0;
+}
+
+// [BB] Let a mod turn the laser sight on for as long as its own menu is open.
+//
+// vr_laser_sight and vr_laser_beam are CVAR_ARCHIVE|CVAR_GLOBALCONFIG, and the
+// VM refuses to let script write those outside menu code -- correctly, since a
+// mod quietly rewriting someone's saved settings is exactly what that rule is
+// for. But a script-side in-world menu wants the laser for the duration and
+// then wants it back how it was, which is not a settings change at all.
+//
+// So: an override the renderer consults, layered ON TOP of the cvars without
+// touching them. Nothing is written, nothing is archived, and the player's own
+// preference is still theirs the moment the override is dropped.
+static void ForceVRLaser(FLevelLocals *self, int on)
+{
+	VR_SetScriptLaserForced(on != 0);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ForceVRLaser, ForceVRLaser)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_BOOL(on);
+	ForceVRLaser(self, on);
+	return 0;
+}
+
+// [BB] Terminate the laser at something only script knows about.
+//
+// The engine's trace sees level geometry and actors; a billboard panel is
+// neither, so a laser aimed at one passes through and lands on the wall behind.
+// Script has already hit-tested and knows the distance, so it publishes it
+// rather than teaching the renderer about billboards.
+static void SetVRLaserRange(FLevelLocals *self, double range)
+{
+	VR_SetScriptLaserRange(range);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetVRLaserRange, SetVRLaserRange)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(range);
+	SetVRLaserRange(self, range);
+	return 0;
+}
+
+// Wrapped rather than bound straight to VR_IsScriptInputSuppressed: a direct
+// native has to take the self pointer and return a VM-representable type, and a
+// bare bool() satisfies neither.
+static int IsVRInputSuppressed(FLevelLocals *self)
+{
+	return VR_IsScriptInputSuppressed() ? 1 : 0;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, IsVRInputSuppressed, IsVRInputSuppressed)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	ACTION_RETURN_BOOL(IsVRInputSuppressed(self));
 }
 
 DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, AimBillboard, AimBillboard)

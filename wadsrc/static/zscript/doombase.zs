@@ -748,6 +748,28 @@ struct LevelLocals native
 	// on its face it landed, as 0..1 across and down -- the same UV the shader
 	// sees. Returns 0 on a miss. maxDist <= 0 means unlimited. Call as:
 	//   int hit; Vector2 uv; [hit, uv] = level.AimBillboard(start, dir);
+	// [BB] Claim the VR sticks while a script-side selector is open.
+	//
+	// Snap turn and stick movement are decided deep in the VR input path, before
+	// any script sees a button -- so without this a mod whose menu is driven by
+	// the thumbstick spins and walks the player while they are choosing, which
+	// is the most disorienting thing an in-world menu can do.
+	//
+	// Set true on open, false on close, and clear it on level end or death too:
+	// nothing else will, and a stuck flag is a player who cannot turn.
+	native void SuppressVRInput(bool suppressed);
+
+	// Force the laser sight on for as long as a script-side menu is up. An
+	// override, not a settings change -- the archived cvars are untouched and the
+	// player gets their own preference back the moment it is dropped.
+	native void ForceVRLaser(bool on);
+
+	// Stop the laser at a distance only script knows -- the engine trace cannot
+	// see billboards, so without this the beam passes through the panel it is
+	// selecting. Shortening only; 0 hands the decision back to the engine.
+	native void SetVRLaserRange(double range);
+	native bool IsVRInputSuppressed();
+
 	native int, Vector2 AimBillboard(Vector3 start, Vector3 dir, double maxDist = 0);
 	// Point versus billboard -- the touch case. Returns the nearest billboard
 	// the point is within maxRange of and inside the bounds of, its UV, and
@@ -908,6 +930,10 @@ struct LevelLocals native
 	// hue: 0 any, 1 red-dominant only, 2 green, 3 blue.
 	// threshold 0 restores the old behaviour exactly.
 	native clearscope void SetDesatKeep(double threshold, double soft, int hue);
+
+	// The drain itself, scene-global. SetDesatKeep decides what survives it.
+	// 0 leaves desaturation entirely to the sector colormaps, as before.
+	native clearscope void SetDesatGlobal(double amount);
 
 	// [BB] THE HEATMAP -- where the fighting happened, accumulated over the
 	// whole life of a map and drawn on the floor. A grid rather than a slot
