@@ -89,6 +89,7 @@ enum MaterialShaderIndex
 	SHADER_Segment,
 	SHADER_Seam,
 	SHADER_WG13,
+	SHADER_SDFPanel,
 	FIRST_USER_SHADER
 };
 

@@ -2281,6 +2281,21 @@ void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double
 		emit(0.0, 0.0, halfw, halfh, GetBillboardShape("bbpanel"), tint, FBillboardUV());
 		return;
 
+	// [BB] The same plate solved as a field. Samples nothing -- bbwhite is
+	// handed over only because a valid texture has to be bound -- and the
+	// shader owns the whole shape, so the corner, the border and the halo all
+	// come out of one distance test.
+	case BB_SDFPANEL:
+	{
+		FGameTexture* white = GetBillboardShape("bbwhite");
+		if (white == nullptr) return;
+		const int savedPanel = OverrideShader;
+		OverrideShader = SHADER_SDFPanel;
+		emit(0.0, 0.0, halfw, halfh, white, tint, FBillboardUV());
+		OverrideShader = savedPanel;
+		return;
+	}
+
 	case BB_RING:
 		emit(0.0, 0.0, halfw, halfh, GetBillboardShape("bbring"), tint, FBillboardUV());
 		return;
@@ -2585,7 +2600,19 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 			// overwrites blue per quad with its character mask, which is fine --
 			// nothing is both a seam and a character.
 			const int vd = (bb->flags & BBFL_VOID) ? 255 : 0;
-			bbGlow = PalEntry(255, (uint8_t)gr, (uint8_t)gs, (uint8_t)vd);
+
+			// [BB] ALPHA carries BB_SDFPANEL's corner radius and border width,
+			// a nibble each. It is the only channel left -- rgb are spoken for
+			// above -- and it was free: nothing downstream reads uAddColor.a.
+			// Every other payload keeps the 255 it has always had.
+			int alpha = 255;
+			if (bb->payload == BB_SDFPANEL)
+			{
+				const int rad = clamp((bb->data >> 0) & 0xFF, 0, 15);
+				const int bor = clamp((bb->data >> 8) & 0xFF, 0, 15);
+				alpha = (rad << 4) | bor;
+			}
+			bbGlow = PalEntry((uint8_t)alpha, (uint8_t)gr, (uint8_t)gs, (uint8_t)vd);
 		}
 		else
 		{

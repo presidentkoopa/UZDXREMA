@@ -1114,7 +1114,7 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 		// player at the same time. Head-driven movement is left alone -- leaning
 		// is posture, not input, and freezing it in place would be its own kind
 		// of wrong.
-		if ((!vr_teleport || !multiplayer) && !VRWheel_ShouldSuppressStickMove())
+		if ((!vr_teleport || !multiplayer) && !VRWheel_ShouldSuppressStickMove() && !VR_IsScriptInputSuppressed())
 		{
 			VR_ApplyStickMove(forwardmove[speed], sidemove[speed], joyforward, joyside, forward, side);
 		}

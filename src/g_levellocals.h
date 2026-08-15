@@ -125,6 +125,21 @@ enum EBillboardPayload
 	// what lets the digits punch to black out of the plate. data = the number.
 	// Drive `progress` to open it. Digits only; letters are BB_SEGMENT.
 	BB_WG13    = 10,
+	// [BB] BB_PANEL's job, done as a distance field instead of a sampled
+	// texture. Same rounded rect, but the edge is solved per pixel, so it is
+	// crisp at any size and -- the actual reason it exists -- it can take
+	// SetBillboardGlow, because a halo needs a field to read past the edge and
+	// a sampled plate has none.
+	//
+	// Deliberately a SECOND payload rather than a change to BB_PANEL: the two
+	// look different, one is cheaper, and a caller should get to pick. Numbered
+	// above BB_TEXT so it lands inside the `payload >= BB_TEXT` gate that packs
+	// the halo -- that gate is what stopped the sampled payloads carrying a
+	// glow into a shader with no idea what one is.
+	//
+	// data byte0 = corner radius 0-255 across the half-extent, byte1 = border
+	// width in the same units; 0 border draws a plain filled plate.
+	BB_SDFPANEL = 11,
 };
 
 // [BB] How a billboard decides which way it points. Facing is a MODE, not
@@ -186,6 +201,12 @@ struct FBillboard
 	double   height = 32.0;
 	double   yaw = 0.0;            // design space: which way the face points
 	double   tilt = 0.0;           // design space: 0 = vertical, + leans the top toward the viewer
+
+	// [BB] Spin in the quad's own plane, degrees, clockwise seen from in front.
+	// Independent of facing: a BBF_CAMERA billboard still rolls, because the
+	// camera solve decides where the face POINTS and roll decides which way is
+	// up on it. See BillboardBasis.
+	double   roll = 0.0;
 	int      facing = BBF_FIXED;   // EBillboardFacing
 	int      payload = 0;          // EBillboardPayload
 	int      data = 0;             // payload-specific packed int
@@ -388,6 +409,29 @@ inline void BillboardBasis(const FBillboard &bb, const DVector3 &bpos, const DVe
 	right = DVector3(-sy, cy, 0.0);
 	up = DVector3(-cy * st, -sy * st, ct);
 	normal = right ^ up;
+
+	// [BB] ROLL -- the third axis, spin in the quad's own plane.
+	//
+	// Yaw and tilt aim a billboard; neither can turn its face. A card that
+	// tumbles as it arrives, a dial, a readout that rotates to stay level --
+	// all of them wanted an angle that did not exist.
+	//
+	// Applied here rather than in the vertex builder ON PURPOSE. This function
+	// is the single basis shared by the renderer AND by AimBillboard,
+	// TouchBillboard and SweepBillboard, so a rolled billboard is pointable
+	// exactly where it is drawn. Rolling in the renderer alone would have made
+	// every rolled panel silently un-hittable at its visible corners -- the
+	// same class of bug as the group transform in section 22.
+	//
+	// A rotation about the normal leaves the normal alone, so it is untouched.
+	if (bb.roll != 0.0)
+	{
+		const double rollRad = bb.roll * DEG2RAD;
+		const double cr = cos(rollRad), sr = sin(rollRad);
+		const DVector3 r0 = right, u0 = up;
+		right = r0 * cr + u0 * sr;
+		up    = u0 * cr - r0 * sr;
+	}
 
 	double g = scale > 0.01 ? scale : 0.01;
 	halfw = bb.width * 0.5 * g;

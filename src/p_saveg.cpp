@@ -90,6 +90,11 @@ FSerializer &Serialize(FSerializer &arc, const char *key, FBillboard &bb, FBillb
 			("height", bb.height)
 			("yaw", bb.yaw)
 			("tilt", bb.tilt)
+			// The third angle. Same reason the font is here: a reloaded panel
+			// that lost its roll comes back upright, and since roll is in the
+			// SHARED basis it would also be hittable somewhere other than where
+			// the save left it.
+			("roll", bb.roll)
 			("facing", bb.facing)
 			("payload", bb.payload)
 			("data", bb.data)

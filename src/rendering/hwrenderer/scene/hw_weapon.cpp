@@ -87,6 +87,7 @@ EXTERN_CVAR(Float, vr_laser_source_offset_z)
 EXTERN_CVAR(Float, vr_laser_beam_glow)
 EXTERN_CVAR(Float, vr_laser_beam_emissive)
 EXTERN_CVAR(Float, vr_laser_beam_taper)
+EXTERN_CVAR(Float, vr_laser_beam_fade)
 EXTERN_CVAR(Bool, vr_laser_lock)
 EXTERN_CVAR(Float, vr_laser_lock_tighten)
 EXTERN_CVAR(Float, vr_laser_lock_rate)
@@ -670,6 +671,27 @@ static bool GetLaserBeamEndpoints(player_t* player, AActor* weapon, bool offhand
 		break;
 	}
 
+	// [BB] A script-side in-world menu can terminate the beam at whatever it is
+	// pointing at.
+	//
+	// The trace above only knows about level geometry and actors, so a laser aimed
+	// at a billboard panel shoots straight through it and stops on the wall
+	// behind -- which reads as the beam ignoring the very thing it is selecting.
+	// Script already knows that distance, having just hit-tested for it, so it
+	// hands it over rather than the engine learning about billboards.
+	//
+	// Shortening only. It can never make the beam longer than the world allows,
+	// so this cannot be used to shoot a laser through a wall.
+	//
+	// Only the hand that asked for it. The other hand may have a perfectly
+	// ordinary laser sight running off the player's own cvars, and cutting that
+	// short at the menu's arm's-length distance would be baffling.
+	const double scriptRange = VR_IsScriptLaserForcedFor(offhand) ? VR_GetScriptLaserRange() : 0.0;
+	if (scriptRange > 0.0)
+	{
+		visibleDistance = std::min(visibleDistance, scriptRange);
+	}
+
 	if (beamDistance <= 0.01)
 	{
 		points.BeamEnd = points.Start;
@@ -842,6 +864,33 @@ static void DrawLaserBeamGeometry(FRenderState& state, const DVector3& beamStart
 			// sight remains a precise thing to aim with, which is its job.
 			const float kTaperStart = std::clamp<float>(vr_laser_beam_taper, 0.05f, 1.0f);
 
+			// FADED ALONG ITS LENGTH, which is the part that was missing.
+			//
+			// Every pass used to be ONE triangle strip drawn at ONE colour, so
+			// the beam was exactly as bright two thousand units out as it was
+			// at the muzzle -- a bar bolted to the gun rather than a sight.
+			// kTaperStart above only ever narrowed the halo, and the core, the
+			// bright line you actually look at, never changed at all.
+			//
+			// The strip is now cut into steps along its length and each step
+			// is drawn a little dimmer, so the beam runs out instead of either
+			// continuing forever or stopping dead in mid-air the way
+			// vr_laser_beam_length 2 does.
+			//
+			// ALPHA IS A FUNCTION OF DISTANCE, NOT OF THE FRACTION DRAWN. A
+			// beam that ends early because it hit a near wall must arrive at
+			// that wall at full strength; only a LONG beam should be faint at
+			// its far end. Driving the falloff off t would fade every short
+			// beam to nothing over a few feet.
+			const double fadeLen = std::max(0.0f, (float)vr_laser_beam_fade);
+			const bool   fading  = fadeLen > 1.0;
+			const double drawLen = fading ? std::min(beamLength, fadeLen) : beamLength;
+
+			// Eight is enough for additive blending to read as smooth; the
+			// tail steps drop out under the alpha test below, so a beam that
+			// fades early costs fewer draws, not more.
+			constexpr int kLengthSteps = 8;
+
 			for (const BeamPass& pass : passes)
 			{
 				const float passAlpha = std::clamp(beamAlpha * pass.alpha, 0.0f, 1.0f);
@@ -852,7 +901,13 @@ static void DrawLaserBeamGeometry(FRenderState& state, const DVector3& beamStart
 
 				// Only a fully opaque CORE draws as solid; the halo is always
 				// additive or it would punch a flat disc through the world.
-				state.SetRenderStyle((isCore && beamOpaque) ? STYLE_Source : STYLE_Add);
+				//
+				// AND NOT EVEN THE CORE WHILE FADING -- STYLE_Source writes the
+				// colour flat and ignores the alpha it is handed, so an opaque
+				// core would be the one part of the beam that refused to fade,
+				// leaving a hard line inside a fading glow.
+				const bool solidCore = isCore && beamOpaque && !fading;
+				state.SetRenderStyle(solidCore ? STYLE_Source : STYLE_Add);
 
 				// OVERBRIGHT THE CORE PAST WHITE so the bloom pass picks it
 				// up. The scene target is half-float HDR and the bloom
@@ -860,30 +915,52 @@ static void DrawLaserBeamGeometry(FRenderState& state, const DVector3& beamStart
 				// -- emissive glow with no light in the light list. Core
 				// only: an overbright halo would haze the whole view.
 				const float em = isCore ? std::max(1.0f, (float)vr_laser_beam_emissive) : 1.0f;
-				state.SetColor(RPART(beamColor) / 255.0f * em, GPART(beamColor) / 255.0f * em,
-					BPART(beamColor) / 255.0f * em, passAlpha);
 
 				const float rEnd   = beamRadius * pass.radius;
 				const float rStart = isCore ? rEnd : rEnd * kTaperStart;
 
-				screen->mVertexData->Map();
-				auto verts = screen->mVertexData->AllocVertices(vertexCount);
-				auto vp = verts.first;
-				for (int i = 0; i <= beamSegments; ++i)
+				for (int s = 0; s < kLengthSteps; ++s)
 				{
-					const double t = (double)i / (double)beamSegments;
-					const double ang = t * 6.28318530717958647692;
-					const double cs = std::cos(ang);
-					const double sn = std::sin(ang);
-					const DVector3 dir = beamRight * cs + beamUp * sn;
-					const DVector3 startPos = beamStart + dir * rStart;
-					const DVector3 endPos = beamTarget + dir * rEnd;
-					vp[i * 2 + 0].Set((float)startPos.X, (float)startPos.Z, (float)startPos.Y, 0.0f, 0.0f);
-					vp[i * 2 + 1].Set((float)endPos.X, (float)endPos.Z, (float)endPos.Y, 0.0f, 1.0f);
-				}
-				screen->mVertexData->Unmap();
+					const double t0 = (double)s / (double)kLengthSteps;
+					const double t1 = (double)(s + 1) / (double)kLengthSteps;
 
-				state.Draw(DT_TriangleStrip, verts.second, vertexCount, true);
+					float stepAlpha = passAlpha;
+					if (fading)
+					{
+						const double mid = drawLen * 0.5 * (t0 + t1);
+						stepAlpha = passAlpha *
+							(float)std::clamp(1.0 - mid / fadeLen, 0.0, 1.0);
+					}
+					if (stepAlpha <= 0.002f)
+						continue;
+
+					state.SetColor(RPART(beamColor) / 255.0f * em, GPART(beamColor) / 255.0f * em,
+						BPART(beamColor) / 255.0f * em, stepAlpha);
+
+					const double r0 = rStart + (rEnd - rStart) * t0;
+					const double r1 = rStart + (rEnd - rStart) * t1;
+					const DVector3 p0 = beamStart + beamVec * (drawLen * t0);
+					const DVector3 p1 = beamStart + beamVec * (drawLen * t1);
+
+					screen->mVertexData->Map();
+					auto verts = screen->mVertexData->AllocVertices(vertexCount);
+					auto vp = verts.first;
+					for (int i = 0; i <= beamSegments; ++i)
+					{
+						const double t = (double)i / (double)beamSegments;
+						const double ang = t * 6.28318530717958647692;
+						const double cs = std::cos(ang);
+						const double sn = std::sin(ang);
+						const DVector3 dir = beamRight * cs + beamUp * sn;
+						const DVector3 startPos = p0 + dir * r0;
+						const DVector3 endPos = p1 + dir * r1;
+						vp[i * 2 + 0].Set((float)startPos.X, (float)startPos.Z, (float)startPos.Y, 0.0f, 0.0f);
+						vp[i * 2 + 1].Set((float)endPos.X, (float)endPos.Z, (float)endPos.Y, 0.0f, 1.0f);
+					}
+					screen->mVertexData->Unmap();
+
+					state.Draw(DT_TriangleStrip, verts.second, vertexCount, true);
+				}
 			}
 		}
 	}
@@ -1179,7 +1256,12 @@ void DrawHitscanTracers(FRenderState& state)
 
 void DrawLaserSightWorld(FRenderState& state)
 {
-	if (!vr_laser_sight && !vr_laser_beam && !vr_laser_other_players_beam && !vr_laser_other_players_pointer)
+	// [BB] VR_IsScriptLaserForced lets a script-side in-world menu switch the laser
+	// on for its duration without writing to these archived cvars -- the VM refuses
+	// those writes, and rewriting a player's saved settings to draw a line for four
+	// seconds would be wrong even if it did not.
+	const bool scriptLaser = VR_IsScriptLaserForced();
+	if (!scriptLaser && !vr_laser_sight && !vr_laser_beam && !vr_laser_other_players_beam && !vr_laser_other_players_pointer)
 	{
 		return;
 	}
@@ -1207,15 +1289,22 @@ void DrawLaserSightWorld(FRenderState& state)
 			return;
 		}
 
+		// [BB] A script menu worn on this hand needs the pointer no matter what
+		// the hand is holding. Both gates below ask "is this hand worth drawing a
+		// laser for", and for a cursor the answer is always yes -- an EMPTY off
+		// hand hits the first one, which is precisely the hand an off-hand menu
+		// is most likely to be worn on.
+		const bool forcedHere = VR_IsScriptLaserForcedFor(offhand);
+
 		AActor* weapon = offhand ? player->OffhandWeapon : player->ReadyWeapon;
 		if (weapon == nullptr)
 		{
-			if (!vr_laser_show_melee)
+			if (!vr_laser_show_melee && !forcedHere)
 			{
 				return;
 			}
 		}
-		else if (!vr_laser_show_melee && (weapon->IntVar(NAME_WeaponFlags) & WIF_MELEEWEAPON))
+		else if (!vr_laser_show_melee && !forcedHere && (weapon->IntVar(NAME_WeaponFlags) & WIF_MELEEWEAPON))
 		{
 			return;
 		}
@@ -1230,8 +1319,12 @@ void DrawLaserSightWorld(FRenderState& state)
 		}
 	};
 
-	drawHand(player, false, !!vr_laser_sight, !!vr_laser_beam);
-	drawHand(player, true, !!vr_laser_sight, !!vr_laser_beam);
+	// Asked per hand, so the forced pointer lands on the hand wearing the menu
+	// and the other hand keeps whatever the player's own cvars say it should have.
+	drawHand(player, false, VR_IsScriptLaserForcedFor(false) || !!vr_laser_sight,
+	                        VR_IsScriptLaserForcedFor(false) || !!vr_laser_beam);
+	drawHand(player, true,  VR_IsScriptLaserForcedFor(true)  || !!vr_laser_sight,
+	                        VR_IsScriptLaserForcedFor(true)  || !!vr_laser_beam);
 
 	if (multiplayer && (vr_laser_other_players_beam || vr_laser_other_players_pointer))
 	{

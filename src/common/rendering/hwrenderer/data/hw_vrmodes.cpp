@@ -765,6 +765,22 @@ CVAR(Float, vr_laser_beam_emissive, 1.8f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 // the part you aim with.
 CVAR(Float, vr_laser_beam_taper, 0.45f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 
+// HOW FAR THE BEAM STAYS VISIBLE, in world units, fading to nothing as it
+// goes. Past this there is only the dot on whatever you are pointing at.
+//
+// THIS IS THE ONE THAT MAKES IT A SIGHT RATHER THAN A ROD. vr_laser_beam_taper
+// above only narrows the halo, and it narrows it at the MUZZLE -- nothing in
+// the beam ever dimmed with distance, so a laser aimed down a corridor drew a
+// line of identical brightness for two thousand units and read as a solid bar
+// bolted to the gun.
+//
+// vr_laser_beam_length 2 already offered a hard cutoff, but a beam that simply
+// stops in mid-air looks broken. This ends it the way a real one ends: it runs
+// out.
+//
+// 0 disables the fade entirely and restores the old full-length beam.
+CVAR(Float, vr_laser_beam_fade, 512.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
 // The lock: does the sight react when it is resting on something alive.
 CVAR(Bool, vr_laser_lock, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 
@@ -1491,4 +1507,94 @@ ADD_STAT(vrstats)
 	out.AppendFormat("gamestate:%d - menuactive:%d - paused:%d", gamestate, menuactive, paused);
 
 	return out;
+}
+
+// [BB] Script-side VR input suppression -- see the note in hw_vrmodes.h.
+//
+// A plain global rather than a cvar because it is transient: a mod sets it while
+// its selector is open and clears it on close, and a value that outlived a crash
+// would leave the player unable to turn with no way to find out why.
+static bool g_scriptVRInputSuppressed = false;
+
+void VR_SetScriptInputSuppressed(bool suppressed)
+{
+	g_scriptVRInputSuppressed = suppressed;
+}
+
+bool VR_IsScriptInputSuppressed()
+{
+	return g_scriptVRInputSuppressed;
+}
+
+// [BB] Script-forced laser sight -- see the note in vmthunks.cpp.
+//
+// An override rather than a cvar write: vr_laser_sight is archived, and a mod
+// that wrote to it would be editing the player's saved settings to draw a line
+// for four seconds.
+// Per-hand, because an in-world menu is worn on ONE hand. Forcing both lit the
+// hand still holding a gun with a beam clamped to the menu's distance -- a
+// second pointer, in the wrong place, doing nothing.
+static bool g_scriptLaserForced = false;
+static int  g_scriptLaserHand = -1;   // -1 both, 0 main, 1 off
+
+void VR_SetScriptLaserForced(bool forced, int hand)
+{
+	g_scriptLaserForced = forced;
+	g_scriptLaserHand = forced ? hand : -1;
+}
+
+bool VR_IsScriptLaserForced()
+{
+	return g_scriptLaserForced;
+}
+
+bool VR_IsScriptLaserForcedFor(bool offhand)
+{
+	if (!g_scriptLaserForced) return false;
+	if (g_scriptLaserHand < 0) return true;
+	return g_scriptLaserHand == (offhand ? 1 : 0);
+}
+
+// [BB] Script-supplied laser termination distance. 0 means "no opinion".
+//
+// Republished every frame by whoever wants it, the same way the volumetric beam
+// is: a value left behind by a menu that closed would clamp the player's laser
+// for the rest of the session with nothing to point at.
+static double g_scriptLaserRange = 0.0;
+
+void VR_SetScriptLaserRange(double range)
+{
+	g_scriptLaserRange = range;
+}
+
+double VR_GetScriptLaserRange()
+{
+	return g_scriptLaserRange;
+}
+
+// [BB] Script-requested haptic pulse -- see the note in hw_vrmodes.h.
+//
+// The handedness swap is the whole reason this exists rather than exposing
+// Vibrate directly: Vibrate's channel is a PHYSICAL side (0 left, 1 right),
+// while everything script-facing is addressed as main/off. Getting that
+// backwards buzzes the wrong wrist, which is a maddening thing to debug because
+// it still works -- just on the other arm. Same swap the native wheel does in
+// hw_vrwheel.cpp.
+void VR_ScriptHaptic(int hand, double intensity, double durationMs)
+{
+	const VRMode *vrmode = VRMode::GetVRModeCached();
+	if (vrmode == nullptr) return;
+
+	if (hand != VR_MAINHAND && hand != VR_OFFHAND) hand = VR_MAINHAND;
+
+	const bool rightHanded = vr_control_scheme < 10;
+	const int channel = rightHanded ? (hand == VR_MAINHAND ? 1 : 0) : hand;
+
+	// Clamped rather than trusted. A script asking for a two-second pulse at
+	// full strength is a script with a bug, and the controller has no way to
+	// refuse it.
+	const float amp = (float)clamp(intensity, 0.0, 1.0);
+	const float ms  = (float)clamp(durationMs, 0.0, 500.0);
+
+	vrmode->Vibrate(ms, channel, amp);
 }

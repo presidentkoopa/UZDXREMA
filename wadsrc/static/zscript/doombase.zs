@@ -578,6 +578,20 @@ struct LevelLocals native
 		// halfW = halfH * (0.60 + digits * 0.42). Square dimensions give a
 		// circle, which is not what it is meant to be.
 		BB_WG13    = 10,
+		// BB_PANEL's job as a distance field rather than a sampled texture.
+		// Crisp at any size, and -- the reason it exists -- it can take
+		// SetBillboardGlow, which a sampled plate structurally cannot: a halo
+		// needs a field to read past the shape's edge and a texture has none.
+		//
+		// Both exist and the caller picks. Sampling one small texture is
+		// cheaper than solving two distance fields, so a ring of background
+		// plates nobody looks closely at should stay BB_PANEL.
+		//
+		// data packs the shape: byte 0 = corner radius 0-15, byte 1 = border
+		// width 0-15, each across the half-extent. Border 0 is a plain plate.
+		// BBFL_VOID turns it into a hole -- dark inside, only the rim lit --
+		// exactly as it does on BB_SEAM.
+		BB_SDFPANEL = 11,
 	}
 
 	enum EBillboardFacing
@@ -710,6 +724,16 @@ struct LevelLocals native
 	}
 	native void MoveBillboard(int id, Vector3 pos);
 	native void OrientBillboard(int id, double yaw, double tilt, int facing);
+	// Spin in the quad's own plane, degrees. Yaw and tilt aim a billboard;
+	// roll turns its face. Independent of facing, so a camera-facing panel
+	// still rolls -- the camera solve decides where the face points, roll
+	// decides which way is up on it.
+	//
+	// Lives in the SHARED basis, so a rolled billboard is pointable exactly
+	// where it is drawn: AimBillboard, TouchBillboard and SweepBillboard all
+	// see the rotation. Its own setter rather than a fourth argument to
+	// OrientBillboard, which is called every tic by everything.
+	native void RollBillboard(int id, double roll);
 	native void ResizeBillboard(int id, double w, double h);
 	// 0 = invisible, 1 = opaque. Separate from UpdateBillboard because a fade
 	// runs every tic while data and colour rarely change.

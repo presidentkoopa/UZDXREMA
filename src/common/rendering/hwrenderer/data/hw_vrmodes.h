@@ -178,6 +178,48 @@ struct VRMode
 };
 
 void VR_HapticEvent(const char* event, int position, int intensity, float angle, float yHeight );
+
+// [BB] Script-side VR input suppression.
+//
+// The native wheel already suppresses turning and stick movement while it is
+// open (VRWheel_ShouldSuppressStickMove and friends), but every one of those
+// lives in C++ with no ZScript reach -- so a mod that puts its own selector in
+// the world has no way to say "the stick is mine right now", and snap turn
+// fires while you are trying to pick something with it.
+//
+// One flag, set and cleared by script, checked in the same two places the
+// native wheel is checked. Deliberately not a cvar: it is transient state, not
+// a preference, and it must not survive a crash or end up archived.
+void VR_SetScriptInputSuppressed(bool suppressed);
+bool VR_IsScriptInputSuppressed();
+
+// [BB] A script-side menu can force the laser sight on for its duration without
+// writing to the archived cvars that normally control it.
+//
+// hand: -1 both, 0 main, 1 off. A menu worn on one hand wants a pointer on that
+// hand only -- forcing both put a second beam on the hand still holding a gun.
+// While forced, that hand's laser also ignores the empty-hand and melee-weapon
+// gates: the pointer is the menu's cursor, and whether the hand happens to be
+// holding a shotgun or nothing at all has no bearing on needing one.
+void VR_SetScriptLaserForced(bool forced, int hand = -1);
+bool VR_IsScriptLaserForced();
+bool VR_IsScriptLaserForcedFor(bool offhand);
+
+// [BB] Where the laser should stop, in map units. 0 means the engine decides.
+// Set by a script menu so the beam ends at the panel it is selecting rather than
+// passing through it. Shortening only.
+void VR_SetScriptLaserRange(double range);
+double VR_GetScriptLaserRange();
+
+// [BB] A haptic pulse a script can ask for, addressed by ABSTRACT hand
+// (VR_MAINHAND / VR_OFFHAND) rather than physical side -- the handedness swap
+// that Vibrate's channel argument needs is done here, once, instead of in every
+// caller. Duration is milliseconds, intensity 0..1; both are clamped.
+//
+// Note that VR_HapticEvent, which the playsim calls in a dozen places, is an
+// empty stub on this platform. VRMode::Vibrate is the path that actually
+// reaches the controller.
+void VR_ScriptHaptic(int hand, double intensity, double durationMs);
 void QzDoom_GetScreenRes(uint32_t *width, uint32_t *height);
 
 extern bool weaponStabilised;

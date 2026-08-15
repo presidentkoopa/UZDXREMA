@@ -1,3 +1,5 @@
+#include "hw_vrmodes.h"
+#include "hw_vrwheel.h"
 #include "vk_openxrdevice.h"
 
 #include "common/rendering/stereo3d/openxr/oxr_loader.h"
@@ -3167,7 +3169,28 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		? handInput[turnHand].trackpad
 		: handInput[turnHand].thumbstick;
 
-		if (gameplayMode)
+		// [BB] Script can claim the stick. While a mod's in-world selector is
+		// open the same thumbstick is picking an item, and snap turn firing
+		// underneath it spins the player mid-choice -- which is the single most
+		// disorienting thing a VR menu can do.
+		//
+		// The latches are reset rather than merely skipped: a stick held over
+		// during suppression must not fire the instant it lifts.
+		// VRWheel_ShouldSuppressStickMove covers the ENGINE's own wheel, which
+		// turns out to have had this bug too: nothing in this file ever mentioned
+		// VRWheel, so its stick-selection mode has always been snap-turning the
+		// player while they picked a weapon with the same thumb.
+		//
+		// That function is deliberately narrow -- true only while a wheel is
+		// actually being driven by the stick -- so pointer-mode wheels keep their
+		// turning, which is right: the stick is free in that mode and there is
+		// nothing to fight.
+		if (gameplayMode && (VR_IsScriptInputSuppressed() || VRWheel_ShouldSuppressStickMove()))
+		{
+			analogTurnRateDegPerSec = 0.0f;
+			lastAnalogTurnTime = 0;
+		}
+		else if (gameplayMode)
 		{
 			static bool turnRightLatched[2] = { false, false };
 			static bool turnLeftLatched[2] = { false, false };

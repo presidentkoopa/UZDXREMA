@@ -36,6 +36,8 @@
 #include "v_2ddrawer.h"
 #include "i_specialpaths.h"
 #include "cmdlib.h"
+#include "printf.h"
+#include <cstdio>
 
 VkRenderPassManager::VkRenderPassManager(VulkanRenderDevice* fb) : fb(fb)
 {
@@ -63,7 +65,41 @@ VkRenderPassManager::VkRenderPassManager(VulkanRenderDevice* fb) : fb(fb)
 	{
 	}
 
-	PipelineCache = builder.Create(fb->device.get());
+	// [BB] A BAD CACHE MUST NOT BE FATAL.
+	//
+	// This is a CACHE. Every byte of it is regenerable, it exists only to save
+	// shader compile time on startup, and losing it costs a few seconds once --
+	// so refusing to launch over one is the worst possible response to it going
+	// wrong.
+	//
+	// And it does go wrong. The builder already checks the header's version,
+	// vendor, device and UUID before handing the data to the driver, so a blob
+	// from another GPU is rejected safely. What that check cannot see is a body
+	// that was truncated by a crash during shutdown: the header still validates,
+	// the data goes in, and vkCreatePipelineCache comes back VK_ERROR_UNKNOWN
+	// (-13). The engine then died on the spot, at Vulkan init, before a single
+	// lump was read -- which looks exactly like a broken build and sends you
+	// looking at everything except a file in AppData.
+	//
+	// Retry once with no initial data, which is the same thing that happens on a
+	// first run and is always valid.
+	try
+	{
+		PipelineCache = builder.Create(fb->device.get());
+	}
+	catch (const std::exception& e)
+	{
+		Printf(TEXTCOLOR_YELLOW "Pipeline cache rejected (%s); rebuilding it.\n", e.what());
+
+		// Delete it rather than leave it to fail again next launch, and do that
+		// BEFORE the retry -- if the retry somehow throws too, the bad file is
+		// still gone and the next start is clean.
+		remove(CacheFilename.GetChars());
+
+		PipelineCacheBuilder fresh;
+		fresh.DebugName("PipelineCache");
+		PipelineCache = fresh.Create(fb->device.get());
+	}
 }
 
 VkRenderPassManager::~VkRenderPassManager()

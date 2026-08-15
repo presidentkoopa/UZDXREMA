@@ -3294,6 +3294,30 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, OrientBillboard, OrientBillboard)
 	return 0;
 }
 
+// [BB] The third angle, on its own.
+//
+// NOT a fourth argument to OrientBillboard: that call is made every tic by
+// everything that orients anything, and widening it would have meant editing
+// every existing call site to pass a value almost all of them do not care
+// about. Roll is also changed on a completely different schedule -- a card
+// tumbles once on arrival and then holds at zero forever -- so paying for it
+// in the per-tic call would be backwards.
+static void RollBillboard(FLevelLocals *self, int id, double roll)
+{
+	FBillboard *bb = FindBillboardByID(self, id);
+	if (bb == nullptr) return;
+	bb->roll = roll;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, RollBillboard, RollBillboard)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(id);
+	PARAM_FLOAT(roll);
+	RollBillboard(self, id, roll);
+	return 0;
+}
+
 static void ResizeBillboard(FLevelLocals *self, int id, double w, double h)
 {
 	FBillboard *bb = FindBillboardByID(self, id);
@@ -5240,16 +5264,21 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SuppressVRInput, SuppressVRInput)
 // So: an override the renderer consults, layered ON TOP of the cvars without
 // touching them. Nothing is written, nothing is archived, and the player's own
 // preference is still theirs the moment the override is dropped.
-static void ForceVRLaser(FLevelLocals *self, int on)
+//
+// hand is -1 for both, 0 for the main hand, 1 for the off hand. A menu worn on
+// one hand only wants a cursor on that hand; forcing both drew a second beam
+// from the hand still holding a gun.
+static void ForceVRLaser(FLevelLocals *self, int on, int hand)
 {
-	VR_SetScriptLaserForced(on != 0);
+	VR_SetScriptLaserForced(on != 0, hand);
 }
 
 DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ForceVRLaser, ForceVRLaser)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
 	PARAM_BOOL(on);
-	ForceVRLaser(self, on);
+	PARAM_INT(hand);
+	ForceVRLaser(self, on, hand);
 	return 0;
 }
 
@@ -5269,6 +5298,30 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetVRLaserRange, SetVRLaserRange)
 	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
 	PARAM_FLOAT(range);
 	SetVRLaserRange(self, range);
+	return 0;
+}
+
+// [BB] Buzz a controller from script.
+//
+// The engine has full per-hand OpenXR haptics -- bound for Touch, Index, Vive
+// and the simple profile -- and script had no way to reach any of it. An
+// in-world menu without haptics is a picture of a menu; one tick per hover is
+// the difference between reading a ring and feeling one.
+//
+// VR_HapticEvent, which the playsim already calls in a dozen places, is an
+// empty stub here, so it was not an option to route through.
+static void VRHaptic(FLevelLocals *self, int hand, double intensity, double durationMs)
+{
+	VR_ScriptHaptic(hand, intensity, durationMs);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, VRHaptic, VRHaptic)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(hand);
+	PARAM_FLOAT(intensity);
+	PARAM_FLOAT(durationMs);
+	VRHaptic(self, hand, intensity, durationMs);
 	return 0;
 }
 

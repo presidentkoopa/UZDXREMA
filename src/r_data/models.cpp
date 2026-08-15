@@ -241,8 +241,25 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 		fovscale = 1.f + (fovscale - 1.f) * cl_scaleweaponfov;
 	}
 
+	// [BB] The psprite's own scale reaches the MODEL path, not just the sprite
+	// one.
+	//
+	// psp->scale was read only by the 2D weapon-sprite code, so a mod that
+	// shrank a psprite saw nothing happen to a weapon drawn as a model -- and
+	// there was no other way to resize one from script at all.
+	//
+	// It defaults to (0,0) and the sprite path already treats that as "unset"
+	// (hw_weapon.cpp tests scale.isZero()), so this is a free channel: zero
+	// leaves every existing model exactly as it was, and no content that does
+	// not opt in can be affected.
+	//
+	// X alone, applied uniformly. A model scaled unevenly on two axes shears
+	// rather than resizes, and "half size" is one number in every caller's head.
+	float pspScale = 1.0f;
+	if (!psp->scale.isZero()) pspScale = (float)psp->scale.X;
+
 	// Scaling model (y scale for a sprite means height, i.e. z in the world!).
-	objectToWorldMatrix.scale(smf->xscale, smf->zscale, smf->yscale / fovscale);
+	objectToWorldMatrix.scale(smf->xscale * pspScale, smf->zscale * pspScale, (smf->yscale / fovscale) * pspScale);
 
 	// Aplying model offsets (model offsets do not depend on model scalings).
 	objectToWorldMatrix.translate(smf->xoffset / smf->xscale, smf->zoffset / smf->zscale, smf->yoffset / smf->yscale);

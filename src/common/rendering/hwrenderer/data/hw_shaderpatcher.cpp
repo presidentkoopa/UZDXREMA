@@ -303,6 +303,10 @@ const FDefaultShader defaultshaders[] =
 	{"Seam", "shaders/glsl/func_seam.fp", "shaders/glsl/material_nolight.fp", "#define NO_LAYERS\n"},
 	// [BB] GITD's kill badge, transcribed. Plate and digits in ONE pass.
 	{"WG13", "shaders/glsl/func_wg13.fp", "shaders/glsl/material_nolight.fp", "#define NO_LAYERS\n"},
+	// [BB] BB_PANEL as a field rather than a sampled texture: crisp at any
+	// size, and it can take a halo, which a sampled plate structurally cannot.
+	// Also samples nothing -- callers hand it bbwhite and it ignores it.
+	{"SDF Panel", "shaders/glsl/func_sdfpanel.fp", "shaders/glsl/material_nolight.fp", "#define NO_LAYERS\n"},
 	{nullptr,nullptr,nullptr,nullptr}
 };
 
