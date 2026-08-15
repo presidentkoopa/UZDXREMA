@@ -35,7 +35,9 @@ anything else here.
 | [Script VR input suppression](#24-script-side-vr-input-suppression) | a mod's own in-world menu can claim the sticks, so snap turn stops firing mid-choice | — |
 | [The laser as a borrowed cursor](#25-the-laser-as-a-borrowed-cursor) | a script menu can force the laser on one named hand and stop it at a billboard | — |
 | [Haptics reach ZScript](#26-haptics-reach-zscript) | the controllers can finally be buzzed from script — and `VR_HapticEvent` turns out to be a stub | — |
-| [Everything else this fork adds](#27-everything-else-this-fork-adds) | the laser sight itself, tracers, the psprite recursion guard, and every native with no API entry | — |
+| [Billboard roll](#27-billboard-roll) | the third angle — and it lives in the shared basis, so a rolled quad is hittable where it is drawn | — |
+| [A panel as a field](#28-a-panel-as-a-field) | `BB_SDFPANEL` — the rounded rect solved per pixel, so a plate can finally glow | — |
+| [Everything else this fork adds](#29-everything-else-this-fork-adds) | the laser sight itself, tracers, the psprite recursion guard, and every native with no API entry | — |
 
 ---
 
@@ -1748,7 +1750,115 @@ Both build targets, as in §25.
 
 ---
 
-## 27. Everything else this fork adds
+## 27. Billboard roll
+
+```
+Level.RollBillboard(int id, double roll)
+```
+
+Yaw and tilt **aim** a billboard; neither can turn its face. A card that tumbles
+as it arrives, a dial, a readout that rotates to stay level — all of them wanted
+an angle that did not exist.
+
+### It goes in the shared basis, not the vertex builder
+
+This is the whole point of the change, and the reason it is three lines rather
+than one. `BillboardBasis` in `g_levellocals.h` is the single function that
+solves orientation for the renderer **and** for `AimBillboard`, `TouchBillboard`
+and `SweepBillboard`. Rolling in the vertex builder alone would have drawn a
+rotated quad that was still *hit-tested unrotated* — silently un-clickable at
+its visible corners, exactly the class of bug §22 records for the group
+transform.
+
+```cpp
+if (bb.roll != 0.0)
+{
+    const double rollRad = bb.roll * DEG2RAD;
+    const double cr = cos(rollRad), sr = sin(rollRad);
+    const DVector3 r0 = right, u0 = up;
+    right = r0 * cr + u0 * sr;
+    up    = u0 * cr - r0 * sr;
+}
+```
+
+A rotation about the normal leaves the normal alone, so it is untouched.
+
+**Independent of facing.** A `BBF_CAMERA` billboard still rolls: the camera
+solve decides where the face *points*, and roll decides which way is up on it.
+
+### Its own setter
+
+Not a fourth argument to `OrientBillboard`. That call is made every tic by
+everything that orients anything, and widening it would mean editing every
+existing call site to pass a value nearly all of them do not care about. Roll
+also changes on a completely different schedule — a card tumbles once on arrival
+and then holds at zero forever — so paying for it in the per-tic call is
+backwards.
+
+Serialised alongside yaw and tilt. A reloaded panel that lost its roll would come
+back upright *and*, because roll is in the shared basis, hittable somewhere other
+than where the save left it.
+
+---
+
+## 28. A panel as a field
+
+```
+BB_SDFPANEL = 11
+```
+
+`BB_PANEL` samples a small rounded-rect texture. That is cheap, correct, and has
+two limits that only appear once a panel is doing real work: it blurs when
+stretched large — which a card held close in VR always is — and **it cannot
+glow.**
+
+That second one is structural rather than an oversight. `SetBillboardGlow` places
+its halo by reading the distance field *outside* the shape, and a sampled texture
+has nothing out there to read. It is why the glow packing is gated on
+`payload >= BB_TEXT`, and why a label could carry a halo while the plate directly
+behind it could not.
+
+This is the same rectangle solved per pixel. Crisp at any size, haloed by the
+same four lines every other field payload uses, and the border is a second
+distance test rather than a second quad — no extra draw, nothing to keep in step
+with the plate's size, no z-fighting.
+
+**A second payload, deliberately, not a change to `BB_PANEL`.** Sampling one
+small texture is cheaper than solving two distance fields, the two look
+different, and a caller should get to pick. A ring of forty background plates
+nobody looks closely at should stay sampled.
+
+### The shape numbers ride in `uAddColor`'s alpha
+
+Corner radius in the high nibble, border width in the low one, each 0–15 across
+the half-extent. Sixteen steps is coarse and it is enough: these are a corner and
+a hairline, not a measurement.
+
+Alpha because it is the only channel left — rgb already carry halo reach, halo
+strength and the void flag — and because it is genuinely free; nothing downstream
+reads `uAddColor.a`. **`uSpecularMaterial` was the obvious alternative and is not
+usable:** it is filled from the *texture's* glossiness and specular level, and
+only on the GL backend.
+
+Numbered 11 so it lands inside the `payload >= BB_TEXT` gate and inherits the
+halo packing without a special case.
+
+`BBFL_VOID` turns it into a hole — dark interior, only the rim lit — reading
+exactly as it does on `BB_SEAM`, so a caller who knows one knows the other.
+
+### Touched
+
+- `g_levellocals.h` — the payload, and `roll` on `FBillboard`
+- `textures.h`, `hw_shaderpatcher.cpp` — `SHADER_SDFPanel`, kept in step with
+  `defaultshaders[]`, which is indexed by the enum with nothing checking they
+  agree
+- `shaders/glsl/func_sdfpanel.fp`
+- `hw_sprites.cpp` — the draw case and the alpha packing
+- `p_saveg.cpp`, `doombase.zs`
+
+---
+
+## 29. Everything else this fork adds
 
 Found by auditing the source against this document rather than the other way
 round. Each of these was shipping and working with no entry here — which is the
