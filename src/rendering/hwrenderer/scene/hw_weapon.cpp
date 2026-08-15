@@ -58,6 +58,7 @@
 #include "playsim/p_trace.h"
 
 #include "vm.h"
+#include "types.h"		// VARF_Meta / PField, for the safe weapon-field read below
 
 EXTERN_CVAR(Float, transsouls)
 EXTERN_CVAR(Int, gl_fuzztype)
@@ -83,6 +84,28 @@ EXTERN_CVAR(Int, vr_laser_fixed_length)
 EXTERN_CVAR(Float, vr_laser_source_offset_x)
 EXTERN_CVAR(Float, vr_laser_source_offset_y)
 EXTERN_CVAR(Float, vr_laser_source_offset_z)
+EXTERN_CVAR(Float, vr_laser_beam_glow)
+EXTERN_CVAR(Float, vr_laser_beam_emissive)
+EXTERN_CVAR(Float, vr_laser_beam_taper)
+EXTERN_CVAR(Bool, vr_laser_lock)
+EXTERN_CVAR(Float, vr_laser_lock_tighten)
+EXTERN_CVAR(Float, vr_laser_lock_rate)
+EXTERN_CVAR(Float, vr_laser_dot_range)
+EXTERN_CVAR(Int, vr_laser_color_mode)
+EXTERN_CVAR(Color, vr_laser_dot_color)
+EXTERN_CVAR(Color, vr_laser_dot_color_offhand)
+EXTERN_CVAR(Color, vr_laser_color_offhand)
+EXTERN_CVAR(Bool, vr_laser_color_per_slot)
+EXTERN_CVAR(Color, vr_laser_color_slot1)
+EXTERN_CVAR(Color, vr_laser_color_slot2)
+EXTERN_CVAR(Color, vr_laser_color_slot3)
+EXTERN_CVAR(Color, vr_laser_color_slot4)
+EXTERN_CVAR(Color, vr_laser_color_slot5)
+EXTERN_CVAR(Color, vr_laser_color_slot6)
+EXTERN_CVAR(Color, vr_laser_color_slot7)
+EXTERN_CVAR(Color, vr_laser_color_slot8)
+EXTERN_CVAR(Color, vr_laser_color_slot9)
+EXTERN_CVAR(Color, vr_laser_color_slot0)
 EXTERN_CVAR(Color, vr_hitscan_tracer_color)
 EXTERN_CVAR(Float, vr_hitscan_tracer_alpha)
 EXTERN_CVAR(Float, vr_hitscan_tracer_length)
@@ -388,6 +411,19 @@ struct FLaserBeamPoints
 	DVector3 Start;
 	DVector3 HitEnd;
 	DVector3 BeamEnd;
+
+	// TRUE WHEN THE SIGHT IS RESTING ON SOMETHING THAT CAN DIE.
+	//
+	// The trace already knew this and was throwing it away -- it runs with
+	// MF_SHOOTABLE and FTraceResults carries both HitType and the Actor it
+	// hit. All that was missing was somewhere to put the answer.
+	//
+	// It is what turns a laser sight from decoration into a threat: the dot
+	// on a wall is a dot, and the dot on a monster tightens, brightens and
+	// starts to breathe. That is the whole menace of a real laser sight, and
+	// it is also honest information -- it tells you your shot connects
+	// before you take it.
+	bool OnTarget = false;
 };
 
 static DVector3 GetWeaponLaserBeamOffset(AActor* weapon)
@@ -399,6 +435,114 @@ static DVector3 GetWeaponLaserBeamOffset(AActor* weapon)
 
 	auto* offset = (DVector3*)weapon->ScriptVar(NAME_LaserBeamOffset, nullptr);
 	return offset != nullptr ? *offset : DVector3(0.0, 0.0, 0.0);
+}
+
+// ---------------------------------------------------------------------
+// WHICH COLOUR THIS SIGHT IS. Four tiers, highest wins -- see the cvar
+// block in hw_vrmodes.cpp for why the weapon outranks the player's
+// preference.
+//
+// SLOTNUMBER IS A META FIELD (`meta int SlotNumber;`, weapons.zs:41), so
+// it lives on the class rather than the instance. ScriptVar handles that
+// -- it returns `cls->Meta + sym->Offset` for meta symbols -- so it is
+// read exactly like an ordinary field and needs no special case here.
+//
+// DO NOT USE ScriptVar HERE. It looks like the obvious call and it is a
+// trap for this particular job.
+//
+// ScriptVar (dobject.cpp:669) does not return null when a field is
+// missing -- it calls I_Error, which is [[noreturn]]. So a weapon class
+// that has no LaserBeamColor does not degrade, it takes the game down
+// mid-frame.
+//
+// That is not hypothetical: it is exactly what happened the first time
+// this shipped. Building the `zdoom` target alone relinks the exe but
+// does NOT repack doomxr.pk3, so the engine went looking for a ZScript
+// field that the stale pk3 had never heard of, and the sight crashed the
+// instant it was switched on. Correct build order fixes that instance;
+// reading the field safely fixes the whole class of it, including any
+// mismatched exe/pk3 pair a user might ever end up with.
+//
+// A cosmetic sight colour is never worth a hard error. Missing field =
+// fall through to the next tier.
+static bool TryReadWeaponInt(AActor* weapon, FName field, int& out)
+{
+	if (weapon == nullptr)
+		return false;
+
+	auto cls = weapon->GetClass();
+	auto sym = dyn_cast<PField>(cls->FindSymbol(field, true));
+	if (sym == nullptr)
+		return false;
+
+	// Meta fields live on the class, instance fields on the object --
+	// mirroring ScriptVar's own branch. SlotNumber is meta; LaserBeamColor
+	// is not, and this handles either without the caller caring.
+	out = (sym->Flags & VARF_Meta)
+		? *(int*)(cls->Meta + sym->Offset)
+		: *(int*)(((char*)weapon) + sym->Offset);
+	return true;
+}
+
+// `isDot` picks the pointer's colour rather than the beam's. Only mode 2
+// makes them differ; below that both elements of a hand resolve the same,
+// which is what keeps the lower modes feeling like one setting rather than
+// two that have to be kept in sync by hand.
+static int GetLaserBeamColorFor(AActor* weapon, bool offhand, bool isDot)
+{
+	// 1. THE WEAPON'S OWN. -1 means the author said nothing.
+	//
+	// An INT with a -1 sentinel rather than a Color field, because Color
+	// has no spare value: the property parser routes colour strings through
+	// V_GetColor (palette.cpp:757), which fills RGB and leaves alpha 0, so
+	// PalEntry 0 means both "unset" and "black" and a weapon that genuinely
+	// wanted a black sight would be indistinguishable from one that never
+	// set the property. Weapon.SlotNumber -1 and HitscanTracerOffset -1.0
+	// are the same trick, already in this file's neighbours.
+	int weaponColor = -1;
+	if (TryReadWeaponInt(weapon, NAME_LaserBeamColor, weaponColor) && weaponColor >= 0)
+		return weaponColor;
+
+	{
+		// 2. PER SLOT.
+		int slot = -1;
+		if (vr_laser_color_per_slot && TryReadWeaponInt(weapon, NAME_SlotNumber, slot))
+		{
+			switch (slot)
+			{
+			case 1: return (int)vr_laser_color_slot1;
+			case 2: return (int)vr_laser_color_slot2;
+			case 3: return (int)vr_laser_color_slot3;
+			case 4: return (int)vr_laser_color_slot4;
+			case 5: return (int)vr_laser_color_slot5;
+			case 6: return (int)vr_laser_color_slot6;
+			case 7: return (int)vr_laser_color_slot7;
+			case 8: return (int)vr_laser_color_slot8;
+			case 9: return (int)vr_laser_color_slot9;
+			case 0: return (int)vr_laser_color_slot0;
+			default: break;   // -1, the "no slot" default: fall through
+			}
+		}
+	}
+
+	// 3. THE MODE LADDER. Each rung uses more of the same four cvars, so
+	// moving up never invalidates a colour already chosen.
+	switch (vr_laser_color_mode)
+	{
+	case 2:   // all four independent
+		if (offhand)
+			return isDot ? (int)vr_laser_dot_color_offhand : (int)vr_laser_color_offhand;
+		return isDot ? (int)vr_laser_dot_color : (int)vr_laser_color;
+
+	case 1:   // per hand; beam and dot match within a hand
+		return offhand ? (int)vr_laser_color_offhand : (int)vr_laser_color;
+
+	default:  // 0 -- one colour for everything
+		break;
+	}
+
+	// 4. THE GLOBAL.
+	return (int)vr_laser_color;
 }
 
 static DVector3 LaserAngleToVector(DAngle yaw, DAngle pitch)
@@ -500,6 +644,17 @@ static bool GetLaserBeamEndpoints(player_t* player, AActor* weapon, bool offhand
 	const bool hit = Trace(points.Start, mo->Sector, direction, maxDistance, MF_SHOOTABLE,
 		ML_BLOCKEVERYTHING | ML_BLOCKHITSCAN | ML_BLOCKUSE, mo, trace, TRACE_NoSky);
 	points.HitEnd = hit ? trace.HitPos : (points.Start + forward * maxDistance);
+
+	// Only a live, shootable thing counts. A corpse is still an actor and
+	// still gets traced against, so CountsAsKill/health are what separate
+	// "aimed at a threat" from "aimed at the mess you already made".
+	points.OnTarget = hit
+		&& trace.HitType == TRACE_HitActor
+		&& trace.Actor != nullptr
+		&& trace.Actor != mo
+		&& (trace.Actor->flags & MF_SHOOTABLE)
+		&& !(trace.Actor->flags & MF_CORPSE)
+		&& trace.Actor->health > 0;
 	DVector3 beamVector = points.HitEnd - points.Start;
 	double beamDistance = beamVector.Length();
 	double visibleDistance = beamDistance;
@@ -526,12 +681,45 @@ static bool GetLaserBeamEndpoints(player_t* player, AActor* weapon, bool offhand
 	return true;
 }
 
-static void DrawLaserBeamGeometry(FRenderState& state, const DVector3& beamStart, const DVector3& beamEnd, const DVector3& hitEnd, bool drawBeam, bool drawPointer)
+static void DrawLaserBeamGeometry(FRenderState& state, const DVector3& beamStart, const DVector3& beamEnd, const DVector3& hitEnd, bool drawBeam, bool drawPointer, bool onTarget, int beamColorIn, int dotColorIn)
 {
 	if (!drawBeam && !drawPointer)
 	{
 		return;
 	}
+
+	// ---- THE DOT GOES QUIET AT RANGE, UNLESS IT HAS FOUND SOMETHING ----
+	//
+	// Close up the dot is useful on anything -- it tells you where the shot
+	// lands on a wall, a switch, a ledge. At distance that same dot is just
+	// a bright speck riding over every far surface in the room, and it
+	// clutters the one thing the sight exists to show you.
+	//
+	// So past vr_laser_dot_range the dot only draws when it is resting on
+	// something shootable. Sweep across a far wall and there is nothing;
+	// cross a monster or a barrel and a dot snaps onto it. The sight stops
+	// being a cursor and becomes a detector.
+	//
+	// FADED, NOT CUT. A hard cutoff pops the dot in and out as you pan past
+	// the threshold, which reads as a glitch. It fades across the last
+	// quarter of the range instead, so the transition is something you
+	// never notice happening.
+	float dotVisibility = 1.0f;
+	if (drawPointer && !onTarget)
+	{
+		const float dotRange = std::max(0.0f, (float)vr_laser_dot_range);
+		if (dotRange > 0.0f)
+		{
+			const double dotDist = (hitEnd - beamStart).Length();
+			const float fadeStart = dotRange * 0.75f;
+			if (dotDist >= dotRange)
+				dotVisibility = 0.0f;
+			else if (dotDist > fadeStart)
+				dotVisibility = 1.0f - (float)((dotDist - fadeStart) / (dotRange - fadeStart));
+		}
+	}
+	if (dotVisibility <= 0.002f)
+		drawPointer = false;
 
 	DVector3 pointerCenter = hitEnd;
 	if (drawPointer)
@@ -544,7 +732,34 @@ static void DrawLaserBeamGeometry(FRenderState& state, const DVector3& beamStart
 		}
 	}
 
-	const int beamColor = (int)vr_laser_color;
+	const int beamColor = beamColorIn;
+	// The pointer and its glow use their own colour; only mode 2 makes it
+	// differ from the beam, but the split has to exist here regardless.
+	const int dotColor  = dotColorIn;
+
+	// ---- THE LOCK ------------------------------------------------------
+	//
+	// Everything that makes the sight threatening rides this one number.
+	//
+	// Off a target it is 0 and the sight behaves exactly as it always has,
+	// so nobody's existing config changes meaning. On a living target it
+	// runs 0..1 on a ~2.3Hz breath -- fast enough to read as agitation
+	// rather than as a slow pulse, slow enough not to strobe.
+	//
+	// It drives three things at once, because one cue is a decoration and
+	// three at once is a state change you feel before you consciously see:
+	//   the dot TIGHTENS   (a spread dot is idle, a small one is aimed)
+	//   the dot BRIGHTENS  (it burns rather than sits)
+	//   the glow SWELLS    (something is about to happen here)
+	//
+	// r_viewpoint.TicFrac is added so the breath is smooth at any framerate
+	// rather than stepping at 35Hz.
+	const bool lockActive = onTarget && vr_laser_lock;
+	const double lockTime = (double)(level.maptime) + r_viewpoint.TicFrac;
+	const float lockPulse = lockActive
+		? (float)(0.5 + 0.5 * std::sin(lockTime * std::max(0.01f, (float)vr_laser_lock_rate)))
+		: 0.0f;
+	const float lock = lockActive ? 1.0f : 0.0f;
 	state.EnableModelMatrix(false);
 	state.SetLightIndex(-1);
 	state.AlphaFunc(Alpha_Greater, 0.0f);
@@ -578,30 +793,98 @@ static void DrawLaserBeamGeometry(FRenderState& state, const DVector3& beamStart
 			beamVec.GetRightUp(beamRight, beamUp);
 
 			const float beamRadius = 0.25f * std::max(0.05f, (float)vr_laser_beam_width);
-			constexpr int beamSegments = 8;
+
+			// SIXTEEN SEGMENTS, NOT EIGHT. Eight is an octagon, and at the
+			// distance a VR player holds a gun from their face the flats are
+			// plainly visible -- the sight read as a faceted plastic rod
+			// rather than as a beam. Sixteen is round at arm's length and is
+			// still a rounding error next to the scene.
+			constexpr int beamSegments = 16;
 			const int vertexCount = (beamSegments + 1) * 2;
 
-			state.SetRenderStyle(beamOpaque ? STYLE_Source : STYLE_Add);
-			state.SetColor(RPART(beamColor) / 255.0f, GPART(beamColor) / 255.0f, BPART(beamColor) / 255.0f, beamAlpha);
+			// CORE AND HALO, which is the whole fix.
+			//
+			// The sight used to be ONE tube at one flat colour and one flat
+			// alpha. That is a drawn line, and a drawn line looks like a
+			// drawn line -- it was the single reason the sight looked cheap
+			// next to everything else this fork renders.
+			//
+			// The POINTER at the end of it already knew better: it draws its
+			// dot and then three or four concentric discs at falling alpha,
+			// and it is the only part of the sight that reads as light. The
+			// beam simply never got the same treatment. This gives it the
+			// same one, with the same shape of numbers.
+			//
+			// It is also the exact principle main.fp states for the weapon
+			// beams (section 13): "a hard narrow CORE a couple of units
+			// across, and a wide soft HALO around it. One without the other
+			// reads as either a drawn line or a smear; together they read as
+			// something incandescent."
+			//
+			// Innermost pass carries the authored alpha so existing configs
+			// still mean what they meant; the outer passes are additive glow
+			// on top and cost two more triangle strips.
+			// vr_laser_beam_glow scales the halo passes only. At 0 the core
+			// is all that draws and the sight is exactly the flat tube it
+			// used to be, which is the honest way to offer "turn it off".
+			const float halo = std::max(0.0f, (float)vr_laser_beam_glow);
 
-			screen->mVertexData->Map();
-			auto verts = screen->mVertexData->AllocVertices(vertexCount);
-			auto vp = verts.first;
-			for (int i = 0; i <= beamSegments; ++i)
+			struct BeamPass { float radius; float alpha; };
+			const BeamPass passes[] = {
+				{ 1.00f, 1.00f },                 // core: tight and bright
+				{ 2.60f, 0.30f * halo },          // inner halo
+				{ 5.20f, 0.11f * halo },          // outer bloom
+			};
+
+			// TAPERED. A parallel-sided tube reads as a rod; real glare is
+			// tighter at the aperture and blooms toward what it lands on.
+			// Only the halo passes taper -- the core stays straight so the
+			// sight remains a precise thing to aim with, which is its job.
+			const float kTaperStart = std::clamp<float>(vr_laser_beam_taper, 0.05f, 1.0f);
+
+			for (const BeamPass& pass : passes)
 			{
-				const double t = (double)i / (double)beamSegments;
-				const double ang = t * 6.28318530717958647692;
-				const double cs = std::cos(ang);
-				const double sn = std::sin(ang);
-				const DVector3 ringOffset = (beamRight * cs + beamUp * sn) * beamRadius;
-				const DVector3 startPos = beamStart + ringOffset;
-				const DVector3 endPos = beamTarget + ringOffset;
-				vp[i * 2 + 0].Set((float)startPos.X, (float)startPos.Z, (float)startPos.Y, 0.0f, 0.0f);
-				vp[i * 2 + 1].Set((float)endPos.X, (float)endPos.Z, (float)endPos.Y, 0.0f, 1.0f);
-			}
-			screen->mVertexData->Unmap();
+				const float passAlpha = std::clamp(beamAlpha * pass.alpha, 0.0f, 1.0f);
+				if (passAlpha <= 0.002f)
+					continue;
 
-			state.Draw(DT_TriangleStrip, verts.second, vertexCount, true);
+				const bool isCore = (pass.radius <= 1.0f);
+
+				// Only a fully opaque CORE draws as solid; the halo is always
+				// additive or it would punch a flat disc through the world.
+				state.SetRenderStyle((isCore && beamOpaque) ? STYLE_Source : STYLE_Add);
+
+				// OVERBRIGHT THE CORE PAST WHITE so the bloom pass picks it
+				// up. The scene target is half-float HDR and the bloom
+				// threshold is 1.0, so a channel above 1.0 bleeds on its own
+				// -- emissive glow with no light in the light list. Core
+				// only: an overbright halo would haze the whole view.
+				const float em = isCore ? std::max(1.0f, (float)vr_laser_beam_emissive) : 1.0f;
+				state.SetColor(RPART(beamColor) / 255.0f * em, GPART(beamColor) / 255.0f * em,
+					BPART(beamColor) / 255.0f * em, passAlpha);
+
+				const float rEnd   = beamRadius * pass.radius;
+				const float rStart = isCore ? rEnd : rEnd * kTaperStart;
+
+				screen->mVertexData->Map();
+				auto verts = screen->mVertexData->AllocVertices(vertexCount);
+				auto vp = verts.first;
+				for (int i = 0; i <= beamSegments; ++i)
+				{
+					const double t = (double)i / (double)beamSegments;
+					const double ang = t * 6.28318530717958647692;
+					const double cs = std::cos(ang);
+					const double sn = std::sin(ang);
+					const DVector3 dir = beamRight * cs + beamUp * sn;
+					const DVector3 startPos = beamStart + dir * rStart;
+					const DVector3 endPos = beamTarget + dir * rEnd;
+					vp[i * 2 + 0].Set((float)startPos.X, (float)startPos.Z, (float)startPos.Y, 0.0f, 0.0f);
+					vp[i * 2 + 1].Set((float)endPos.X, (float)endPos.Z, (float)endPos.Y, 0.0f, 1.0f);
+				}
+				screen->mVertexData->Unmap();
+
+				state.Draw(DT_TriangleStrip, verts.second, vertexCount, true);
+			}
 		}
 	}
 
@@ -622,7 +905,13 @@ static void DrawLaserBeamGeometry(FRenderState& state, const DVector3& beamStart
 		const double pointerDistance = (hitEnd - r_viewpoint.Pos).Length();
 		const double fovScale = std::tan(r_viewpoint.GetFieldOfView().Radians() * 0.5);
 		const double pointerScale = std::max(0.25, (double)vr_laser_pointer_scale);
-		const float pointerRadius = (float)std::max(0.006, pointerDistance * fovScale * 0.01 * pointerScale);
+		// TIGHTENS ON A TARGET. A dot that stays the same size whatever it
+		// is resting on is a cursor; one that draws in when it finds meat
+		// is a threat. The breath rides on top so it never settles.
+		const float lockTighten = std::clamp<float>(vr_laser_lock_tighten, 0.0f, 0.9f);
+		const float lockScale = 1.0f - lock * lockTighten * (0.65f + 0.35f * lockPulse);
+		const float pointerRadius = (float)std::max(0.006,
+			pointerDistance * fovScale * 0.01 * pointerScale * lockScale);
 		const int pointerSegments = 16;
 		const int pointerVertexCount = pointerSegments + 2;
 		screen->mVertexData->Map();
@@ -641,16 +930,31 @@ static void DrawLaserBeamGeometry(FRenderState& state, const DVector3& beamStart
 		}
 		screen->mVertexData->Unmap();
 
-		const float pointerAlpha = std::clamp<float>(vr_laser_pointer_alpha, 0.0f, 1.0f);
+		// BRIGHTENS WITH IT, so the smaller dot does not also become a
+		// fainter one -- tightening alone would read as the sight losing
+		// confidence rather than gaining it.
+		const float pointerAlpha = std::clamp<float>(
+			vr_laser_pointer_alpha * dotVisibility * (1.0f + lock * (0.35f + 0.30f * lockPulse)), 0.0f, 1.0f);
 		const bool pointerOpaque = pointerAlpha >= 0.999f;
-		state.SetColor(RPART(beamColor) / 255.0f, GPART(beamColor) / 255.0f, BPART(beamColor) / 255.0f, pointerAlpha);
+		// THE DOT BURNS TOO, and harder when locked. It is the part you
+		// actually look at, so if anything on the sight should read as
+		// incandescent rather than painted, it is this. Same mechanism as
+		// the beam core: push past 1.0 and let bloom do it.
+		const float dotEm = std::max(1.0f, (float)vr_laser_beam_emissive) * (1.0f + lock * 0.5f * lockPulse);
+		state.SetColor(RPART(dotColor) / 255.0f * dotEm, GPART(dotColor) / 255.0f * dotEm,
+			BPART(dotColor) / 255.0f * dotEm, pointerAlpha);
 		state.SetRenderStyle(pointerOpaque ? STYLE_Source : STYLE_Add);
 		state.Draw(DT_TriangleFan, pointerVerts.second, pointerVertexCount, true);
 
 		if (vr_laser_pointer_glow != 0)
 		{
-			const float glowScale = std::max(1.1f, (float)vr_laser_pointer_glow_scale);
-			const float glowIntensity = std::max(0.1f, (float)vr_laser_pointer_glow_intensity);
+			// AND THE GLOW SWELLS. The dot draws in while the halo around it
+			// pushes out -- opposite directions, which is what makes the
+			// lock read as pressure rather than as a simple size change.
+			const float glowScale = std::max(1.1f, (float)vr_laser_pointer_glow_scale)
+				* (1.0f + lock * (0.45f + 0.55f * lockPulse));
+			const float glowIntensity = std::max(0.1f, (float)vr_laser_pointer_glow_intensity)
+				* (1.0f + lock * 0.8f * lockPulse);
 			const bool dynamicGlow = vr_laser_pointer_glow == 2;
 			state.SetRenderStyle(STYLE_Add);
 			const int glowPasses = dynamicGlow ? 4 : 3;
@@ -677,7 +981,7 @@ static void DrawLaserBeamGeometry(FRenderState& state, const DVector3& beamStart
 					gv[i + 1].Set((float)pos.X, (float)pos.Z, (float)pos.Y, 0.0f, 0.0f);
 				}
 				screen->mVertexData->Unmap();
-				state.SetColor(RPART(beamColor) / 255.0f, GPART(beamColor) / 255.0f, BPART(beamColor) / 255.0f, passAlpha);
+				state.SetColor(RPART(dotColor) / 255.0f, GPART(dotColor) / 255.0f, BPART(dotColor) / 255.0f, passAlpha);
 				state.Draw(DT_TriangleFan, glowVerts.second, pointerVertexCount, true);
 			}
 		}
@@ -921,7 +1225,8 @@ void DrawLaserSightWorld(FRenderState& state)
 		{
 			const bool drawBeam = allowBeamToggle || (weapon != nullptr && (weapon->IntVar(NAME_WeaponFlags) & WIF_HASLASERBEAM));
 			const bool drawPointer = allowPointer;
-			DrawLaserBeamGeometry(state, points.Start, points.BeamEnd, points.HitEnd, drawBeam, drawPointer);
+			DrawLaserBeamGeometry(state, points.Start, points.BeamEnd, points.HitEnd, drawBeam, drawPointer, points.OnTarget,
+				GetLaserBeamColorFor(weapon, offhand, false), GetLaserBeamColorFor(weapon, offhand, true));
 		}
 	};
 

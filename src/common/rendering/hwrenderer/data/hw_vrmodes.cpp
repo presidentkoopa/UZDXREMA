@@ -715,6 +715,137 @@ CVAR(Int, vr_laser_fixed_length, 100, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR(Float, vr_laser_source_offset_x, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR(Float, vr_laser_source_offset_y, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR(Float, vr_laser_source_offset_z, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
+// ---------------------------------------------------------------------
+// LASER SIGHT -- shaping and the target lock.
+//
+// DECLARED HERE, MENU'D ELSEWHERE. These have to be C++ because the
+// renderer reads them every frame in hw_weapon.cpp, but this fork's
+// convention is that the CONTROLS for engine features live outside the
+// engine -- in the Radiance Control Panel alongside the rest of the
+// fork's knobs -- rather than being bolted into GZDoom's own options
+// tree. So there is deliberately no MENUDEF entry for any of these in
+// wadsrc. Declaring them without menu'ing them is the whole point.
+//
+// Every default is chosen so an existing config behaves exactly as it did
+// before these existed: glow 1.0 is the intended look, taper 0.45 is what
+// the shaping was written around, and lock on is the feature. Set
+// vr_laser_beam_glow to 0 and you have the old flat tube back.
+// ---------------------------------------------------------------------
+
+// Halo strength around the beam core. 0 disables the halo passes entirely
+// and restores the single flat tube the sight used to draw.
+CVAR(Float, vr_laser_beam_glow, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
+// EMISSIVE, WITHOUT A SINGLE DYNAMIC LIGHT.
+//
+// The scene is rendered into VK_FORMAT_R16G16B16A16_SFLOAT -- a half-float
+// HDR target (vk_renderdevice.cpp:1254) -- so colour channels above 1.0
+// survive rather than clipping. gl_bloom_threshold defaults to exactly 1.0
+// (hw_postprocess_cvars.cpp:45), which means anything drawn brighter than
+// white is picked up by the bloom extract pass and bleeds on its own.
+//
+// So this multiplies the CORE's colour past 1.0 and lets the existing
+// bloom do the work. No lights are spawned, nothing is added to the light
+// list, and the cost is a multiply -- the glow is a post-process the
+// engine was already running.
+//
+// THE CORE ONLY, never the halo. The halo is already a wide soft additive
+// wash; pushing that overbright would flood the screen rather than make
+// the beam look hot. The look comes from a small intensely bright centre
+// inside a soft one, which is the same reason the beam is drawn as core
+// plus halo in the first place.
+//
+// 1.0 = no overbright, exactly the old behaviour. 1.8 is a clearly lit
+// filament without hazing the view.
+CVAR(Float, vr_laser_beam_emissive, 1.8f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
+// How much narrower the halo is at the muzzle than at the impact. 1.0 is a
+// parallel-sided tube; lower is more cone. The core never tapers -- it is
+// the part you aim with.
+CVAR(Float, vr_laser_beam_taper, 0.45f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
+// The lock: does the sight react when it is resting on something alive.
+CVAR(Bool, vr_laser_lock, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
+// How far the dot draws in when locked, as a fraction of its idle size.
+// 0 keeps the dot the same size and leaves only the brightening and the
+// glow swell.
+CVAR(Float, vr_laser_lock_tighten, 0.40f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
+// Breath rate of the lock, in radians per tic. ~0.42 is about 2.3Hz, fast
+// enough to read as agitation rather than a slow throb.
+CVAR(Float, vr_laser_lock_rate, 0.42f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
+// Beyond this many map units the dot only draws when it is resting on
+// something shootable -- so it stops riding over every far wall in the room
+// and starts meaning "there is a thing there". Faded across the last quarter
+// of the range rather than cut, or it would pop as you pan. 0 disables the
+// behaviour and the dot draws on everything at any distance, as before.
+//
+// 320 is about a small room across: close enough that the dot is still a
+// useful pointer at conversational range, far enough that it goes quiet
+// before it becomes clutter.
+CVAR(Float, vr_laser_dot_range, 320.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
+// ---------------------------------------------------------------------
+// LASER SIGHT COLOUR, in four tiers.
+//
+// Resolved in hw_weapon.cpp, highest wins:
+//
+//   1. the WEAPON's own Weapon.LaserBeamColor, if it set one
+//   2. the per-SLOT colour, if per-slot is on
+//   3. the OFFHAND colour, if per-hand is on and this is the off hand
+//   4. vr_laser_color, the global
+//
+// Each tier is off by default, so a config that has never touched any of
+// this keeps one red sight on both hands exactly as before.
+//
+// WHY THE WEAPON WINS. Weapon.LaserBeamColor is a mod's deliberate
+// statement about a specific gun -- a plasma weapon that wants a blue
+// sight should not be overruled by a player's slot preference, in the
+// same way Weapon.LaserBeamOffset already overrules nothing and is
+// simply obeyed. A player who disagrees can still turn the tiers off.
+// ---------------------------------------------------------------------
+
+// HOW MANY COLOURS ARE IN PLAY. One knob rather than a pile of toggles,
+// because the three useful answers are a ladder and not a set of
+// independent switches:
+//
+//   0  ONE     -- vr_laser_color for everything, both hands, beam and dot.
+//                 The way it has always worked.
+//   1  PER HAND-- mainhand and offhand differ, but within a hand the beam
+//                 and its dot match. In a two-gun game this is the one that
+//                 earns its keep: two identical red lines converging on the
+//                 same wall tell you nothing about which hand is which.
+//   2  ALL FOUR-- mainhand beam, mainhand dot, offhand beam, offhand dot,
+//                 each its own colour. For a dim beam with a hot dot, or
+//                 any other split where the pointer wants to read
+//                 differently from the line that leads to it.
+//
+// Higher modes simply use more of the same four cvars, so stepping up the
+// ladder never invalidates what you already set.
+CVAR(Int, vr_laser_color_mode, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
+// The other three. vr_laser_color, declared above, is the mainhand beam and
+// doubles as the single colour in mode 0.
+CVAR(Color, vr_laser_color_offhand, 0x40a0ff, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Color, vr_laser_dot_color, 0xff2020, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Color, vr_laser_dot_color_offhand, 0x60c0ff, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
+// PER SLOT. Ten, matching the number keys, so "the shotgun is orange and
+// the plasma is cyan" is a thing a player can simply set.
+CVAR(Bool, vr_laser_color_per_slot, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Color, vr_laser_color_slot1, 0xff4040, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Color, vr_laser_color_slot2, 0xffa040, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Color, vr_laser_color_slot3, 0xffe040, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Color, vr_laser_color_slot4, 0x60ff60, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Color, vr_laser_color_slot5, 0x40ffd0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Color, vr_laser_color_slot6, 0x40a0ff, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Color, vr_laser_color_slot7, 0xa060ff, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Color, vr_laser_color_slot8, 0xff60c0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Color, vr_laser_color_slot9, 0xffffff, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+CVAR(Color, vr_laser_color_slot0, 0x909090, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CUSTOM_CVAR(Int, vr_hitscan_tracer, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0)

@@ -3005,6 +3005,13 @@ OptionValue "LaserPointerGlow"
 	2, "$VRLASERMNU_POINTER_GLOW_DYNAMIC"
 }
 
+OptionValue "LaserColorMode"
+{
+	0, "$VRLASERMNU_COLOR_MODE_ONE"
+	1, "$VRLASERMNU_COLOR_MODE_HAND"
+	2, "$VRLASERMNU_COLOR_MODE_ALL"
+}
+
 OptionMenu VRLaserSightOptions protected
 {
 	Title "$VRLASERMNU_TITLE"
@@ -3015,7 +3022,6 @@ OptionMenu VRLaserSightOptions protected
 	Option "$VRLASERMNU_MULTIPLAYER_POINTER",		"vr_laser_other_players_pointer", "YesNo"
 	Option "$VRLASERMNU_MELEE",				"vr_laser_show_melee", "YesNo"
 	Option "$VRLASERMNU_HIDE_ON_WHEEL",			"vr_laser_hide_on_wheel", "YesNo"
-	ColorPicker "$VRLASERMNU_COLOR",			"vr_laser_color"
 	Slider "$VRLASERMNU_POINTER_SCALE",			"vr_laser_pointer_scale", 0.1, 1.0, 0.05, 2
 	Slider "$VRLASERMNU_POINTER_ALPHA",			"vr_laser_pointer_alpha", 0.0, 1.0, 0.05, 2
 	Option "$VRLASERMNU_POINTER_GLOW",			"vr_laser_pointer_glow", "LaserPointerGlow"
@@ -3028,14 +3034,56 @@ OptionMenu VRLaserSightOptions protected
 	Option "$VRLASERMNU_MULTIPLAYER_BEAM",			"vr_laser_other_players_beam", "YesNo"
 	Slider "$VRLASERMNU_BEAM_ALPHA",			"vr_laser_beam_alpha", 0.0, 1.0, 0.05, 2
 	Slider "$VRLASERMNU_BEAM_WIDTH",			"vr_laser_beam_width", 0.1, 2.0, 0.05, 2
+	Slider "$VRLASERMNU_BEAM_GLOW",				"vr_laser_beam_glow", 0.0, 3.0, 0.1, 1
+	Slider "$VRLASERMNU_BEAM_EMISSIVE",			"vr_laser_beam_emissive", 1.0, 4.0, 0.1, 1
+	Slider "$VRLASERMNU_BEAM_TAPER",			"vr_laser_beam_taper", 0.05, 1.0, 0.05, 2
 	Option "$VRLASERMNU_BEAM_LENGTH",			"vr_laser_beam_length", "LaserBeamLength"
 	Slider "$VRLASERMNU_SHORT_LENGTH",			"vr_laser_fixed_length", 60, 1000, 10, 0
 	Slider "$VRLASERMNU_SOURCE_OFFSET_X",		"vr_laser_source_offset_x", -64, 64, 1, 0
 	Slider "$VRLASERMNU_SOURCE_OFFSET_Y",		"vr_laser_source_offset_y", -64, 64, 1, 0
 	Slider "$VRLASERMNU_SOURCE_OFFSET_Z",		"vr_laser_source_offset_z", -64, 64, 1, 0
+
+	StaticText ""
+	StaticText "$VRLASERMNU_LOCK_OPTIONS", gold
+	Option "$VRLASERMNU_LOCK",					"vr_laser_lock", "OnOff"
+	Slider "$VRLASERMNU_LOCK_TIGHTEN",			"vr_laser_lock_tighten", 0.0, 0.9, 0.05, 2
+	Slider "$VRLASERMNU_LOCK_RATE",				"vr_laser_lock_rate", 0.05, 1.5, 0.05, 2
+	Slider "$VRLASERMNU_DOT_RANGE",				"vr_laser_dot_range", 0, 2048, 32, 0
+
+	StaticText ""
+	StaticText "$VRLASERMNU_COLOR_OPTIONS", gold
+	Option "$VRLASERMNU_COLOR_MODE",			"vr_laser_color_mode", "LaserColorMode"
+	ColorPicker "$VRLASERMNU_COLOR_MAIN_BEAM",	"vr_laser_color"
+	ColorPicker "$VRLASERMNU_COLOR_OFF_BEAM",	"vr_laser_color_offhand"
+	ColorPicker "$VRLASERMNU_COLOR_MAIN_DOT",	"vr_laser_dot_color"
+	ColorPicker "$VRLASERMNU_COLOR_OFF_DOT",	"vr_laser_dot_color_offhand"
+	Option "$VRLASERMNU_COLOR_PER_SLOT",		"vr_laser_color_per_slot", "OnOff"
+	Submenu "$VRLASERMNU_SLOT_COLORS",			"VRLaserSlotColors"
 	StaticText " "
 
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_laser_sight vr_laser_show_melee vr_laser_hide_on_wheel vr_laser_beam vr_laser_other_players_beam vr_laser_other_players_pointer vr_laser_color vr_laser_beam_alpha vr_laser_beam_width vr_laser_pointer_scale vr_laser_pointer_alpha vr_laser_pointer_glow vr_laser_pointer_glow_scale vr_laser_pointer_glow_intensity vr_laser_beam_length vr_laser_fixed_length vr_laser_source_offset_x vr_laser_source_offset_y vr_laser_source_offset_z"
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_laser_sight vr_laser_show_melee vr_laser_hide_on_wheel vr_laser_beam vr_laser_other_players_beam vr_laser_other_players_pointer vr_laser_color vr_laser_beam_alpha vr_laser_beam_width vr_laser_beam_glow vr_laser_beam_emissive vr_laser_beam_taper vr_laser_pointer_scale vr_laser_pointer_alpha vr_laser_pointer_glow vr_laser_pointer_glow_scale vr_laser_pointer_glow_intensity vr_laser_beam_length vr_laser_fixed_length vr_laser_source_offset_x vr_laser_source_offset_y vr_laser_source_offset_z vr_laser_lock vr_laser_lock_tighten vr_laser_lock_rate vr_laser_dot_range vr_laser_color_mode vr_laser_color_offhand vr_laser_dot_color vr_laser_dot_color_offhand vr_laser_color_per_slot vr_laser_color_slot1 vr_laser_color_slot2 vr_laser_color_slot3 vr_laser_color_slot4 vr_laser_color_slot5 vr_laser_color_slot6 vr_laser_color_slot7 vr_laser_color_slot8 vr_laser_color_slot9 vr_laser_color_slot0"
+}
+
+// Ten slots is too many rows to sit inside the main page without pushing
+// everything else off the bottom, so they get their own. Reached from the
+// colour block above, and only meaningful while per-slot is on.
+OptionMenu VRLaserSlotColors protected
+{
+	Title "$VRLASERMNU_SLOT_COLORS"
+
+	StaticText ""
+	StaticText "$VRLASERMNU_SLOT_COLORS_HELP", darkgray
+	StaticText ""
+	ColorPicker "$VRLASERMNU_SLOT1",			"vr_laser_color_slot1"
+	ColorPicker "$VRLASERMNU_SLOT2",			"vr_laser_color_slot2"
+	ColorPicker "$VRLASERMNU_SLOT3",			"vr_laser_color_slot3"
+	ColorPicker "$VRLASERMNU_SLOT4",			"vr_laser_color_slot4"
+	ColorPicker "$VRLASERMNU_SLOT5",			"vr_laser_color_slot5"
+	ColorPicker "$VRLASERMNU_SLOT6",			"vr_laser_color_slot6"
+	ColorPicker "$VRLASERMNU_SLOT7",			"vr_laser_color_slot7"
+	ColorPicker "$VRLASERMNU_SLOT8",			"vr_laser_color_slot8"
+	ColorPicker "$VRLASERMNU_SLOT9",			"vr_laser_color_slot9"
+	ColorPicker "$VRLASERMNU_SLOT0",			"vr_laser_color_slot0"
 }
 
 OptionValue "WheelListOption"

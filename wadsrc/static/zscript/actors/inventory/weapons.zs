@@ -33,6 +33,7 @@ class Weapon : StateProvider
 	int Crosshair;							// 0 to use player's crosshair
 	Vector3 LaserBeamOffset;				// Per-weapon local laser beam origin offset
 	double HitscanTracerOffset;				// Per-weapon local hitscan tracer origin offset override
+	int LaserBeamColor;						// Per-weapon laser sight colour. -1 = use the cvars.
 	bool GivenAsMorphWeapon;
 	bool bAltFire;							// Set when this weapon's alternate fire is used.
 	double UseRange;						// [NS] Distance at which player can +use
@@ -77,6 +78,7 @@ class Weapon : StateProvider
 	property BobPivot3D : BobPivot3D;
 	property LaserBeamOffset : LaserBeamOffset;
 	property HitscanTracerOffset : HitscanTracerOffset;
+	property LaserBeamColor : LaserBeamColor;
 	property UseRange: UseRange;
 
 	flagdef NoAutoFire: WeaponFlags, 0;			// weapon does not autofire
@@ -126,6 +128,7 @@ class Weapon : StateProvider
 		Weapon.BobPivot3D (0.0, 0.0, 0.0);
 		Weapon.LaserBeamOffset (0.0, 0.0, 0.0);
 		Weapon.HitscanTracerOffset (-1.0);
+		Weapon.LaserBeamColor -1;
 		Weapon.UseRange 48;
 		+WEAPONSPAWN
 		DefaultStateUsage SUF_ACTOR|SUF_OVERLAY|SUF_WEAPON;
