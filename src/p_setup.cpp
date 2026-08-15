@@ -303,6 +303,19 @@ void FLevelLocals::ClearLevelData(bool fullgc)
 	}
 	
 	interpolator.ClearInterpolations();	// [RH] Nothing to interpolate on a fresh level.
+
+	// [BB] Beams do not survive a map change. Nothing else resets them, so
+	// without this the first tic of the new map still holds the old map's
+	// endpoints and would interpolate a beam from wherever it was standing in
+	// the level you just left. Dropping the count is enough on its own -- the
+	// renderer never looks past it, and the snapshot rebuilds from there.
+	BeamCount = 0;
+	PrevBeamCount = 0;
+	for (int b = 0; b < MAX_BEAMS; b++)
+	{
+		PrevBeamIntensity[b] = 0.0;
+	}
+
 	Thinkers.DestroyAllThinkers(fullgc);
 	ClearAllSubsectorLinks(); // can't be done as part of the polyobj deletion process.
 

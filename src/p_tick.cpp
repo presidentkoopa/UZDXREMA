@@ -374,6 +374,32 @@ void P_Ticker (void)
 
 		Level->TickBillboards();	// [BB] follow attachments, expire transients
 
+		// [BB] Snapshot last tic's beams so the renderer can interpolate them.
+		//
+		// THIS HAS TO HAPPEN HERE, before anything below can call SetBeam.
+		// Every beam writer runs downstream of this line -- weapon DoEffect and
+		// psprite actions under P_PlayerThink, mods under WorldTick, everything
+		// else under RunThinkers -- so at this instant the arrays still hold
+		// exactly what was drawn for the tic that just ended. It is also the
+		// same instant AActor::Prev is taken a few lines up, which is what keeps
+		// a beam and the actor it is stuck to from drifting apart mid-tic.
+		{
+			const int wasLive = clamp(Level->BeamCount, 0, FLevelLocals::MAX_BEAMS);
+			for (int b = 0; b < wasLive; b++)
+			{
+				Level->PrevBeamStart[b] = Level->BeamStart[b];
+				Level->PrevBeamEnd[b] = Level->BeamEnd[b];
+				Level->PrevBeamIntensity[b] = Level->BeamIntensity[b];
+			}
+			// Slots past the live count keep no history: mark them dark so the
+			// renderer snaps rather than lerps if the count grows into them.
+			for (int b = wasLive; b < Level->PrevBeamCount; b++)
+			{
+				Level->PrevBeamIntensity[b] = 0.0;
+			}
+			Level->PrevBeamCount = wasLive;
+		}
+
 		for (i = 0; i < MAXPLAYERS; i++)
 			if (Level->PlayerInGame(i))
 				P_PlayerThink(Level->Players[i]);

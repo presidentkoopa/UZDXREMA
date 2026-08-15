@@ -1211,14 +1211,46 @@ public:
 	double   ShapeReach = 0.0;
 	PalEntry ShapeUnder = 0xffff2610;
 
-	static const int MAX_BEAMS = 8;
+	// 128. Raised from 8 so a real firefight can have bolts crossing in both
+	// directions. The arrays below are vec4, which is the one case where
+	// std140 and the C++ layout agree naturally, so growing them keeps the
+	// shader offsets aligned. 3 arrays x 128 x 16B = 6KB per viewpoint, x2
+	// viewpoints = 12KB against a 64KB uniform range.
+	//
+	// COST IS PER ACTIVE BEAM, NOT PER SLOT. Both shader loops break as soon
+	// as i reaches the live count, and each surviving beam gets a cheap
+	// bounding-sphere reject before the real solve. An empty slot costs
+	// nothing.
+	static const int MAX_BEAMS = 128;
 	int      BeamCount = 0;
-	DVector3 BeamStart[MAX_BEAMS];
-	DVector3 BeamEnd[MAX_BEAMS];
+	DVector3 BeamStart[MAX_BEAMS] = {};
+	DVector3 BeamEnd[MAX_BEAMS] = {};
 	double   BeamThick[MAX_BEAMS] = {};   // the hot core, world units
 	double   BeamSoft[MAX_BEAMS] = {};    // how far the halo reaches past it
 	PalEntry BeamColor[MAX_BEAMS] = {};
 	double   BeamIntensity[MAX_BEAMS] = {};
+
+	// LAST TIC'S ENDPOINTS, so the renderer can interpolate.
+	//
+	// Script writes beams once per tic at 35Hz, but the renderer uploads them
+	// every frame. Without these the beam teleports 35 times a second while
+	// everything around it moves smoothly, which reads as a strobing beam at
+	// any framerate above the tic rate. P_Ticker copies current -> prev at the
+	// top of each tic, at the same instant AActor::Prev is taken, so a beam
+	// anchored to an actor interpolates in lockstep with that actor.
+	//
+	// PrevBeamIntensity AND PrevBeamCount ARE BOTH LOAD-BEARING, not spare
+	// diagnostics. Every beam user in RS_Lance releases a slot by writing
+	// (0,0,0)->(0,0,0) with intensity 0, so on the tic a beam switches back on
+	// prev is the map origin. Interpolating that sweeps the beam across the
+	// entire level for one tic, lighting everything it crosses. The renderer
+	// tests both fields and snaps instead of lerping whenever a slot was dark
+	// or out of range last tic. Slots can also go live purely by BeamCount
+	// growing, which is why the count is remembered too.
+	DVector3 PrevBeamStart[MAX_BEAMS] = {};
+	DVector3 PrevBeamEnd[MAX_BEAMS] = {};
+	double   PrevBeamIntensity[MAX_BEAMS] = {};
+	int      PrevBeamCount = 0;
 	double   BeamGlow = 0.35;             // halo strength relative to the core
 	double   BeamFogScatter = 1.0;        // how much a beam lights fog it crosses
 

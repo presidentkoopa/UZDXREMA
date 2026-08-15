@@ -148,9 +148,9 @@ struct HWViewpointUniforms
 	//
 	// In the viewpoint block rather than StreamData: these are scene-global,
 	// and StreamData's size divides 64KB into MAX_STREAM_DATA draws.
-	FVector4 mBeamA[8];
-	FVector4 mBeamB[8];
-	FVector4 mBeamCol[8];
+	FVector4 mBeamA[128];
+	FVector4 mBeamB[128];
+	FVector4 mBeamCol[128];
 	FVector4 mBeamParams = { 0.f, 0.35f, 1.f, 0.f };
 
 	// [BB] What happens ALONG the beam, which is what stops it being a stick.

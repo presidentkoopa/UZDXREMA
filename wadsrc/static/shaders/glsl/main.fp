@@ -1459,7 +1459,7 @@ vec3 BeamLightAt(vec3 p)
 	int n = int(uBeamParams.x);
 	if (n <= 0) return sum;
 
-	for (int i = 0; i < 8; i++)
+	for (int i = 0; i < 128; i++)
 	{
 		if (i >= n) break;
 
@@ -1545,7 +1545,7 @@ vec3 BeamAirGlow(vec3 fragPos)
 	if (fragDist < 0.001) return sum;
 	vec3 dir = toFrag / fragDist;
 
-	for (int i = 0; i < 8; i++)
+	for (int i = 0; i < 128; i++)
 	{
 		if (i >= n) break;
 

@@ -85,6 +85,16 @@ CVAR(Int, vol_beam_quality, 24, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 // somebody might want to see. 0 restores the unfaded behaviour.
 CVAR(Float, vol_beam_axisfade, 0.85f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 
+// [BB] Smooth segment beams between tics instead of stepping at 35Hz.
+//
+// Beams are written from script, so they only change 35 times a second while
+// the view redraws 90-120. Off, a beam is exactly where script last put it and
+// visibly stutters against the world; on, it is drawn where it was passing
+// through at this instant. An escape hatch, not a taste setting -- leave it on
+// unless a beam is doing something strange, in which case turning it off says
+// whether the interpolation or the script is at fault.
+CVAR(Bool, r_beam_interpolate, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
 sector_t * hw_FakeFlat(sector_t * sec, sector_t * dest, area_t in_area, bool back);
 
 std::pair<PalEntry, PalEntry>& R_GetSkyCapColor(FGameTexture* tex);
@@ -233,14 +243,44 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 		// becomes a beam standing in a wall, which is a memorable bug.
 		{
 			int nb = clamp(Level->BeamCount, 0, FLevelLocals::MAX_BEAMS);
+
+			// Script sets beams at 35Hz; this loop runs every frame. Without the
+			// lerp a beam holds still for a whole tic and then jumps, which at
+			// 90-120Hz reads as a beam that stutters against smoothly moving
+			// geometry. cl_capfps and r_NoInterpolate already pin TicFrac to 1.0
+			// upstream (hw_entrypoint.cpp), so those cases collapse to the old
+			// behaviour on their own and need no guard here.
+			const double ticFrac = r_beam_interpolate ? Viewpoint.TicFrac : 1.0;
+
 			for (int i = 0; i < nb; i++)
 			{
+				// INTERPOLATE ONLY A BEAM THAT WAS ALREADY LIT AND STILL IS.
+				// Callers park a released slot at (0,0,0) rather than leaving
+				// stale endpoints behind, so both transitions have to snap: on
+				// the tic a beam lights up prev is the map origin and lerping
+				// would drag it across the level, and on the tic it goes out the
+				// same thing happens in reverse. Between those it is the same
+				// beam moving, which is exactly what wants smoothing.
+				const bool lerpable =
+					i < Level->PrevBeamCount &&
+					Level->PrevBeamIntensity[i] > 0.0 &&
+					Level->BeamIntensity[i] > 0.0;
+				const double f = lerpable ? ticFrac : 1.0;
+
+				const DVector3 a = Level->PrevBeamStart[i] +
+					(Level->BeamStart[i] - Level->PrevBeamStart[i]) * f;
+				const DVector3 b = Level->PrevBeamEnd[i] +
+					(Level->BeamEnd[i] - Level->PrevBeamEnd[i]) * f;
+
 				VPUniforms.mBeamA[i] = {
-					(float)Level->BeamStart[i].X, (float)Level->BeamStart[i].Z,
-					(float)Level->BeamStart[i].Y, (float)Level->BeamThick[i] };
+					(float)a.X, (float)a.Z,
+					(float)a.Y, (float)Level->BeamThick[i] };
 				VPUniforms.mBeamB[i] = {
-					(float)Level->BeamEnd[i].X, (float)Level->BeamEnd[i].Z,
-					(float)Level->BeamEnd[i].Y, (float)Level->BeamSoft[i] };
+					(float)b.X, (float)b.Z,
+					(float)b.Y, (float)Level->BeamSoft[i] };
+				// Colour is NOT interpolated on purpose. A band change is a
+				// deliberate step -- see the tier bands in RS_Lance -- and
+				// crossfading it would turn a power-up into a smear.
 				VPUniforms.mBeamCol[i] = {
 					Level->BeamColor[i].r / 255.f, Level->BeamColor[i].g / 255.f,
 					Level->BeamColor[i].b / 255.f, (float)Level->BeamIntensity[i] };
