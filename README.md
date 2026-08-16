@@ -11,7 +11,7 @@ and rendering feature set** on top of it. Everything DoomXR does — VR, dual
 tracked hands, OpenVR input, the mod compatibility below — is unchanged and
 inherited. What is new here is what the renderer can draw.
 
-Branch: `doomxr`.
+Branch: `model-remap`. Engine base: **UZDoom 5.0.0-rc.2**.
 
 The full engineering write-up, with file references and the reasoning behind
 each decision, is in **[`FORK_CHANGES.md`](FORK_CHANGES.md)**. This page is the
@@ -83,6 +83,27 @@ has not moved.
 
 ---
 
+## What it adds beyond the renderer
+
+The table above is what the renderer can draw. This is the rest — the VR input
+surface, and the reach script was given so a mod can use any of it.
+
+| | |
+| --- | --- |
+| **Shapes** | Signed distance fields painted onto surfaces. A flat emissive glyph — disc, ring, square, outline, cross, hexagon, triangle — projected onto whatever surface passes through it. 128 slots, seven primitives, seven natives, its own shader function. The largest system in the renderer, and it had no entry anywhere until the fork was audited against itself. |
+| **Laser sight** | The fork's own: beam, dot, glow, per-hand colours, a trace behind it, a target lock and a headshot reaction. Around fifty `vr_laser_*` cvars and a `toggle_laser_sight` CCMD. |
+| **The laser as a borrowed cursor** | An in-world menu made of billboards needs a pointer, and the engine already draws a very good one. Three natives let a script borrow the real laser instead of building its own — an override that never writes a cvar, so the player's settings survive it. |
+| **Haptics reach ZScript** | `Level.VRHaptic(hand, intensity, durationMs)`. Complete per-hand OpenXR haptics were already there — bound for the Touch, Index, Vive and simple profiles — and script could reach none of it. A menu could draw itself and be pointed at, and could not make your hand feel anything. |
+| **Script-side VR input suppression** | A script can say *the stick is mine right now*. Snap turn and stick movement are decided deep in the VR input path, long before any script sees a button; the native wheel suppressed both and nothing else could. Driving a menu with the thumbstick used to spin and walk you while you were choosing. |
+| **`MainHandRoll`** | The main hand's true wrist roll, for anything drawn *on* the held weapon. `AttackRoll` cannot carry it — the VR backends write the real value and `UpdateCanonicalMainHandPose` zeroes it on the next tic, before `WorldTick` runs, so script never saw anything but 0. |
+| **Direct model frame addressing** | A HUD weapon model gets its frame through the *sprite*, and that channel is one character wide: `MAX_SPRITE_FRAMES` is **29**, inherited from Doom's 8-character lump names. The weapon models this fork ships run to 75 frames. Everything past the 29th was not awkward but *unaddressable* — there was no letter left to name it with. |
+| **Native state remap** | ModelSwapper's animation engine, moved into the engine where it should have started. Frame addressing made the *script* the animation clock, with everything that entails: event ordering, tick timing, and silent failure when any link in the chain broke. This makes the psprite's own current state the clock, natively. |
+| **psprite scale reaches models** | `psp->scale` was read only by the 2D weapon-sprite path. A mod that shrank a psprite saw nothing happen to a weapon drawn as a **model**, and there was no other way to resize one from script at all — model scale came from `MODELDEF` and the sprite frame. |
+| **Texture inside the glow** | The glow wave varies a lane's **edge**, which is the right answer while the edge is on screen and no answer at all once coverage saturates and the wall is a solid card of colour. Five terms that act **inside** the lit area instead: the wave owns shape, these own substance. |
+| **Field reflection** | Read another mod's data without linking against it — `HasField`, `GetFieldInt/Bool/Float/String/Name/Object`, `FieldCount`, `FieldAt`. Interoperate with something you do not control and cannot compile against. |
+
+---
+
 ## Compatibility
 
 **Content built for this fork will not run on stock GZDoom.** The additions are
@@ -130,6 +151,15 @@ Optional mods tested with DoomXR:
 `auto-setup-windows-vr.cmd` locates Visual Studio's bundled CMake via
 `vswhere` — CMake is generally not on PATH. Build output lands in
 `build-dxr/RelWithDebInfo/`.
+
+**Python 3 is required to configure.** UZDoom 5.0.0 compiles
+`libraries/Translation/*.po` into the language lumps at build time, so
+`find_package(Python3 3.6 REQUIRED)` will fail the configure step without it.
+If it is not on PATH, vcpkg downloads one and cmake can be pointed at it:
+
+```
+-DPython3_EXECUTABLE=build-dxr/vcpkg/downloads/tools/python/python-3.14.2-x64-1/python.exe
+```
 
 For the general UZDoom build process, see UZDoom's
 [wiki][gh_wiki]:
