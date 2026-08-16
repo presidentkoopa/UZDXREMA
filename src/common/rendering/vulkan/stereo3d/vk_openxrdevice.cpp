@@ -136,6 +136,8 @@ EXTERN_CVAR(Float, vr_overlayscreen_vpos);
 EXTERN_CVAR(Int, vr_overlayscreen_bg);
 EXTERN_CVAR(Int, vr_control_scheme);
 EXTERN_CVAR(Bool, vr_two_handed_weapons);
+EXTERN_CVAR(Float, vr_stabilize_distance_inches);
+EXTERN_CVAR(Bool, vr_holster_use_grip);
 CVAR(Bool, vr_menu_pointer, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR(Color, vr_menu_pointer_color, 0xffffff, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR(Bool, vr_mouse_in_menu, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
@@ -2758,6 +2760,7 @@ void VKOpenXRDeviceMode::DestroyOpenXR() const
 	xrLastSelectState[0] = xrLastSelectState[1] = false;
 	xrLastMenuState[0] = xrLastMenuState[1] = false;
 	xrLastGripState[0] = xrLastGripState[1] = false;
+	xrLastHolsterState[0] = xrLastHolsterState[1] = false;
 	xrLastThumbClickState[0] = xrLastThumbClickState[1] = false;
 	xrLastTrackpadClickState[0] = xrLastTrackpadClickState[1] = false;
 	xrLastAState[0] = xrLastAState[1] = false;
@@ -3161,7 +3164,12 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		syncHandState(1);
 	}
 
-	const bool dominantGripModifierNew = *vr_secondary_button_mappings && handInput[mainHand].grip;
+	// The shift layer stays live while a holster store is merely ARMED -- that
+	// is the whole tap-vs-combo idea. Pressing grip at your hip does not cost
+	// you the modifier; pressing another button just converts the press into a
+	// combo and cancels the pending store.
+	const bool dominantGripModifierNew = *vr_secondary_button_mappings
+		&& (xrGripContext[mainHand] == GRIPCTX_Modifier || xrGripContext[mainHand] == GRIPCTX_Holster);
 	const bool dominantGripModifierOld = *vr_secondary_button_mappings && xrLastGripState[mainHand];
 	static float analogTurnRateDegPerSec = 0.0f;
 	static uint64_t lastAnalogTurnTime = 0;
@@ -3320,7 +3328,125 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		const float dz = xrHandPoses[mainHand].position.z - xrHandPoses[offHand].position.z;
 		const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
 		const bool offhandGrip = handInput[offHand].grip;
-		weaponStabilised = vr_two_handed_weapons && offhandGrip && distance < 0.50f;
+
+		// ---- GRIP ARBITER ----------------------------------------------
+		// One resolution per hand per frame, in priority order, before any
+		// consumer runs. Everything downstream reads xrGripContext and never
+		// handInput[].grip directly -- that is the whole point.
+		//
+		// Priority: Holster > Stabilize > Modifier > Plain.
+		// A holster wins because it is a small, deliberate, spatial target;
+		// stabilize is a loose proximity test that false-positives near the
+		// body, which is exactly where holsters live.
+		AActor* consolePawn = players[consoleplayer].mo;
+
+		// Per-weapon stabilize reach (ZScript-synced, see AActor::StabilizeReach)
+		// in place of a fixed 0.50m for every weapon. 0 = use the global
+		// fallback cvar, negative = this weapon does not stabilize at all.
+		double reachInches = consolePawn ? consolePawn->StabilizeReach : 0.0;
+		if (reachInches == 0.0) reachInches = vr_stabilize_distance_inches;
+		const float stabilizeRangeMeters = (reachInches > 0.0) ? (float)(reachInches * 0.0254) : -1.0f;
+
+		const bool stabilizeGeometryOk = vr_two_handed_weapons
+			&& stabilizeRangeMeters >= 0.0f && distance < stabilizeRangeMeters;
+
+		for (int h = 0; h < 2; ++h)
+		{
+			const bool held = handInput[h].grip;
+			const bool isMain = (h == mainHand);
+			const bool holsterHere = consolePawn
+				&& (isMain ? consolePawn->HolsterClaimMain : consolePawn->HolsterClaimOff);
+
+			// ---- tap vs combo -------------------------------------------
+			// Grip alone does nothing as a modifier -- the shift layer only
+			// matters once a SECOND button joins it. So grip can serve both
+			// jobs on both hands, as long as the decision waits for release
+			// instead of being guessed at press:
+			//
+			//   press inside a holster        -> arm a pending store
+			//   any other button joins        -> it was a combo, cancel
+			//   release, still inside, clean  -> store
+			//
+			// The modifier stays live the entire time, so nothing is lost.
+			// This is why the main hand is not special-cased: it keeps its
+			// whole grip+button roster AND can holster.
+			const bool wasHeld = xrLastGripState[h];
+			// SAME HAND ONLY, and no stick axes. A combo means grip plus another
+			// button ON THIS CONTROLLER -- that is what the shift layer is made
+			// of. Locomotion lives on the other hand's stick and must never
+			// cancel a store: running while holstering is the normal case, not
+			// an edge case. Thumb CLICK counts (it is a button in the roster),
+			// thumb DEFLECTION does not.
+			const bool otherButtonDown = handInput[h].select || handInput[h].thumbClick
+				|| handInput[h].a || handInput[h].b || handInput[h].x || handInput[h].y;
+
+			if (held && !wasHeld)
+			{
+				// rising edge: only a press that STARTS in a holster counts,
+				// so drifting a held hand into one never stores by accident
+				xrHolsterArmed[h] = holsterHere && *vr_holster_use_grip;
+				xrHolsterCombo[h] = false;
+			}
+			else if (held)
+			{
+				if (otherButtonDown)
+					xrHolsterCombo[h] = true;
+			}
+			else if (!held && wasHeld)
+			{
+				// falling edge: a clean tap that began and ended in a holster
+				if (xrHolsterArmed[h] && !xrHolsterCombo[h] && holsterHere)
+					xrHolsterFire[h] = true;
+
+				// A clean tap ANYWHERE (no other button joined it) is also
+				// what makes the dominant grip bindable at all -- see the
+				// suppressGripButton branch. Without this it is swallowed
+				// wholesale by the shift layer and never reaches the bind
+				// system, which is why it could not be captured in Customize
+				// Controls.
+				if (!xrHolsterCombo[h])
+					xrGripTapFire[h] = true;
+
+				xrHolsterArmed[h] = false;
+				xrHolsterCombo[h] = false;
+			}
+
+			int ctx = GRIPCTX_None;
+			if (!held)
+			{
+				ctx = GRIPCTX_None;
+			}
+			else if (xrHolsterArmed[h] && !xrHolsterCombo[h])
+			{
+				// Armed for a store, but the modifier is deliberately NOT
+				// suppressed while armed -- see dominantGripModifierNew.
+				ctx = GRIPCTX_Holster;
+			}
+			else if (isMain && *vr_secondary_button_mappings)
+			{
+				ctx = GRIPCTX_Modifier;
+			}
+			else if (!isMain && stabilizeGeometryOk)
+			{
+				ctx = GRIPCTX_Stabilize;
+			}
+			else
+			{
+				ctx = GRIPCTX_Plain;
+			}
+			xrGripContext[h] = ctx;
+		}
+
+		// Publish to ZScript so a mod can see what grip is doing rather than
+		// guessing from the raw button, same as the engine now does.
+		if (consolePawn)
+		{
+			consolePawn->GripContextMain = xrGripContext[mainHand];
+			consolePawn->GripContextOff  = xrGripContext[offHand];
+			consolePawn->VRTurnYaw = snapTurn;
+		}
+
+		weaponStabilised = (xrGripContext[offHand] == GRIPCTX_Stabilize);
 
 		if (weaponStabilised)
 		{
@@ -3436,6 +3562,20 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		const int thumbBaseKey = dominantHand ? KEY_ENTER : KEY_SPACE;
 		const int thumbAltKey = dominantHand ? KEY_TAB : KEY_HOME;
 		const int gripAltKey = KEY_PAD_DPAD_UP;
+		// Per-hand, not one shared key: which hand reached into the holster
+		// decides which weapon moves, and a single key for both would be
+		// ambiguous the moment the player has both hands in holsters at once.
+		//
+		// F13 main hand, F14 off hand. Deliberately obscure keys with nothing
+		// else on them: PgUp/PgDn are wanted elsewhere, and every pad key is
+		// already spoken for by the modifier roster.
+		const int holsterKey = dominantHand ? 0x64 /* F13 */ : 0x65 /* F14 */;
+
+		// A one-frame pulse set by the arbiter when a clean grip tap finished
+		// inside a holster. Not a live "is grip held" test -- grip keeps doing
+		// its normal jobs throughout, and this only fires on the release that
+		// turned out not to be a combo.
+		const bool holsterFiring = xrHolsterFire[hand];
 
 		// When virtual menu mouse is active on the right hand, the trigger drives
 		// GUI left-click events. Suppress trigger-as-key to avoid menu key-path
@@ -3450,20 +3590,44 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		{
 			PostRemappedControllerKeyTransition(xrLastSelectState[hand], handInput[hand].select, modifierOld, modifierNew, triggerBaseKey, triggerAltKey);
 		}
-		if (suppressGripButton)
+		// The holster key is a clean down-then-up pulse: fire on the frame the
+		// arbiter says a tap completed, release on the next. Grip itself is
+		// NOT suppressed -- it goes on doing whatever else it does, which is
+		// the point of resolving tap vs combo instead of seizing the button.
+		PostControllerKeyTransition(xrLastHolsterState[hand], holsterFiring, holsterKey);
+		// Unlike xrLastGripState (updated in syncHandState) this one is ours,
+		// so it has to be advanced here or every frame looks like a fresh
+		// press to PostControllerKeyTransition.
+		xrLastHolsterState[hand] = holsterFiring;
+		xrHolsterFire[hand] = false;
+		const bool gripTapping = xrGripTapFire[hand];
+		xrGripTapFire[hand] = false;
+
 		{
-			// While the dominant hand grip is acting as a modifier, do not emit it
-			// as a separate button. This keeps grip+B style combos from also firing
-			// the standalone grip binding and matches the OpenVR shift-layer intent.
-			PostControllerKeyTransition(xrLastGripState[hand], false, gripKey);
-		}
-		else if (!dominantHand && *vr_secondary_button_mappings)
-		{
-			PostRemappedControllerKeyTransition(xrLastGripState[hand], handInput[hand].grip, modifierOld, modifierNew, gripKey, gripAltKey);
-		}
-		else
-		{
-			PostControllerKeyTransition(xrLastGripState[hand], handInput[hand].grip, gripKey);
+			if (suppressGripButton)
+			{
+				// The dominant grip is the shift layer, so it must not fire as a
+				// button DURING a combo -- grip+B would otherwise also trigger
+				// whatever plain grip is bound to.
+				//
+				// But suppressing it unconditionally meant it could never be
+				// bound to anything at all: Customize Controls captures a key
+				// by waiting for one to arrive, and this one never did. So a
+				// CLEAN TAP -- pressed and released with no other button --
+				// emits as a one-frame pulse. Combos stay silent, and grip on
+				// its own becomes a real bindable key (RShoulder) without
+				// costing the shift layer anything.
+				PostControllerKeyTransition(xrLastGripTapState[hand], gripTapping, gripKey);
+				xrLastGripTapState[hand] = gripTapping;
+			}
+			else if (!dominantHand && *vr_secondary_button_mappings)
+			{
+				PostRemappedControllerKeyTransition(xrLastGripState[hand], handInput[hand].grip, modifierOld, modifierNew, gripKey, gripAltKey);
+			}
+			else
+			{
+				PostControllerKeyTransition(xrLastGripState[hand], handInput[hand].grip, gripKey);
+			}
 		}
 		PostRemappedControllerKeyTransition(xrLastThumbClickState[hand], handInput[hand].thumbClick, modifierOld, modifierNew, thumbBaseKey, thumbAltKey);
 		const int thumbClickKey = (hand == 1) ? KEY_PAD_RTHUMB : KEY_PAD_LTHUMB;
@@ -3755,6 +3919,21 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		if (player && player->mo)
 		{
 			const float hmdHeight = GetHmdAdjustedHeightInMapUnit(xrUsingStageSpace ? false : xrHasLocalHeightAnchor, xrLocalHeightAnchor);
+
+			// Real head pose in world space, for body-relative UI (holsters and
+			// similar) that needs the player's actual physical position rather
+			// than an aim ray. CenterEyePos is DVector3 in the same space as
+			// AActor.Pos (r_utility.cpp: CenterEyePos = viewPoint.Pos), so this
+			// is a direct assignment -- no axis swap, unlike AttackPos below
+			// which reads a raw OpenXR matrix in a different convention.
+			if (!multiplayer)
+			{
+				player->mo->HmdPos  = r_viewpoint.CenterEyePos;
+				player->mo->HmdYaw   = r_viewpoint.Angles.Yaw;
+				player->mo->HmdPitch = r_viewpoint.Angles.Pitch;
+				player->mo->HmdRoll  = r_viewpoint.Angles.Roll;
+			}
+
 			if (!multiplayer)
 			{
 				if (!vr_crouch_use_button)

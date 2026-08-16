@@ -34,6 +34,12 @@ class Weapon : StateProvider
 	Vector3 LaserBeamOffset;				// Per-weapon local laser beam origin offset
 	double HitscanTracerOffset;				// Per-weapon local hitscan tracer origin offset override
 	int LaserBeamColor;						// Per-weapon laser sight colour. -1 = use the cvars.
+
+	// Two-hand stabilize reach, in real-world inches (hand-to-hand, not map
+	// units -- the native check compares raw controller positions in meters).
+	// 0 (the ZScript default) = use vr_stabilize_distance_inches. A negative
+	// value disables stabilize for this weapon outright, e.g. on melee.
+	double StabilizeDistance;
 	bool GivenAsMorphWeapon;
 	bool bAltFire;							// Set when this weapon's alternate fire is used.
 	double UseRange;						// [NS] Distance at which player can +use
@@ -62,6 +68,7 @@ class Weapon : StateProvider
 	property Kickback: Kickback;
 	property ReadySound: ReadySound;
 	property SelectionOrder: SelectionOrder;
+	property StabilizeDistance: StabilizeDistance;
 	property MinSelectionAmmo1: MinSelAmmo1;
 	property MinSelectionAmmo2: MinSelAmmo2;
 	property SisterWeapon: SisterWeaponType;

@@ -3037,7 +3037,7 @@ OptionMenu VRLaserSightOptions protected
 	Slider "$VRLASERMNU_BEAM_GLOW",				"vr_laser_beam_glow", 0.0, 3.0, 0.1, 1
 	Slider "$VRLASERMNU_BEAM_EMISSIVE",			"vr_laser_beam_emissive", 1.0, 4.0, 0.1, 1
 	Slider "$VRLASERMNU_BEAM_TAPER",			"vr_laser_beam_taper", 0.05, 1.0, 0.05, 2
-	Slider "$VRLASERMNU_BEAM_FADE",				"vr_laser_beam_fade", 0, 2048, 32, 0
+	Slider "$VRLASERMNU_BEAM_FADE",				"vr_laser_beam_fade", 0, 8192, 32, 0
 	Option "$VRLASERMNU_BEAM_LENGTH",			"vr_laser_beam_length", "LaserBeamLength"
 	Slider "$VRLASERMNU_SHORT_LENGTH",			"vr_laser_fixed_length", 60, 1000, 10, 0
 	Slider "$VRLASERMNU_SOURCE_OFFSET_X",		"vr_laser_source_offset_x", -64, 64, 1, 0
@@ -3049,7 +3049,7 @@ OptionMenu VRLaserSightOptions protected
 	Option "$VRLASERMNU_LOCK",					"vr_laser_lock", "OnOff"
 	Slider "$VRLASERMNU_LOCK_TIGHTEN",			"vr_laser_lock_tighten", 0.0, 0.9, 0.05, 2
 	Slider "$VRLASERMNU_LOCK_RATE",				"vr_laser_lock_rate", 0.05, 1.5, 0.05, 2
-	Slider "$VRLASERMNU_DOT_RANGE",				"vr_laser_dot_range", 0, 2048, 32, 0
+	Slider "$VRLASERMNU_DOT_RANGE",				"vr_laser_dot_range", 0, 8192, 32, 0
 
 	StaticText ""
 	StaticText "$VRLASERMNU_COLOR_OPTIONS", gold
@@ -3062,7 +3062,26 @@ OptionMenu VRLaserSightOptions protected
 	Submenu "$VRLASERMNU_SLOT_COLORS",			"VRLaserSlotColors"
 	StaticText " "
 
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_laser_sight vr_laser_show_melee vr_laser_hide_on_wheel vr_laser_beam vr_laser_other_players_beam vr_laser_other_players_pointer vr_laser_color vr_laser_beam_alpha vr_laser_beam_width vr_laser_beam_glow vr_laser_beam_emissive vr_laser_beam_taper vr_laser_beam_fade vr_laser_pointer_scale vr_laser_pointer_alpha vr_laser_pointer_glow vr_laser_pointer_glow_scale vr_laser_pointer_glow_intensity vr_laser_beam_length vr_laser_fixed_length vr_laser_source_offset_x vr_laser_source_offset_y vr_laser_source_offset_z vr_laser_lock vr_laser_lock_tighten vr_laser_lock_rate vr_laser_dot_range vr_laser_color_mode vr_laser_color_offhand vr_laser_dot_color vr_laser_dot_color_offhand vr_laser_color_per_slot vr_laser_color_slot1 vr_laser_color_slot2 vr_laser_color_slot3 vr_laser_color_slot4 vr_laser_color_slot5 vr_laser_color_slot6 vr_laser_color_slot7 vr_laser_color_slot8 vr_laser_color_slot9 vr_laser_color_slot0"
+	// CYCLING LAYERS OVER EVERYTHING ABOVE, so it stays reachable regardless
+	// of which colour tier is in use -- the four pickers, per-slot, all of it.
+	// See vr_laser_color_cycle in hw_vrmodes.cpp for how it composes.
+	StaticText "$VRLASERMNU_COLOR_CYCLE_OPTIONS", gold
+	Option "$VRLASERMNU_COLOR_CYCLE",			"vr_laser_color_cycle", "OnOff"
+	Slider "$VRLASERMNU_COLOR_CYCLE_SPEED",		"vr_laser_color_cycle_speed", 6.0, 360.0, 6.0, 0
+	Option "$VRLASERMNU_COLOR_CYCLE_DOT",		"vr_laser_color_cycle_dot", "OnOff"
+	StaticText " "
+
+	// Reacts on top of BOTH tiers above -- a lined-up headshot always wins
+	// the pixel. What counts as a head is gameplay-mod data (see the
+	// Headshots mod); this only controls how the engine shows it.
+	StaticText "$VRLASERMNU_HEADSHOT_OPTIONS", gold
+	Option "$VRLASERMNU_HEADSHOT_REACT",		"vr_laser_headshot_react", "OnOff"
+	ColorPicker "$VRLASERMNU_HEADSHOT_COLOR",	"vr_laser_headshot_color"
+	Option "$VRLASERMNU_HEADSHOT_PULSE",		"vr_laser_headshot_pulse", "OnOff"
+	Slider "$VRLASERMNU_HEADSHOT_PULSE_SPEED",	"vr_laser_headshot_pulse_speed", 0.5, 20.0, 0.5, 1
+	StaticText " "
+
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_laser_sight vr_laser_show_melee vr_laser_hide_on_wheel vr_laser_beam vr_laser_other_players_beam vr_laser_other_players_pointer vr_laser_color vr_laser_beam_alpha vr_laser_beam_width vr_laser_beam_glow vr_laser_beam_emissive vr_laser_beam_taper vr_laser_beam_fade vr_laser_pointer_scale vr_laser_pointer_alpha vr_laser_pointer_glow vr_laser_pointer_glow_scale vr_laser_pointer_glow_intensity vr_laser_beam_length vr_laser_fixed_length vr_laser_source_offset_x vr_laser_source_offset_y vr_laser_source_offset_z vr_laser_lock vr_laser_lock_tighten vr_laser_lock_rate vr_laser_dot_range vr_laser_color_mode vr_laser_color_offhand vr_laser_dot_color vr_laser_dot_color_offhand vr_laser_color_per_slot vr_laser_color_slot1 vr_laser_color_slot2 vr_laser_color_slot3 vr_laser_color_slot4 vr_laser_color_slot5 vr_laser_color_slot6 vr_laser_color_slot7 vr_laser_color_slot8 vr_laser_color_slot9 vr_laser_color_slot0 vr_laser_color_cycle vr_laser_color_cycle_speed vr_laser_color_cycle_dot vr_laser_headshot_react vr_laser_headshot_color vr_laser_headshot_pulse vr_laser_headshot_pulse_speed"
 }
 
 // Ten slots is too many rows to sit inside the main page without pushing
@@ -3243,8 +3262,9 @@ OptionMenu VROptionsMenu protected
 	ColorPicker "$VRPREFMNU_MOUSE_POINTER",		"vr_menu_pointer_color"
 	Option "$VRPREFMNU_SECONDARY_BUTTON_MAPPINGS",	"vr_secondary_button_mappings", "OnOff", vr_joy_mode
 	Option "$VRPREFMNU_TWO_HANDED_WEAPONS",		"vr_two_handed_weapons", "OnOff"
+	Slider "Stabilize Distance (in)",			"vr_stabilize_distance_inches", 1.0, 24.0, 1.0, 0
 	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_control_scheme vr_switch_sticks vr_mouse_in_menu vr_menu_pointer_color vr_secondary_button_mappings vr_two_handed_weapons"
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_control_scheme vr_switch_sticks vr_mouse_in_menu vr_menu_pointer_color vr_secondary_button_mappings vr_two_handed_weapons vr_stabilize_distance_inches"
 
 	StaticText ""
 	StaticText "$VRPREFMNU_LOCOMOTION", gold

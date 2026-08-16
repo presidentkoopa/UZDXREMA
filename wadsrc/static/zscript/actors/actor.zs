@@ -281,6 +281,54 @@ class Actor : Thinker native
 	native readonly double OffhandAngle;
 	native readonly bool OverrideAttackPosDir;
 
+	// Real headset position/orientation in map units, world space -- where the
+	// player's head actually is, not an aim ray. For body-relative UI such as
+	// holsters that need to reason about the player's physical pose.
+	native readonly vector3 HmdPos;
+	native readonly double HmdYaw;
+	native readonly double HmdPitch;
+	native readonly double HmdRoll;
+
+	// Two-hand stabilize reach for the ready weapon, inches. Write this from
+	// ReadyWeapon.StabilizeDistance each tic; native reads it in place of a
+	// fixed constant. 0 = use vr_stabilize_distance_inches, negative = disabled.
+	native double StabilizeReach;
+
+	// Set true for a hand while it is claimed by body-relative UI (a holster
+	// reach) this frame. Native gives a holster claim priority over stabilize
+	// and the grip-modifier layer for that hand -- one hand, one meaning.
+	native bool HolsterClaimMain;
+	native bool HolsterClaimOff;
+
+	// What the grip arbiter decided each hand's grip MEANS this frame.
+	// 0 none, 1 holster, 2 stabilize, 3 modifier, 4 plain (EGripContext).
+	// Engine-owned and the mirror of HolsterClaim* above: script says what it
+	// wants to claim, this reports what actually won.
+	native readonly int GripContextMain;
+	native readonly int GripContextOff;
+
+	// Accumulated CONTROLLER-driven yaw (snap + stick turn), degrees. HmdYaw is
+	// physical head yaw PLUS this. Body-relative anchors must follow this part
+	// 1:1 -- it rotates the whole virtual body -- while only the physical
+	// remainder should get a neck deadzone.
+	native readonly double VRTurnYaw;
+
+	// What the laser sight's own beam trace is resting on, per hand, updated
+	// every render frame. Engine-owned -- this is the SAME trace the beam is
+	// drawn from, not a second one, so a mod checking "is this a headshot"
+	// against it always agrees with what the player sees.
+	native readonly Actor LaserTraceTargetMain;
+	native readonly Actor LaserTraceTargetOff;
+	native readonly vector3 LaserTraceHitPosMain;
+	native readonly vector3 LaserTraceHitPosOff;
+
+	// Write true here when the point above is a headshot -- the engine has no
+	// idea which classes have heads, that is gameplay-mod data. The laser
+	// sight reacts to this (vr_laser_headshot_react and friends) on whichever
+	// hand it is set for.
+	native bool LaserHeadshotLinedUpMain;
+	native bool LaserHeadshotLinedUpOff;
+
 	meta String Obituary;		// Player was killed by this actor
 	meta String HitObituary;		// Player was killed by this actor in melee
 	meta double DeathHeight;	// Height on normal death

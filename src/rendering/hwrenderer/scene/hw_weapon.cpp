@@ -28,6 +28,8 @@
 #include "sbar.h"
 #include "r_utility.h"
 #include "v_video.h"
+#include "palutil.h"
+#include "i_time.h"
 #include "doomstat.h"
 #include "d_player.h"
 #include "g_levellocals.h"
@@ -88,6 +90,13 @@ EXTERN_CVAR(Float, vr_laser_beam_glow)
 EXTERN_CVAR(Float, vr_laser_beam_emissive)
 EXTERN_CVAR(Float, vr_laser_beam_taper)
 EXTERN_CVAR(Float, vr_laser_beam_fade)
+EXTERN_CVAR(Bool, vr_laser_color_cycle)
+EXTERN_CVAR(Float, vr_laser_color_cycle_speed)
+EXTERN_CVAR(Bool, vr_laser_color_cycle_dot)
+EXTERN_CVAR(Bool, vr_laser_headshot_react)
+EXTERN_CVAR(Color, vr_laser_headshot_color)
+EXTERN_CVAR(Bool, vr_laser_headshot_pulse)
+EXTERN_CVAR(Float, vr_laser_headshot_pulse_speed)
 EXTERN_CVAR(Bool, vr_laser_lock)
 EXTERN_CVAR(Float, vr_laser_lock_tighten)
 EXTERN_CVAR(Float, vr_laser_lock_rate)
@@ -425,6 +434,11 @@ struct FLaserBeamPoints
 	// it is also honest information -- it tells you your shot connects
 	// before you take it.
 	bool OnTarget = false;
+
+	// The actor OnTarget refers to, or null. Carried out of the trace so the
+	// caller can publish it to script (AActor.LaserTraceTarget*) without a
+	// second trace -- see the headshot line-up reaction below.
+	AActor* HitActor = nullptr;
 };
 
 static DVector3 GetWeaponLaserBeamOffset(AActor* weapon)
@@ -489,6 +503,56 @@ static bool TryReadWeaponInt(AActor* weapon, FName field, int& out)
 // makes them differ; below that both elements of a hand resolve the same,
 // which is what keeps the lower modes feeling like one setting rather than
 // two that have to be kept in sync by hand.
+// COLOUR CYCLING -- replaces a resolved colour's HUE with a slowly drifting
+// one while keeping its saturation and brightness exactly as authored, so a
+// dim pointer stays dim and a saturated one stays saturated as it cycles.
+//
+// PHASE IS PER TARGET (0=mainhand beam, 1=mainhand dot, 2=offhand beam,
+// 3=offhand dot), spaced 90 degrees apart so all four start visibly
+// different colours rather than four copies of the same drift.
+//
+// A colour with zero saturation -- a straight grey or white sight -- has no
+// hue to speak of, so cycling one grows it out to a fully saturated colour
+// rather than leaving it looking broken. That is a deliberate call: the
+// whole point of turning this on is to see colour, and a cycling sight that
+// stayed grey the entire time would look like the feature had failed.
+static PalEntry CycleHue(PalEntry base, int target)
+{
+	float r = base.r / 255.0f, g = base.g / 255.0f, b = base.b / 255.0f;
+
+	// RGBtoHSV is not declared in palutil.h -- only the reverse direction is
+	// -- so value and a usable saturation are pulled by hand. Cheap: three
+	// compares and a subtract, and it only runs when cycling is on.
+	float mx = std::max(r, std::max(g, b));
+	float mn = std::min(r, std::min(g, b));
+	float v = mx;
+	float s = (mx > 0.0001f) ? (mx - mn) / mx : 0.0f;
+	if (s < 0.35f) s = 0.85f;   // grey/white input: give the cycle something to show
+
+	const double speed = std::max(0.0, (double)vr_laser_color_cycle_speed);
+	const double phase = target * 90.0;
+	const double hue = std::fmod(I_msTimeF() * (speed / 1000.0) + phase, 360.0);
+
+	float cr, cg, cb;
+	HSVtoRGB(&cr, &cg, &cb, (float)hue, s, v);
+	return PalEntry(base.a,
+		(uint8_t)std::clamp(cr * 255.0f, 0.0f, 255.0f),
+		(uint8_t)std::clamp(cg * 255.0f, 0.0f, 255.0f),
+		(uint8_t)std::clamp(cb * 255.0f, 0.0f, 255.0f));
+}
+
+// Straight per-channel lerp toward a target colour, alpha untouched. Used by
+// the headshot line-up reaction to blend toward vr_laser_headshot_color
+// instead of hard-swapping it, so a pulsing reaction fades rather than pops.
+static PalEntry LerpColor(PalEntry from, PalEntry to, float t)
+{
+	t = std::clamp(t, 0.0f, 1.0f);
+	return PalEntry(from.a,
+		(uint8_t)(from.r + (to.r - from.r) * t),
+		(uint8_t)(from.g + (to.g - from.g) * t),
+		(uint8_t)(from.b + (to.b - from.b) * t));
+}
+
 static int GetLaserBeamColorFor(AActor* weapon, bool offhand, bool isDot)
 {
 	// 1. THE WEAPON'S OWN. -1 means the author said nothing.
@@ -656,6 +720,7 @@ static bool GetLaserBeamEndpoints(player_t* player, AActor* weapon, bool offhand
 		&& (trace.Actor->flags & MF_SHOOTABLE)
 		&& !(trace.Actor->flags & MF_CORPSE)
 		&& trace.Actor->health > 0;
+	points.HitActor = points.OnTarget ? trace.Actor : nullptr;
 	DVector3 beamVector = points.HitEnd - points.Start;
 	double beamDistance = beamVector.Length();
 	double visibleDistance = beamDistance;
@@ -1314,8 +1379,62 @@ void DrawLaserSightWorld(FRenderState& state)
 		{
 			const bool drawBeam = allowBeamToggle || (weapon != nullptr && (weapon->IntVar(NAME_WeaponFlags) & WIF_HASLASERBEAM));
 			const bool drawPointer = allowPointer;
+
+			// Publish what the trace just found so a gameplay mod can ask
+			// "is this a headshot" against the SAME hit, not a second one --
+			// see AActor.LaserTraceTarget*/LaserTraceHitPos* in actor.zs.
+			if (offhand)
+			{
+				player->mo->LaserTraceTargetOff = points.HitActor;
+				player->mo->LaserTraceHitPosOff = points.HitEnd;
+			}
+			else
+			{
+				player->mo->LaserTraceTargetMain = points.HitActor;
+				player->mo->LaserTraceHitPosMain = points.HitEnd;
+			}
+
+			PalEntry beamCol = GetLaserBeamColorFor(weapon, offhand, false);
+			PalEntry dotCol  = GetLaserBeamColorFor(weapon, offhand, true);
+
+			// CYCLING LAYERS ON TOP OF THE RESOLVED COLOUR, and only replaces
+			// what it is explicitly asked to. The beam and dot are cycled
+			// independently -- vr_laser_color_cycle_dot gates the dot on its
+			// own, because the dot is the reactive element (vr_laser_dot_range)
+			// and often wants to hold still while the beam leading to it moves.
+			if (vr_laser_color_cycle)
+			{
+				const int base = offhand ? 2 : 0;
+				beamCol = CycleHue(beamCol, base + 0);
+				if (vr_laser_color_cycle_dot)
+					dotCol = CycleHue(dotCol, base + 1);
+			}
+
+			// HEADSHOT LINE-UP REACTS ON TOP OF EVERYTHING ABOVE, including
+			// colour cycling -- a live headshot lineup is the most urgent
+			// thing the sight can say, so it always wins the pixel. Reacts
+			// to a flag script wrote from the trace just published above
+			// (one tic of lag), never decides "is this a head" itself.
+			const bool headshotHot = offhand ? player->mo->LaserHeadshotLinedUpOff : player->mo->LaserHeadshotLinedUpMain;
+			if (vr_laser_headshot_react && headshotHot)
+			{
+				float t = 1.0f;
+				if (vr_laser_headshot_pulse)
+				{
+					constexpr double TWO_PI = 6.283185307179586;
+					const double speed = std::max(0.0, (double)vr_laser_headshot_pulse_speed);
+					const double wave = 0.5 + 0.5 * std::sin(I_msTimeF() * 0.001 * speed * TWO_PI);
+					// Floored at 0.4, not 0: a pulse that dips to zero reads as
+					// the reaction switching off and on, not as one continuous
+					// alert breathing.
+					t = 0.4f + 0.6f * (float)wave;
+				}
+				beamCol = LerpColor(beamCol, (int)vr_laser_headshot_color, t);
+				dotCol  = LerpColor(dotCol,  (int)vr_laser_headshot_color, t);
+			}
+
 			DrawLaserBeamGeometry(state, points.Start, points.BeamEnd, points.HitEnd, drawBeam, drawPointer, points.OnTarget,
-				GetLaserBeamColorFor(weapon, offhand, false), GetLaserBeamColorFor(weapon, offhand, true));
+				(int)beamCol, (int)dotCol);
 		}
 	};
 

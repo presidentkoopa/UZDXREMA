@@ -779,7 +779,12 @@ CVAR(Float, vr_laser_beam_taper, 0.45f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 // out.
 //
 // 0 disables the fade entirely and restores the old full-length beam.
-CVAR(Float, vr_laser_beam_fade, 512.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+// DEFAULTS SHORT, so the sight leans on the reactive dot rather than on a
+// long visible line -- the owner's stated preference: "i want a laser sight
+// that can be super short and taper off so i can rely on the reactive dot."
+// 100 is a short taper right at the gun; the slider still reaches 8192 for
+// whoever wants the old long-beam look back.
+CVAR(Float, vr_laser_beam_fade, 100.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 
 // The lock: does the sight react when it is resting on something alive.
 CVAR(Bool, vr_laser_lock, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
@@ -862,6 +867,71 @@ CVAR(Color, vr_laser_color_slot7, 0xa060ff, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR(Color, vr_laser_color_slot8, 0xff60c0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR(Color, vr_laser_color_slot9, 0xffffff, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR(Color, vr_laser_color_slot0, 0x909090, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
+// ---------------------------------------------------------------------
+// COLOUR CYCLING -- a fifth tier that sits ON TOP of the four above rather
+// than replacing them.
+//
+// Every resolved colour is still whatever the ladder above says: a weapon's
+// own LaserBeamColor, a slot colour, a per-hand colour, or the global. What
+// changes is that colour's HUE gets replaced by a slowly drifting one before
+// it is drawn, while its saturation and brightness are kept exactly as
+// authored. A cheap red pointer stays a cheap, undersaturated red as it
+// cycles; a rich saturated cyan stays rich and saturated. Cycling a hue
+// number is what "smooth fade" means here -- it is a walk around the colour
+// wheel, not a crossfade between two RGB triples, so it never dips through
+// grey or dims on the way.
+//
+// EACH TARGET HAS ITS OWN INDEPENDENT PHASE, offset at startup, so two
+// cycling sights never lock into a duplicate colour and drift apart together
+// -- they read as genuinely separate lights rather than as one light with
+// four names.
+//
+// DRIVEN OFF WALL-CLOCK TIME, not the tic counter. The tic rate is fixed at
+// 35 permanently (see the fork's own TICRATE decision) and a hue step tied
+// to it would visibly stair-step at a slow speed, the same way the old beam
+// used to strobe before it got interpolation. A millisecond clock cycles as
+// smoothly as the display refreshes.
+CVAR(Bool, vr_laser_color_cycle, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
+// Degrees of hue per second. 360 is one full trip around the wheel every
+// second -- fast enough to look electric; 6 is a slow, ambient drift that
+// takes a minute to repeat. 0 would be legal but pointless: use the tier
+// above instead of turning cycling on to stand still.
+CVAR(Float, vr_laser_color_cycle_speed, 60.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
+// Whether the DOT cycles too. Off by default: the dot is the reactive
+// element -- see vr_laser_dot_range -- and it is easier to read as "locked
+// on target" if its colour holds still while the beam leading to it cycles.
+CVAR(Bool, vr_laser_color_cycle_dot, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
+// ---------------------------------------------------------------------
+// HEADSHOT LINE-UP REACTION -- the sight tells you when it is resting on a
+// head, not just on something that can die (that is vr_laser_lock, above).
+//
+// The engine only draws the reaction; a gameplay mod (see the Headshots
+// mod's HS_Handler) decides what counts as a head and writes the answer
+// back to AActor.LaserHeadshotLinedUpMain/Off each tic, reading the exact
+// same trace the beam itself is drawn from (AActor.LaserTraceTarget*/
+// LaserTraceHitPos*). This is deliberately not a beam/dot split like
+// colour cycling above -- a headshot lineup is meant to be unmissable, so
+// it always tints both.
+CVAR(Bool, vr_laser_headshot_react, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
+// The colour the sight blends toward when lined up. Default is a hot red,
+// deliberately far from the cool default sight colours so it reads as an
+// alert rather than as one more available hue.
+CVAR(Color, vr_laser_headshot_color, 0xff2020, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
+// Pulse toward the colour above instead of holding it solid. Off means a
+// flat colour swap the instant the sight lines up; on means it breathes,
+// which reads as "live" rather than as a static UI state change.
+CVAR(Bool, vr_laser_headshot_pulse, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
+// Pulse rate in cycles per second. Wall-clock driven (see CycleHue's own
+// comment on why) so it stays smooth regardless of the fixed 35 tic rate.
+CVAR(Float, vr_laser_headshot_pulse_speed, 6.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
 CUSTOM_CVAR(Int, vr_hitscan_tracer, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
 	if (self < 0)
@@ -885,6 +955,17 @@ CVAR(Float, vr_snapTurn, 45.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_switch_sticks, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_secondary_button_mappings, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_two_handed_weapons, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// Fallback two-hand stabilize reach in real-world inches, used by any weapon
+// that does not set Weapon.StabilizeDistance (0, the ZScript default).
+CVAR(Float, vr_stabilize_distance_inches, 8.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// Should a holster claim take over that hand's GRIP button?
+//
+// Off (default): a claim still suppresses two-hand stabilize for that hand,
+// but grip keeps its normal meaning and the holster is worked with its own
+// bound keys instead. Grip already carries several jobs -- stabilize, the
+// secondary-button modifier layer, a plain bind -- and taking it over is the
+// part of this that is still unsettled, so it is opt-in rather than assumed.
+CVAR(Bool, vr_holster_use_grip, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_momentum, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // Only used in player.zs
 CVAR(Float, vr_momentum_threshold, 1.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_crouch_use_button, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)

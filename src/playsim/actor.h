@@ -1675,6 +1675,76 @@ public:
 	DAngle   OffhandAngle;
 	DAngle   OffhandRoll;
 
+	// Real headset position/orientation in map units, world space. Unlike
+	// AttackPos/OffhandPos this is not a per-hand aim ray -- it is where the
+	// player's actual head is right now, for body-relative UI (holsters,
+	// menus anchored to the player) that needs to reason about the player's
+	// physical pose rather than where they are aiming.
+	DVector3 HmdPos;
+	DAngle   HmdYaw;
+	DAngle   HmdPitch;
+	DAngle   HmdRoll;
+
+	// Two-hand stabilize reach for the current ready weapon, in real-world
+	// inches. ZScript-owned: copied each tic from ReadyWeapon.StabilizeDistance
+	// (see RS_StabilizeSync/equivalent). 0 = use vr_stabilize_distance_inches,
+	// negative = stabilize disabled for this weapon. Native reads this instead
+	// of a fixed literal so the reach is per-weapon, not one global constant.
+	double StabilizeReach;
+
+	// Grip-priority claims: while true for a hand, that hand's grip is being
+	// spent on body-relative UI (a holster reach) this frame, and every other
+	// consumer of that hand's grip -- stabilize, the secondary-button modifier
+	// layer, the plain grip keybind -- must stand down for it. ZScript-owned,
+	// written by whatever holds the holster anchors and proximity check; native
+	// only reads these. This is the single arbitration point: one hand, one
+	// meaning, decided in priority order (holster beats everything else) before
+	// any other grip consumer runs.
+	bool HolsterClaimMain;
+	bool HolsterClaimOff;
+
+	// What the grip arbiter decided each hand's grip means this frame; see
+	// EGripContext in vk_openxrdevice.h. Engine-owned and read-only to script,
+	// the mirror image of HolsterClaim* above: script says what it wants to
+	// claim, the engine says what actually won.
+	int GripContextMain;
+	int GripContextOff;
+
+	// Accumulated CONTROLLER-driven yaw (snap turn and stick turn), in degrees.
+	// HmdYaw is physical head yaw PLUS this, and separating them matters: a
+	// body-relative anchor must follow controller rotation exactly, because
+	// that turns the whole virtual body, while physical head rotation should
+	// be allowed a neck's worth of freedom first. Without the split a 45
+	// degree snap turn hides inside the neck deadzone and every snap leaves
+	// body-anchored things permanently offset.
+	double VRTurnYaw;
+
+	// What the laser sight's own trace is currently resting on, per hand --
+	// engine-owned, written every render frame from the same Trace() call
+	// that already draws the beam (hw_weapon.cpp: GetLaserBeamEndpoints).
+	// TObjPtr, not a raw pointer: the target can die between the frame this
+	// is written and the tic a script reads it, and this needs to go null
+	// when that happens rather than dangle.
+	//
+	// Exists so a mod can ask "is the sight actually on a head" without
+	// running its own second trace that could disagree with the one the
+	// beam is drawn from -- offsets, per-hand quirks and the script-side
+	// beam-shortening hook (VR_IsScriptLaserForcedFor) all live in that one
+	// trace, and reimplementing it from AttackPos/AttackAngle alone would
+	// drift from what the player actually sees.
+	TObjPtr<AActor*> LaserTraceTargetMain;
+	TObjPtr<AActor*> LaserTraceTargetOff;
+	DVector3 LaserTraceHitPosMain;
+	DVector3 LaserTraceHitPosOff;
+
+	// The other direction: did a mod decide the point above is a headshot?
+	// Script-owned (a class list of what even has a head is mod data, not
+	// engine data -- see the Headshots gameplay mod), native reads this to
+	// react on the sight. One tic of lag behind LaserTraceTarget* is fine;
+	// this is a cosmetic reaction, not a hit determination.
+	bool LaserHeadshotLinedUpMain;
+	bool LaserHeadshotLinedUpOff;
+
 	DVector3 (*OffhandDir)(AActor* actor, DAngle yaw, DAngle pitch);
 };
 

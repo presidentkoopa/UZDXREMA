@@ -807,6 +807,17 @@ struct LevelLocals native
 
 	native bool IsVRInputSuppressed();
 
+	// What FindModelFrameRaw would resolve for (cls, sprite, frame), the part
+	// no script could otherwise see: whether that MODELDEF block mirrors the
+	// mesh (negative X Scale) and its baked AngleOffset/PitchOffset/RollOffset.
+	// Mirroring is a per-model authoring choice with no relationship to which
+	// hand a weapon is normally held in, so there was no way to compensate a
+	// world-placed copy of a weapon's model correctly without this -- a single
+	// guessed "flip 180" can only ever be right for some of the arsenal.
+	// Returns false (all outputs 0) if the class has no model, or no
+	// FSpriteModelFrame exists for that exact (sprite, frame).
+	native bool, bool, double, double, double GetModelOrientationHint(class<Actor> cls, int sprite, int frame);
+
 	native int, Vector2 AimBillboard(Vector3 start, Vector3 dir, double maxDist = 0);
 	// Point versus billboard -- the touch case. Returns the nearest billboard
 	// the point is within maxRange of and inside the bounds of, its UV, and

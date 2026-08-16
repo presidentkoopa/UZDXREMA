@@ -42,6 +42,7 @@
 #include "sbar.h"
 #include "doomstat.h"
 #include "p_acs.h"
+#include "r_data/models.h"
 #include "a_pickups.h"
 #include "a_specialspot.h"
 #include "actorptrselect.h"
@@ -5337,6 +5338,61 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, IsVRInputSuppressed, IsVRInputSuppre
 {
 	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
 	ACTION_RETURN_BOOL(IsVRInputSuppressed(self));
+}
+
+// GetModelOrientationHint -- what FindModelFrameRaw would resolve for a given
+// (class, sprite, frame), specifically the parts a script cannot see any other
+// way: whether the model's own MODELDEF Scale mirrors it (negative X), and the
+// AngleOffset/PitchOffset/RollOffset baked into that same block.
+//
+// Written for the holster system's "why do some stored weapons face forward,
+// some backward, some sideways" bug. The cause: mirroring is a per-MODEL
+// authoring choice (chainsaw is -1.5 X, SMG is -1.0 X, rifle/pistol/revolver
+// are positive, unmirrored) with NO correlation to which hand a weapon is
+// normally held in -- so a single script-side "flip main hand 180" guess can
+// only ever be right for a subset of the arsenal. Same story for PitchOffset:
+// SMG bakes in +45, most weapons bake in 0. There was no way to know either
+// value from script, so there was no way to compensate for real.
+//
+// Returns false if the class has no model bound at all (hasmodel false) or
+// the (sprite, frame) pair has no FSpriteModelFrame -- e.g. a still-loading
+// class, or a caller that got the frame wrong.
+static int GetModelOrientationHint(FLevelLocals* self, PClass* cls, int sprite, int frame,
+	bool* outMirrored, double* outAngleOffset, double* outPitchOffset, double* outRollOffset)
+{
+	*outMirrored = false;
+	*outAngleOffset = 0.0;
+	*outPitchOffset = 0.0;
+	*outRollOffset = 0.0;
+
+	if (cls == nullptr) return 0;
+	auto def = GetDefaultByType(cls);
+	if (def == nullptr || !def->hasmodel) return 0;
+
+	FSpriteModelFrame* smf = FindModelFrame(cls, sprite, frame, false);
+	if (smf == nullptr) return 0;
+
+	*outMirrored = (smf->xscale < 0.0f);
+	*outAngleOffset = smf->angleoffset;
+	*outPitchOffset = smf->pitchoffset;
+	*outRollOffset = smf->rolloffset;
+	return 1;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, GetModelOrientationHint, GetModelOrientationHint)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_POINTER(cls, PClass);
+	PARAM_INT(sprite);
+	PARAM_INT(frame);
+	bool mirrored; double angleoffset, pitchoffset, rolloffset;
+	int found = GetModelOrientationHint(self, cls, sprite, frame, &mirrored, &angleoffset, &pitchoffset, &rolloffset);
+	if (numret > 0) ret[0].SetInt(found);
+	if (numret > 1) ret[1].SetInt(mirrored);
+	if (numret > 2) ret[2].SetFloat(angleoffset);
+	if (numret > 3) ret[3].SetFloat(pitchoffset);
+	if (numret > 4) ret[4].SetFloat(rolloffset);
+	return min(numret, 5);
 }
 
 DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, AimBillboard, AimBillboard)

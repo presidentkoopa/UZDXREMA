@@ -56,6 +56,28 @@ protected:
 	mutable XrFovf currentFov{};
 };
 
+// What a hand's grip button means on a given frame.
+//
+// Grip carries several jobs at once in VR -- two-hand stabilize, the
+// secondary-button shift layer, a plain bind, and now holsters -- and every
+// one of them used to test the raw button independently. Nothing stopped two
+// firing on the same frame, and nothing could tell you which one "won",
+// because none of them knew the others existed.
+//
+// This is the single place that decides. Resolved once per hand per frame in
+// PRIORITY ORDER, and every consumer asks what the context is rather than
+// asking whether the button is down. Adding a fifth job means adding a value
+// here and one branch in ResolveGripContexts -- not another blind test
+// scattered somewhere else.
+enum EGripContext
+{
+	GRIPCTX_None = 0,   // grip not held, or held with nothing claiming it
+	GRIPCTX_Holster,    // hand is inside a holster volume; highest priority
+	GRIPCTX_Stabilize,  // off hand supporting the main hand's weapon
+	GRIPCTX_Modifier,   // dominant grip acting as the shift layer
+	GRIPCTX_Plain,      // ordinary grip, whatever it is bound to
+};
+
 class VKOpenXRDeviceMode : public VRMode
 {
 public:
@@ -184,6 +206,25 @@ protected:
 	mutable bool xrLastSelectState[2] = { false, false };
 	mutable bool xrLastMenuState[2] = { false, false };
 	mutable bool xrLastGripState[2] = { false, false };
+	mutable bool xrLastHolsterState[2] = { false, false };
+	// What this hand's grip MEANS this frame -- see EGripContext and
+	// ResolveGripContexts. Every consumer of grip reads this instead of
+	// re-deriving intent from the raw button, which is how two of them used
+	// to fire at once.
+	mutable int xrGripContext[2] = { 0, 0 };
+	// Tap-vs-combo resolution for grip. A grip press that STARTS inside a
+	// holster arms a pending store; if any other button joins it before
+	// release then it was a modifier combo and the store is cancelled. So the
+	// same button serves both, decided on release rather than guessed at press.
+	mutable bool xrHolsterArmed[2] = { false, false };
+	mutable bool xrHolsterCombo[2] = { false, false };
+	mutable bool xrHolsterFire[2]  = { false, false };
+	// A grip press that came and went with no other button joining it. Lets
+	// the DOMINANT hand's grip emit its key on release without breaking the
+	// shift layer -- combos still suppress it, so grip+X is a combo and grip
+	// alone is a bindable button.
+	mutable bool xrGripTapFire[2]  = { false, false };
+	mutable bool xrLastGripTapState[2] = { false, false };
 	mutable bool xrLastThumbClickState[2] = { false, false };
 	mutable bool xrLastTrackpadClickState[2] = { false, false };
 	mutable bool xrLastAState[2] = { false, false };
