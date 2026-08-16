@@ -1,3 +1,4 @@
+i have not verified the credits but i have verified the claims
 ![Doom XR Edition](https://github.com/iAmErmac/DoomXR/blob/doomxr/branding/banner.png)
 
 # UZDXREMA — a rendering fork of DoomXR
