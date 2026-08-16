@@ -2109,3 +2109,50 @@ Matters less than it sounds for the case this was built for. Any mod that
 has to store them in fields to vary them at all. Weapons with hardcoded
 damage are the ones whose damage never varies, and those are readable once
 from `Default`, or measurable by observation.
+
+---
+
+## 31. `MainHandRoll` — the main hand's real wrist roll
+
+```zscript
+native readonly double AActor.MainHandRoll;   // degrees
+```
+
+The main hand's true roll, for anything drawn *on* the held weapon.
+
+`AttackRoll` cannot carry it. The VR backends compute the real value from
+`weaponangles[ROLL]` and assign it, and then `UpdateCanonicalMainHandPose`
+overwrites it with zero on the very next tic
+(`src/playsim/p_user.cpp:163`), before `WorldTick` runs
+(`src/p_tick.cpp:403-408`). Script therefore never saw anything but 0.
+
+That zero is correct and must stay. `AttackPitch` and `AttackAngle` survive
+because the usercmd has a `weaponpitch` and a `weaponyaw` to rebuild them
+from; there is no `weaponroll` (`src/d_protocol.h:64-75`), so a peer has no
+way to arrive at the same number. Zeroing is what keeps it deterministic.
+
+So this is a second field rather than a fix to the first, written by the VR
+backends beside the `AttackRoll` assignment they already made:
+
+| | |
+| --- | --- |
+| `src/common/rendering/hwrenderer/data/hw_vrmodes.cpp` | shared VR path |
+| `src/common/rendering/vulkan/stereo3d/vk_openxrdevice.cpp` | OpenXR / Vulkan |
+| `src/gl/stereo3d/gl_openxrdevice.cpp` | OpenXR / GL |
+| `src/rendering/gl/stereo3d/gl_openvr.cpp` | OpenVR |
+
+Renderer-owned like the `Hmd*` block: never touched by the playsim, never
+serialised, no usercmd involvement.
+
+**Which to read.** `MainHandRoll` for presentation — a readout welded to the
+gun, anything that should agree with what the player can see in their hand.
+`AttackRoll` for anything that must agree across a network. `OffhandRoll`
+needs no counterpart; nothing zeroes it outside `if (multiplayer)`
+(`p_user.cpp:168-174`).
+
+**Why it matters.** Without it the held model rolls with the wrist while
+script is told the wrist is level, so anything script positions on the gun
+stays upright as the gun turns over. That reads as a bug in the mod, and the
+mod cannot fix it.
+
+Both build targets, as §25/§26 note.
