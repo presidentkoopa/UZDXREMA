@@ -60,10 +60,14 @@
 #include "v_draw.h"
 #include "types.h"		// [BB] PType and the type singletons, for the field reflection natives below
 #include "i_specialpaths.h"	// [BB] M_GetConfigPath, for JSON profile natives below
-#include "rapidjson/rapidjson.h"
-#include "rapidjson/writer.h"
-#include "rapidjson/prettywriter.h"
-#include "rapidjson/document.h"
+// serializer_rapidjson.h MUST come before any rapidjson header. It defines
+// RAPIDJSON_48BITPOINTER_OPTIMIZATION 0 and the CXX11 feature macros, and
+// RAPIDJSON_48BITPOINTER_OPTIMIZATION changes sizeof(GenericValue). Including
+// rapidjson directly here gave this translation unit a different ValueType
+// size to serializer.cpp's, an ODR violation that tripped
+// "stack_.GetSize() == sizeof(ValueType)" in GenericDocument::ParseStream on
+// every level load.
+#include "serializer_rapidjson.h"
 #include "rapidjson/stringbuffer.h"
 #include <fstream>
 #include <sstream>

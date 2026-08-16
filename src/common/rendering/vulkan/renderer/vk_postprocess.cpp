@@ -298,6 +298,7 @@ void VkPostprocess::DrawPresentTexture(const IntRect &box, bool applyGamma, bool
 	{
 		uniforms.InvGamma = 1.0f;
 		uniforms.Contrast = 1.0f;
+		uniforms.Brightness = 0.0f;
 		uniforms.Saturation = 1.0f;
 		uniforms.BlackPoint = 0.0f;
 		uniforms.WhitePoint = 1.0f;
@@ -306,6 +307,7 @@ void VkPostprocess::DrawPresentTexture(const IntRect &box, bool applyGamma, bool
 	{
 		uniforms.InvGamma = 1.0f / clamp<float>(vid_gamma, 0.1f, 4.f);
 		uniforms.Contrast = clamp<float>(vid_contrast, 0.1f, 3.f);
+		uniforms.Brightness = clamp<float>(vid_brightness, -0.8f, 0.8f);
 		uniforms.Saturation = clamp<float>(vid_saturation, -15.0f, 15.f);
 		uniforms.BlackPoint = clamp<float>(vid_i_blackpoint, 0.f, 1.f);
 		uniforms.WhitePoint = clamp<float>(vid_i_whitepoint, 0.f, 5.f);
@@ -362,7 +364,6 @@ void VkPostprocess::DrawPresentTextureToImage(VkTextureImage *image, VkFormat ou
 	{
 		uniforms.InvGamma = 1.0f;
 		uniforms.Contrast = 1.0f;
-		uniforms.Brightness = 0.0f;
 		uniforms.Saturation = 1.0f;
 	}
 	else
@@ -375,7 +376,6 @@ void VkPostprocess::DrawPresentTextureToImage(VkTextureImage *image, VkFormat ou
 		const float gammaValue = clamp<float>(vid_gamma, 0.1f, 4.f);
 		uniforms.InvGamma = outputIsSrgb ? (1.0f / sqrtf(gammaValue)) : (1.0f / gammaValue);
 		uniforms.Contrast = clamp<float>(vid_contrast, 0.1f, 3.f);
-		uniforms.Brightness = clamp<float>(vid_brightness, -0.8f, 0.8f);
 		uniforms.Saturation = clamp<float>(vid_saturation, -15.0f, 15.f);
 		uniforms.GrayFormula = static_cast<int>(gl_satformula);
 

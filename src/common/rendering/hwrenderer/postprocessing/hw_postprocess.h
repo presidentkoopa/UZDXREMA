@@ -964,16 +964,23 @@ private:
 
 struct PresentUniforms
 {
+	// LAYOUT IS LOAD-BEARING. UniformBlockDecl::Create emits these fields to GLSL
+	// in declaration order under plain std140 with no explicit offsets, so this
+	// struct must match std140 byte for byte. Scale and Offset are vec2 and need
+	// an 8-byte boundary; anything that changes the byte count before them must
+	// be balanced by padding, or the present pass samples a garbage UV rect and
+	// the screen goes black. The static_asserts below the struct enforce it.
 	float InvGamma;
 	float Contrast;
-	float Brightness;	// UZDXREMA: additive VR brightness lift, driven by vid_brightness.
-						// Distinct from upstream's BlackPoint/WhitePoint remap below.
+	float Brightness;	// UZDXREMA: additive brightness lift from vid_brightness.
+						// Separate stage from upstream's BlackPoint/WhitePoint.
 	float Saturation;
 	float BlackPoint;
 	float WhitePoint;
 	float ColorScale;
 	int GrayFormula;
 	int WindowPositionParity; // top-of-window might not be top-of-screen
+	float padding0;		// balances Brightness above; see the note at the top
 	FVector2 Scale;
 	FVector2 Offset;
 	int HdrMode;
@@ -991,12 +998,22 @@ struct PresentUniforms
 			{ "ColorScale", UniformType::Float, offsetof(PresentUniforms, ColorScale) },
 			{ "GrayFormula", UniformType::Int, offsetof(PresentUniforms, GrayFormula) },
 			{ "WindowPositionParity", UniformType::Int, offsetof(PresentUniforms, WindowPositionParity) },
+			{ "padding0", UniformType::Float, offsetof(PresentUniforms, padding0) },
 			{ "UVScale", UniformType::Vec2, offsetof(PresentUniforms, Scale) },
 			{ "UVOffset", UniformType::Vec2, offsetof(PresentUniforms, Offset) },
 			{ "HdrMode", UniformType::Int, offsetof(PresentUniforms, HdrMode) }
 		};
 	}
 };
+
+// std140 guard rails for PresentUniforms. UniformBlockDecl::Create emits the
+// fields in declaration order with no explicit offsets, so the C++ layout IS the
+// GLSL layout. vec2 needs 8-byte alignment; if these fire, add or remove a
+// padding float rather than reordering the block.
+static_assert(offsetof(PresentUniforms, Scale) % 8 == 0,
+	"PresentUniforms::Scale must be 8-byte aligned for std140 - add a padding float");
+static_assert(offsetof(PresentUniforms, Offset) % 8 == 0,
+	"PresentUniforms::Offset must be 8-byte aligned for std140 - add a padding float");
 
 class PPPresent
 {

@@ -1,12 +1,18 @@
 add_pk3(doomxr.pk3 ${CMAKE_CURRENT_SOURCE_DIR}/static)
 
-# NOTE (UZDXREMA merge): upstream 5.0.0 generates static/language.csv at build time from
-# libraries/Translation/*.po and then POST_BUILD deletes it from the source tree.
-# The fork ships hand-maintained wadsrc/static/language.0 and wadsrc/static/language.csv
-# containing ~500 DoomXR/VR-only string keys that do not exist in the upstream .po database,
-# so enabling the generator here would overwrite and then delete them.
-# Left disabled deliberately until the fork strings are migrated into the .po recipe.
-#generate_language_files(doomxr_pk3 static/language.csv ENGINE)
+# UZDXREMA merge: upstream 5.0.0 generates static/language.csv at build time from
+# libraries/Translation/*.po, then POST_BUILD deletes it from the source tree. It has
+# to stay enabled - it is the only source of the stock engine strings (OPTMNU_*,
+# DSPLYMNU_*, ...), and without it every stock menu row renders as its raw key.
+#
+# The fork's own ~525 DoomXR/VR-only keys do not exist in the .po database, so they
+# live in static/language.0 and static/language.1 instead. Those filenames are not
+# touched by the generator but still load as LANGUAGE lumps (stringtable.cpp scans
+# every lump named LANGUAGE), so fork and upstream strings coexist.
+#
+# Do NOT put fork strings in static/language.csv - the generator overwrites and then
+# deletes that file on every build.
+generate_language_files(doomxr_pk3 static/language.csv ENGINE)
 
 # insert appstream data into doomxr.pk3, for release notes
 add_custom_target(

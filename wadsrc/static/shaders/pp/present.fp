@@ -43,10 +43,10 @@ vec4 ApplyGamma(vec4 c)
 
 	val = val * Contrast - (Contrast - 1.0) * 0.5;
 
-	// UZDXREMA: additive brightness lift, driven by vid_brightness plus the
-	// per-eye vr_openxr_present_brightness_bias. Applied here, immediately after
-	// contrast, which is where the fork has always applied it. Upstream's
-	// WhitePoint/BlackPoint remap below is a separate stage, not a replacement.
+	// UZDXREMA: additive brightness lift from vid_brightness plus the per-eye
+	// vr_openxr_present_brightness_bias. Applied straight after contrast, where
+	// the fork has always applied it. Upstream's WhitePoint/BlackPoint remap
+	// below is a separate stage, not a replacement.
 	val += Brightness * 0.5;
 
 	val = val * (WhitePoint - BlackPoint) + BlackPoint;
