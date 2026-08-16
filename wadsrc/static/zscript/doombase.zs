@@ -807,6 +807,49 @@ struct LevelLocals native
 
 	native bool IsVRInputSuppressed();
 
+	// FIELD REFLECTION -- read another mod's data without linking to it.
+	//
+	// A typed reference needs its class at COMPILE time, so describing another
+	// mod's weapon normally means hard-depending on it. These take the field
+	// name as a STRING and resolve at runtime, so a consumer carries no
+	// reference to anything and still builds when that mod is absent. Service
+	// (service.zs) solves the case where the other mod cooperates; this one
+	// covers everything already released, which never will.
+	//
+	// Each returns FALSE when the field is missing, the wrong type, or not
+	// readable, and leaves its out parameter untouched. False means "could not
+	// answer", never "the answer is zero" -- a caller must be able to tell an
+	// absent value from one that is genuinely 0.
+	//
+	// Private, meta and static fields are refused. Read-only fields are not:
+	// read-only means "do not write", and none of these write. Inherited
+	// fields resolve, so a subclass reports Weapon's own members too.
+	//
+	// Reads only, by design. A setter would put another mod's corruption and
+	// its crash in different places with nothing tying them together.
+	native bool HasField(Object o, string field);
+	native bool GetFieldInt(Object o, string field, out int value);
+	// Separate from GetFieldInt on purpose. Handles both storage shapes: a
+	// standalone bool field, and a flagdef packed as a bit -- which is every
+	// +WEAPON.OFFHANDWEAPON and every actor flag, readable here by name.
+	native bool GetFieldBool(Object o, string field, out int value);
+	// Widens: serves float32, float64 and integer fields, because every one of
+	// those survives the conversion. Nothing narrows anywhere.
+	native bool GetFieldFloat(Object o, string field, out double value);
+	native bool GetFieldString(Object o, string field, out string value);
+	native bool GetFieldName(Object o, string field, out name value);
+	native bool GetFieldObject(Object o, string field, out Object value);
+
+	// Enumeration -- what lets a consumer DISCOVER what a weapon carries
+	// instead of only asking questions it already knew to ask. type comes back
+	// as "int", "double", "string", "name", "object" or "other", so a caller
+	// picks its getter without the engine exporting the type system.
+	//
+	// Costs a symbol lookup per call. Fine per selection change; cache it
+	// rather than walking forty weapons every tic.
+	native int  FieldCount(Object o);
+	native bool FieldAt(Object o, int index, out string fieldName, out string fieldType);
+
 	// What FindModelFrameRaw would resolve for (cls, sprite, frame), the part
 	// no script could otherwise see: whether that MODELDEF block mirrors the
 	// mesh (negative X Scale) and its baked AngleOffset/PitchOffset/RollOffset.
@@ -817,6 +860,33 @@ struct LevelLocals native
 	// Returns false (all outputs 0) if the class has no model, or no
 	// FSpriteModelFrame exists for that exact (sprite, frame).
 	native bool, bool, double, double, double GetModelOrientationHint(class<Actor> cls, int sprite, int frame);
+
+	// The model's baked POSITION offset (MODELDEF Offset/ZOffset), already
+	// divided by that model's own scale -- ready to use directly as a
+	// Doom-space local (X, Y, Z), no further conversion needed. A different
+	// bug from GetModelOrientationHint: that one is rotation (why a stored
+	// weapon pointed the wrong way), this one is displacement (why it did not
+	// sit where the actor origin was placed). pixelstretch should be
+	// level.info.pixelstretch, or 1.0 if unknown.
+	native bool, double, double, double GetModelOffsetHint(class<Actor> cls, int sprite, int frame, double pixelstretch);
+
+	// What GetModelOffsetHint's local offset becomes in WORLD space once
+	// rotated by (actorAngle, actorPitch, actorRoll) -- computed by building
+	// the SAME VSMatrix with the SAME rotate() calls RenderModel itself uses
+	// (r_data/models.cpp), not by script re-deriving that rotation by hand.
+	// That hand-derivation is exactly what went wrong building the holster
+	// system's centering fix: two independent trig reconstructions, each
+	// internally consistent, both wrong against the real renderer, because
+	// neither accounted for RenderModel silently negating pitch before
+	// rotating. This does not re-derive anything -- it replays the engine's
+	// own transform on the offset directly.
+	//
+	// Returns the displacement a script needs to place an ACTOR at (i.e. the
+	// actor's origin should be targetWorldPos - result) so that, once the
+	// engine applies the model's own baked offset AND the actor's own
+	// rotation on top, the MESH lands at targetWorldPos.
+	native bool, double, double, double GetModelWorldOffset(class<Actor> cls, int sprite, int frame,
+		double pixelstretch, double actorAngle, double actorPitch, double actorRoll);
 
 	native int, Vector2 AimBillboard(Vector3 start, Vector3 dir, double maxDist = 0);
 	// Point versus billboard -- the touch case. Returns the nearest billboard

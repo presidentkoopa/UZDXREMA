@@ -43,6 +43,7 @@
 #include "doomstat.h"
 #include "p_acs.h"
 #include "r_data/models.h"
+#include "matrix.h"
 #include "a_pickups.h"
 #include "a_specialspot.h"
 #include "actorptrselect.h"
@@ -63,6 +64,7 @@
 #include "s_music.h"
 #include "texturemanager.h"
 #include "v_draw.h"
+#include "types.h"		// [BB] PType and the type singletons, for the field reflection natives below
 
 DVector2 AM_GetPosition();
 int Net_GetLatency(int *ld, int *ad);
@@ -5326,6 +5328,287 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, VRHaptic, VRHaptic)
 	return 0;
 }
 
+// [BB] FIELD REFLECTION -- read another mod's data without linking to it.
+//
+// ZScript can only reach a field through a TYPED reference, and a typed
+// reference needs the class at COMPILE time -- so a mod that wants to describe
+// another mod's weapon has to hard-depend on it, which for an informational
+// consumer is exactly the wrong shape. A weapon-select panel that shows tier,
+// rarity and affixes wants to work with DoomRL Arsenal, LegenDoom, Doomablo and
+// mods not written yet, none of which will declare an interface for it and none
+// of which it can afford to require.
+//
+// Service (service.zs) solves the cooperating case and only that case. Nothing
+// already released is going to publish one.
+//
+// The VM knows all of this already: PClass::Fields lists every field of every
+// class in every loaded mod, and PField carries its Offset, Type and Flags.
+// None of it was exposed. This opens a door onto data the VM maintains anyway.
+//
+// READ ONLY, permanently. There is deliberately no SetField: writing into
+// another mod's private state puts the corruption and the crash in different
+// mods and leaves the culprit no trace. Reading cannot corrupt anything.
+static PField *WR_ResolveField(DObject *o, const FString &name)
+{
+	if (o == nullptr) return nullptr;
+
+	// searchparents, so a subclass reports the fields it inherits. Without it
+	// every caller would need to know the other mod's class hierarchy to find
+	// Weapon's own members -- which is the knowledge this exists to remove.
+	PSymbol *sym = o->GetClass()->FindSymbol(FName(name.GetChars()), true);
+	PField *f = dyn_cast<PField>(sym);
+	if (f == nullptr) return nullptr;
+
+	// Private: the declaring mod said no. Meta/Static are class data, not
+	// instance data -- reading them at an instance offset is meaningless.
+	// VARF_ReadOnly is deliberately ALLOWED: it means "may not be written",
+	// and nothing here writes.
+	if (f->Flags & (VARF_Private | VARF_Meta | VARF_Static)) return nullptr;
+	return f;
+}
+
+// Every getter returns false rather than a value when it cannot answer, and
+// leaves the out parameter untouched. False is "I could not answer", never
+// "the answer is zero" -- a caller has to be able to tell an absent stat from
+// one that is genuinely 0, because those render differently and conflating
+// them is how a panel starts lying.
+DEFINE_ACTION_FUNCTION(FLevelLocals, HasField)
+{
+	// SELF_STRUCT, not bare PROLOGUE. These are declared as methods on
+	// LevelLocals rather than as statics, so the VM passes self as parameter
+	// zero -- a bare PARAM_PROLOGUE does not consume it and every argument
+	// after shifts by one, which reads the level itself as the target object.
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_OBJECT(o, DObject);
+	PARAM_STRING(name);
+	ACTION_RETURN_BOOL(WR_ResolveField(o, name) != nullptr);
+}
+
+DEFINE_ACTION_FUNCTION(FLevelLocals, GetFieldInt)
+{
+	// SELF_STRUCT, not bare PROLOGUE. These are declared as methods on
+	// LevelLocals rather than as statics, so the VM passes self as parameter
+	// zero -- a bare PARAM_PROLOGUE does not consume it and every argument
+	// after shifts by one, which reads the level itself as the target object.
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_OBJECT(o, DObject);
+	PARAM_STRING(name);
+	PARAM_OUTPOINTER(out, int);
+
+	PField *f = WR_ResolveField(o, name);
+	// Type-checked, not reinterpreted. Offset is a raw byte offset, so reading
+	// an int32 field through the wrong pointer type is garbage or a crash
+	// rather than a wrong answer.
+	if (f == nullptr || (f->Type != TypeSInt32 && f->Type != TypeUInt32))
+		ACTION_RETURN_BOOL(false);
+
+	if (out) *out = *(int *)((uint8_t *)o + f->Offset);
+	ACTION_RETURN_BOOL(true);
+}
+
+DEFINE_ACTION_FUNCTION(FLevelLocals, GetFieldFloat)
+{
+	// SELF_STRUCT, not bare PROLOGUE. These are declared as methods on
+	// LevelLocals rather than as statics, so the VM passes self as parameter
+	// zero -- a bare PARAM_PROLOGUE does not consume it and every argument
+	// after shifts by one, which reads the level itself as the target object.
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_OBJECT(o, DObject);
+	PARAM_STRING(name);
+	PARAM_OUTPOINTER(out, double);
+
+	PField *f = WR_ResolveField(o, name);
+	if (f == nullptr) ACTION_RETURN_BOOL(false);
+
+	// WIDENING is the one permitted courtesy -- every int and every float32
+	// survives the trip into a double. Narrowing is not offered anywhere: a
+	// double read as an int silently discards, and a sheet quietly showing 3
+	// for 3.7 is worse than one showing nothing at all.
+	uint8_t *base = (uint8_t *)o + f->Offset;
+	if      (f->Type == TypeFloat64) { if (out) *out = *(double *)base; }
+	else if (f->Type == TypeFloat32) { if (out) *out = *(float *)base; }
+	else if (f->Type == TypeSInt32)  { if (out) *out = *(int32_t *)base; }
+	else if (f->Type == TypeUInt32)  { if (out) *out = *(uint32_t *)base; }
+	else ACTION_RETURN_BOOL(false);
+
+	ACTION_RETURN_BOOL(true);
+}
+
+// Bools are their own getter, not folded into GetFieldInt. TypeBool derives
+// from PInt but is a distinct singleton, so the integer path never catches one
+// by accident -- and a caller reaching for GetFieldInt on a flag has usually
+// misunderstood what it is reading. FieldAt reports "bool" so it can tell.
+//
+// TWO STORAGE SHAPES, and missing the second one is what makes flags look
+// absent. A standalone bool field is a whole byte (PBool::GetValueInt is
+// `*(bool *)addr`, types.cpp:806). A flagdef -- every +WEAPON.OFFHANDWEAPON,
+// every actor flag -- is a BIT packed into a shared byte, which codegen reads
+// with OP_LBIT against `1 << BitValue` (codegen.cpp:7389). BitValue is -1 for
+// the first shape and the bit index for the second.
+DEFINE_ACTION_FUNCTION(FLevelLocals, GetFieldBool)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_OBJECT(o, DObject);
+	PARAM_STRING(name);
+	PARAM_OUTPOINTER(out, int);
+
+	PField *f = WR_ResolveField(o, name);
+	if (f == nullptr || f->Type != TypeBool) ACTION_RETURN_BOOL(false);
+
+	uint8_t *base = (uint8_t *)o + f->Offset;
+	int v;
+	if (f->BitValue < 0) v = (*(bool *)base) ? 1 : 0;
+	else                 v = ((*base) & (1 << f->BitValue)) ? 1 : 0;
+
+	if (out) *out = v;
+	ACTION_RETURN_BOOL(true);
+}
+
+DEFINE_ACTION_FUNCTION(FLevelLocals, GetFieldString)
+{
+	// SELF_STRUCT, not bare PROLOGUE. These are declared as methods on
+	// LevelLocals rather than as statics, so the VM passes self as parameter
+	// zero -- a bare PARAM_PROLOGUE does not consume it and every argument
+	// after shifts by one, which reads the level itself as the target object.
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_OBJECT(o, DObject);
+	PARAM_STRING(name);
+	PARAM_OUTPOINTER(out, FString);
+
+	PField *f = WR_ResolveField(o, name);
+	if (f == nullptr || f->Type != TypeString) ACTION_RETURN_BOOL(false);
+
+	if (out) *out = *(FString *)((uint8_t *)o + f->Offset);
+	ACTION_RETURN_BOOL(true);
+}
+
+DEFINE_ACTION_FUNCTION(FLevelLocals, GetFieldName)
+{
+	// SELF_STRUCT, not bare PROLOGUE. These are declared as methods on
+	// LevelLocals rather than as statics, so the VM passes self as parameter
+	// zero -- a bare PARAM_PROLOGUE does not consume it and every argument
+	// after shifts by one, which reads the level itself as the target object.
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_OBJECT(o, DObject);
+	PARAM_STRING(name);
+	PARAM_OUTPOINTER(out, int);
+
+	PField *f = WR_ResolveField(o, name);
+	if (f == nullptr || f->Type != TypeName) ACTION_RETURN_BOOL(false);
+
+	// A Name is an index into the name table, which is what the VM passes
+	// around for one -- so it goes out as the int the script side receives.
+	if (out) *out = ((FName *)((uint8_t *)o + f->Offset))->GetIndex();
+	ACTION_RETURN_BOOL(true);
+}
+
+DEFINE_ACTION_FUNCTION(FLevelLocals, GetFieldObject)
+{
+	// SELF_STRUCT, not bare PROLOGUE. These are declared as methods on
+	// LevelLocals rather than as statics, so the VM passes self as parameter
+	// zero -- a bare PARAM_PROLOGUE does not consume it and every argument
+	// after shifts by one, which reads the level itself as the target object.
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_OBJECT(o, DObject);
+	PARAM_STRING(name);
+	PARAM_OUTPOINTER(out, DObject *);
+
+	PField *f = WR_ResolveField(o, name);
+	if (f == nullptr || f->Type == nullptr) ACTION_RETURN_BOOL(false);
+	if (f->Type->GetRegType() != REGT_POINTER) ACTION_RETURN_BOOL(false);
+
+	if (out) *out = *(DObject **)((uint8_t *)o + f->Offset);
+	ACTION_RETURN_BOOL(true);
+}
+
+// ENUMERATION -- the half that matters.
+//
+// The typed getters above let a caller ask a question it already knew to ask.
+// These let it DISCOVER what there is to ask, which is the difference between
+// a panel that supports a fixed list of mods and one that degrades usefully on
+// all of them, including mods released after this fork stops being maintained.
+//
+// WALKS THE HIERARCHY. PClass::Fields holds only what a class DECLARES, so a
+// weapon subclass that adds nothing reports zero fields and everything it
+// inherited from Weapon and Actor is invisible -- which was the entire useful
+// content. Collected base-first so an index means the same thing on both calls.
+//
+// Filtered here rather than at the point of use, so FieldCount and FieldAt
+// agree: every index in 0..count-1 resolves, with no holes for a caller to
+// trip over mid-loop.
+static void WR_CollectFields(PClass *cls, TArray<PField *> &out)
+{
+	if (cls == nullptr) return;
+	WR_CollectFields(cls->ParentClass, out);
+	for (unsigned i = 0; i < cls->Fields.Size(); ++i)
+	{
+		PField *f = cls->Fields[i];
+		if (f == nullptr) continue;
+		if (f->Flags & (VARF_Private | VARF_Meta | VARF_Static)) continue;
+		out.Push(f);
+	}
+}
+
+DEFINE_ACTION_FUNCTION(FLevelLocals, FieldCount)
+{
+	// SELF_STRUCT, not bare PROLOGUE. These are declared as methods on
+	// LevelLocals rather than as statics, so the VM passes self as parameter
+	// zero -- a bare PARAM_PROLOGUE does not consume it and every argument
+	// after shifts by one, which reads the level itself as the target object.
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_OBJECT(o, DObject);
+	if (o == nullptr) ACTION_RETURN_INT(0);
+
+	TArray<PField *> fields;
+	WR_CollectFields(o->GetClass(), fields);
+	ACTION_RETURN_INT((int)fields.Size());
+}
+
+DEFINE_ACTION_FUNCTION(FLevelLocals, FieldAt)
+{
+	// SELF_STRUCT, not bare PROLOGUE. These are declared as methods on
+	// LevelLocals rather than as statics, so the VM passes self as parameter
+	// zero -- a bare PARAM_PROLOGUE does not consume it and every argument
+	// after shifts by one, which reads the level itself as the target object.
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_OBJECT(o, DObject);
+	PARAM_INT(index);
+	PARAM_OUTPOINTER(outName, FString);
+	PARAM_OUTPOINTER(outType, FString);
+
+	if (o == nullptr || index < 0) ACTION_RETURN_BOOL(false);
+
+	TArray<PField *> fields;
+	WR_CollectFields(o->GetClass(), fields);
+
+	// Out of range is not an error worth a console line -- enumeration loops
+	// are expected to probe.
+	if ((unsigned)index >= fields.Size()) ACTION_RETURN_BOOL(false);
+
+	PField *f = fields[index];
+	if (f == nullptr) ACTION_RETURN_BOOL(false);
+
+	if (outName) *outName = f->SymbolName.GetChars();
+
+	// The type goes out as a plain string so a caller can pick the right
+	// getter without this fork having to export the type system.
+	if (outType)
+	{
+		const char *t = "other";
+		// Bool before int: TypeBool derives from PInt, so the order matters
+		// only for a reader's understanding, but reporting a flag as "int"
+		// would send a caller to a getter that correctly refuses it.
+		if      (f->Type == TypeBool) t = "bool";
+		else if (f->Type == TypeSInt32 || f->Type == TypeUInt32) t = "int";
+		else if (f->Type == TypeFloat32 || f->Type == TypeFloat64) t = "double";
+		else if (f->Type == TypeString) t = "string";
+		else if (f->Type == TypeName) t = "name";
+		else if (f->Type != nullptr && f->Type->GetRegType() == REGT_POINTER) t = "object";
+		*outType = t;
+	}
+	ACTION_RETURN_BOOL(true);
+}
+
 // Wrapped rather than bound straight to VR_IsScriptInputSuppressed: a direct
 // native has to take the self pointer and return a VM-representable type, and a
 // bare bool() satisfies neither.
@@ -5393,6 +5676,141 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, GetModelOrientationHint, GetModelOri
 	if (numret > 3) ret[3].SetFloat(pitchoffset);
 	if (numret > 4) ret[4].SetFloat(rolloffset);
 	return min(numret, 5);
+}
+
+// GetModelOffsetHint -- the model's baked POSITION offset (MODELDEF Offset /
+// ZOffset), already divided by that model's own scale exactly the way
+// RenderModel does it internally:
+//   translate(xoffset/xscale, zoffset/(zscale*stretch), yoffset/yscale)
+// so the three returned numbers are ready to use directly as a Doom-space
+// (X, Y, Z) local offset -- no further division needed on the script side.
+//
+// This is centering, not orientation -- a different bug from the mirror/angle
+// one GetModelOrientationHint answers. The chainsaw's Offset 0.0 14.0 0.0 is
+// real displacement (14 units, not a rotation), and nothing before this could
+// see it: a manual trim slider defaulting to zero applies no correction at
+// all until someone finds and moves it, which is why centering kept failing
+// even after the orientation fix landed.
+//
+// pixelstretch is passed rather than pulled from self->info, since the
+// caller (an actor already holding a level pointer) has it for free and it
+// keeps this function from needing to know how FLevelLocals stores it.
+static int GetModelOffsetHint(FLevelLocals* self, PClass* cls, int sprite, int frame, double pixelstretch,
+	double* outX, double* outY, double* outZ)
+{
+	*outX = 0.0; *outY = 0.0; *outZ = 0.0;
+
+	if (cls == nullptr) return 0;
+	auto def = GetDefaultByType(cls);
+	if (def == nullptr || !def->hasmodel) return 0;
+
+	FSpriteModelFrame* smf = FindModelFrame(cls, sprite, frame, false);
+	if (smf == nullptr) return 0;
+	if (smf->xscale == 0.0f || smf->yscale == 0.0f || smf->zscale == 0.0f) return 0;
+
+	float stretch = (pixelstretch != 0.0) ? (float)pixelstretch : 1.0f;
+	*outX = smf->xoffset / smf->xscale;
+	*outY = smf->yoffset / smf->yscale;
+	*outZ = smf->zoffset / (smf->zscale * stretch);
+	return 1;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, GetModelOffsetHint, GetModelOffsetHint)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_POINTER(cls, PClass);
+	PARAM_INT(sprite);
+	PARAM_INT(frame);
+	PARAM_FLOAT(pixelstretch);
+	double ox, oy, oz;
+	int found = GetModelOffsetHint(self, cls, sprite, frame, pixelstretch, &ox, &oy, &oz);
+	if (numret > 0) ret[0].SetInt(found);
+	if (numret > 1) ret[1].SetFloat(ox);
+	if (numret > 2) ret[2].SetFloat(oy);
+	if (numret > 3) ret[3].SetFloat(oz);
+	return min(numret, 4);
+}
+
+// GetModelWorldOffset -- what GetModelOffsetHint SHOULD have been from the
+// start: instead of handing script a local offset and trusting script to
+// re-derive the engine's own rotation composition (which is how the holster
+// system's centering bug happened -- two independent hand-derivations of the
+// yaw/pitch basis, each internally self-consistent, each wrong against the
+// real renderer, because neither accounted for RenderModel silently
+// NEGATING pitch before rotating: "pitch -= angles.Pitch.Degrees()" when
+// MDL_USEACTORPITCH is set without MDL_BADROTATION), this builds the SAME
+// VSMatrix with the SAME rotate() calls RenderModel itself makes and
+// transforms the offset through it directly. No trig reconstruction, no
+// axis-convention guessing -- it IS the engine's own transform.
+//
+// Assumes MDL_USEACTORPITCH + MDL_USEACTORROLL set, MDL_BADROTATION and
+// MDL_USEROTATIONCENTER NOT set -- true for every block in this MODELDEF
+// today (Add-ModelDefPitchFlags.ps1 only ever adds the first two). A weapon
+// added later with different flags would need this extended; nothing here
+// silently mishandles that case, it just was not built for data that does
+// not currently exist.
+//
+// actorAngle/Pitch/Roll are passed in rather than read from an AActor,
+// because the caller (a holster prop) wants the WOULD-BE offset for angles
+// it has computed but not necessarily assigned to anything yet.
+static int GetModelWorldOffset(FLevelLocals* self, PClass* cls, int sprite, int frame, double pixelstretch,
+	double actorAngle, double actorPitch, double actorRoll,
+	double* outDX, double* outDY, double* outDZ)
+{
+	*outDX = 0.0; *outDY = 0.0; *outDZ = 0.0;
+
+	double localX, localY, localZ;
+	if (!GetModelOffsetHint(self, cls, sprite, frame, pixelstretch, &localX, &localY, &localZ))
+		return 0;
+
+	// RenderModel's own rotation sequence, replicated exactly:
+	//   rotate(-angle, 0,1,0); rotate(pitch, 0,0,1); rotate(-roll, 1,0,0);
+	// with pitch pre-negated (the MDL_USEACTORPITCH, !MDL_BADROTATION branch)
+	// and roll taken as-is (MDL_USEACTORROLL). No translate() calls at all --
+	// this matrix represents pure rotation, so multMatrixPoint on a w=0
+	// vector transforms a DIRECTION, never picking up a spurious position.
+	const float engineePitch = (float)(-actorPitch);
+	const float engineRoll = (float)actorRoll;
+	const float engineAngle = (float)actorAngle;
+
+	VSMatrix m;
+	m.loadIdentity();
+	m.rotate(-engineAngle, 0, 1, 0);
+	m.rotate(engineePitch, 0, 0, 1);
+	m.rotate(-engineRoll, 1, 0, 0);
+
+	// Doom-space (X,Y,Z-up) -> matrix space (X, Z-as-matrixY, Y-as-matrixZ),
+	// the SAME swap the engine's own offset translate() and position
+	// translate() both use ("y scale for a sprite means height, i.e. z in
+	// the world" -- r_data/models.cpp).
+	FLOATTYPE point[4] = { (FLOATTYPE)localX, (FLOATTYPE)localZ, (FLOATTYPE)localY, 0.0f };
+	FLOATTYPE result[4] = { 0, 0, 0, 0 };
+	m.multMatrixPoint(point, result);
+
+	// matrix space back to Doom space.
+	*outDX = result[0];
+	*outDY = result[2];
+	*outDZ = result[1];
+	return 1;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, GetModelWorldOffset, GetModelWorldOffset)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_POINTER(cls, PClass);
+	PARAM_INT(sprite);
+	PARAM_INT(frame);
+	PARAM_FLOAT(pixelstretch);
+	PARAM_FLOAT(actorAngle);
+	PARAM_FLOAT(actorPitch);
+	PARAM_FLOAT(actorRoll);
+	double dx, dy, dz;
+	int found = GetModelWorldOffset(self, cls, sprite, frame, pixelstretch, actorAngle, actorPitch, actorRoll, &dx, &dy, &dz);
+	if (numret > 0) ret[0].SetInt(found);
+	if (numret > 1) ret[1].SetFloat(dx);
+	if (numret > 2) ret[2].SetFloat(dy);
+	if (numret > 3) ret[3].SetFloat(dz);
+	return min(numret, 4);
 }
 
 DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, AimBillboard, AimBillboard)
