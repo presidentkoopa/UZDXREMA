@@ -370,7 +370,14 @@ void VkPostprocess::DrawPresentTextureToImage(VkTextureImage *image, VkFormat ou
 	{
 		uniforms.InvGamma = 1.0f;
 		uniforms.Contrast = 1.0f;
+		uniforms.Brightness = 0.0f;
 		uniforms.Saturation = 1.0f;
+		// Identity black/white remap. Upstream added this stage to
+		// DrawPresentTexture but not to this fork-only XR variant; leaving it at
+		// zero makes the shader's val * (WhitePoint - BlackPoint) + BlackPoint
+		// collapse to 0 and the headset goes black.
+		uniforms.BlackPoint = 0.0f;
+		uniforms.WhitePoint = 1.0f;
 	}
 	else
 	{
@@ -382,7 +389,12 @@ void VkPostprocess::DrawPresentTextureToImage(VkTextureImage *image, VkFormat ou
 		const float gammaValue = clamp<float>(vid_gamma, 0.1f, 4.f);
 		uniforms.InvGamma = outputIsSrgb ? (1.0f / sqrtf(gammaValue)) : (1.0f / gammaValue);
 		uniforms.Contrast = clamp<float>(vid_contrast, 0.1f, 3.f);
+		uniforms.Brightness = clamp<float>(vid_brightness, -0.8f, 0.8f);
 		uniforms.Saturation = clamp<float>(vid_saturation, -15.0f, 15.f);
+		// Same black/white remap the flat present applies. Without it this path
+		// submits a black eye image.
+		uniforms.BlackPoint = clamp<float>(vid_i_blackpoint, 0.f, 1.f);
+		uniforms.WhitePoint = clamp<float>(vid_i_whitepoint, 0.f, 5.f);
 		uniforms.GrayFormula = static_cast<int>(gl_satformula);
 
 		// OpenXR headset compositor path can look noticeably brighter/flatter than
