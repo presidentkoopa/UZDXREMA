@@ -1956,3 +1956,156 @@ tint is **three cvars** (`gl_bloom_tint_r/g/b`), not one.
   describes an intention the code never followed through on.
 - `uSweepPad1` is reserved for sky scaling in the per-fragment darkness path,
   which is not implemented (§9 records the gap).
+
+---
+
+## 30. Field reflection — reading another mod's data without linking to it
+
+```
+Level.HasField(Object o, string field) -> bool
+Level.GetFieldInt(Object o, string field, out int value) -> bool
+Level.GetFieldBool(Object o, string field, out int value) -> bool
+Level.GetFieldFloat(Object o, string field, out double value) -> bool
+Level.GetFieldString(Object o, string field, out string value) -> bool
+Level.GetFieldName(Object o, string field, out name value) -> bool
+Level.GetFieldObject(Object o, string field, out Object value) -> bool
+Level.FieldCount(Object o) -> int
+Level.FieldAt(Object o, int index, out string fieldName, out string fieldType) -> bool
+```
+
+A typed reference needs its class at **compile** time, so a mod that wants to
+*describe* another mod's weapon normally has to hard-depend on it. That is the
+wrong shape for an informational consumer: a weapon-select panel wants tier,
+rarity and affixes off DoomRL Arsenal, LegenDoom, Doomablo and mods not written
+yet, none of which will ever publish an interface for it. `Service`
+(`service.zs`) already solves the case where the other mod cooperates; nothing
+already released will.
+
+The VM already knows all of this. `PClass::Fields` lists every field of every
+class in every loaded mod, and each `PField` carries its `Offset`, `Type` and
+`Flags` (`src/common/objects/dobjtype.h:83`, `src/common/scripting/core/
+symbols.h:78-94`). None of it reached script. This is a door onto data the VM
+already maintains, not a new mechanism.
+
+### Enumeration is the half that matters
+
+The typed getters let a caller ask a question it already knew to ask.
+`FieldCount`/`FieldAt` let it **discover** what there is to ask — the
+difference between supporting a fixed list of mods and degrading usefully on
+all of them, including ones released after this fork stops being maintained.
+`FieldAt` reports each field's type as a plain string (`"int"`, `"bool"`,
+`"double"`, `"string"`, `"name"`, `"object"`, `"other"`) so a caller can pick
+the matching getter without the fork exporting the type system.
+
+Walks the class hierarchy base-first (`WR_CollectFields`, recursive over
+`PClass::ParentClass`) rather than reading `Fields` directly. `Fields` holds
+only what a class *declares* — a weapon subclass that adds nothing of its own
+reports zero fields there, and everything it inherited from `Weapon` and
+`Actor` would be invisible, which is the entire useful content. Filtered
+during collection so `FieldCount` and `FieldAt` always agree, with no holes
+in `0..count-1` for a caller's loop to trip over.
+
+### Read-only, permanently
+
+There is deliberately no `SetField`. Writing into another mod's private state
+puts the corruption and the eventual crash in two different mods with nothing
+tying them together. Reading cannot corrupt anything; keep the asymmetry.
+
+### What a caller may see
+
+Refused: `VARF_Private` (the declaring mod said no), `VARF_Meta` and
+`VARF_Static` (class data, not instance data — reading either at an instance
+offset is meaningless). Allowed: `VARF_ReadOnly`, which means "script may not
+*write* this," and every native here only reads.
+
+Resolution goes through `FindSymbol(name, searchparents: true)`, so a
+subclass reports fields it inherits rather than only ones it redeclares.
+
+### Every getter is type-checked, never reinterpreted
+
+`Offset` is a raw byte offset into the object. Reading an `int32` field
+through a `double*` is not a wrong answer, it is garbage or a crash. Each
+getter compares the field's `PType*` against the expected singleton
+(`TypeSInt32`, `TypeFloat64`, `TypeString`, `TypeBool`, …) and returns `false`
+on any mismatch. `GetFieldFloat` **widens** — it also serves `float32` and
+integer fields, since every one of those survives the conversion to `double`
+— but nothing narrows anywhere: a `double` read as an `int` would silently
+discard, and a stat sheet quietly showing `3` for `3.7` is worse than showing
+nothing.
+
+Every getter returns `false` and leaves its out parameter untouched when it
+cannot answer. `false` means "could not answer," never "the answer is zero" —
+a caller has to be able to tell an absent value from one that is genuinely 0,
+because a stat sheet renders those two differently.
+
+### Bools have two storage shapes, and missing the second is the trap
+
+`GetFieldBool` is its own getter rather than folded into `GetFieldInt`,
+because `TypeBool` derives from `PInt` but is a distinct singleton, and
+reaching for `GetFieldInt` on a flag has usually meant misunderstanding what
+it is.
+
+A standalone `bool` field is a whole byte (`PBool::GetValueInt` is
+`*(bool *)addr`, `types.cpp:806`). A `flagdef` — every `+WEAPON.OFFHANDWEAPON`,
+every actor flag — is a **bit** packed into a shared byte, read by codegen
+against `1 << BitValue` (`OP_LBIT`, `codegen.cpp:7389`). `PField::BitValue` is
+`-1` for the first shape and the bit index for the second. `GetFieldBool`
+branches on it, so every engine flag is readable by name through the same
+call that reads a plain bool field.
+
+### Four things only running it found
+
+Written up because none of them were visible in the diff, and each produced a
+different failure shape:
+
+- `types.h` was not included in `vmthunks.cpp` — `PType` was an incomplete
+  type. 22 compile errors.
+- `PARAM_PROLOGUE` where `PARAM_SELF_STRUCT_PROLOGUE` was needed. These are
+  declared as methods on `LevelLocals`, not free statics, so the VM passes
+  `self` as parameter zero; a bare prologue does not consume it, and every
+  argument after shifts by one. Compiled clean, then read the target object
+  as the level itself on every call.
+- `PClass::Fields` holding only declared fields, above. `FieldCount` returned
+  `0` on a stock `Pistol` until enumeration walked the hierarchy.
+- Bools unreadable at all, until `GetFieldBool` existed — and the curse flags
+  this was built to read (`LockedDamage`, `LockedCritChance`, …) are bools.
+
+### Verified in-engine against a real mod (RS_Main)
+
+Read a live `VR_Revolver`'s rolled `Tier`, `DamagePerShot`, `Capacity`,
+`Accuracy`, `Velocity`, `CritChance`, `CritMult` and `ReloadSpeed`; read its
+five `Locked*` curse flags and caught one genuinely set
+(`LockedCritChance = true`) on a weapon rolled during the test; enumerated
+712 fields on it with names and types. Nothing in the test names an `RS_Main`
+type — every read is a runtime string.
+
+### Touched
+
+- `src/scripting/vmthunks.cpp` — `WR_ResolveField`, `WR_CollectFields`, and
+  the nine `DEFINE_ACTION_FUNCTION` thunks
+- `wadsrc/static/zscript/doombase.zs` — the native declarations on
+  `LevelLocals`
+
+Both build targets, as §25/§26 note: the executable *and* the pk3 target
+carrying the ZScript declarations. Building only the first gives a clean
+compile and a script error at load.
+
+### What it does not solve
+
+A value never stored cannot be read, because there is nothing to read:
+
+```zscript
+A_FireBullets(0, 0, 1, 25);     // 25 is an operand in compiled bytecode
+```
+
+There is no field holding `25`. `FState` does carry `ActionFunc`
+(`src/gamedata/info.h:104`), but it is deliberately absent from the fields
+exported to script (`p_states.cpp:1136-1150`), and even exported it would be
+a `VMFunction*` — the call's arguments are pushed on the VM stack at
+execution time and are not retained as data anywhere.
+
+Matters less than it sounds for the case this was built for. Any mod that
+*rolls* stats per instance — every loot mod, which is the whole category —
+has to store them in fields to vary them at all. Weapons with hardcoded
+damage are the ones whose damage never varies, and those are readable once
+from `Default`, or measurable by observation.
