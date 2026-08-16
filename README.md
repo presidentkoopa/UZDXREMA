@@ -19,9 +19,17 @@ Two thirds of it is theirs, and that is about the right ratio.
 
 Branch: `model-remap`. Engine base: **UZDoom 5.0.0-rc.2**.
 
-The full engineering write-up, with file references and the reasoning behind
-each decision, is in **[`FORK_CHANGES.md`](FORK_CHANGES.md)**. This page is the
-summary.
+Three documents, for three questions:
+
+- **[`CHANGES.md`](CHANGES.md)** — *where* the changes are. Every one of the 398
+  files this fork touches, what owns it, and what it does there.
+- **[`FORK_CHANGES.md`](FORK_CHANGES.md)** — *why*, in full. The engineering
+  write-up, with file references and the reasoning behind each decision.
+- This page — *what*, for someone deciding whether they want any of it.
+
+Note that this repository is the **engine** half. Nearly every feature here is a
+capability plus a ZScript native to reach it; the content that calls those
+natives lives in the mods, not here. `CHANGES.md` covers that boundary.
 
 ---
 
