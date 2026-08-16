@@ -293,7 +293,10 @@ void VkPostprocess::DrawPresentTexture(const IntRect &box, bool applyGamma, bool
 	if (!screenshot) // Already applied as we are actually copying the last frame here (GetScreenshotBuffer is called after swap)
 		hw_postprocess.customShaders.Run(&renderstate, "screen");
 
-	PresentUniforms uniforms;
+	// Zero-init: not every member is assigned on every path (padding0 never is,
+	// and the two paths below set different subsets), and the whole struct is
+	// memcpy-ed into the uniform buffer.
+	PresentUniforms uniforms = {};
 	if (!applyGamma)
 	{
 		uniforms.InvGamma = 1.0f;
@@ -359,7 +362,10 @@ void VkPostprocess::DrawPresentTextureToImage(VkTextureImage *image, VkFormat ou
 	if (!screenshot)
 		hw_postprocess.customShaders.Run(&renderstate, "screen");
 
-	PresentUniforms uniforms;
+	// Zero-init: not every member is assigned on every path (padding0 never is,
+	// and the two paths below set different subsets), and the whole struct is
+	// memcpy-ed into the uniform buffer.
+	PresentUniforms uniforms = {};
 	if (!applyGamma)
 	{
 		uniforms.InvGamma = 1.0f;
