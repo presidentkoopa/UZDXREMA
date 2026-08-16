@@ -400,7 +400,7 @@ OptionMenu "OptionsMenu" protected
 	Submenu "$OPTMNU_VIDEO",			"VideoModeMenu"
 	IfOption(Experimental)
 	{
-		Submenu "$OPTMNU_EXPERIMENTAL",	"ExperimentalMenu"
+		Submenu "$OPTMNU_EXPERIMENTAL",	"ExperimentalMenu", 0, 0, Gold
 	}
 	StaticText " "
 	Submenu "$OS_TITLE", "os_Menu"
@@ -1373,11 +1373,11 @@ OptionMenu "VideoOptions" protected
 	{
 		Submenu "$DSPLYMNU_SWOPT",             SWROptions
 	}
-	Submenu "$DSPLYMNU_IMAGEADJUST",           ImageAdjustMenu,       0, false, vid_shadersupport
+	Submenu "$DSPLYMNU_IMAGEADJUST",           ImageAdjustMenu,       0, false, -1, vid_shadersupport
 	StaticText " "
 	IfOption(VulkanRender)
 	{
-		Submenu "$DSPLYMNU_VKOPT",             VKOptions,             0, false, vid_preferbackend, 1, HideInv
+		Submenu "$DSPLYMNU_VKOPT",             VKOptions,             0, false, -1, vid_preferbackend, 1, HideInv
 	}
 	Submenu "$GLMNU_TEXOPT",                   GLTextureGLOptions
 	Submenu "$GLMNU_DYNLIGHT",                 GLLightOptions
@@ -2478,8 +2478,8 @@ OptionMenu "GLLightOptions" protected
 OptionMenu "OpenGLOptions" protected
 {
 	Title "$GLMNU_TITLE"
-	Submenu "$GLPREFMNU_VRMODE",                VR3DMenu,                  0, false, vid_preferbackend, 0, HideInv
-	Submenu "$GLMNU_POSTPROCESS",               PostProcessMenu,           0, false, vid_shadersupport
+	Submenu "$GLPREFMNU_VRMODE",                VR3DMenu,                  0, false, -1, vid_preferbackend, 0, HideInv
+	Submenu "$GLMNU_POSTPROCESS",               PostProcessMenu,           0, false, -1, vid_shadersupport
 	StaticText " "
 	Option "$GLPREFMNU_SECLIGHTMODE",           gl_lightmode,              LightingModes
 	Option "$GLPREFMNU_SWLMBANDED",             gl_bandedswlight,          OnOff
@@ -2503,7 +2503,7 @@ OptionMenu "OpenGLOptions" protected
 	Option "$GLPREFMNU_RENDERSKYDOME",          gl_skydome,                YesNo
 	StaticText " "
 	Slider "$GLPREFMNU_MENUBLUR",               gl_menu_blur,              0, 5.0, 0.5, 2, vid_shadersupport, 0, Hide
-	StaticText " ",                                                        -1, vid_shadersupport
+	StaticText " ",                                                        -1, true, vid_shadersupport
 	Option "$GLPREFMNU_MULTISAMPLE",            gl_multisample,            Multisample
 	StaticText " "
 	Option "$GLPREFMNU_GLOBAL_FADE",						gl_global_fade, "OnOff"

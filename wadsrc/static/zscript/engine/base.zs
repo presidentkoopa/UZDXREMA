@@ -221,7 +221,6 @@ struct _ native unsafe(internal)	// These are the global variables, the struct i
 	native @KeyBindings Bindings;
 	native @KeyBindings DoubleBindings;
 	native @KeyBindings AutomapBindings;
-	native @KeyBindings DoubleBindings;
 	native readonly @GameInfoStruct gameinfo;
 	native readonly ui bool netgame;
 	native readonly uint gameaction;

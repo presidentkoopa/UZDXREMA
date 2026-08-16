@@ -252,7 +252,9 @@ class OptionMenuItemLabeledSubmenu : OptionMenuItemSubmenu
 		name graycheckMode = 'Hide'
 	)
 	{
-		Super.init(label, command, param, false, graycheck, graycheckVal, graycheckMode);
+		// -1 is the fork's `cr` slot (no per-item colour override); it sits ahead
+		// of upstream's graycheck trio in the merged OptionMenuItemSubmenu.Init.
+		Super.init(label, command, param, false, -1, graycheck, graycheckVal, graycheckMode);
 		mLabelCVar = labelcvar;
 		return self;
 	}
@@ -290,7 +292,8 @@ class OptionMenuItemCommand : OptionMenuItemSubmenu
 		name graycheckMode = 'Hide'
 	)
 	{
-		Super.Init(label, command, 0, centered, graycheck, graycheckVal, graycheckMode);
+		// -1 is the fork's `cr` slot; see OptionMenuItemSubmenu.Init above.
+		Super.Init(label, command, 0, centered, -1, graycheck, graycheckVal, graycheckMode);
 		ccmd = command;
 		mCloseOnSelect = closeonselect;
 		mUnsafe = true;
@@ -730,42 +733,13 @@ class OptionMenuItemDoubleTapControl : OptionMenuItemControlBase
 	}
 }
 
-class OptionMenuItemDoubleControl : OptionMenuItemControlBase
-{
-	string mDoubleAction;
-	KeyBindings mDoubleBindings;
-
-	OptionMenuItemDoubleControl Init(String label, Name command, Name doublecommand)
-	{
-		Super.Init(label, command, Bindings);
-		mDoubleAction = doublecommand;
-		mDoubleBindings = DoubleBindings;
-		return self;
-	}
-
-	override bool MenuEvent(int mkey, bool fromcontroller)
-	{
-		if (mkey == Menu.MKEY_Input)
-		{
-			mWaiting = false;
-			mBindings.SetBind(mInput, mAction);
-			mDoubleBindings.SetBind(mInput, mDoubleAction);
-			return true;
-		}
-		else if (mkey == Menu.MKEY_Clear)
-		{
-			mBindings.UnbindACommand(mAction);
-			mDoubleBindings.UnbindACommand(mDoubleAction);
-			return true;
-		}
-		else if (mkey == Menu.MKEY_Abort)
-		{
-			mWaiting = false;
-			return true;
-		}
-		return false;
-	}
-}
+// NOTE (UZDXREMA merge): upstream 5.0.0-rc.2 ships a richer three-argument
+// OptionMenuItemDoubleControl here - Init(label, command, doublecommand) with a
+// MenuEvent override that binds the primary command into Bindings and a separate
+// double-tap command into DoubleBindings. It is removed because upstream's own
+// MENUDEF never instantiates it (zero call sites), while this fork's MENUDEF has
+// 151 two-argument DoubleControl entries that need the signature kept below.
+// Adopting upstream's form means adding a second command to all 151 lines first.
 
 class OptionMenuItemMapControl : OptionMenuItemControlBase
 {
