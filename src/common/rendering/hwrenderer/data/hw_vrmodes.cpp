@@ -652,7 +652,12 @@ CVAR(Bool, vr_openxr_use_screen_viewport_for_submit, true, CVAR_ARCHIVE | CVAR_G
 CVARD(Bool, vr_desktop_view_openxr_render, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "Reuse the XR-submitted present texture for the desktop mirror to skip the separate unbiased mirror pass")
 CVARD(Bool, vr_openxr_multiview_mirror_reuse, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "When multiview is active, reuse the XR-submitted eye textures for the desktop mirror unless an unbiased mirror path is explicitly needed")
 CVARD(Bool, vr_openxr_multiview_postprocess, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "Use a shared layered pipeline image and a single scene handoff copy when multiview is active")
-CVAR(Float, vr_openxr_present_gamma_bias, 1.95f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// Retuned for UZDoom 5.0.0. present.fp now linearises with pow(c, 2.2) before the
+// colour ops, which the pre-5.0 shader did not, so the effective exponent is
+// 2.2 * InvGamma rather than InvGamma. The old 1.95 therefore landed at ~4.29 and
+// the headset came out roughly five times too dark in the midtones. 1.95 / 2.2
+// keeps the fork's previous look under the new pipeline. Tune to taste at runtime.
+CVAR(Float, vr_openxr_present_gamma_bias, 0.886f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_openxr_present_contrast_bias, 0.85f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_openxr_present_brightness_bias, -0.15f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_openxr_present_saturation_bias, 1.15f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
