@@ -1,31 +1,23 @@
-/*---------------------------------------------------------------------------
+/*
+** r_videoscale.cpp
 **
-** Copyright(C) 2017 Magnus Norddahl
-** Copyright(C) 2017-2024 Rachael Alexanderson
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+**---------------------------------------------------------------------------
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+** Copyright 2017 Magnus Norddahl
+** Copyright 2017-2024 Rachael Alexanderson
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
@@ -42,6 +34,8 @@
 #include "printf.h"
 #include "version.h"
 #include "hwrenderer/data/hw_vrmodes.h"
+#include "menustate.h"
+#include "menu.h"
 
 #define NUMSCALEMODES countof(vScaleTable)
 extern bool setsizeneeded;
@@ -106,18 +100,18 @@ namespace
 	{
 		return (uint32_t)((float)inheight * v_MinimumToFill(inwidth, inheight));
 	}
-	
+
 	float v_MinimumToFill2(uint32_t inwidth, uint32_t inheight)
 	{
 		// sx = screen x dimension, sy = same for y
-		float sx = (float)inwidth * 1.2, sy = (float)inheight;
+		float sx = (float)inwidth * 1.2f, sy = (float)inheight;
 		static float lastsx = 0., lastsy = 0., result = 0.;
 		if (lastsx != sx || lastsy != sy)
 		{
 			if (sx <= 0. || sy <= 0.)
 				return 1.; // prevent x/0 error
 			// set absolute minimum scale to fill the entire screen but get as close to 640x400 as possible
-			float ssx = (float)(VID_MIN_UI_WIDTH) / 1.2 / sx, ssy = (float)(VID_MIN_UI_HEIGHT) / sy;
+			float ssx = (float)(VID_MIN_UI_WIDTH) / 1.2f / sx, ssy = (float)(VID_MIN_UI_HEIGHT) / sy;
 			result = (ssx < ssy) ? ssy : ssx;
 			lastsx = sx;
 			lastsy = sy;
@@ -132,7 +126,7 @@ namespace
 	{
 		return (uint32_t)((float)inheight * v_MinimumToFill2(inwidth, inheight));
 	}
-	
+
 	inline void refresh_minimums()
 	{
 		// specialUI is tracking a state where high-res console fonts are actually required, and
@@ -173,7 +167,7 @@ namespace
 		{ true,				[](uint32_t Width, uint32_t Height)->uint32_t { return 1280; },		           					[](uint32_t Width, uint32_t Height)->uint32_t { return 800; },	        					1.2f,   				false   },	// 4  - 1280x800
 		{ true,				[](uint32_t Width, uint32_t Height)->uint32_t { return vid_scale_customwidth; },				[](uint32_t Width, uint32_t Height)->uint32_t { return vid_scale_customheight; },			1.0f,   				true    },	// 5  - Custom
 		{ true,				[](uint32_t Width, uint32_t Height)->uint32_t { return 320; },		            				[](uint32_t Width, uint32_t Height)->uint32_t { return 200; },			        			1.2f,   				false   },	// 6  - 320x200
-		{ true,				[](uint32_t Width, uint32_t Height)->uint32_t { return v_mfillX2(Width, Height) * 1.2; },		[](uint32_t Width, uint32_t Height)->uint32_t { return v_mfillY2(Width, Height); },			1.2f,					false   },	// 7  - Minimum Scale to Fill Entire Screen (1.2)
+		{ true,				[](uint32_t Width, uint32_t Height)->uint32_t { return uint32_t(v_mfillX2(Width, Height) * 1.2); },		[](uint32_t Width, uint32_t Height)->uint32_t { return v_mfillY2(Width, Height); },			1.2f,					false   },	// 7  - Minimum Scale to Fill Entire Screen (1.2)
 	};
 	bool isOutOfBounds(int x)
 	{
@@ -203,8 +197,19 @@ CUSTOM_CVAR(Bool, vid_cropaspect, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 	setsizeneeded = true;
 }
 
+static bool IsVideoMenuActive()
+{
+	if (menuactive != MENU_Off && CurrentMenu != nullptr)
+		return CurrentMenu->IsKindOf("VideoOptions");
+	else
+		return false;
+}
+
 bool ViewportLinearScale()
 {
+	if (IsVideoMenuActive())
+		return false;
+
 	if (isOutOfBounds(vid_scalemode))
 		vid_scalemode = 0;
 	// always use linear if supersampling
@@ -220,6 +225,9 @@ bool ViewportLinearScale()
 
 int ViewportScaledWidth(int width, int height)
 {
+	if (IsVideoMenuActive())
+		return width;
+
 	if (isOutOfBounds(vid_scalemode))
 		vid_scalemode = 0;
 	refresh_minimums();
@@ -236,6 +244,9 @@ int ViewportScaledWidth(int width, int height)
 
 int ViewportScaledHeight(int width, int height)
 {
+	if (IsVideoMenuActive())
+		return height;
+
 	if (isOutOfBounds(vid_scalemode))
 		vid_scalemode = 0;
 	if (vid_cropaspect && height > 0)
@@ -251,6 +262,9 @@ int ViewportScaledHeight(int width, int height)
 
 float ViewportPixelAspect()
 {
+	if (IsVideoMenuActive())
+		return 1.0;
+
 	if (isOutOfBounds(vid_scalemode))
 		vid_scalemode = 0;
 	// hack - use custom scaling if in "custom" mode
@@ -292,32 +306,32 @@ CCMD (vid_scaletoheight)
 
 inline bool atob(const char* I)
 {
-    if (stricmp (I, "true") == 0 || stricmp (I, "1") == 0)
-        return true;
-    return false;
+	if (stricmp (I, "true") == 0 || stricmp (I, "1") == 0)
+		return true;
+	return false;
 }
 
 CCMD (vid_setscale)
 {
-    if (argv.argc() > 2)
-    {
-        vid_scale_customwidth = atoi(argv[1]);
-        vid_scale_customheight = atoi(argv[2]);
-        if (argv.argc() > 3)
-        {
-            vid_scale_linear = atob(argv[3]);
-            if (argv.argc() > 4)
-            {
-                vid_scale_custompixelaspect = (float)atof(argv[4]);
-            }
-        }
-        vid_scalemode = 5;
+	if (argv.argc() > 2)
+	{
+		vid_scale_customwidth = atoi(argv[1]);
+		vid_scale_customheight = atoi(argv[2]);
+		if (argv.argc() > 3)
+		{
+			vid_scale_linear = atob(argv[3]);
+			if (argv.argc() > 4)
+			{
+				vid_scale_custompixelaspect = (float)atof(argv[4]);
+			}
+		}
+		vid_scalemode = 5;
 		vid_scalefactor = 1.0;
-    }
-    else
-    {
-        Printf("Usage: vid_setscale <x> <y> [bool linear] [float pixel-shape]\nThis command will create a custom viewport scaling mode.\n");
-    }
+	}
+	else
+	{
+		Printf("Usage: vid_setscale <x> <y> [bool linear] [float pixel-shape]\nThis command will create a custom viewport scaling mode.\n");
+	}
 }
 
 CCMD (vid_scaletolowest)

@@ -1,3 +1,21 @@
+/*
+** p_conversation.h
+**
+** Implements Strife style conversation dialogs
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 2004-2016 Marisa Heit
+** Copyright 2008-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
+
 #ifndef P_CONVERSATION_H
 #define P_CONVERSATION_H 1
 
@@ -70,7 +88,7 @@ void P_FreeStrifeConversations ();
 void P_StartConversation (AActor *npc, AActor *pc, bool facetalker, bool saveangle);
 void P_ResumeConversation ();
 
-void P_ConversationCommand (int netcode, int player, uint8_t **stream);
+void P_ConversationCommand (int netcode, int player, TArrayView<uint8_t>& stream);
 
 
 #endif

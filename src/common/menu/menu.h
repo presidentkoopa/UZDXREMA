@@ -1,8 +1,29 @@
+/*
+** menu.h
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 2009-2016 Marisa Heit
+** Copyright 2010-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
+**---------------------------------------------------------------------------
+**
+*/
+
 #ifndef __M_MENU_MENU_H__
 #define __M_MENU_MENU_H__
-
-
-
 
 #include "dobject.h"
 #include "c_cvars.h"
@@ -29,13 +50,15 @@ enum EMenuKey
 	MKEY_Right,
 	MKEY_PageUp,
 	MKEY_PageDown,
+	MKEY_Home,
+	MKEY_End,
 	//----------------- Keys past here do not repeat.
 	MKEY_Enter,
 	MKEY_Back,		// Back to previous menu
 	MKEY_Clear,		// Clear keybinding/flip player sprite preview
 	NUM_MKEYS,
 
-	// These are not buttons but events sent from other menus 
+	// These are not buttons but events sent from other menus
 
 	MKEY_Input,		// Sent when input is confirmed
 	MKEY_Abort,		// Input aborted
@@ -66,6 +89,7 @@ public:
 	PClass *mClass = nullptr;
 	bool mProtected = false;
 	TArray<DMenuItemBase *> mItems;
+	FFont* mTooltipFont = nullptr;
 
 	size_t PropagateMark() override;
 };
@@ -255,6 +279,11 @@ public:
 	bool DontPause;
 	bool Animated;
 	bool AnimatedTransition;
+	FString mCurrentTooltip;
+	double mTooltipScrollTimer;
+	double mTooltipScrollOffset;
+	FFont* mTooltipFont;
+	bool DrawTooltips;
 	static int InMenu;
 
 	DMenu(DMenu *parent = NULL);
@@ -281,6 +310,7 @@ public:
 	double mXpos, mYpos;
 	FName mAction;
 	int mEnabled;
+	FString mTooltip;
 
 	bool Activate();
 	bool SetString(int i, const char *s);
@@ -289,7 +319,7 @@ public:
 	bool GetValue(int i, int *pvalue);
 	void OffsetPositionY(int ydelta) { mYpos += ydelta; }
 	double GetY() { return mYpos; }
-};	
+};
 
 //=============================================================================
 //
@@ -303,6 +333,7 @@ struct FOptionValues
 		double Value;
 		FString TextValue;
 		FString Text;
+		FString Tooltip;
 	};
 
 	TArray<Pair> mValues;
@@ -346,13 +377,16 @@ bool M_MenuPauses();
 
 
 struct IJoystickConfig;
-DMenuItemBase * CreateOptionMenuItemStaticText(const char *name, int v = -1, bool centered = true);
-DMenuItemBase * CreateOptionMenuItemSubmenu(const char *label, FName cmd, int center, int v = CR_UNDEFINED);
+// [UZDXREMA] The fork's 'centered' / 'cr' parameters stay ahead of upstream's greycheck
+// trio so existing 3-argument call sites keep their meaning (same layout upstream itself
+// used for CreateOptionMenuItemCommand below).
+DMenuItemBase * CreateOptionMenuItemStaticText(const char *name, int v = -1, bool centered = true, FIntCVar *greycheck = nullptr, int greycheckVal = 0, FName greycheckMode = NAME_Hide);
+DMenuItemBase * CreateOptionMenuItemSubmenu(const char *label, FName cmd, int param, int cr = CR_UNDEFINED, FIntCVar *greycheck = nullptr, int greycheckVal = 0, FName greycheckMode = NAME_Hide);
 DMenuItemBase * CreateOptionMenuItemControl(const char *label, FName cmd, FKeyBindings *bindings);
 DMenuItemBase * CreateOptionMenuItemJoyConfigMenu(const char *label, IJoystickConfig *joy);
 DMenuItemBase * CreateListMenuItemPatch(double x, double y, int height, int hotkey, FTextureID tex, FName command, int param);
 DMenuItemBase * CreateListMenuItemText(double x, double y, int height, int hotkey, const char *text, FFont *font, PalEntry color1, PalEntry color2, FName command, int param);
-DMenuItemBase * CreateOptionMenuItemCommand(const char *label, FName cmd, bool centered = false);
+DMenuItemBase * CreateOptionMenuItemCommand(const char *label, FName cmd, bool centered = false, FIntCVar *greycheck = nullptr, int greycheckVal = 0, FName greycheckMode = NAME_Hide);
 DMenuItemBase* CreateListMenuItemStaticText(double x, double y, const char* text, FFont* font, PalEntry color, bool centered = false);
 
 void UpdateVRModes(bool considerQuadBuffered=true);

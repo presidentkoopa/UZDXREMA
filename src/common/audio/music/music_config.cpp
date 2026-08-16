@@ -1,34 +1,23 @@
 /*
 ** music_config.cpp
+**
 ** This forwards all CVAR changes to the music system.
 **
 **---------------------------------------------------------------------------
-** Copyright 1999-2016 Randy Heit
+**
+** Copyright 1999-2016 Marisa Heit
 ** Copyright 2005-2019 Christoph Oelckers
-** All rights reserved.
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+**---------------------------------------------------------------------------
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
@@ -62,7 +51,7 @@ EXTERN_CVAR(Bool, mus_usereplaygain)
 
 #define FORWARD_STRING_CVAR(key) \
 	auto ret = ChangeMusicSetting(zmusic_##key, mus_playing.handle,*self); \
-	if (ret) S_MIDIDeviceChanged(-1); 
+	if (ret) S_MIDIDeviceChanged(-1);
 
 #ifndef ZMUSIC_LITE
 CUSTOM_CVAR(Int, adl_chips_count, 6, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_VIRTUAL)
@@ -95,6 +84,11 @@ CUSTOM_CVAR(Bool, adl_use_custom_bank, false, CVAR_ARCHIVE | CVAR_VIRTUAL)
 	FORWARD_BOOL_CVAR(adl_use_custom_bank);
 }
 
+CUSTOM_CVAR(Bool, adl_use_genmidi, false, CVAR_ARCHIVE | CVAR_VIRTUAL)
+{
+	FORWARD_BOOL_CVAR(adl_use_genmidi);
+}
+
 CUSTOM_CVAR(String, adl_custom_bank, "", CVAR_ARCHIVE | CVAR_VIRTUAL | CVAR_SYSTEM_ONLY)
 {
 	FORWARD_STRING_CVAR(adl_custom_bank);
@@ -103,6 +97,30 @@ CUSTOM_CVAR(String, adl_custom_bank, "", CVAR_ARCHIVE | CVAR_VIRTUAL | CVAR_SYST
 CUSTOM_CVAR(Int, adl_volume_model, 0 /*ADLMIDI_VolumeModel_AUTO*/, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_VIRTUAL)
 {
 	FORWARD_CVAR(adl_volume_model);
+}
+
+CUSTOM_CVAR(Int, adl_chan_alloc, 0 /*ADLMIDI_ChanAlloc_AUTO*/, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_VIRTUAL)
+{
+	FORWARD_CVAR(adl_chan_alloc);
+}
+
+CUSTOM_CVAR(Bool, adl_auto_arpeggio, false, CVAR_ARCHIVE | CVAR_VIRTUAL)
+{
+	FORWARD_BOOL_CVAR(adl_auto_arpeggio);
+}
+
+CUSTOM_CVAR(Float, adl_gain, 1.0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_VIRTUAL)
+{
+	if (!mus_usereplaygain)
+	{
+		FORWARD_CVAR(adl_gain);
+	}
+	else
+	{
+		// Replay gain will disable the user setting for consistency.
+		float newval;
+		ChangeMusicSetting(zmusic_adl_gain, mus_playing.handle, 1.0f, & newval);
+	}
 }
 #endif
 //==========================================================================
@@ -233,6 +251,20 @@ CUSTOM_CVAR(Bool, opl_fullpan, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_VIR
 	FORWARD_BOOL_CVAR(opl_fullpan);
 }
 
+CUSTOM_CVAR(Float, opl_gain, 1.0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_VIRTUAL)
+{
+	if (!mus_usereplaygain)
+	{
+		FORWARD_CVAR(opl_gain);
+	}
+	else
+	{
+		// Replay gain will disable the user setting for consistency.
+		float newval;
+		ChangeMusicSetting(zmusic_opl_gain, mus_playing.handle, 1.0f, & newval);
+	}
+}
+
 #ifndef ZMUSIC_LITE
 //==========================================================================
 //
@@ -271,6 +303,34 @@ CUSTOM_CVAR(String, opn_custom_bank, "", CVAR_ARCHIVE | CVAR_VIRTUAL)
 	FORWARD_STRING_CVAR(opn_custom_bank);
 }
 
+CUSTOM_CVAR(Int, opn_volume_model, 0 /*OPNMIDI_VolumeModel_AUTO*/, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_VIRTUAL)
+{
+	FORWARD_CVAR(adl_volume_model);
+}
+
+CUSTOM_CVAR(Int, opn_chan_alloc, -1 /*OPNMIDI_ChanAlloc_AUTO*/, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_VIRTUAL)
+{
+	FORWARD_CVAR(adl_chan_alloc);
+}
+
+CUSTOM_CVAR(Bool, opn_auto_arpeggio, false, CVAR_ARCHIVE | CVAR_VIRTUAL)
+{
+	FORWARD_BOOL_CVAR(adl_auto_arpeggio);
+}
+
+CUSTOM_CVAR(Float, opn_gain, 1.0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_VIRTUAL)
+{
+	if (!mus_usereplaygain)
+	{
+		FORWARD_CVAR(opn_gain);
+	}
+	else
+	{
+		// Replay gain will disable the user setting for consistency.
+		float newval;
+		ChangeMusicSetting(zmusic_opn_gain, mus_playing.handle, 1.0f, & newval);
+	}
+}
 //==========================================================================
 //
 // GUS MIDI device
@@ -513,4 +573,3 @@ CUSTOM_CVAR(Float, mod_dumb_mastervolume, 1.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG 
 		ChangeMusicSetting(zmusic_mod_dumb_mastervolume, mus_playing.handle, 0.5f, &newval);
 	}
 }
-

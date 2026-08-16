@@ -1,24 +1,19 @@
-// 
-//---------------------------------------------------------------------------
-//
-// Copyright(C) 2002-2016 Christoph Oelckers
-// All rights reserved.
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public License
-// along with this program.  If not, see http://www.gnu.org/licenses/
-//
-//--------------------------------------------------------------------------
-//
+/*
+** hw_sky.cpp
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 2002-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 #include "a_sharedglobal.h"
 #include "r_sky.h"
@@ -44,7 +39,7 @@ CUSTOM_CVAR(Bool, gl_skydome, true, CVAR_GLOBALCONFIG|CVAR_ARCHIVE)
 
 //===========================================================================
 //
-// 
+//
 //
 //===========================================================================
 
@@ -123,6 +118,9 @@ void HWSkyInfo::init(HWDrawInfo *di, sector_t* sec, int skypos, int sky1, PalEnt
 	}
 	else fadecolor = 0;
 
+	texture[2] = TexMan.GetGameTexture(di->Level->skymisttexture, true);
+	x_offset[2] = di->Level->hw_skymistpos;
+
 }
 
 
@@ -166,10 +164,10 @@ void HWWall::SkyPlane(HWWallDispatcher *di, sector_t *sector, int plane, bool al
 		case PORTS_PORTAL:
 		case PORTS_LINKEDPORTAL:
 		{
-			if (di->di && di->di->Viewpoint.IsAllowedOoB())
+			if (di->di && di->di->Viewpoint.bDoOob)
 			{
 				secplane_t myplane = plane ? sector->ceilingplane : sector->floorplane;
-				if (di->di->Viewpoint.IsOrtho() && di->di->Viewpoint.ViewVector3D.dot(myplane.Normal()) > 0.0) return;
+				if (di->di->Viewpoint.bDoOrtho && di->di->Viewpoint.ViewVector3D.dot(myplane.Normal()) > 0.0) return;
 				else if (plane==1 && di->di->Viewpoint.Pos.Z >= myplane.ZatPoint(di->di->Viewpoint.Pos)) return;
 				else if (plane==0 && di->di->Viewpoint.Pos.Z <= myplane.ZatPoint(di->di->Viewpoint.Pos)) return;
 			}
@@ -308,7 +306,7 @@ void HWWall::SkyTop(HWWallDispatcher *di, seg_t * seg,sector_t * fs,sector_t * b
 						seg->sidedef->GetTextureYOffset(side_t::mid) > 0)
 					{
 						ztop[0]=ztop[1]=32768.0f;
-						zbottom[0]=zbottom[1]= 
+						zbottom[0]=zbottom[1]=
 							bs->ceilingplane.ZatPoint(v2) + seg->sidedef->GetTextureYOffset(side_t::mid);
 						SkyPlane(di, fs, sector_t::ceiling, false);
 						return;
@@ -333,20 +331,23 @@ void HWWall::SkyTop(HWWallDispatcher *di, seg_t * seg,sector_t * fs,sector_t * b
 			flags|=HWF_SKYHACK;	// mid textures on such lines need special treatment!
 		}
 	}
-	else 
+	else
 	{
 		float frontreflect = fs->GetReflect(sector_t::ceiling);
 		if (frontreflect > 0)
 		{
-			float backreflect = bs->GetReflect(sector_t::ceiling);
-			if (backreflect > 0 && bs->ceilingplane.fD() == fs->ceilingplane.fD() && !bs->isClosed())
-			{
-				// Don't add intra-portal line to the portal.
-				if (!(di->di && di->di->Viewpoint.IsAllowedOoB()))
-				{
-					return;
-				}
-			}
+			// [DVR] Changed the stencil for planemirrors, so now I need intra-portal lines
+			// (this supersedes the fork's narrower "keep intra-portal lines only when
+			// the viewpoint is out of bounds" exception, which was the same fix scoped smaller)
+			// float backreflect = bs->GetReflect(sector_t::ceiling);
+			// if (backreflect > 0 && bs->ceilingplane.fD() == fs->ceilingplane.fD() && !bs->isClosed())
+			// {
+			// 	Don't add intra-portal line to the portal.
+			// 	if (!(di->di && di->di->Viewpoint.bDoOob))
+			// 	{
+			// 		return;
+			// 	}
+			// }
 		}
 		else
 		{
@@ -383,7 +384,7 @@ void HWWall::SkyBottom(HWWallDispatcher *di, seg_t * seg,sector_t * fs,sector_t 
 	{
 		if (bs->special == GLSector_NoSkyDraw || (bs->MoreFlags & SECMF_NOSKYWALLS) != 0 || (seg->linedef->flags & ML_NOSKYWALLS) != 0) return;
 		auto tex = TexMan.GetGameTexture(seg->sidedef->GetTexture(side_t::bottom), true);
-		
+
 		// For lower skies the normal logic only applies to walls with no lower texture.
 		if (!tex->isValid())
 		{
@@ -415,20 +416,23 @@ void HWWall::SkyBottom(HWWallDispatcher *di, seg_t * seg,sector_t * fs,sector_t 
 			flags |= HWF_SKYHACK;	// mid textures on such lines need special treatment!
 		}
 	}
-	else 
+	else
 	{
 		float frontreflect = fs->GetReflect(sector_t::floor);
 		if (frontreflect > 0)
 		{
-			float backreflect = bs->GetReflect(sector_t::floor);
-			if (backreflect > 0 && bs->floorplane.fD() == fs->floorplane.fD() && !bs->isClosed())
-			{
-				// Don't add intra-portal line to the portal.
-				if (!(di->di && di->di->Viewpoint.IsAllowedOoB()))
-				{
-					return;
-				}
-			}
+			// [DVR] Changed the stencil for planemirrors, so now I need intra-portal lines
+			// (this supersedes the fork's narrower "keep intra-portal lines only when
+			// the viewpoint is out of bounds" exception, which was the same fix scoped smaller)
+			// float backreflect = bs->GetReflect(sector_t::floor);
+			// if (backreflect > 0 && bs->floorplane.fD() == fs->floorplane.fD() && !bs->isClosed())
+			// {
+			// 	// Don't add intra-portal line to the portal.
+			// 	if (!(di->di && di->di->Viewpoint.bDoOob))
+			// 	{
+			// 		return;
+			// 	}
+			// }
 		}
 		else
 		{
@@ -450,4 +454,3 @@ void HWWall::SkyBottom(HWWallDispatcher *di, seg_t * seg,sector_t * fs,sector_t 
 
 	SkyPlane(di, fs, sector_t::floor, true);
 }
-

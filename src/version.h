@@ -1,71 +1,52 @@
 /*
 ** version.h
 **
+** ZDoom version constants
+**
 **---------------------------------------------------------------------------
-** Copyright 1998-2007 Randy Heit
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2006-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
 
-#ifndef __VERSION_H__
-#define __VERSION_H__
-
-const char *GetGitDescription();
-const char *GetGitHash();
-const char *GetGitTime();
-const char *GetVersionString();
+#pragma once
 
 /** Lots of different version numbers **/
 
-#define VERSIONSTR "4.14.3"
+#define VERSIONSTR "5.0.0-rc.2"
 
 // The version as seen in the Windows resource
-#define RC_FILEVERSION 4,14,3,0
-#define RC_PRODUCTVERSION 4,14,3,0
+#define RC_FILEVERSION 5,0,0,0
+#define RC_PRODUCTVERSION 5,0,0,0
 #define RC_PRODUCTVERSION2 VERSIONSTR
 // These are for content versioning.
-#define VER_MAJOR 4
-#define VER_MINOR 14
-#define VER_REVISION 3
+#define VER_MAJOR 5
+#define VER_MINOR 0
+#define VER_REVISION 0
 
 // This should always refer to the UZDoom version a derived port is based on and not reflect the derived port's version number!
-#define ENG_MAJOR 4
-#define ENG_MINOR 14
-#define ENG_REVISION 3
-
-// Version identifier for network games.
-// Bump it every time you do a release unless you're certain you
-// didn't change anything that will affect sync.
-#define NETGAMEVERSION 235
+#define ENG_MAJOR 5
+#define ENG_MINOR 0
+#define ENG_REVISION 0
 
 // Version stored in the ini's [LastRun] section.
 // Bump it if you made some configuration change that you want to
 // be able to migrate in FGameConfigFile::DoGlobalSetup().
-#define LASTRUNVERSION "228"
+#define ENGINELASTRUNVERSION "233"
+#define GAMELASTRUNVERSION "1"
 
 // Protocol version used in demos.
 // Bump it if you change existing DEM_ commands or add new ones.
@@ -93,8 +74,12 @@ const char *GetVersionString();
 // This is so that derivates can use the same savegame versions without worrying about engine compatibility
 #define GAMESIG "UZDOOM"
 
+// list of compatible ports, ex.:
+// #define ALLOWLOADIN "PORT1", "PORT2", "PORT3"
+#define ALLOWLOADIN "LZDOOM"
+
 #ifndef LOAD_GZDOOM_4142_SAVES
-#define LOAD_GZDOOM_4142_SAVES 1
+	#define LOAD_GZDOOM_4142_SAVES 1
 #endif
 
 #ifdef __ANDROID__
@@ -114,8 +99,11 @@ const char *GetVersionString();
 #define GAMENAMELOWERCASE "doomxr"
 #define APPID "org.zdoom.DoomXR"
 #define QUERYIWADDEFAULT true
-#define FORUM_URL "http://forum.zdoom.org/"
-#define BUGS_FORUM_URL	"http://forum.zdoom.org/viewforum.php?f=2"
+#define BUGS_URL "https://github.com/UZDoom/UZDoom/issues"
+
+#define UPDATER_URL "https://zdoom.org/uzdoom-updates.php?r={}&f={}"
+#define UPDATER_URL_BACKUP "https://github.com/UZDoom/UZDoom/releases/{}/{}/{}"
+
 // For QUERYIWADDEFAULT: Set to 'true' to always show dialog box on startup by default, 'false' to disable.
 // Should set to 'false' for standalone games, and set to 'true' for regular source port forks that are meant to run any game.
 
@@ -132,4 +120,8 @@ const int SAVEPICHEIGHT = 162;
 const int VID_MIN_WIDTH = 320;
 const int VID_MIN_HEIGHT = 200;
 
-#endif //__VERSION_H__
+const char *GetVersionString();
+const char *GetGitHash();
+const char *GetGitTime();
+const char *GetGitTag();
+int GetGitDistance();

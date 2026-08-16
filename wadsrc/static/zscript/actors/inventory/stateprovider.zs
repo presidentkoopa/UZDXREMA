@@ -1,3 +1,21 @@
+/*
+** stateprovider.zs
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2006-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 class StateProvider : Inventory
 {
@@ -76,7 +94,7 @@ class StateProvider : Inventory
 		}
 	}
 
-	
+
 	//---------------------------------------------------------------------------
 	//
 	//
@@ -111,6 +129,9 @@ class StateProvider : Inventory
 				return;	// out of ammo
 		}
 
+		// UZDXREMA: hoisted ahead of the aim calculation (upstream keeps it after
+		// the pufftype default) because laflags/alflags must carry the offhand bit
+		// before BulletSlope()/SpawnPlayerMissile() consume them.
 		if (weapon != NULL)
 		{
 			laflags |= weapon.bOffhandWeapon ? LAF_ISOFFHAND : 0;
@@ -176,7 +197,7 @@ class StateProvider : Inventory
 				}
 			}
 		}
-		else 
+		else
 		{
 			if (numbullets < 0)
 				numbullets = 1;
@@ -236,7 +257,7 @@ class StateProvider : Inventory
 	//
 	//==========================================================================
 
-	action Actor, Actor A_FireProjectile(class<Actor> missiletype, double angle = 0, bool useammo = true, double spawnofs_xy = 0, double spawnheight = 0, int flags = 0, double pitch = 0)	
+	action Actor, Actor A_FireProjectile(class<Actor> missiletype, double angle = 0, bool useammo = true, double spawnofs_xy = 0, double spawnheight = 0, int flags = 0, double pitch = 0)
 	{
 		let player = self.player;
 		if (!player) return null, null;
@@ -256,7 +277,7 @@ class StateProvider : Inventory
 				return null, null;	// out of ammo
 		}
 
-		if (missiletype) 
+		if (missiletype)
 		{
 			Vector2 ofs = (0, Spawnofs_xy);
 			if (!weapon || !player.mo.OverrideAttackPosDir)
@@ -282,7 +303,7 @@ class StateProvider : Inventory
 				if (!(flags & FPF_AIMATANGLE))
 				{
 					// This original implementation is to aim straight ahead and then offset
-					// the angle from the resulting direction. 
+					// the angle from the resulting direction.
 					if (weapon && player.mo.OverrideAttackPosDir)
 					{
 						Vector3 dir;
@@ -416,7 +437,7 @@ class StateProvider : Inventory
 	// customizable railgun attack function
 	//
 	//==========================================================================
-	
+
 	action void A_RailAttack(int damage, int spawnofs_xy = 0, bool useammo = true, color color1 = 0, color color2 = 0, int flags = 0, double maxdiff = 0, class<Actor> pufftype = "BulletPuff", double spread_xy = 0, double spread_z = 0, double range = 0, int duration = 0, double sparsity = 1.0, double driftspeed = 1.0, class<Actor> spawnclass = "none", double spawnofs_z = 0, int spiraloffset = 270, int limit = 0)
 	{
 		if (range == 0) range = 8192;
@@ -463,9 +484,9 @@ class StateProvider : Inventory
 		p.limit = limit;
 		self.RailAttack(p);
 	}
-	
 
-	
+
+
 	//---------------------------------------------------------------------------
 	//
 	// PROC A_ReFire
@@ -509,11 +530,13 @@ class StateProvider : Inventory
 		else
 		{
 			player.refire = 0;
+			// UZDXREMA: use the hand-local `weapon`, not player.ReadyWeapon, so an
+			// offhand refire checks the offhand weapon's ammo.
 			weapon.CheckAmmo (weapon.bAltFire? Weapon.AltFire : Weapon.PrimaryFire, autoSwitch);
 		}
 	}
-	
-	
+
+
 
 	action void A_ClearReFire()
 	{
@@ -527,7 +550,7 @@ class CustomInventory : StateProvider
 	{
 		DefaultStateUsage SUF_ACTOR|SUF_OVERLAY|SUF_ITEM;
 	}
-	
+
 	//---------------------------------------------------------------------------
 	//
 	//
@@ -540,7 +563,7 @@ class CustomInventory : StateProvider
 	deprecated("2.3", "must be called from Weapon") action void A_CheckReload() {}
 	deprecated("3.7", "must be called from Weapon") action void A_WeaponReady(int flags = 0) {}	// this was somehow missed in 2.3 ...
 	native bool CallStateChain (Actor actor, State state);
-		
+
 	//===========================================================================
 	//
 	// ACustomInventory :: SpecialDropAction

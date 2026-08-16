@@ -1,28 +1,21 @@
-//-----------------------------------------------------------------------------
-//
-// Copyright 1993-1996 id Software
-// Copyright 1999-2016 Randy Heit
-// Copyright 2002-2016 Christoph Oelckers
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see http://www.gnu.org/licenses/
-//
-//-----------------------------------------------------------------------------
-//
-// DESCRIPTION:
-//		Ticker.
-//
-//-----------------------------------------------------------------------------
+/*
+** p_tick.cpp
+**
+** Ticker.
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2002-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 #include "p_local.h"
 #include "p_effect.h"
@@ -38,6 +31,7 @@
 #include "events.h"
 #include "actorinlines.h"
 #include "g_game.h"
+#include "am_map.h"
 #include "i_interface.h"
 #include "c_dispatch.h"
 #include "texturemanager.h"
@@ -45,6 +39,67 @@
 
 extern gamestate_t wipegamestate;
 extern uint8_t globalfreeze, globalchangefreeze;
+
+void C_Ticker();
+void M_Ticker();
+void D_RunCutscene();
+
+//==========================================================================
+//
+// P_RunClientsideLogic
+//
+// Handles all logic that should be ran every tick including while
+// predicting. Only put non-playsim behaviors in here to avoid desyncs
+// when playing online.
+//
+//==========================================================================
+
+void P_RunClientSideLogic()
+{
+	C_Ticker();
+	M_Ticker();
+
+	// [ZZ] also tick the UI part of the events
+	primaryLevel->localEventManager->UiTick();
+
+	if (gamestate == GS_LEVEL || gamestate == GS_TITLELEVEL)
+	{
+		if (!WorldPaused(false))
+		{
+			for (unsigned int i = 0; i < MAXPLAYERS; ++i)
+			{
+				if (playeringame[i] && players[i].inventorytics > 0)
+					--players[i].inventorytics;
+			}
+		}
+
+		for (auto level : AllLevels())
+		{
+			auto it = level->GetClientSideThinkerIterator<AActor>();
+			AActor* ac = nullptr;
+			while ((ac = it.Next()) != nullptr)
+			{
+				ac->ClearInterpolation();
+				ac->ClearFOVInterpolation();
+			}
+
+			level->ClientSideThinkers.RunClientSideThinkers(level);
+		}
+
+		StatusBar->CallTick();
+
+		// TODO: Should this be called on all maps...?
+		if (gamestate == GS_LEVEL)
+			primaryLevel->automap->Ticker();
+	}
+	else if (gamestate == GS_CUTSCENE || gamestate == GS_INTRO)
+	{
+		D_RunCutscene();
+	}
+
+	// [MK] Additional ticker for UI events right after all others
+	primaryLevel->localEventManager->PostUiTick();
+}
 
 //==========================================================================
 //
@@ -281,12 +336,53 @@ CCMD(bb_clear)
 		n, n == 1 ? "" : "s", g, g == 1 ? "" : "s");
 }
 
+//==========================================================================
+//
+// P_ClearLevelInterpolation
+//
+//==========================================================================
+
+void P_ClearLevelInterpolation()
+{
+	for (auto Level : AllLevels())
+	{
+		Level->interpolator.UpdateInterpolations();
+
+		auto it = Level->GetThinkerIterator<AActor>();
+		AActor* ac;
+
+		while ((ac = it.Next()))
+		{
+			ac->ClearInterpolation();
+			ac->ClearFOVInterpolation();
+		}
+	}
+
+	for (unsigned int i = 0; i < MAXPLAYERS; i++)
+	{
+		if (playeringame[i])
+		{
+			DPSprite* pspr = players[i].psprites;
+			while (pspr)
+			{
+				pspr->ResetInterpolation();
+
+				pspr = pspr->Next;
+			}
+		}
+	}
+
+	R_ClearInterpolationPath();
+	if (StatusBar != nullptr)
+		StatusBar->ClearInterpolation();
+}
+
 //
 // P_Ticker
 //
 void P_Ticker (void)
 {
-	int i;
+	unsigned int i;
 
 	for (auto Level : AllLevels())
 	{
@@ -420,9 +516,4 @@ void P_Ticker (void)
 		Level->maptime++;
 		Level->totaltime++;
 	}
-	if (players[consoleplayer].mo != NULL) {
-		if (players[consoleplayer].mo->Vel.Length() > primaryLevel->max_velocity) { primaryLevel->max_velocity = players[consoleplayer].mo->Vel.Length(); }
-		primaryLevel->avg_velocity += (players[consoleplayer].mo->Vel.Length() - primaryLevel->avg_velocity) / primaryLevel->maptime;
-	}
-	StatusBar->CallTick();		// Status bar should tick AFTER the thinkers to properly reflect the level's state at this time.
 }

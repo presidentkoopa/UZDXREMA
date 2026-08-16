@@ -5,14 +5,16 @@
 
 Timer::Timer(Widget* owner) : OwnerObj(owner)
 {
-	PrevTimerObj = owner->FirstTimerObj;
-	if (PrevTimerObj)
-		PrevTimerObj->PrevTimerObj = this;
+	NextTimerObj = owner->FirstTimerObj;
+	if (NextTimerObj)
+		NextTimerObj->PrevTimerObj = this;
 	owner->FirstTimerObj = this;
 }
 
 Timer::~Timer()
 {
+	Stop();
+
 	if (PrevTimerObj)
 		PrevTimerObj->NextTimerObj = NextTimerObj;
 	if (NextTimerObj)
@@ -25,7 +27,7 @@ void Timer::Start(int timeoutMilliseconds, bool repeat)
 {
 	Stop();
 
-	TimerId = DisplayWindow::StartTimer(timeoutMilliseconds, [=]() {
+	TimerId = DisplayWindow::StartTimer(timeoutMilliseconds, [this,repeat]() {
 		if (!repeat)
 			Stop();
 		if (FuncExpired)

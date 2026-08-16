@@ -1,3 +1,27 @@
+/*
+** quaternion.h
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1998-2016 Marisa Heit
+** Copyright 2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
+**---------------------------------------------------------------------------
+**
+*/
+
 #pragma once
 
 #include "vectors.h"
@@ -13,7 +37,7 @@ public:
 
 	TQuaternion() = default;
 
-	TQuaternion(vec_t x, vec_t y, vec_t z, vec_t w)
+	constexpr TQuaternion(vec_t x, vec_t y, vec_t z, vec_t w)
 		: X(x), Y(y), Z(z), W(w)
 	{
 	}
@@ -38,6 +62,17 @@ public:
 	void Zero()
 	{
 		Z = Y = X = W = 0;
+	}
+
+	void MakeIdentity()
+	{
+		Z = Y = X = 0;
+		W = 1;
+	}
+
+	static constexpr TQuaternion Identity()
+	{
+		return {0,0,0,1};
 	}
 
 	bool isZero() const
@@ -71,25 +106,15 @@ public:
 	}
 
 	// returns the XY fields as a 2D-vector.
-	const Vector2& XY() const
+	Vector2 XY() const
 	{
-		return *reinterpret_cast<const Vector2*>(this);
+		return Vector2(X, Y);
 	}
 
-	Vector2& XY()
+	// returns the XYZ fields as a 3D-vector.
+	Vector3 XYZ() const
 	{
-		return *reinterpret_cast<Vector2*>(this);
-	}
-
-	// returns the XY fields as a 2D-vector.
-	const Vector3& XYZ() const
-	{
-		return *reinterpret_cast<const Vector3*>(this);
-	}
-
-	Vector3& XYZ()
-	{
-		return *reinterpret_cast<Vector3*>(this);
+		return Vector3(X, Y, Z);
 	}
 
 
@@ -204,12 +229,12 @@ public:
 	{
 		return X*X + Y*Y + Z*Z + W*W;
 	}
-	
+
 	double Sum() const
 	{
 		return abs(X) + abs(Y) + abs(Z) + abs(W);
 	}
-	
+
 
 	// Return a unit vector facing the same direction as this one
 	TQuaternion Unit() const
@@ -242,7 +267,7 @@ public:
 		return *this;
 	}
 
-	TQuaternion Resized(double len) const 
+	TQuaternion Resized(double len) const
 	{
 		double vlen = Length();
 		if (vlen != 0.)
@@ -309,7 +334,10 @@ public:
 		auto factor = sinTheta / g_sqrt(lengthSquared);
 		TQuaternion<vec_t> ret;
 		ret.W = cosTheta;
-		ret.XYZ() = factor * axis;
+		auto xyz = vec_t(factor) * axis;
+		ret.X = vec_t(xyz.X);
+		ret.Y = vec_t(xyz.Y);
+		ret.Z = vec_t(xyz.Z);
 		return ret;
 	}
 	static TQuaternion<vec_t> FromAngles(TAngle<vec_t> yaw, TAngle<vec_t> pitch, TAngle<vec_t> roll)
@@ -345,6 +373,12 @@ public:
 			auto scale1 = (theta * t).Sin();
 			return (from * scale0 + to * scale1).Unit();
 		}
+	}
+
+	template<typename U>
+	explicit operator TVector4<U>()
+	{
+		return TVector4<U>(U(X),U(Y),U(Z),U(W));
 	}
 };
 

@@ -170,7 +170,7 @@ using s3d::OpenXR_GetThumbstick;
 // DPSprite* is the RS fork's direct model-frame override; the wheel renders
 // world items, not psprites, so it always takes the default.
 class DPSprite;
-void RenderFrameModels(FModelRenderer* renderer, FLevelLocals* Level, const FSpriteModelFrame* smf, const FState* curState, const int curTics, FTranslationID translation, AActor* actor, const DPSprite* psp = nullptr);
+void RenderFrameModels(FModelRenderer* renderer, FLevelLocals* Level, const FSpriteModelFrame* smf, const FState* curState, const int curTics, double ticFrac, FTranslationID translation, AActor* actor, const DPSprite* psp = nullptr);
 
 namespace
 {
@@ -1634,7 +1634,8 @@ namespace
 		state.SetObjectColor(0xffffffff);
 		state.SetAddColor(0);
 		renderer.BeginDrawModel(DefaultRenderStyle(), (int)smfFlags, objectToWorldMatrix, mirrored);
-		RenderFrameModels(&renderer, entry.Item->Level, entry.ModelFrame, entry.ModelState, 0, translation, entry.Item);
+		// ticFrac 0.0: wheel icons are posed, not interpolated between tics.
+		RenderFrameModels(&renderer, entry.Item->Level, entry.ModelFrame, entry.ModelState, 0, 0.0, translation, entry.Item);
 		renderer.EndDrawModel(DefaultRenderStyle(), (int)smfFlags);
 		state.SetVertexBuffer(screen->mVertexData);
 	}

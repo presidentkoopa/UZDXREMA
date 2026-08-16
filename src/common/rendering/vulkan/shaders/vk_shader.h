@@ -1,3 +1,24 @@
+/*
+** vk_shader.h
+**
+** Vulkan backend
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 2016-2020 Magnus Norddahl
+**
+** SPDX-License-Identifier: Zlib
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 #pragma once
 
@@ -7,6 +28,7 @@
 #include "matrix.h"
 #include "name.h"
 #include "hw_renderstate.h"
+#include "zvulkan/vulkanbuilders.h"
 #include <list>
 
 #define SHADER_MIN_REQUIRED_TEXTURE_LAYERS 11
@@ -89,6 +111,8 @@ private:
 	FString LoadPublicShaderLump(const char *lumpname);
 	FString LoadPrivateShaderLump(const char *lumpname);
 
+	static ShaderIncludeResult OnInclude(FString headerName, FString includerName, size_t depth);
+
 	VulkanRenderDevice* fb = nullptr;
 
 	std::vector<VkShaderProgram> mMaterialShaders[MAX_PASS_TYPES];
@@ -98,4 +122,5 @@ private:
 	int compileIndex = 0;
 
 	std::list<VkPPShader*> PPShaders;
+	friend class VkPPShader;
 };

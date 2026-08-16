@@ -1,33 +1,22 @@
 /*
-** joystickmenu.cpp
+** joystickmenu.zs
+**
 ** The joystick configuration menus
 **
 **---------------------------------------------------------------------------
+**
 ** Copyright 2010-2017 Christoph Oelckers
-** All rights reserved.
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+**---------------------------------------------------------------------------
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
@@ -66,6 +55,34 @@ class OptionMenuSliderJoySensitivity : OptionMenuSliderBase
 //
 //=============================================================================
 
+class OptionMenuSliderJoyHapticsStrength : OptionMenuSliderBase
+{
+	JoystickConfig mJoy;
+
+	OptionMenuSliderJoyHapticsStrength Init(String label, double min, double max, double step, int showval, JoystickConfig joy)
+	{
+		Super.Init(label, min, max, step, showval);
+		mJoy = joy;
+		return self;
+	}
+
+	override double GetSliderValue()
+	{
+		return mJoy.GetHapticsStrength();
+	}
+
+	override void SetSliderValue(double val)
+	{
+		mJoy.SetHapticsStrength(val);
+	}
+}
+
+//=============================================================================
+//
+//
+//
+//=============================================================================
+
 class OptionMenuSliderJoyScale : OptionMenuSliderBase
 {
 	int mAxis;
@@ -85,12 +102,56 @@ class OptionMenuSliderJoyScale : OptionMenuSliderBase
 	{
 		double d = mJoy.GetAxisScale(mAxis);
 		mNeg = d < 0? -1:1;
-		return d;
+		return abs(d);
 	}
 
 	override void SetSliderValue(double val)
 	{
 		mJoy.SetAxisScale(mAxis, val * mNeg);
+	}
+}
+
+//=============================================================================
+//
+//
+//
+//=============================================================================
+
+class OptionMenuSliderJoyCurve : OptionMenuSliderBase
+{
+	int mAxis;
+	int mNeg;
+	int mPoint;
+	bool mShown;
+	JoystickConfig mJoy;
+
+	OptionMenuSliderJoyCurve Init(String label, int axis, double min, double max, double step, int showval, JoystickConfig joy, int point)
+	{
+		Super.Init(label, min, max, step, showval);
+		mAxis = axis;
+		mNeg = 1;
+		mJoy = joy;
+		mPoint = point;
+		mShown = false;
+		return self;
+	}
+
+	override bool Visible()
+	{
+ 		mShown |= mJoy.GetAxisResponseCurve(mAxis) == JoystickConfig.JOYCURVE_CUSTOM;
+		return mShown;
+	}
+
+	override double GetSliderValue()
+	{
+		double d = mJoy.GetAxisResponseCurvePoint(mAxis, mPoint);
+		mNeg = d < 0? -1:1;
+		return d;
+	}
+
+	override void SetSliderValue(double val)
+	{
+		mJoy.SetAxisResponseCurvePoint(mAxis, mPoint, val * mNeg);
 	}
 }
 
@@ -130,12 +191,102 @@ class OptionMenuSliderJoyDeadZone : OptionMenuSliderBase
 
 //=============================================================================
 //
-// 
+//
+//
+//=============================================================================
+
+class OptionMenuSliderJoyDigitalThreshold : OptionMenuSliderBase
+{
+	int mAxis;
+	int mNeg;
+	JoystickConfig mJoy;
+
+	OptionMenuSliderJoyDigitalThreshold Init(String label, int axis, double min, double max, double step, int showval, JoystickConfig joy)
+	{
+		Super.Init(label, min, max, step, showval);
+		mAxis = axis;
+		mNeg = 1;
+		mJoy = joy;
+		return self;
+	}
+
+	override double GetSliderValue()
+	{
+		double d = mJoy.GetAxisDigitalThreshold(mAxis);
+		mNeg = d < 0? -1:1;
+		return d;
+	}
+
+	override void SetSliderValue(double val)
+	{
+		mJoy.SetAxisDigitalThreshold(mAxis, val * mNeg);
+	}
+}
+
+//=============================================================================
+//
+//
+//
+//=============================================================================
+
+class OptionMenuItemJoyCurve : OptionMenuItemOptionBase
+{
+	int mAxis;
+	JoystickConfig mJoy;
+
+	OptionMenuItemJoyCurve Init(String label, int axis, Name values, int center, JoystickConfig joy)
+	{
+		Super.Init(label, 'none', values, null, center);
+		mAxis = axis;
+		mJoy = joy;
+		return self;
+	}
+
+	override int GetSelection()
+	{
+		double f = mJoy.GetAxisResponseCurve(mAxis);
+		let opt = OptionValues.GetCount(mValues);
+		if (opt > 0)
+		{
+			// Map from joystick curve to menu selection.
+			for(int i = 0; i < opt; i++)
+			{
+				if (f ~== OptionValues.GetValue(mValues, i))
+				{
+					return i;
+				}
+			}
+		}
+		return JoystickConfig.JOYCURVE_CUSTOM;
+	}
+
+	override void SetSelection(int selection)
+	{
+		let opt = OptionValues.GetCount(mValues);
+		// Map from menu selection to joystick curve.
+		if (opt == 0 || selection >= opt)
+		{
+			selection = JoystickConfig.JOYCURVE_DEFAULT;
+		}
+		else
+		{
+			selection = int(OptionValues.GetValue(mValues, selection));
+		}
+		mJoy.setAxisResponseCurve(mAxis, selection);
+	}
+}
+
+//=============================================================================
+//
+//
 //
 //=============================================================================
 
 class OptionMenuItemJoyMap : OptionMenuItemOptionBase
 {
+	// For backwards compatibility with menu mods, we need to leave this class alone.
+	// It simply is always set to "None" and does nothing now.
+
 	int mAxis;
 	JoystickConfig mJoy;
 
@@ -183,7 +334,7 @@ class OptionMenuItemJoyMap : OptionMenuItemOptionBase
 
 //=============================================================================
 //
-// 
+//
 //
 //=============================================================================
 
@@ -220,7 +371,6 @@ class OptionMenuItemInverter : OptionMenuItemOptionBase
 //
 //=============================================================================
 
-
 class OptionMenuJoyEnable : OptionMenuItemOptionBase
 {
 	JoystickConfig mJoy;
@@ -243,7 +393,6 @@ class OptionMenuJoyEnable : OptionMenuItemOptionBase
 	}
 }
 
-
 class OptionMenuJoyEnableInBackground : OptionMenuItemOptionBase
 {
 	JoystickConfig mJoy;
@@ -265,6 +414,44 @@ class OptionMenuJoyEnableInBackground : OptionMenuItemOptionBase
 		mJoy.SetEnabledInBackground(Selection);
 	}
 }
+
+
+class OptionMenuJoyReset : OptionMenuItemSubmenu
+{
+	JoystickConfig mJoy;
+
+	OptionMenuJoyReset Init(String label, JoystickConfig joy)
+	{
+		Super.Init(label, "");
+		mJoy = joy;
+		return self;
+	}
+
+	override bool MenuEvent(int mkey, bool fromcontroller)
+	{
+		if (mkey == Menu.MKEY_MBYes)
+		{
+			Menu.MenuSound("menu/choose");
+			mJoy.Reset();
+			return true;
+		}
+
+		return Super.MenuEvent(mkey, fromcontroller);
+	}
+
+	override bool Activate()
+	{
+		String msg = "$SAFEMESSAGE";
+		msg = StringTable.Localize(msg);
+		String actionLabel = StringTable.localize(mLabel);
+
+		String FullString;
+		FullString = String.Format("%s%s%s\n\n%s", TEXTCOLOR_WHITE, actionLabel, TEXTCOLOR_NORMAL, msg);
+		Menu.StartMessage(FullString, 0);
+		return true;
+	}
+}
+
 
 class OptionMenuItemJoyConfigMenu : OptionMenuItemSubmenu
 {
@@ -321,6 +508,16 @@ class OptionMenuItemJoyConfigMenu : OptionMenuItemSubmenu
 
 			it = new("OptionMenuSliderJoySensitivity").Init("$JOYMNU_OVRSENS", 0, 2, 0.1, 3, joy);
 			opt.mItems.Push(it);
+
+			if (joy.HasHaptics())
+			{
+				it = new("OptionMenuSliderJoyHapticsStrength").Init("$JOYMNU_HAPTICS", 0, 2, 0.1, 3, joy);
+				opt.mItems.Push(it);
+			}
+
+			it = new("OptionMenuJoyReset").Init("$OPTMNU_DEFAULTS", joy);
+			opt.mItems.Push(it);
+
 			it = new("OptionMenuItemStaticText").Init(" ", false);
 			opt.mItems.Push(it);
 
@@ -334,13 +531,25 @@ class OptionMenuItemJoyConfigMenu : OptionMenuItemSubmenu
 					it = new("OptionMenuItemStaticText").Init(" ", false);
 					opt.mItems.Push(it);
 
-					it = new("OptionMenuItemJoyMap").Init(joy.GetAxisName(i), i, "JoyAxisMapNames", false, joy);
+					it = new("OptionMenuItemStaticText").Init(joy.GetAxisName(i), false);
 					opt.mItems.Push(it);
 					it = new("OptionMenuSliderJoyScale").Init("$JOYMNU_OVRSENS", i, 0, 4, 0.1, 3, joy);
 					opt.mItems.Push(it);
 					it = new("OptionMenuItemInverter").Init("$JOYMNU_INVERT", i, false, joy);
 					opt.mItems.Push(it);
+					it = new("OptionMenuItemJoyCurve").Init("$JOYMNU_CURVE", i, "JoyAxisCurveNames", false, joy);
+					opt.mItems.Push(it);
+					it = new("OptionMenuSliderJoyCurve").Init("X1", i, 0, 0.9, 0.05, 3, joy, 0);
+					opt.mItems.Push(it);
+					it = new("OptionMenuSliderJoyCurve").Init("Y1", i, 0, 0.9, 0.05, 3, joy, 1);
+					opt.mItems.Push(it);
+					it = new("OptionMenuSliderJoyCurve").Init("X2", i, 0, 0.9, 0.05, 3, joy, 2);
+					opt.mItems.Push(it);
+					it = new("OptionMenuSliderJoyCurve").Init("Y2", i, 0, 0.9, 0.05, 3, joy, 3);
+					opt.mItems.Push(it);
 					it = new("OptionMenuSliderJoyDeadZone").Init("$JOYMNU_DEADZONE", i, 0, 0.9, 0.05, 3, joy);
+					opt.mItems.Push(it);
+					it = new("OptionMenuSliderJoyDigitalThreshold").Init("$JOYMNU_THRESHOLD", i, 0, 0.9, 0.05, 3, joy);
 					opt.mItems.Push(it);
 				}
 			}
@@ -369,4 +578,3 @@ class JoystickConfigMenu : OptionMenu
 {
 	JoystickConfig mJoy;
 }
-

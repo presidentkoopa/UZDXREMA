@@ -1,47 +1,35 @@
 /*
-** c_dispatch.cpp
+** c_buttons.cpp
+**
 ** Functions for executing console commands and aliases
 **
 **---------------------------------------------------------------------------
-** Copyright 1998-2007 Randy Heit
-** Copyright 2019 Christoph Oelckers
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 2017-2019 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
 
+#include "basics.h"
+#include "c_bind.h"
 #include "c_buttons.h"
-
 #include "c_dispatch.h"
-#include "printf.h"
 #include "cmdlib.h"
-#include "c_console.h"
+#include "m_joy.h"
+#include "printf.h"
 
 ButtonMap buttonMap;
-
 
 //=============================================================================
 //
@@ -100,7 +88,7 @@ int ButtonMap::ListActionCommands (const char *pattern)
 
 int ButtonMap::FindButtonIndex (const char *key, int funclen) const
 {
-    if (!key) return -1;
+	if (!key) return -1;
 
 	FName name = funclen == -1? FName(key, true) : FName(key, funclen, true);
 	if (name == NAME_None) return -1;
@@ -136,11 +124,31 @@ void ButtonMap::ResetButtonStates ()
 {
 	for (auto &btn : Buttons)
 	{
-		if (!btn.bReleaseLock) 
+		if (!btn.bReleaseLock)
 		{
 			btn.ReleaseKey (0);
 		}
 		btn.ResetTriggers ();
+	}
+}
+
+//=============================================================================
+//
+//
+//
+//=============================================================================
+
+void ButtonMap::GetAxes ()
+{
+	float joyaxes[NUM_AXIS_CODES];
+	I_GetAxes(joyaxes);
+
+	for (unsigned i = 0; i < Buttons.Size(); i++)
+	{
+		FButtonStatus &btn = Buttons[i];
+		FString &btn_name = NumToName[i];
+
+		btn.AddAxes(btn_name, joyaxes);
 	}
 }
 
@@ -238,6 +246,53 @@ bool FButtonStatus::ReleaseKey (int keynum)
 	}
 	// Returns true if releasing this key caused the button to go up.
 	return wasdown && !bDown;
+}
+
+//=============================================================================
+//
+//
+//
+//=============================================================================
+
+void FButtonStatus::AddAxes (FString &btn_name, float joyaxes[NUM_AXIS_CODES])
+{
+	int i;
+
+	bIsAxis = false;
+	Axis = 0.0f;
+
+	char cmd_name[16];
+	strcpy(&cmd_name[1], btn_name.GetChars());
+
+	cmd_name[0] = '+';
+	TArray<int> positive_keys = Bindings.GetKeysForCommand(cmd_name);
+
+	cmd_name[0] = '-';
+	TArray<int> negative_keys = Bindings.GetKeysForCommand(cmd_name);
+
+	for (i = 0; i < NUM_AXIS_CODES; i++)
+	{
+		float axis_value = joyaxes[i];
+
+		if (axis_value > 0.0)
+		{
+			int key_code = KeyAxisMapping[i];
+
+			if (positive_keys.Contains(key_code))
+			{
+				Axis += axis_value;
+				bIsAxis = true;
+			}
+
+			if (negative_keys.Contains(key_code))
+			{
+				Axis -= axis_value;
+				bIsAxis = true;
+			}
+		}
+	}
+
+	Axis = clamp<float>(Axis, 0.0f, 1.0f);
 }
 
 //=============================================================================

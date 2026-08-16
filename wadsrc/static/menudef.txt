@@ -391,14 +391,16 @@ OptionMenu "OptionsMenu" protected
 	Submenu "$OPTMNU_COMPATIBILITY",	"CompatibilityOptions"
 	Submenu "$OPTMNU_AUTOMAP",			"AutomapOptions"
 	Submenu "$OPTMNU_HUD",				"HUDOptions"
+	Submenu "$OPTMNU_HAPTICS",			"HapticsOptions"
 	Submenu "$OPTMNU_MISCELLANEOUS",	"MiscOptions"
 	Submenu "$OPTMNU_NETWORK",			"NetworkOptions"
 	Submenu "$OPTMNU_SOUND",			"SoundOptions"
+	Submenu "$OPTMNU_ACCESSIBILITY",	"AccessibilityOptions"
 	Submenu "$OPTMNU_DISPLAY",			"VideoOptions"
 	Submenu "$OPTMNU_VIDEO",			"VideoModeMenu"
 	IfOption(Experimental)
 	{
-		Submenu "$OPTMNU_EXPERIMENTAL",	"ExperimentalMenu", 0, 0, Gold
+		Submenu "$OPTMNU_EXPERIMENTAL",	"ExperimentalMenu"
 	}
 	StaticText " "
 	Submenu "$OS_TITLE", "os_Menu"
@@ -408,13 +410,14 @@ OptionMenu "OptionsMenu" protected
 	SafeCommand	"$OPTMNU_DEFAULTS",		"reset2defaults"
 	SafeCommand	"$OPTMNU_RESETTOSAVED",	"reset2saved"
 	SafeCommand	"$OPTMNU_WRITEINI",		"writeini"
-	
+
 	Command "$OPTMNU_CONSOLE",			"menuconsole"
 	ifOption(Developer1, Developer2)
 	{
 		Submenu "$DEVOPTMNU_TITLE",		"DeveloperOptionsMenu"
 	}
 	//Command "$OPTMNU_OPENCONFIG",		"openconfig"
+	//Command "$OPTMNU_OPENWADS",			"openwads"
 	//Command "$OPTMNU_OPENSCREENSHOTS",	"openscreenshots"
 	//Command "$OPTMNU_OPENSAVES",		"opensaves"
 	StaticText " "
@@ -527,7 +530,7 @@ ListMenu "PlayerMenu"
 	ValueText "$PLYRMNU_PLAYERCLASS", "Class"
 	ValueText "$PLYRMNU_PLAYERSKIN", "Skin"
 	ValueText "$PLYRMNU_PLAYERGENDER", "Gender", "Gender"
-	Slider "$PLYRMNU_AUTOAIM", "Autoaim", 0, 35, 1
+	Slider "$PLYRMNU_AUTOAIM", "Autoaim", 0, 70, 1
 	ValueText "$PLYRMNU_VERTSPREAD", vertspread, "OnOff"
 	ValueText "$PLYRMNU_SWITCHONPICKUP", "Switch", "OffOn"
 	ValueText "$PLYRMNU_ALWAYSRUN", "AlwaysRun", "OnOff"
@@ -894,10 +897,55 @@ OptionMenu "InventoryControlsMenu" protected
 	Control    "$CNTRLMNU_DROPWEAPON"   , "weapdrop"
 	Control    "$CNTRLMNU_DROPOFFHANDWEAPON"   , "weapdrop 1"
 
+	IfGame(Heretic, Hexen, Strife)
+	{
+		StaticText	""
+		StaticText	"$CNTRLMNU_INVENTORY_HOTKEYS"
+	}
+
+	IfGame(Heretic)
+	{
+		Control		"$CNTRLMNU_ARTI_CHAOS",		"use ArtiTeleport"
+		Control		"$CNTRLMNU_ARTI_EGG",		"use ArtiEgg"
+		Control		"$CNTRLMNU_ARTI_URN",		"use ArtiSuperHealth"
+		Control		"$CNTRLMNU_ARTI_FLASK",		"use ArtiHealth"
+		Control		"$CNTRLMNU_ARTI_RING",		"use ArtiInvulnerability"
+		Control		"$CNTRLMNU_ARTI_SHADOW",	"use ArtiInvisibility"
+		Control		"$CNTRLMNU_ARTI_BOMB",		"use ArtiTimeBomb"
+		Control		"$CNTRLMNU_ARTI_TOME",		"use ArtiTomeOfPower"
+		Control		"$CNTRLMNU_ARTI_TORCH",		"use ArtiTorch"
+		Control		"$CNTRLMNU_ARTI_WINGS",		"use ArtiFly"
+	}
+
 	IfGame(Hexen)
 	{
-		StaticText ""
-		Control    "$CNTRLMNU_USEFLECHETTE", "useflechette"
+		Control		"$CNTRLMNU_ARTI_BANISH",	"use ArtiTeleportOther"
+		Control		"$CNTRLMNU_ARTI_BOOTS",		"use ArtiSpeedboots"
+		Control		"$CNTRLMNU_ARTI_CHAOS",		"use ArtiTeleport"
+		Control		"$CNTRLMNU_ARTI_SERVANT",	"use ArtiDarkServant"
+		Control		"$CNTRLMNU_ARTI_BLAST",		"use ArtiBlastRadius"
+		Control		"$CNTRLMNU_ARTI_BRACERS",	"use ArtiBoostArmor"
+		Control		"$CNTRLMNU_ARTI_FLECHETTE",	"useflechette"
+		Control		"$CNTRLMNU_ARTI_ICON",		"use ArtiInvulnerability2"
+		Control		"$CNTRLMNU_ARTI_KRATER",	"use ArtiBoostMana"
+		Control		"$CNTRLMNU_ARTI_INCANT",	"use ArtiHealingRadius"
+		Control		"$CNTRLMNU_ARTI_URN",		"use ArtiSuperHealth"
+		Control		"$CNTRLMNU_ARTI_PORK",		"use ArtiPork"
+		Control		"$CNTRLMNU_ARTI_FLASK",		"use ArtiHealth"
+		Control		"$CNTRLMNU_ARTI_TORCH",		"use ArtiTorch"
+		Control		"$CNTRLMNU_ARTI_WINGS",		"use ArtiFly"
+	}
+
+	IfGame(Strife)
+	{
+		Control		"$CNTRLMNU_INV_SURGERYKIT",		"use SurgeryKit"
+		Control		"$CNTRLMNU_INV_LARMOR",			"use LeatherArmor"
+		Control		"$CNTRLMNU_INV_MARMOR",			"use MetalArmor"
+		Control		"$CNTRLMNU_INV_ENVSUIT",		"use EnvironmentalSuit"
+		Control		"$CNTRLMNU_INV_SHADOWARMOR",	"use ShadowArmor"
+		Control		"$CNTRLMNU_INV_BEACON",			"use TeleporterBeacon"
+		Control		"$CNTRLMNU_INV_TARGETER",		"use Targeter"
+		Control		"$CNTRLMNU_INV_SCANNER",		"use Scanner"
 	}
 }
 
@@ -926,10 +974,55 @@ OptionMenu "InventoryDoubleControlsMenu" protected
 	StaticText ""
 	DoubleControl    "$CNTRLMNU_DROPWEAPON"   , "weapdrop"
 
+	IfGame(Heretic, Hexen, Strife)
+	{
+		StaticText	""
+		StaticText	"$CNTRLMNU_INVENTORY_HOTKEYS"
+	}
+
+	IfGame(Heretic)
+	{
+		DoubleControl		"$CNTRLMNU_ARTI_CHAOS",		"use ArtiTeleport"
+		DoubleControl		"$CNTRLMNU_ARTI_EGG",		"use ArtiEgg"
+		DoubleControl		"$CNTRLMNU_ARTI_URN",		"use ArtiSuperHealth"
+		DoubleControl		"$CNTRLMNU_ARTI_FLASK",		"use ArtiHealth"
+		DoubleControl		"$CNTRLMNU_ARTI_RING",		"use ArtiInvulnerability"
+		DoubleControl		"$CNTRLMNU_ARTI_SHADOW",	"use ArtiInvisibility"
+		DoubleControl		"$CNTRLMNU_ARTI_BOMB",		"use ArtiTimeBomb"
+		DoubleControl		"$CNTRLMNU_ARTI_TOME",		"use ArtiTomeOfPower"
+		DoubleControl		"$CNTRLMNU_ARTI_TORCH",		"use ArtiTorch"
+		DoubleControl		"$CNTRLMNU_ARTI_WINGS",		"use ArtiFly"
+	}
+
 	IfGame(Hexen)
 	{
-		StaticText ""
-		DoubleControl    "$CNTRLMNU_USEFLECHETTE", "useflechette"
+		DoubleControl		"$CNTRLMNU_ARTI_BANISH",	"use ArtiTeleportOther"
+		DoubleControl		"$CNTRLMNU_ARTI_BOOTS",		"use ArtiSpeedboots"
+		DoubleControl		"$CNTRLMNU_ARTI_CHAOS",		"use ArtiTeleport"
+		DoubleControl		"$CNTRLMNU_ARTI_SERVANT",	"use ArtiDarkServant"
+		DoubleControl		"$CNTRLMNU_ARTI_BLAST",		"use ArtiBlastRadius"
+		DoubleControl		"$CNTRLMNU_ARTI_BRACERS",	"use ArtiBoostArmor"
+		DoubleControl		"$CNTRLMNU_ARTI_FLECHETTE",	"useflechette"
+		DoubleControl		"$CNTRLMNU_ARTI_ICON",		"use ArtiInvulnerability2"
+		DoubleControl		"$CNTRLMNU_ARTI_KRATER",	"use ArtiBoostMana"
+		DoubleControl		"$CNTRLMNU_ARTI_INCANT",	"use ArtiHealingRadius"
+		DoubleControl		"$CNTRLMNU_ARTI_URN",		"use ArtiSuperHealth"
+		DoubleControl		"$CNTRLMNU_ARTI_PORK",		"use ArtiPork"
+		DoubleControl		"$CNTRLMNU_ARTI_FLASK",		"use ArtiHealth"
+		DoubleControl		"$CNTRLMNU_ARTI_TORCH",		"use ArtiTorch"
+		DoubleControl		"$CNTRLMNU_ARTI_WINGS",		"use ArtiFly"
+	}
+
+	IfGame(Strife)
+	{
+		DoubleControl		"$CNTRLMNU_INV_SURGERYKIT",		"use SurgeryKit"
+		DoubleControl		"$CNTRLMNU_INV_LARMOR",			"use LeatherArmor"
+		DoubleControl		"$CNTRLMNU_INV_MARMOR",			"use MetalArmor"
+		DoubleControl		"$CNTRLMNU_INV_ENVSUIT",		"use EnvironmentalSuit"
+		DoubleControl		"$CNTRLMNU_INV_SHADOWARMOR",	"use ShadowArmor"
+		DoubleControl		"$CNTRLMNU_INV_BEACON",			"use TeleporterBeacon"
+		DoubleControl		"$CNTRLMNU_INV_TARGETER",		"use Targeter"
+		DoubleControl		"$CNTRLMNU_INV_SCANNER",		"use Scanner"
 	}
 }
 
@@ -948,24 +1041,26 @@ OptionMenu "OtherControlsMenu" protected
 	}
 
 	StaticText ""
+	Control    "$CNTRLMNU_AUTOMAP"         , "togglemap"
 	Control    "Toggle Cinema Mode"        , "cinemamode"
 	Control    "Toggle Portable HUD"       , "portablehud"
-	Control    "$CNTRLMNU_AUTOMAP"         , "togglemap"
 
 	StaticText ""
 	Control    "$CNTRLMNU_CHASECAM"        , "chase"
 	Control    "$CNTRLMNU_COOPSPY"         , "spynext"
+	Control    "$CNTRLMNU_COOPSPYPREV"     , "spyprev"
+	Control    "$CNTRLMNU_COOPSPYCANCEL"   , "spycancel"
 
 	StaticText ""
 	Control    "$CNTRLMNU_SCREENSHOT"      , "screenshot"
-	Control    "$CNTRLMNU_CONSOLE"         , "toggleconsole"
+	Control    "$OPTMNU_CONSOLE"           , "toggleconsole"
 	Control    "$CNTRLMNU_PAUSE"           , "pause"
 
 	StaticText ""
 	Control    "$CNTRLMNU_DISPLAY_INC"     , "sizeup"
 	Control    "$CNTRLMNU_DISPLAY_DEC"     , "sizedown"
 	Control    "$CNTRLMNU_TOGGLE_MESSAGES" , "togglemessages"
-	Control    "$CNTRLMNU_ADJUST_GAMMA"    , "bumpgamma"
+	Control    "$CNTRLMNU_ADJUST_LIGHTS"   , "bumplight"
 
 	StaticText ""
 	Control    "$CNTRLMNU_OPEN_MAIN"       , "menu_main"
@@ -1000,6 +1095,8 @@ OptionMenu "OtherDoubleControlsMenu" protected
 	StaticText ""
 	DoubleControl    "$CNTRLMNU_CHASECAM"        , "chase"
 	DoubleControl    "$CNTRLMNU_COOPSPY"         , "spynext"
+	DoubleControl    "$CNTRLMNU_COOPSPYPREV"     , "spyprev"
+	DoubleControl    "$CNTRLMNU_COOPSPYCANCEL"   , "spycancel"
 
 	StaticText ""
 	DoubleControl    "$CNTRLMNU_SCREENSHOT"      , "screenshot"
@@ -1011,6 +1108,7 @@ OptionMenu "OtherDoubleControlsMenu" protected
 	DoubleControl    "$CNTRLMNU_DISPLAY_DEC"     , "sizedown"
 	DoubleControl    "$CNTRLMNU_TOGGLE_MESSAGES" , "togglemessages"
 	DoubleControl    "$CNTRLMNU_ADJUST_GAMMA"    , "bumpgamma"
+	DoubleControl    "$CNTRLMNU_ADJUST_LIGHTS"   , "bumplight"
 
 	StaticText ""
 	DoubleControl    "$CNTRLMNU_OPEN_MAIN"       , "menu_main"
@@ -1052,6 +1150,18 @@ OptionMenu "PopupDoubleControlsMenu" protected
 	DoubleControl    "$CNTRLMNU_MISSION" , "showpop 1"
 	DoubleControl    "$CNTRLMNU_KEYS"    , "showpop 2"
 	DoubleControl    "$CNTRLMNU_STATS"   , "showpop 3"
+}
+
+OptionMenu "StrifeControlsMenu" protected
+{
+	Title "$CNTRLMNU_POPUPS_TITLE"
+	ScrollTop 2
+	StaticTextSwitchable "$CNTRLMNU_SWITCHTEXT1", "$CNTRLMNU_SWITCHTEXT2", "ControlMessage"
+
+	StaticText ""
+	Control    "$CNTRLMNU_MISSION" , "showpop 1"
+	Control    "$CNTRLMNU_KEYS"    , "showpop 2"
+	Control    "$CNTRLMNU_STATS"   , "showpop 3"
 }
 
 //-------------------------------------------------------------------------------------------
@@ -1100,8 +1210,8 @@ OptionMenu "MouseOptions" protected
 	}
 	Option "$MOUSEMNU_CURSOR",			"vid_cursor", "Cursors"
 	StaticText 	""
-	Slider "$MOUSEMNU_SENSITIVITY_X",	"m_sensitivity_x", 0.1, 8, 0.05
-	Slider "$MOUSEMNU_SENSITIVITY_Y",	"m_sensitivity_y", 0.1, 8, 0.05
+	Slider "$MOUSEMNU_SENSITIVITY_X",	"m_sensitivity_x", 0.1, 8, 0.05, 2
+	Slider "$MOUSEMNU_SENSITIVITY_Y",	"m_sensitivity_y", 0.1, 8, 0.05, 2
 	StaticText 	""
 	Slider "$MOUSEMNU_TURNSPEED",		"m_yaw", 0, 2.5, 0.1
 	Slider "$MOUSEMNU_MOUSELOOKSPEED",	"m_pitch", 0, 2.5, 0.1
@@ -1115,7 +1225,6 @@ OptionMenu "MouseOptions" protected
 	Option "$MOUSEMNU_LOOKSTRAFE",		"lookstrafe", "OnOff"
 }
 
-
 //-------------------------------------------------------------------------------------------
 //
 // Joystick Menu
@@ -1127,12 +1236,18 @@ OptionMenu "JoystickOptionsDefaults" protected
 	Title "$JOYMNU_OPTIONS"
 	Option "$JOYMNU_ENABLE", "use_joystick", "YesNo"
 	Option "$JOYMNU_NOMENU", "m_blockcontrollers", "YesNo"
+	ScaleSlider "$JOYMNU_HAPTICS", "haptics_strength", 0, 10, 1, "$OPTVAL_OFF", 0, "m_simpleoptions_view", 0, Hide
 	IfOption(Windows)
 	{
 		Option "$JOYMNU_DINPUT", "joy_dinput", "YesNo"
 		Option "$JOYMNU_XINPUT", "joy_xinput", "YesNo"
 		Option "$JOYMNU_PS2", "joy_ps2raw", "YesNo"
 	}
+	StaticText ""
+	Slider "$JOYMNU_TURNSPEED",			"cl_analog_sensitivity_yaw", 0, 2.5, 0.1
+	Slider "$JOYMNU_LOOKSPEED",			"cl_analog_sensitivity_pitch", 0, 2.5, 0.1
+	Option "$JOYMNU_ANALOGRUN",			"cl_analog_run", "OnOff"
+	Option "$JOYMNU_ANALOGSTRAFERUN",	"cl_analog_straferun", "OnOff"
 	StaticText ""
 	StaticTextSwitchable "$JOYMNU_NOCON", "$JOYMNU_CONFIG", "ConfigureMessage"
 	StaticTextSwitchable " ", "$JOYMNU_DISABLED1", "ConnectMessage1"
@@ -1144,6 +1259,15 @@ OptionMenu "JoystickOptionsDefaults" protected
 OptionMenu "JoystickOptions" protected
 {
 	Title "$JOYMNU_OPTIONS"
+}
+
+OptionValue "JoyAxisCurveNames"
+{
+	-1, "$OPTVAL_CUSTOM"
+	0, "$OPTVAL_DEFAULT"
+	1, "$OPTVAL_LINEAR"
+	2, "$OPTVAL_QUADRATIC"
+	3, "$OPTVAL_CUBIC"
 }
 
 OptionValue "JoyAxisMapNames"
@@ -1169,7 +1293,6 @@ OptionMenu "JoystickConfigMenu" protected
 	// Will be filled in by joystick code.
 }
 
-
 //-------------------------------------------------------------------------------------------
 //
 // Video Menu
@@ -1180,19 +1303,6 @@ OptionValue ColumnMethods
 {
 	0.0, "$OPTVAL_ORIGINAL"
 	1.0, "$OPTVAL_OPTIMIZED"
-}
-
-OptionValue BlendMethods
-{
-	0.0, "$OPTVAL_CLASSIC"
-	1.0, "$OPTVAL_PRECISE"
-}
-
-OptionValue SkyModes
-{
-	0.0, "$OPTVAL_NORMAL"
-	1.0, "$OPTVAL_STRETCH"
-	2.0, "$OPTVAL_CAPPED"
 }
 
 OptionValue RocketTrailTypes
@@ -1231,13 +1341,6 @@ OptionValue Wipes
 	3.0, "$OPTVAL_CROSSFADE"
 }
 
-OptionValue Endoom
-{
-	0.0, "$OPTVAL_OFF"
-	1.0, "$OPTVAL_ON"
-	2.0, "$OPTVAL_ONLYMODIFIED"
-}
-
 OptionValue Contrast
 {
 	0.0, "$OPTVAL_OFF"
@@ -1254,40 +1357,84 @@ OptionValue Fuzziness
 
 OptionValue VanillaTrans
 {
-	0.0, "$OPTVAL_VTFZDOOM"
-	1.0, "$OPTVAL_VTFVANILLA"
-	2.0, "$OPTVAL_VTAZDOOM"
-	3.0, "$OPTVAL_VTAVANILLA"
+	-1, "$OPTVAL_AUTO"
+	0, "$OPTVAL_VTFZDOOM"
+	1, "$OPTVAL_VTFVANILLA"
+	2, "$OPTVAL_VTAZDOOM"
+	3, "$OPTVAL_VTAVANILLA"
 }
 
-OptionValue PreferBackend
+OptionMenu "VideoOptions" protected
 {
-	0, "$OPTVAL_OPENGL"
-	1, "$OPTVAL_VULKAN"
-	2, "$OPTVAL_OPENGLES"
-}
+	Title "$DSPLYMNU_TITLE"
 
-OptionMenu "TrueColorOptions" protected
-{
-	Title "$TCMNU_TITLE"
+	Submenu "$DSPLYMNU_GLOPT",                 OpenGLOptions
+	IfOption(SWRender)
+	{
+		Submenu "$DSPLYMNU_SWOPT",             SWROptions
+	}
+	Submenu "$DSPLYMNU_IMAGEADJUST",           ImageAdjustMenu,       0, false, vid_shadersupport
 	StaticText " "
-	Option "$TCMNU_MINFILTER",				"r_minfilter", "OnOff"
-	Option "$TCMNU_MAGFILTER",				"r_magfilter", "OnOff"
-	Option "$TCMNU_MIPMAP",					"r_mipmap", "OnOff"
+	IfOption(VulkanRender)
+	{
+		Submenu "$DSPLYMNU_VKOPT",             VKOptions,             0, false, vid_preferbackend, 1, HideInv
+	}
+	Submenu "$GLMNU_TEXOPT",                   GLTextureGLOptions
+	Submenu "$GLMNU_DYNLIGHT",                 GLLightOptions
+	StaticText " "
+	Option "$VIDMNU_REFRESHRATE",              vid_refreshrate,        RefreshRate
+	StaticText " "
+	Slider "$DSPLYMNU_SCREENSIZE",             screenblocks,           3.0, 12.0, 1.0, 0
+	StaticText " "
+	Slider "$DSPLYMNU_FOV",                    fov,                    75.0, 120.0, 0.1, 1, "", 0, Gray, 1.0, "$VALFORMAT_DEGREES"
+	StaticText " "
+	Option "$DSPLYMNU_SPRITESHADOW",           r_actorspriteshadow,    SpriteShadowModes
+	Option "$DSPLYMNU_CUSTOMINVERTMAP",        cl_customizeinvulmap,   OnOff
+	ColorPicker "$DSPLYMNU_CUSTOMINVERTC1",    cl_custominvulmapcolor1
+	ColorPicker "$DSPLYMNU_CUSTOMINVERTC2",    cl_custominvulmapcolor2
+	Option "$DSPLYMNU_WIPETYPE",               wipetype,               Wipes
+	Option "$DSPLYMNU_DRAWFUZZ",               r_drawfuzz,             Fuzziness
+	Option "$DSPLYMNU_OLDTRANS",               r_vanillatrans,         VanillaTrans
+	Option "$DSPLYMNU_FAKECONTRAST",           r_fakecontrast,         Contrast
+	Option "$DSPLYMNU_ROCKETTRAILS",           cl_rockettrails,        RocketTrailTypes
+	Option "$DSPLYMNU_ROCKETEXPSTYLE",         addrocketexplosion,     RocketExplosionStyles
+	Option "$DSPLYMNU_BLOODTYPE",              cl_bloodtype,           BloodTypes
+	Option "$DSPLYMNU_PUFFTYPE",               cl_pufftype,            PuffTypes
+	Slider "$DSPLYMNU_MAXPARTICLES",           r_maxparticles,         100, 10000, 100, 0
+	Slider "$DSPLYMNU_MAXDECALS",              cl_maxdecals,           0, 10000, 100, 0
+	Option "$DSPLYMNU_PLAYERSPRITES",          r_drawplayersprites,    OnOff
+	Option "$DSPLYMNU_DEATHCAM",               r_deathcamera,          OnOff
+	Option "$DSPLYMNU_TELEZOOM",               telezoom,               OnOff
+	Option "$DSPLYMNU_NOMONSTERINTERPOLATION", nomonsterinterpolation, NoYes
+	StaticText " "
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vid_refreshrate screenblocks vid_gamma vid_brightness vid_contrast vid_saturation vid_hwgamma fov r_actorspriteshadow cl_customizeinvulmap cl_custominvulmapcolor1 cl_custominvulmapcolor2 wipetype r_drawfuzz r_vanillatrans transsouls r_fakecontrast cl_rockettrails addrocketexplosion cl_bloodtype cl_pufftype r_maxparticles cl_maxdecals r_drawplayersprites r_deathcamera telezoom r_quakeintensity nomonsterinterpolation"
+}
+
+OptionValue BlendMethods
+{
+	0.0, "$OPTVAL_CLASSIC"
+	1.0, "$OPTVAL_PRECISE"
+}
+
+OptionValue SkyModes
+{
+	0.0, "$OPTVAL_NORMAL"
+	1.0, "$OPTVAL_STRETCH"
+	2.0, "$OPTVAL_CAPPED"
 }
 
 OptionMenu "SWROptions" protected
 {
 	Title "$DSPLYMNU_SWOPT"
-	Submenu "$DSPLYMNU_TCOPT",			"TrueColorOptions"
-	Option "$DSPLYMNU_BLENDMETHOD",				"r_blendmethod", "BlendMethods"
+	Submenu "$DSPLYMNU_TCOPT",        TrueColorOptions
+	Option "$DSPLYMNU_BLENDMETHOD",   r_blendmethod,                 BlendMethods
 	StaticText " "
-	Option "$DSPLYMNU_SKYMODE",					"r_skymode", "SkyModes"
-	Option "$DSPLYMNU_LINEARSKY",				"r_linearsky", "OnOff"
-	Option "$DSPLYMNU_GZDFULLBRIGHT",			"r_fullbrightignoresectorcolor", "OnOff"
-	Option "$DSPLYMNU_SCALEFUZZ",				"r_fuzzscale", "OnOff"
-	Option "$DSPLYMNU_MODELS",					"r_models", "OnOff"
-	Option "$DSPLYMNU_MODELSCARMACK",			"r_models_carmack", "OnOff"
+	Option "$DSPLYMNU_SKYMODE",       r_skymode,                     SkyModes
+	Option "$DSPLYMNU_LINEARSKY",     r_linearsky,                   OnOff
+	Option "$DSPLYMNU_GZDFULLBRIGHT", r_fullbrightignoresectorcolor, OnOff
+	Option "$DSPLYMNU_SCALEFUZZ",     r_fuzzscale,                   OnOff
+	Option "$DSPLYMNU_MODELS",        r_models,                      OnOff
+	Option "$DSPLYMNU_MODELSCARMACK",			r_models_carmack,              OnOff
 	StaticText " "
 	ScaleSlider "$DSPLYMNU_SPRITECULL",			"r_sprite_distance_cull", 0.0, 8000.0, 500.0, "$GLPREFMNU_CULLING_DISABLED"
 	ScaleSlider "$DSPLYMNU_LINECULL",			"r_line_distance_cull", 0.0, 16000.0, 1000.0, "$GLPREFMNU_CULLING_DISABLED"
@@ -1295,1395 +1442,48 @@ OptionMenu "SWROptions" protected
 	SafeCommand "$DSPLYMNU_RESETRENDERCULL",	"resetcvar r_sprite_distance_cull r_line_distance_cull"
 }
 
-OptionMenu "VideoOptions" protected
+OptionMenu "TrueColorOptions" protected
 {
-	Title "$DSPLYMNU_TITLE"
-
-	Submenu "$DSPLYMNU_GLOPT", 			"OpenGLOptions"
-	IfOption(SWRender)
-	{
-		Submenu "$DSPLYMNU_SWOPT", 			"SWROptions"
-	}
-	IfOption(VulkanRender)
-	{
-		Submenu "$DSPLYMNU_VKOPT",			"VKOptions"
-	}
-	Submenu "$GLMNU_TEXOPT", 			"GLTextureGLOptions"
-	Submenu "$GLMNU_DYNLIGHT",			"GLLightOptions"
-	StaticText " "
-	Option "$VIDMNU_REFRESHRATE",               "vid_refreshrate", "RefreshRate"
-	StaticText " "
-	Slider "$DSPLYMNU_SCREENSIZE",				"screenblocks", 				3.0, 12.0, 1.0, 0
-
-	Slider "$DSPLYMNU_GAMMA",					"vid_gamma",					0.75, 3.0, 0.05, 2
-	Slider "$DSPLYMNU_BRIGHTNESS",				"vid_brightness",				-0.8,0.8, 0.05,2
-	Slider "$DSPLYMNU_CONTRAST",				"vid_contrast",	   				0.1, 3.0, 0.1
-	Slider "$DSPLYMNU_SATURATION",				"vid_saturation",  				-3.0, 3.0, 0.25, 2
-	StaticText " "
-	Slider "$DSPLYMNU_FOV",						"fov",							75.0, 120.0, 0.1, 1
-	StaticText " "
-	Option "$DSPLYMNU_SPRITESHADOW",			"r_actorspriteshadow", "SpriteShadowModes"
-	Option "$DSPLYMNU_CUSTOMINVERTMAP",			"cl_customizeinvulmap", "OnOff"
-	ColorPicker "$DSPLYMNU_CUSTOMINVERTC1",		"cl_custominvulmapcolor1"
-	ColorPicker "$DSPLYMNU_CUSTOMINVERTC2",		"cl_custominvulmapcolor2"
-	Option "$DSPLYMNU_WIPETYPE",				"wipetype", "Wipes"
-	Option "$DSPLYMNU_DRAWFUZZ",				"r_drawfuzz", "Fuzziness"
-	Option "$DSPLYMNU_OLDTRANS",				"r_vanillatrans", "VanillaTrans"
-	Option "$DSPLYMNU_FAKECONTRAST",			"r_fakecontrast", "Contrast"
-	Option "$DSPLYMNU_ROCKETTRAILS",			"cl_rockettrails", "RocketTrailTypes"
-	Option "$DSPLYMNU_ROCKETEXPSTYLE",			"addrocketexplosion", "RocketExplosionStyles"
-	Option "$DSPLYMNU_BLOODTYPE",				"cl_bloodtype", "BloodTypes"
-	Option "$DSPLYMNU_PUFFTYPE",				"cl_pufftype", "PuffTypes"
-	Slider "$DSPLYMNU_MAXPARTICLES",			"r_maxparticles", 100, 10000, 100, 0
-	Slider "$DSPLYMNU_MAXDECALS",				"cl_maxdecals", 0, 10000, 100, 0
-	Option "$DSPLYMNU_PLAYERSPRITES",			"r_drawplayersprites", "OnOff"
-	Option "$DSPLYMNU_DEATHCAM",				"r_deathcamera", "OnOff"
-	Option "$DSPLYMNU_TELEZOOM",				"telezoom", "OnOff"
-	Slider "$DSPLYMNU_QUAKEINTENSITY",			"r_quakeintensity", 0.0, 1.0, 0.05, 2
-	Option "$DSPLYMNU_NOMONSTERINTERPOLATION",	"nomonsterinterpolation", "NoYes"
-	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vid_refreshrate screenblocks Gamma vid_brightness vid_contrast vid_saturation vid_hwgamma fov r_actorspriteshadow cl_customizeinvulmap cl_custominvulmapcolor1 cl_custominvulmapcolor2 wipetype r_drawfuzz r_vanillatrans transsouls r_fakecontrast cl_rockettrails cl_bloodtype cl_pufftype r_maxparticles cl_maxdecals r_drawplayersprites r_deathcamera telezoom r_quakeintensity nomonsterinterpolation"
-}
-
-
-//-------------------------------------------------------------------------------------------
-//
-// HUD menu
-//
-//-------------------------------------------------------------------------------------------
-
-OptionValue CrosshairHealthTypes
-{
-	0.0, "$TXT_NO"
-	1.0, "$OPTVAL_YES_STANDARD"
-	2.0, "$OPTVAL_YES_ENHANCED"
-}
-
-OptionValue DisplayTagsTypes
-{
-	0.0, "$OPTVAL_NONE"
-	1.0, "$OPTVAL_ITEMS"
-	2.0, "$OPTVAL_WEAPONS"
-	3.0, "$OPTVAL_BOTH"
-}
-
-OptionValue TextColors
-{
-	0.0, "$C_BRICK"
-	1.0, "$C_TAN"
-	2.0, "$C_GRAY"
-	3.0, "$C_GREEN"
-	4.0, "$C_BROWN"
-	5.0, "$C_GOLD"
-	6.0, "$C_RED"
-	7.0, "$C_BLUE"
-	8.0, "$C_ORANGE"
-	9.0, "$C_WHITE"
-	10.0, "$C_YELLOW"
-	11.0, "$C_DEFAULT"
-	12.0, "$C_BLACK"
-	13.0, "$C_LIGHTBLUE"
-	14.0, "$C_CREAM"
-	15.0, "$C_OLIVE"
-	16.0, "$C_DARKGREEN"
-	17.0, "$C_DARKRED"
-	18.0, "$C_DARKBROWN"
-	19.0, "$C_PURPLE"
-	20.0, "$C_DARKGRAY"
-	21.0, "$C_CYAN"
-	22.0, "$C_ICE"
-	23.0, "$C_FIRE"
-	24.0, "$C_SAPPHIRE"
-	25.0, "$C_TEAL"
-}
-
-OptionValue Crosshairs
-{
-	// will be filled in from the XHAIRS lump
-}
-
-OptionValue ZDoomHexen
-{
-	0.0, "$OPTVAL_ZDOOM"
-	1.0, "$OPTVAL_HEXEN"
-}
-
-OptionValue ZDoomStrife
-{
-	0.0, "$OPTVAL_ZDOOM"
-	1.0, "$OPTVAL_STRIFE"
-}
-
-OptionMenu "HUDOptions" protected
-{
-	Title "$HUDMNU_TITLE"
-	Submenu "$HUDMNU_SCALEOPT",				"ScalingOptions"
-	Submenu "$HUDMNU_ALTHUD",				"AltHudOptions"
-	Submenu "$HUDMNU_MESSAGE", 				"MessageOptions"
-	Submenu "$HUDMNU_FLASH", 				"FlashOptions"
-	Submenu "$DSPLYMNU_SCOREBOARD", 		"ScoreboardOptions"
-	Submenu "$HUDMNU_FONTOPTIONS",			"FontOptions"
-	StaticText " "
-	Option "$HUDMNU_CROSSHAIRON",			"crosshairon", "OnOff"
-	Option "$HUDMNU_CROSSHAIR",				"crosshair", "Crosshairs"
-	Option "$HUDMNU_FORCECROSSHAIR",		"crosshairforce", "OnOff"
-	Option "$HUDMNU_GROWCROSSHAIR",			"crosshairgrow", "OnOff"
-	ColorPicker "$HUDMNU_CROSSHAIRCOLOR", 	"crosshaircolor"
-	Option "$HUDMNU_CROSSHAIRHEALTH",		"crosshairhealth", "CrosshairHealthTypes"
-	Slider "$HUDMNU_CROSSHAIRSCALE",		"crosshairscale", 0.0, 2.0, 0.05, 2
-	StaticText " "
-	Option "$HUDMNU_NAMETAGS",				"displaynametags", "DisplayTagsTypes"
-	Option "$HUDMNU_NAMETAGCOLOR",			"nametagcolor", "TextColors", "displaynametags"
-	Option "$HUDMNU_OLDOUCH",				"st_oldouch", "OnOff"
-	StaticText " "
-	Slider "$DSPLYMNU_MOVEBOB",				"movebob", 0, 1.0, 0.05, 2
-	Slider "$DSPLYMNU_STILLBOB",			"stillbob", 0, 1.0, 0.05, 2
-	StaticText " "
-	Slider "$DSPLYMNU_MENUDIM",					"dimamount", 0, 1.0, 0.05, 2
-	ColorPicker "$DSPLYMNU_DIMCOLOR",			"dimcolor"
-	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar crosshairon crosshair crosshairforce crosshairgrow crosshaircolor crosshairhealth crosshairscale displaynametags nametagcolor st_oldouch movebob stillbob wbobspeed wbobfire dimamount dimcolor"
-}
-
-OptionMenu "FlashOptions" protected
-{
-	Title "$HUDMNU_FLASH"
-	Option "$HUDMNU_HEXENFLASHES",			"pf_hexenweaps", "ZDoomHexen"
-	Option "$HUDMNU_POISONFLASHES",			"pf_poison", "ZDoomHexen"
-	Option "$HUDMNU_ICEFLASHES",			"pf_ice", "ZDoomHexen"
-	Option "$HUDMNU_HAZARDFLASHES",			"pf_hazard", "ZDoomStrife"
-	StaticText " "
-	Slider "$DSPLYMNU_BLOODFADE",				"blood_fade_scalar", 0.0, 1.0, 0.05, 2
-	Slider "$DSPLYMNU_PICKUPFADE",				"pickup_fade_scalar", 0.0, 1.0, 0.05, 2
-	Slider "$DSPLYMNU_POWERUPFADE",				"powerup_fade_scalar", 0.0, 1.0, 0.05, 2
-	Slider "$DSPLYMNU_WATERFADE",				"underwater_fade_scalar", 0.0, 1.0, 0.05, 2
-	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar pf_hexenweaps pf_poison pf_ice pf_hazard blood_fade_scalar pickup_fade_scalar underwater_fade_scalar"
-}
-
-OptionMenu "ScalingOptions" protected
-{
-	Title "$SCALEMNU_TITLE"
-	ScaleSlider "$HUDMNU_UISCALE",				"uiscale", 0.0, 8.0, 1.0, "$SCALEMNU_ADAPT"
-	StaticText " "
-	// These will need a new control type.
-	StaticText "$SCALEMNU_OVERRIDE", 1
-	ScaleSlider "$SCALEMNU_MESSAGES", 			"con_scaletext", 0.0, 8.0, 1.0, "$SCALEMNU_USEUI"
-	ScaleSlider "$SCALEMNU_CONSOLE", 			"con_scale", 0.0, 8.0, 1.0, "$SCALEMNU_USEUI"
-	Option "$SCALEMNU_HUD_OLDSCALE",			"hud_oldscale", "OnOff"
-	Slider "$SCALEMNU_HUD_SCALEFACTOR",			"hud_scalefactor", 0.0, 1.0, 0.025, 3, "hud_oldscale", 1
-	ScaleSlider "$SCALEMNU_STATBAR",			"st_scale", -1.0, 8.0, 1.0, "$SCALEMNU_USEUI", "$SCALEMNU_USEFS", "hud_oldscale"
-	ScaleSlider "$SCALEMNU_HUD", 				"hud_scale", -1.0, 8.0, 1.0, "$SCALEMNU_USEUI", "$SCALEMNU_USEFS", "hud_oldscale"
-	ScaleSlider "$SCALEMNU_ALTHUD",				"hud_althudscale", 0.0, 8.0, 1.0, "$SCALEMNU_USEUI", "", "hud_oldscale"
-	StaticText " "
-	Option "$SCALEMNU_HUDASPECT", 				"hud_aspectscale", "OnOff"
-	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar uiscale con_scaletext con_scale st_scale hud_scale hud_althudscale hud_aspectscale"
-	StaticText " "
-	StaticText "$SCALEMNU_SCALECLASSIC", 1
-	Option "$SCALEMNU_INTER",					"inter_classic_scaling", "OnOff"
-	Option "$SCALEMNU_BORDER",					"ui_screenborder_classic_scaling", "OnOff"
-	Slider "$SCALEMNU_FACTOR",					"classic_scaling_factor", 1.0, 3.0, 0.2, 1
-	Slider "$SCALEMNU_RATIO",					"classic_scaling_pixelaspect", 1.0, 1.2, 0.2, 1
-	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar inter_classic_scaling ui_screenborder_classic_scaling classic_scaling_factor classic_scaling_pixelaspect"
-}
-//-------------------------------------------------------------------------------------------
-//
-// Alternative HUD
-//
-//-------------------------------------------------------------------------------------------
-
-OptionValue "AMCoordinates"
-{
-	0, "$OPTVAL_PLAYER"
-	1, "$OPTVAL_MAP"
-}
-
-OptionValue "AltHUDAmmo"
-{
-	0, "$OPTVAL_CURRENTWEAPON"
-	1, "$OPTVAL_AVAILABLEWEAPONS"
-	2, "$OPTVAL_ALLWEAPONS"
-}
-
-OptionValue "AltHUDTime"
-{
-	0, "$OPTVAL_OFF"
-	1, "$OPTVAL_LEVELMILLISECONDS"
-	2, "$OPTVAL_LEVELSECONDS"
-	3, "$OPTVAL_LEVEL"
-	4, "$OPTVAL_HUBSECONDS"
-	5, "$OPTVAL_HUB"
-	6, "$OPTVAL_TOTALSECONDS"
-	7, "$OPTVAL_TOTAL"
-	8, "$OPTVAL_SYSTEMSECONDS"
-	9, "$OPTVAL_SYSTEM"
-}
-
-OptionValue "AltHUDLag"
-{
-	0, "$OPTVAL_OFF"
-	1, "$OPTVAL_NETGAMESONLY"
-	2, "$OPTVAL_ALWAYS"
-}
-
-OptionValue "AltHUDAmmoOrder"
-{
-	0, "$OPTVAL_AMMOIMAGETEXT"
-	1, "$OPTVAL_AMMOTEXTIMAGE"
-}
-
-OptionMenu "AltHUDOptions" protected
-{
-	Title "$ALTHUDMNU_TITLE"
-	//Indent 220
-	Option "$ALTHUDMNU_ENABLE",					"hud_althud", "OnOff"
-	Option "$ALTHUDMNU_SHOWSECRETS",			"hud_showsecrets", "OnOff"
-	Option "$ALTHUDMNU_SHOWMONSTERS",			"hud_showmonsters", "OnOff"
-	Option "$ALTHUDMNU_SHOWITEMS",				"hud_showitems", "OnOff"
-	Option "$ALTHUDMNU_SHOWSTATS",				"hud_showstats", "OnOff"
-	Option "$ALTHUDMNU_SHOWBERSERK",			"hud_berserk_health", "OnOff"
-	Option "$ALTHUDMNU_SHOWWEAPONS",			"hud_showweapons", "OnOff"
-	Option "$ALTHUDMNU_SHOWTIMESTAT",			"hud_showtimestat", "OnOff"
-	Option "$ALTHUDMNU_SHOWAMMO",				"hud_showammo", "AltHUDAmmo"
-	Option "$ALTHUDMNU_SHOWTIME",				"hud_showtime", "AltHUDTime"
-	Option "$ALTHUDMNU_TIMECOLOR",				"hud_timecolor", "TextColors"
-	Option "$ALTHUDMNU_SHOWLAG",				"hud_showlag", "AltHUDLag"
-	Option "$ALTHUDMNU_AMMOORDER",				"hud_ammo_order", "AltHUDAmmoOrder"
-	Slider "$ALTHUDMNU_AMMORED",				"hud_ammo_red", 0, 100, 1, 0
-	Slider "$ALTHUDMNU_AMMOYELLOW",				"hud_ammo_yellow", 0, 100, 1, 0
-	Option "$ALTHUDMNU_SWAPHEALTHARMOR",		"hud_swaphealtharmor", "OnOff"
-	Slider "$ALTHUDMNU_HEALTHRED",				"hud_health_red", 0, 100, 1, 0
-	Slider "$ALTHUDMNU_HEALTHYELLOW",			"hud_health_yellow", 0, 100, 1, 0
-	Slider "$ALTHUDMNU_HEALTHGREEN",			"hud_health_green", 0, 100, 1, 0
-	Slider "$ALTHUDMNU_ARMORRED",				"hud_armor_red", 0, 100, 1, 0
-	Slider "$ALTHUDMNU_ARMORYELLOW",			"hud_armor_yellow", 0, 100, 1, 0
-	Slider "$ALTHUDMNU_ARMORGREEN",				"hud_armor_green", 0, 100, 1, 0
-	StaticText " "
-	StaticText "$ALTHUDMNU_AUTOMAPHUD", 1
-	option "$ALTHUDMNU_TITLECOLOR",				"hudcolor_titl", "TextColors"
-	option "$ALTHUDMNU_MAPTIMECOLOR",			"hudcolor_ltim", "TextColors"
-	option "$ALTHUDMNU_HUBTIMECOLOR",			"hudcolor_time", "TextColors"
-	option "$ALTHUDMNU_TOTALTIMECOLOR",			"hudcolor_ttim", "TextColors"
-	option "$ALTHUDMNU_COORDINATECOLOR",		"hudcolor_xyco", "TextColors"
-	option "$ALTHUDMNU_COORDINATEMODE",			"map_point_coordinates", "AMCoordinates"
-	option "$ALTHUDMNU_STATSNAMECOLOR",			"hudcolor_statnames", "TextColors"
-	option "$ALTHUDMNU_STATSCOLOR",				"hudcolor_stats", "TextColors"
-	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar hud_althud hud_showsecrets hud_showmonsters hud_showitems hud_showstats hud_berserk_health hud_showweapons hud_showammo hud_showtime hud_timecolor hud_showlag hud_ammo_order hud_ammo_red hud_ammo_yellow hud_health_red hud_health_yellow hud_health_green hud_armor_red hud_armor_yellow hud_armor_green hudcolor_titl hudcolor_ltim hudcolor_time hudcolor_ttim hudcolor_xyco map_point_coordinates hudcolor_statnames hudcolor_stats"
-}
-
-//-------------------------------------------------------------------------------------------
-//
-// Misc menu
-//
-//-------------------------------------------------------------------------------------------
-
-OptionValue Autosave
-{
-	0,	"$OPTVAL_ALWAYS"
-	1,	"$OPTVAL_SCRIPTSONLY"
-	2,	"$OPTVAL_NEVER"
-}
-
-OptionValue dehopt
-{
-	0,	"$OPTVAL_NEVER"
-	1,	"$OPTVAL_ALL"
-	2,	"$OPTVAL_ONLYLASTONE"
-}
-
-OptionValue AlwaysTally
-{
-	0,	"$OPTVAL_MODDEFINED"
-	1,	"$OPTVAL_NOTHUBS"
-	2,	"$OPTVAL_WITHHUBS"
-}
-
-OptionValue SaveOrder
-{
-	0,	"$OPTVAL_ALPHABETICAL"
-	1,	"$OPTVAL_LASTSAVEDTIME"
-}
-
-OptionMenu "MiscOptions" protected
-{
-	Title "$MISCMNU_TITLE"
-	//Indent 220
-	IfOption(Windows)
-	{
-		Option "$MISCMNU_MERGEKEYS", 			"k_mergekeys", "OnOff"
-		Option "$MISCMNU_WINFULLSCREENTOGGLE",	"k_allowfullscreentoggle", "OnOff"
-	}
-	IfOption(Mac)
-	{
-		Option "$MISCMNU_MACFULLSCREENTOGGLE",	"k_allowfullscreentoggle", "OnOff"
-	}
-	//Option "$MISCMNU_QUERYIWAD",				"queryiwad", "OnOff"
-	Option "$MISCMNU_DISABLEAUTOLOAD",			"disableautoload", "OnOff"
-	Option "$MISCMNU_LOADLIGHTS",				"autoloadlights", "OnOff"
-	Option "$MISCMNU_LOADBRIGHTMAPS",			"autoloadbrightmaps", "OnOff"
-	StaticText " "
-	Option "$MISCMNU_FVIEWBOB",            "fviewbob", "OnOff"
-	Option "$MISCMNU_NOCHEATS",					"nocheats", "OnOff"
-	Option "$MISCMNU_ALLCHEATS",				"allcheats", "OnOff"
-	Option "$MISCMNU_ENABLEAUTOSAVES",			"disableautosave", "Autosave"
-	Option "$MISCMNU_RESTARTONDEATH",			"cl_restartondeath", "OnOff"
-	Option "$MISCMNU_SAVELOADCONFIRMATION",		"saveloadconfirmation", "OnOff"
-	Slider "$MISCMNU_AUTOSAVECOUNT",			"autosavecount", 1, 20, 1, 0
-	Option "$MISCMNU_QUICKSAVEROTATION",		"quicksaverotation", "OnOff"
-	Slider "$MISCMNU_QUICKSAVECOUNT",			"quicksaverotationcount", 1, 20, 1, 0
-	Option "$MISCMNU_SAVEORDER",				"save_sort_order", "SaveOrder"
-	Option "$MISCMNU_DEHLOAD",					"dehload", "dehopt"
-	Option "$MISCMNU_ENABLESCRIPTSCREENSHOTS",	"enablescriptscreenshot", "OnOff"
-	Option "$MISCMNU_SETSLOTSTRICT",			"setslotstrict", "YesNo"
-	Option "$MISCMNU_INTERSCROLL",				"nointerscrollabort", "OffOn"
-	Option "$MISCMNU_PAUSEINBACKGROUND",		"i_pauseinbackground", "OnOff"
-	StaticText " "
-	Option "$MISCMNU_CACHENODES",				"gl_cachenodes", "OnOff"
-	Slider "$MISCMNU_CACHETIME",				"gl_cachetime", 0.0, 2.0, 0.1
-	SafeCommand "$MISCMNU_CLEARNODECACHE",		"clearnodecache"
-	StaticText " "
-	Option "$OPTMNU_LANGUAGE",					"language", "LanguageOptions"
-
-	StaticText " "
-	Option "$MISCMNU_QUICKEXIT",				"m_quickexit", "OnOff"
-	Option "$MISCMNU_SHOWEXPERIMENTAL",			"menu_showexperimental", "OnOff"
-
-	StaticText " "
-	Option	"$DSPLYMNU_SHOWENDOOM",			"showendoom", "Endoom"
-
-	StaticText " "
-	Option "$MISCMNU_CLEANMENU",				"m_cleanscale", "OffOn"
-	Option "$MISCMNU_CLEANSTAT",				"wi_cleantextscale", "OnOff"
-	Option "$MISCMNU_WIPERCENT",				"wi_percents", "OnOff"
-
-	StaticText " "
-	Option "$MISCMNU_ALWAYSTALLY",				"sv_alwaystally", "AlwaysTally"
+	Title "$TCMNU_TITLE"
 	StaticText ""
-	Option "$VIDMNU_SHOWFPSONHUD",		        "vid_fps", "OnOff"
-	Option "$MISCMNU_LOCK_FRAMERATE_IF_LOW_PERF",         "cl_capfps", "OnOff"
-
-	StaticText " "
-	Option "$MISCMNU_DEVELOPERMODE",			"developer", "DevMessageLevels"
-
-	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar k_mergekeys k_allowfullscreentoggle queryiwad nocheats allcheats disableautosave saveloadconfirmation autosavecount quicksaverotation quicksaverotationcount dehload enablescriptscreenshot setslotstrict nointerscrollabort gl_cachenodes gl_cachetime clearnodecache m_quickexit showendoom menu_hideextreme sv_alwaystally cl_capfps developer"
+	Option "$TCMNU_MINFILTER", r_minfilter, OnOff
+	Option "$TCMNU_MAGFILTER", r_magfilter, OnOff
+	Option "$TCMNU_MIPMAP",    r_mipmap,    OnOff
 }
 
-//-------------------------------------------------------------------------------------------
-//
-// Automap Menu
-//
-//-------------------------------------------------------------------------------------------
-
-OptionValue MapColorTypes
+OptionMenu "ImageAdjustMenu" protected
 {
-	-1, "$OPTVAL_DEFAULT"
-	0, "$OPTVAL_CUSTOM"
-	1, "$OPTVAL_TRADITIONALDOOM"
-	2, "$OPTVAL_TRADITIONALSTRIFE"
-	3, "$OPTVAL_TRADITIONALRAVEN"
-}
+	Title "$DSPLYMNU_IMAGEADJUST"
+	Class "VideoOptions"
 
-OptionValue SecretTypes
-{
-	0, "$OPTVAL_NEVER"
-	1, "$OPTVAL_ONLYWHENFOUND"
-	2, "$OPTVAL_ALWAYS"
-}
-
-OptionValue RotateTypes
-{
-	0, "$OPTVAL_OFF"
-	1, "$OPTVAL_ON"
-	2, "$OPTVAL_ONFOROVERLAYONLY"
-}
-
-OptionValue OverlayTypes
-{
-	0, "$OPTVAL_OFF"
-	1, "$OPTVAL_OVERLAYNORMAL"
-	2, "$OPTVAL_OVERLAYONLY"
-}
-
-OptionValue MaplabelTypes
-{
-	0, "$OPTVAL_NEVER"
-	1, "$OPTVAL_ALWAYS"
-	2, "$OPTVAL_NOTFORHUBS"
-}
-
-OptionValue STSTypes
-{
-	0, "$OPTVAL_OFF"
-	1, "$OPTVAL_FRONT"
-	2, "$OPTVAL_ANIMATED"
-	3, "$OPTVAL_ROTATED"
-}
-
-OptionValue MapBackTypes
-{
-	0, "$OPTVAL_OFF"
-	1, "$OPTVAL_ON"
-	2, "$OPTVAL_MAPDEFINEDCOLORSONLY"
-}
-
-OptionValue MapTriggers
-{
-	0, "$OPTVAL_OFF"
-	1, "$OPTVAL_NODOORS"
-	2, "$OPTVAL_ON"
-}
-
-OptionString MapMarkFont
-{
-	"AMMNUMx", "$OPTVAL_DEFAULT"
-	"SmallFont", "$OPTVAL_SMALL"
-	"BigFont", "$OPTVAL_LARGE"
-	"ConsoleFont", "$OPTVAL_CONSOLE"
-}
-
-OptionMenu AutomapOptions protected
-{
-	Title "$AUTOMAPMNU_TITLE"
-
-	Option "$AUTOMAPMNU_COLORSET",				"am_colorset", "MapColorTypes"
-	Option "$AUTOMAPMNU_CUSTOMCOLORS",			"am_customcolors", "YesNo"
-	Submenu "$AUTOMAPMNU_SETCUSTOMCOLORS",		"MapColorMenu"
-
+	StaticText "$DSPLYMNU_IMAGEADJUST_TOP1",   Cyan
+	StaticText "$DSPLYMNU_IMAGEADJUST_TOP2",   Cyan
+	StaticText "$DSPLYMNU_IMAGEADJUST_TOP3",   Cyan
 	StaticText ""
-	Submenu "$AUTOMAPMNU_CONTROLS",				"MapControlsMenu"
-
+	Slider "$DSPLYMNU_GAMMA",                  vid_fixgamma,      -1.0, 1.0, 0.01, 2
+	Tooltip "$DSPLYMNU_TOOLTIP_GAMMA"
+	Slider "$DSPLYMNU_BLACKPOINT",             vid_blackpoint,    0.0, 0.25, 0.01, 2
+	Tooltip "$DSPLYMNU_TOOLTIP_BLACKPOINT"
+	Command "$OPTMNU_DEFAULTS",                vid_reset2defaults
+	Tooltip "$DSPLYMNU_TOOLTIP_IMAGEADJUST_RESET"
+	Slider "$DSPLYMNU_BRIGHTNESS",             vid_whitepoint,    -1.0, 1.0, 0.01, 2
+	Tooltip "$DSPLYMNU_TOOLTIP_BRIGHTNESS"
+	Slider "$DSPLYMNU_CONTRAST",               vid_contrast,      0.5, 2.0, 0.01, 2
+	Tooltip "$DSPLYMNU_TOOLTIP_CONTRAST"
+	Slider "$DSPLYMNU_SATURATION",             vid_saturation,    -1.0, 2.0, 0.01, 2
+	Tooltip "$DSPLYMNU_TOOLTIP_SATURATION"
 	StaticText ""
-	Option "$AUTOMAPMNU_ROTATE",				"am_rotate", "RotateTypes"
-	Option "$AUTOMAPMNU_FOLLOW",				"am_followplayer", "OnOff"
-	Option "$AUTOMAPMNU_OVERLAY",				"am_overlay", "OverlayTypes"
-	Option "$AUTOMAPMNU_TEXTURED",				"am_textured", "OnOff"
-	Slider "$AUTOMAPMNU_LINEALPHA",				"am_linealpha", 0.1, 1.0, 0.1, 1
-	Slider "$AUTOMAPMNU_LINETHICKNESS",			"am_linethickness", 1, 8, 1, 0
-	Option "$AUTOMAPMNU_LINEANTIALIASING",		"am_lineantialiasing", "OnOff"
-
+	Slider "Brightness Lift (VR)",             vid_brightness,    -2.0, 2.0, 0.05, 2
 	StaticText ""
-	Option "$AUTOMAPMNU_SHOWITEMS",				"am_showitems", "OnOff"
-	Option "$AUTOMAPMNU_SHOWMONSTERS",			"am_showmonsters", "OnOff"
-	Option "$AUTOMAPMNU_SHOWSECRETS",			"am_showsecrets", "OnOff"
-	Option "$AUTOMAPMNU_SHOWTIME",				"am_showtime", "OnOff"
-	Option "$AUTOMAPMNU_SHOWTOTALTIME",			"am_showtotaltime", "OnOff"
-	Option "$AUTOMAPMNU_SHOWMAPLABEL",			"am_showmaplabel", "MaplabelTypes"
-
-	StaticText ""
-	Option "$AUTOMAPMNU_SHOWKEYS",				"am_showkeys", "OnOff"
-	Option "$AUTOMAPMNU_SHOWKEYS_ALWAYS",			"am_showkeys_always", "OnOff"
-
-	StaticText ""
-	Option "$AUTOMAPMNU_MAPSECRETS",			"am_map_secrets", "SecretTypes"
-	Option "$AUTOMAPMNU_DRAWMAPBACK",			"am_drawmapback", "MapBackTypes"
-	Option "$AUTOMAPMNU_SHOWTRIGGERLINES",		"am_showtriggerlines", "MapTriggers"
-	Option "$AUTOMAPMNU_SHOWTHINGSPRITES",		"am_showthingsprites", "STSTypes"
-
-	StaticText ""
-	Option "$AUTOMAPMNU_PTOVERLAY",				"am_portaloverlay", "OnOff"
-	Slider "$AUTOMAPMNU_EMPTYSPACEMARGIN",		"am_emptyspacemargin", 0, 90, 5, 0
-
-	StaticText ""
-	Option "$AUTOMAPMNU_MARKFONT",				"am_markfont", "MapMarkFont"
-	Option "$AUTOMAPMNU_MARKCOLOR",				"am_markcolor", "TextColors"
+	StaticText "$DSPLYMNU_IMAGEADJUST_BOTTOM", Cyan
 }
-
-//-------------------------------------------------------------------------------------------
-//
-// Automap Controls
-//
-//-------------------------------------------------------------------------------------------
-
-OptionMenu MapControlsMenu protected
-{
-	Title "$MAPCNTRLMNU_TITLE"
-	ScrollTop 2
-	StaticTextSwitchable 	"$CNTRLMNU_SWITCHTEXT1", "$CNTRLMNU_SWITCHTEXT2", "ControlMessage"
-
-	StaticText ""
-	MapControl "$MAPCNTRLMNU_PANLEFT",			"+am_panleft"
-	MapControl "$MAPCNTRLMNU_PANRIGHT",			"+am_panright"
-	MapControl "$MAPCNTRLMNU_PANUP",			"+am_panup"
-	MapControl "$MAPCNTRLMNU_PANDOWN",			"+am_pandown"
-
-	StaticText ""
-	MapControl "$MAPCNTRLMNU_ZOOMIN",			"+am_zoomin"
-	MapControl "$MAPCNTRLMNU_ZOOMOUT",			"+am_zoomout"
-
-	StaticText ""
-	MapControl "$MAPCNTRLMNU_TOGGLEZOOM",		"am_gobig"
-	MapControl "$MAPCNTRLMNU_TOGGLEFOLLOW",		"am_togglefollow"
-	MapControl "$MAPCNTRLMNU_ROTATE",			"toggle am_rotate"
-	MapControl "$MAPCNTRLMNU_TOGGLEGRID",		"am_togglegrid"
-	MapControl "$MAPCNTRLMNU_TOGGLETEXTURE",	"am_toggletexture"
-
-	StaticText ""
-	MapControl "$MAPCNTRLMNU_SETMARK",			"am_setmark"
-	MapControl "$MAPCNTRLMNU_CLEARMARK",		"am_clearmarks"
-}
-
-//-------------------------------------------------------------------------------------------
-//
-// Automap Colors
-//
-//-------------------------------------------------------------------------------------------
-
-OptionMenu MapColorMenu protected
-{
-	Title "$MAPCOLORMNU_TITLE"
-	SafeCommand "$MAPCOLORMNU_DEFAULTMAPCOLORS", 		"am_restorecolors"
-	StaticText " "
-	Submenu "$MAPCOLORMNU_CHEATMODE",					"MapColorMenuCheats"
-	Submenu "$MAPCOLORMNU_OVERLAY",						"MapColorMenuOverlay"
-	Submenu "$MAPCOLORMNU_OVCHEATMODE",					"MapColorMenuCheatsOverlay"
-	StaticText " "
-	ColorPicker "$MAPCOLORMNU_BACKCOLOR",				"am_backcolor"
-	ColorPicker "$MAPCOLORMNU_YOURCOLOR",				"am_yourcolor"
-	ColorPicker "$MAPCOLORMNU_WALLCOLOR",				"am_wallcolor"
-	ColorPicker "$MAPCOLORMNU_FDWALLCOLOR",				"am_fdwallcolor"
-	ColorPicker "$MAPCOLORMNU_CDWALLCOLOR",				"am_cdwallcolor"
-	ColorPicker "$MAPCOLORMNU_EFWALLCOLOR",				"am_efwallcolor"
-	ColorPicker "$MAPCOLORMNU_GRIDCOLOR",				"am_gridcolor"
-	ColorPicker "$MAPCOLORMNU_XHAIRCOLOR",				"am_xhaircolor"
-	ColorPicker "$MAPCOLORMNU_NOTSEENCOLOR",			"am_notseencolor"
-	ColorPicker "$MAPCOLORMNU_LOCKEDCOLOR",				"am_lockedcolor"
-	ColorPicker "$MAPCOLORMNU_INTRALEVELCOLOR",			"am_intralevelcolor"
-	ColorPicker "$MAPCOLORMNU_INTERLEVELCOLOR",			"am_interlevelcolor"
-	ColorPicker "$MAPCOLORMNU_SECRETSECTORCOLOR",		"am_secretsectorcolor"
-	ColorPicker "$MAPCOLORMNU_UNEXPLOREDSECRETCOLOR",	"am_unexploredsecretcolor"
-	ColorPicker "$MAPCOLORMNU_SPECIALWALLCOLOR",		"am_specialwallcolor"
-	ColorPicker "$MAPCOLORMNU_PORTAL",					"am_portalcolor"
-}
-
-OptionMenu MapColorMenuCheats protected
-{
-	Title "$MAPCOLORMNU_CHEATMODE"
-	ColorPicker "$MAPCOLORMNU_TSWALLCOLOR",				"am_tswallcolor"
-	ColorPicker "$MAPCOLORMNU_SECRETWALLCOLOR",			"am_secretwallcolor"
-	ColorPicker "$MAPCOLORMNU_THINGCOLOR",				"am_thingcolor"
-	ColorPicker "$MAPCOLORMNU_MONSTERCOLOR",			"am_thingcolor_monster"
-	ColorPicker "$MAPCOLORMNU_NONCOUNTINGMONSTERCOLOR",	"am_thingcolor_ncmonster"
-	ColorPicker "$MAPCOLORMNU_FRIENDCOLOR",				"am_thingcolor_friend"
-	ColorPicker "$MAPCOLORMNU_ITEMCOLOR",				"am_thingcolor_item"
-	ColorPicker "$MAPCOLORMNU_COUNTITEMCOLOR",			"am_thingcolor_citem"
-}
-
-OptionMenu MapColorMenuOverlay protected
-{
-	Title "$MAPCOLORMNU_OVERLAY"
-	ColorPicker "$MAPCOLORMNU_YOURCOLOR",				"am_ovyourcolor"
-	ColorPicker "$MAPCOLORMNU_WALLCOLOR",				"am_ovwallcolor"
-	ColorPicker "$MAPCOLORMNU_FDWALLCOLOR",				"am_ovfdwallcolor"
-	ColorPicker "$MAPCOLORMNU_CDWALLCOLOR",				"am_ovcdwallcolor"
-	ColorPicker "$MAPCOLORMNU_EFWALLCOLOR",				"am_ovefwallcolor"
-	ColorPicker "$MAPCOLORMNU_NOTSEENCOLOR",			"am_ovunseencolor"
-	ColorPicker "$MAPCOLORMNU_LOCKEDCOLOR",				"am_ovlockedcolor"
-	ColorPicker "$MAPCOLORMNU_INTRALEVELCOLOR",			"am_ovtelecolor"
-	ColorPicker "$MAPCOLORMNU_INTERLEVELCOLOR",			"am_ovinterlevelcolor"
-	ColorPicker "$MAPCOLORMNU_SECRETSECTORCOLOR",		"am_ovsecretsectorcolor"
-	ColorPicker "$MAPCOLORMNU_UNEXPLOREDSECRETCOLOR",	"am_ovunexploredsecretcolor"
-	ColorPicker "$MAPCOLORMNU_SPECIALWALLCOLOR",		"am_ovspecialwallcolor"
-	ColorPicker "$MAPCOLORMNU_PORTAL",					"am_ovportalcolor"
-}
-
-OptionMenu MapColorMenuCheatsOverlay protected
-{
-	Title "$MAPCOLORMNU_OVCHEATMODE"
-	ColorPicker "$MAPCOLORMNU_TSWALLCOLOR",				"am_ovotherwallscolor"
-	ColorPicker "$MAPCOLORMNU_SECRETWALLCOLOR",			"am_ovsecretwallcolor"
-	ColorPicker "$MAPCOLORMNU_THINGCOLOR",				"am_ovthingcolor"
-	ColorPicker "$MAPCOLORMNU_MONSTERCOLOR",			"am_ovthingcolor_monster"
-	ColorPicker "$MAPCOLORMNU_NONCOUNTINGMONSTERCOLOR",	"am_ovthingcolor_ncmonster"
-	ColorPicker "$MAPCOLORMNU_FRIENDCOLOR",				"am_ovthingcolor_friend"
-	ColorPicker "$MAPCOLORMNU_ITEMCOLOR",				"am_ovthingcolor_item"
-	ColorPicker "$MAPCOLORMNU_COUNTITEMCOLOR",			"am_ovthingcolor_citem"
-}
-
-//-------------------------------------------------------------------------------------------
-//
-// Color Picker
-//
-//-------------------------------------------------------------------------------------------
-
-OptionMenu ColorPickerMenu protected
-{
-	Title "$MNU_COLORPICKER"
-	// This menu will be created by the calling code
-}
-
-//-------------------------------------------------------------------------------------------
-//
-// Messages
-//
-//-------------------------------------------------------------------------------------------
-
-
-OptionValue MessageLevels
-{
-	0.0, "$OPTVAL_ITEMPICKUP"
-	1.0, "$OPTVAL_OBITUARIES"
-	2.0, "$OPTVAL_CRITICALMESSAGES"
-}
-
-OptionValue DevMessageLevels
-{
-	0, "$OPTVAL_OFF"
-	1, "$OPTVAL_ERRORS"
-	2, "$OPTVAL_WARNINGS"
-	3, "$OPTVAL_NOTIFICATIONS"
-	4, "$OPTVAL_EVERYTHING"
-}
-
-OptionMenu MessageOptions protected
-{
-	Title 	"$MSGMNU_TITLE"
-	Option "$MSGMNU_SHOWMESSAGES",				"show_messages", "OnOff"
-	Option "$MSGMNU_SHOWOBITUARIES",			"show_obituaries", "OnOff"
-	Option "$MSGMNU_SHOWSECRETS",				"cl_showsecretmessage", "OnOff"
-	Option "$MSGMNU_MESSAGELEVEL", 				"msg", "MessageLevels"
-	Option "$MSGMNU_DEVELOPER", 				"developer", "DevMessageLevels"
-	Option "$MSGMNU_CENTERMESSAGES",			"con_centernotify", "OnOff"
-	Option "$MSGMNU_PULSEMESSAGES",				"con_pulsetext", "OnOff"
-	Option "$MSGMNU_SUBTITLES",					"inter_subtitles", "OnOff"
-	StaticText " "
-	StaticText "$MSGMNU_MESSAGECOLORS", 1
-	StaticText " "
-	Option "$MSGMNU_ITEMPICKUP",				"msg0color", "TextColors"
-	Option "$MSGMNU_OBITUARIES",				"msg1color", "TextColors"
-	Option "$MSGMNU_CRITICALMESSAGES",			"msg2color", "TextColors"
-	Option "$MSGMNU_CHATMESSAGES",				"msg3color", "TextColors"
-	Option "$MSGMNU_TEAMMESSAGES",				"msg4color", "TextColors"
-	Option "$MSGMNU_CENTEREDMESSAGES",			"msgmidcolor", "TextColors"
-	StaticText " "
-	Option "$MSGMNU_SCREENSHOTMESSAGES",		"screenshot_quiet",	"OffOn"
-	Option "$MSGMNU_LONGSAVEMESSAGES",			"longsavemessages",	"OnOff"
-}
-
-//-------------------------------------------------------------------------------------------
-//
-// Scoreboard
-//
-//-------------------------------------------------------------------------------------------
-
-OptionMenu ScoreboardOptions protected
-{
-	Title "$SCRBRDMNU_TITLE"
-	StaticText "$SCRBRDMNU_COOPERATIVE", 1
-	StaticText " "
-	Option "$SCRBRDMNU_ENABLE",				"sb_cooperative_enable", "YesNo"
-	Option "$SCRBRDMNU_HEADERCOLOR",		"sb_cooperative_headingcolor", "TextColors"
-	Option "$SCRBRDMNU_YOURCOLOR",			"sb_cooperative_yourplayercolor", "TextColors"
-	Option "$SCRBRDMNU_OTHERPLAYERCOLOR",	"sb_cooperative_otherplayercolor", "TextColors"
-	StaticText " "
-	StaticText " "
-	StaticText "$SCRBRDMNU_DEATHMATCH", 1
-	StaticText " "
-	Option "$SCRBRDMNU_ENABLE",				"sb_deathmatch_enable",	"YesNo"
-	Option "$SCRBRDMNU_HEADERCOLOR",		"sb_deathmatch_headingcolor", "TextColors"
-	Option "$SCRBRDMNU_YOURCOLOR",			"sb_deathmatch_yourplayercolor", "TextColors"
-	Option "$SCRBRDMNU_OTHERPLAYERCOLOR",	"sb_deathmatch_otherplayercolor", "TextColors"
-	StaticText " "
-	StaticText " "
-	StaticText "$SCRBRDMNU_TEAMDEATHMATCH", 1
-	StaticText " "
-	Option "$SCRBRDMNU_ENABLE",				"sb_teamdeathmatch_enable", "YesNo"
-	Option "$SCRBRDMNU_HEADERCOLOR",		"sb_teamdeathmatch_headingcolor", "TextColors"
-}
-
-//-------------------------------------------------------------------------------------------
-//
-// Font options
-//
-//-------------------------------------------------------------------------------------------
-
-OptionMenu FontOptions protected
-{
-	Title "$HUDMNU_FONTOPTIONS"
-	Option "$FONTMNU_LOG",					"log_vgafont", "YesNo"
-	Option "$FONTMNU_DLG",					"dlg_vgafont", "YesNo"
-}
-
-/*=======================================
- *
- * Gameplay Options (dmflags) Menu
- *
- *=======================================*/
-
-OptionValue  SmartAim
-{
-	0.0, "$OPTVAL_OFF"
-	1.0, "$OPTVAL_ON"
-	2.0, "$OPTVAL_NEVERFRIENDS"
-	3.0, "$OPTVAL_ONLYMONSTERS"
-}
-
-OptionValue  FallingDM
-{
-	0, "$OPTVAL_OFF"
-	1, "$OPTVAL_OLD"
-	2, "$OPTVAL_HEXEN"
-	3, "$OPTVAL_STRIFE"
-}
-
-OptionValue  JumpCrouchFreeLook
-{
-	0, "$OPTVAL_DEFAULT"
-	1, "$OPTVAL_OFF"
-	2, "$OPTVAL_ON"
-}
-
-
-OptionMenu GameplayOptions protected
-{
-	Position -35
-	Title 	"$GMPLYMNU_TITLE"
-	//Indent 222
-	Submenu "$GMPLYMNU_DEATHMATCH",				"DeathmatchOptions"
-	Submenu "$GMPLYMNU_COOPERATIVE",			"CoopOptions"
-	StaticText " "
-	Option "$GMPLYMNU_TEAMPLAY",				"teamplay",	"OnOff"
-	Slider	"$GMPLYMNU_TEAMDAMAGE",				"teamdamage", 0, 1, 0.05,2
-	StaticText " "
-	Option "$GMPLYMNU_SMARTAUTOAIM",			"sv_smartaim", "SmartAim"
-	StaticText " "
-	Option "$GMPLYMNU_PISTOLSTART",				"sv_pistolstart", "YesNo"
-	Option "$GMPLYMNU_FALLINGDAMAGE",			"sv_fallingdamage", "FallingDM"
-	Option "$GMPLYMNU_DROPWEAPON",				"sv_weapondrop", "YesNo"
-	Option "$GMPLYMNU_DOUBLEAMMO",				"sv_doubleammo", "YesNo"
-	Option "$GMPLYMNU_INFINITEAMMO",			"sv_infiniteammo", "YesNo"
-	Option "$GMPLYMNU_INFINITEINVENTORY",		"sv_infiniteinventory", "YesNo"
-	Option "$GMPLYMNU_NOMONSTERS",				"sv_nomonsters", "YesNo"
-	Option "$GMPLYMNU_NOMONSTERSTOEXIT",		"sv_killallmonsters", "YesNo"
-	Option "$GMPLYMNU_MONSTERSRESPAWN",			"sv_monsterrespawn", "YesNo"
-	Option "$GMPLYMNU_NORESPAWN",				"sv_norespawn", "YesNo"
-	Option "$GMPLYMNU_ITEMSRESPAWN",			"sv_itemrespawn", "YesNo"
-	Option "$GMPLYMNU_SUPERRESPAWN",			"sv_respawnsuper", "YesNo"
-	Option "$GMPLYMNU_FASTMONSTERS",			"sv_fastmonsters", "YesNo"
-	Option "$GMPLYMNU_INSTANTREACTION",			"sv_instantreaction", "YesNo"
-	Option "$GMPLYMNU_DEGENERATION",			"sv_degeneration", "YesNo"
-	Option "$GMPLYMNU_NOAUTOAIM",				"sv_noautoaim", "NoYes"
-	Option "$GMPLYMNU_NOVERTSPREAD",			"sv_novertspread", "NoYes"
-	Option "$GMPLYMNU_ALLOWSUICIDE",			"sv_disallowsuicide", "NoYes"
-	Option "$GMPLYMNU_ALLOWJUMP",				"sv_jump", "JumpCrouchFreeLook"
-	Option "$GMPLYMNU_ALLOWCROUCH",				"sv_crouch", "JumpCrouchFreeLook"
-	Option "$GMPLYMNU_ALLOWFREELOOK",			"sv_freelook", "JumpCrouchFreeLook"
-	Option "$GMPLYMNU_ALLOWFOV",				"sv_nofov", "NoYes"
-	Option "$GMPLYMNU_BFGFREEAIM",				"sv_nobfgaim", "NoYes"
-	Option "$GMPLYMNU_ALLOWAUTOMAP",			"sv_noautomap", "NoYes"
-	Option "$GMPLYMNU_AUTOMAPALLIES",			"sv_noautomapallies", "NoYes"
-	Option "$GMPLYMNU_ALLOWSPYING",				"sv_disallowspying", "NoYes"
-	Option "$GMPLYMNU_CHASECAM",				"sv_chasecam", "YesNo"
-	Option "$GMPLYMNU_DONTCHECKAMMO",			"sv_dontcheckammo", "NoYes"
-	Option "$GMPLYMNU_KILLBOSSSPAWNS",			"sv_killbossmonst", "YesNo"
-	Option "$GMPLYMNU_NOCOUNTENDMONSTER",		"sv_nocountendmonst", "NoYes"
-	Option "$GMPLYMNU_ALWAYSSPAWNMULTI",		"sv_alwaysspawnmulti", "YesNo"
-	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar teamplay teamdamage sv_smartaim sv_fallingdamage sv_weapondrop sv_doubleammo sv_infiniteammo sv_infiniteinventory sv_nomonsters sv_killallmonsters sv_monsterrespawn sv_norespawn sv_itemrespawn sv_respawnsuper sv_fastmonsters sv_instantreaction sv_degeneration sv_noautoaim sv_disallowsuicide sv_jump sv_crouch sv_freelook sv_nofov sv_nobfgaim sv_noautomap sv_noautomapallies sv_disallowspying sv_chasecam sv_dontcheckammo sv_killbossmonst sv_nocountendmonst sv_alwaysspawnmulti"
-	Class "GameplayMenu"
-}
-
-OptionMenu DeathmatchOptions protected
-{
-	Position -35
-	Title 	"$GMPLYMNU_DEATHMATCH"
-
-	Option "$GMPLYMNU_WEAPONSSTAY",				"sv_weaponstay", "YesNo"
-	Option "$GMPLYMNU_ALLOWPOWERUPS",			"sv_noitems", "NoYes"
-	Option "$GMPLYMNU_ALLOWHEALTH",				"sv_nohealth", "NoYes"
-	Option "$GMPLYMNU_ALLOWARMOR",				"sv_noarmor", "NoYes"
-	Option "$GMPLYMNU_SPAWNFARTHEST",			"sv_spawnfarthest", "YesNo"
-	Option "$GMPLYMNU_SAMEMAP",					"sv_samelevel", "YesNo"
-	Option "$GMPLYMNU_FORCERESPAWN",			"sv_forcerespawn", "YesNo"
-	Option "$GMPLYMNU_ALLOWEXIT",				"sv_noexit", "NoYes"
-	Option "$GMPLYMNU_BARRELSRESPAWN",			"sv_barrelrespawn", "YesNo"
-	Option "$GMPLYMNU_RESPAWNPROTECTION",		"sv_respawnprotect", "YesNo"
-	Option "$GMPLYMNU_LOSEFRAG",				"sv_losefrag", "YesNo"
-	Option "$GMPLYMNU_KEEPFRAGS",				"sv_keepfrags", "YesNo"
-	Option "$GMPLYMNU_NOTEAMSWITCH",			"sv_noteamswitch", "YesNo"
-	Option "$GMPLYMNU_NOEXTRAAMMO",				"sv_noextraammo", "NoYes"
-	Class "GameplayMenu"
-}
-
-OptionMenu CoopOptions protected
-{
-	Position -35
-	Title 	"$GMPLYMNU_COOPERATIVE"
-
-	Option "$GMPLYMNU_MULTIPLAYERTHINGS",	 	"sv_nothingspawn", "NoYes"
-	Option "$GMPLYMNU_COOPTHINGS",	 			"sv_nocoopthings", "NoYes"
-	Option "$GMPLYMNU_COOPITEMS",	 			"sv_nocoopitems", "NoYes"
-	Option "$GMPLYMNU_MULTIPLAYERWEAPONS",	 	"sv_noweaponspawn", "NoYes"
-	Option "$GMPLYMNU_LOSEINVENTORY",			"sv_cooploseinventory", "YesNo"
-	Option "$GMPLYMNU_KEEPKEYS",				"sv_cooplosekeys", "NoYes"
-	Option "$GMPLYMNU_KEEPWEAPONS",				"sv_cooploseweapons", "NoYes"
-	Option "$GMPLYMNU_KEEPARMOR",				"sv_cooplosearmor", "NoYes"
-	Option "$GMPLYMNU_KEEPPOWERUPS",			"sv_cooplosepowerups", "NoYes"
-	Option "$GMPLYMNU_KEEPAMMO",				"sv_cooploseammo", "NoYes"
-	Option "$GMPLYMNU_LOSEHALFAMMO",			"sv_coophalveammo", "YesNo"
-	Option "$GMPLYMNU_SPAWNWHEREDIED",			"sv_samespawnspot", "YesNo"
-	Option "$GMPLYMNU_NOPLAYERCLIP",			"sv_noplayerclip", "YesNo"
-	Option "$GMPLYMNU_SHAREKEYS",				"sv_coopsharekeys", "YesNo"
-	Option "$GMPLYMNU_LOCALITEMS",				"sv_localitems", "YesNo"
-	Option "$GMPLYMNU_NOLOCALDROP",				"sv_nolocaldrops", "YesNo"
-	Option "$GMPLYMNU_REMEMBERWEAP",			"sv_rememberlastweapon", "YesNo"
-	Class "GameplayMenu"
-}
-
-/*=======================================
- *
- * Compatibility Options Menu
- *
- *=======================================*/
-
-
-OptionValue CompatModes
-{
-	0, "$OPTVAL_DEFAULT"
-	1, "$OPTVAL_DOOM"
-	2, "$OPTVAL_DOOMSTRICT"
-	3, "$OPTVAL_BOOM"
-	6, "$OPTVAL_BOOMSTRICT"
-	5, "$OPTVAL_MBF"
-	7, "$OPTVAL_MBFSTRICT"
-	8, "$OPTVAL_MBF21"
-	9, "$OPTVAL_MBF21STRICT"
-	4, "$OPTVAL_ZDOOM2063"
-}
-
-OptionMenu "CompatibilityOptions" protected
-{
-	Position -35
-	Title "$CMPTMNU_TITLE"
-	Option "$CMPTMNU_MODE",							"compatmode", "CompatModes", "", 1
-	StaticText " "
-	Submenu "$CMPTMNU_ACTORBEHAVIOR",				"CompatActorMenu"
-	Submenu "$CMPTMNU_DEHACKEDBEHAVIOR",			"CompatDehackedMenu"
-	Submenu "$CMPTMNU_MAPACTIONBEHAVIOR",			"CompatMapMenu"
-	Submenu "$CMPTMNU_PHYSICSBEHAVIOR",				"CompatPhysicsMenu"
-	Submenu "$CMPTMNU_RENDERINGBEHAVIOR",			"CompatRenderMenu"
-	Submenu "$CMPTMNU_SOUNDBEHAVIOR",				"CompatSoundMenu"
-	Class "CompatibilityMenu"
-}
-
-OptionMenu "CompatActorMenu" protected
-{
-	Position -35
-	Title "$CMPTMNU_ACTORBEHAVIOR"
-	Option "$CMPTMNU_VILEGHOSTS",					"compat_VILEGHOSTS", "YesNo"
-	Option "$CMPTMNU_NOBLOCKFRIENDS",				"compat_NOBLOCKFRIENDS", "YesNo"
-	Option "$CMPTMNU_LIMITPAIN",					"compat_LIMITPAIN", "YesNo"
-	Option "$CMPTMNU_MBFMONSTERMOVE",				"compat_MBFMONSTERMOVE", "YesNo"
-	Option "$CMPTMNU_CROSSDROPOFF",					"compat_CROSSDROPOFF", "YesNo"
-	Option "$CMPTMNU_DROPOFF",						"compat_DROPOFF", "YesNo"
-	Option "$CMPTMNU_INVISIBILITY",					"compat_INVISIBILITY", "YesNo"
-	Option "$CMPTMNU_MINOTAUR",						"compat_MINOTAUR", "YesNo"
-	Option "$CMPTMNU_NOTOSSDROPS",					"compat_NOTOSSDROPS", "YesNo"
-	Option "$CMPTMNU_VOODOOZOMBIES",				"compat_voodoozombies", "YesNo"
-	Option "$CMPTMNU_OLDRANDOM",					"compat_oldrandom", "YesNo"
-	Class "CompatibilityMenu"
-}
-
-OptionMenu "CompatDehackedMenu" protected
-{
-	Position -35
-	Title "$CMPTMNU_DEHACKEDBEHAVIOR"
-	Option "$CMPTMNU_DEHHEALTH",					"compat_DEHHEALTH", "YesNo"
-	Option "$CMPTMNU_MUSHROOM",						"compat_MUSHROOM", "YesNo"
-	Class "CompatibilityMenu"
-}
-
-OptionMenu "CompatMapMenu" protected
-{
-	Position -35
-	Title "$CMPTMNU_MAPACTIONBEHAVIOR"
-	Option "$CMPTMNU_USEBLOCKING",					"compat_USEBLOCKING", "YesNo"
-	Option "$CMPTMNU_ANYBOSSDEATH",					"compat_ANYBOSSDEATH", "YesNo"
-	Option "$CMPTMNU_NODOORLIGHT",					"compat_NODOORLIGHT", "YesNo"
-	Option "$CMPTMNU_LIGHT",						"compat_LIGHT", "YesNo"
-	Option "$CMPTMNU_SHORTTEX",						"compat_SHORTTEX", "YesNo"
-	Option "$CMPTMNU_STAIRS",						"compat_stairs", "YesNo"
-	Option "$CMPTMNU_FLOORMOVE",					"compat_floormove", "YesNo"
-	Option "$CMPTMNU_POINTONLINE",					"compat_pointonline", "YesNo"
-	Option "$CMPTMNU_MULTIEXIT",					"compat_multiexit", "YesNo"
-	Option "$CMPTMNU_TELEPORT",						"compat_teleport", "YesNo"
-	Option "$CMPTMNU_FDTELEPORT",					"compat_fdteleport", "YesNo"
-	Option "$CMPTMNU_PUSHWINDOW",					"compat_pushwindow", "YesNo"
-	Option "$CMPTMNU_CHECKSWITCHRANGE",				"compat_checkswitchrange", "YesNo"
-	Option "$CMPTMNU_RAILINGHACK",					"compat_railing", "YesNo"
-	Option "$CMPTMNU_NOMBF21",						"compat_nombf21", "YesNo"
-	Class "CompatibilityMenu"
-}
-
-OptionMenu "CompatPhysicsMenu" protected
-{
-	Position -35
-	Title "$CMPTMNU_PHYSICSBEHAVIOR"
-	Option "$CMPTMNU_NOPASSOVER",					"compat_nopassover", "YesNo"
-	Option "$CMPTMNU_BOOMSCROLL",					"compat_BOOMSCROLL", "YesNo"
-	Option "$CMPTMNU_BADANGLES",					"compat_badangles", "YesNo"
-	Option "$CMPTMNU_WALLRUN",						"compat_WALLRUN", "YesNo"
-	Option "$CMPTMNU_RAVENSCROLL",					"compat_RAVENSCROLL", "YesNo"
-	Option "$CMPTMNU_TRACE",						"compat_TRACE", "YesNo"
-	Option "$CMPTMNU_HITSCAN",						"compat_HITSCAN", "YesNo"
-	Option "$CMPTMNU_MISSILECLIP",					"compat_MISSILECLIP", "YesNo"
-	Option "$CMPTMNU_EXPLODE1",						"compat_explode1", "YesNo"
-	Option "$CMPTMNU_EXPLODE2",						"compat_explode2", "YesNo"
-	Class "CompatibilityMenu"
-}
-
-
-OptionMenu "CompatRenderMenu" protected
-{
-	Position -35
-	Title "$CMPTMNU_RENDERINGBEHAVIOR"
-	Option "$CMPTMNU_POLYOBJ",						"compat_POLYOBJ", "YesNo"
-	Option "$CMPTMNU_MASKEDMIDTEX",					"compat_MASKEDMIDTEX", "YesNo"
-	Option "$CMPTMNU_SPRITESORT",					"compat_SPRITESORT", "YesNo"
-	Class "CompatibilityMenu"
-}
-
-OptionMenu "CompatSoundMenu" protected
-{
-	Position -35
-	Title "$CMPTMNU_SOUNDBEHAVIOR"
-	Option "$CMPTMNU_SOUNDSLOTS",					"compat_soundslots", "YesNo"
-	Option "$CMPTMNU_SILENTPICKUP",					"compat_SILENTPICKUP", "YesNo"
-	Option "$CMPTMNU_SILENTINSTANTFLOORS",			"compat_silentinstantfloors", "YesNo"
-	Option "$CMPTMNU_SECTORSOUNDS",					"compat_SECTORSOUNDS", "YesNo"
-	Option "$CMPTMNU_SOUNDTARGET",					"compat_SOUNDTARGET", "YesNo"
-	Class "CompatibilityMenu"
-}
-
-/*=======================================
- *
- * Sound Options Menu
- *
- *=======================================*/
-
-OptionValue SampleRates
-{
-	0,		"$OPTVAL_DEFAULT"
-	8000,	"$OPTVAL_8000HZ"
-	11025,	"$OPTVAL_11025HZ"
-	22050,	"$OPTVAL_22050HZ"
-	32000,	"$OPTVAL_32000HZ"
-	44100,	"$OPTVAL_44100HZ"
-	48000,	"$OPTVAL_48000HZ"
-}
-
-
-OptionValue BufferSizes
-{
-	   0, "$OPTVAL_DEFAULT"
-	  64, "$OPTVAL_64SAMPLES"
-	 128, "$OPTVAL_128SAMPLES"
-	 256, "$OPTVAL_256SAMPLES"
-	 512, "$OPTVAL_512SAMPLES"
-	1024, "$OPTVAL_1024SAMPLES"
-	2048, "$OPTVAL_2048SAMPLES"
-	4096, "$OPTVAL_4096SAMPLES"
-}
-
-
-OptionValue BufferCounts
-{
-	   0, "$OPTVAL_DEFAULT"
-	   2, "2"
-	   3, "3"
-	   4, "4"
-	   5, "5"
-	   6, "6"
-	   7, "7"
-	   8, "8"
-	   9, "9"
-	  10, "10"
-	  11, "11"
-	  12, "12"
-}
-
-
-OptionString ALDevices
-{
-	// filled in by the sound code
-}
-
-OptionString ALResamplers
-{
-	// filled in by the sound code
-}
-
-OptionString SpeakerModes
-{
-	"Auto",		"$OPTSTR_AUTO"
-	"Mono",		"$OPTSTR_MONO"
-	"Stereo",	"$OPTSTR_STEREO"
-	"Prologic",	"$OPTSTR_PROLOGIC"
-	"Quad",		"$OPTSTR_QUAD"
-	"Surround",	"$OPTSTR_SURROUND"
-	"5.1",		"$OPTSTR_5POINT1"
-	"7.1",		"$OPTSTR_7POINT1"
-}
-
-
-OptionString Resamplers
-{
-	"NoInterp",		"$OPTSTR_NOINTERPOLATION"
-	"Linear",		"$OPTVAL_LINEAR_1"
-	"Cubic",		"$OPTVAL_CUBIC"
-	"Spline",		"$OPTSTR_SPLINE"
-}
-
-
-OptionMenu OpenALSoundItems protected
-{
-	Title "$OPENALMNU_TITLE"
-	Option "$OPENALMNU_PLAYBACKDEVICE",		"snd_aldevice",		"ALDevices"
-	Option "$OPENALMNU_ENABLEEFX",			"snd_efx",			"OnOff"
-	Option "$OPENALMNU_RESAMPLER",			"snd_alresampler",	"ALResamplers"
-}
-
-
-OptionValue MidiDevices
-{
-	// filled in by the sound code
-}
-
-OptionMenu SoundOptions protected
-{
-	Title "$SNDMNU_TITLE"
-	Slider "$MODMNU_MASTERVOLUME",		"snd_mastervolume", 0, 1, 0.05, 2
-	StaticText " "
-	Slider "$SNDMNU_SFXVOLUME",			"snd_sfxvolume", 0, 1, 0.05, 2
-	Slider "$SNDMNU_MUSICVOLUME",		"snd_musicvolume", 0, 1, 0.05, 2
-	Slider "$SNDMNU_FOOTSTEPVOLUME",	"snd_footstepvolume", 0, 1, 0.05, 2
-	StaticText " "
-	Slider "$SNDMNU_MENUVOLUME",		"snd_menuvolume", 0, 1, 0.05, 2
-	StaticText " "
-	Option "$SNDMNU_MIDIDEVICE",		"snd_mididevice", "MidiDevices"
-	StaticText " "
-	Option "$SNDMNU_UNDERWATERREVERB",	"snd_waterreverb", "OnOff"
-	Option "$SNDMNU_RANDOMIZEPITCHES",	"snd_pitched", "OnOff"
-	Slider "$SNDMNU_CHANNELS",			"snd_channels", 64, 256, 8, 0
-	StaticText " "
-	Submenu "$SNDMNU_ADVANCED",			"AdvSoundOptions"
-	Submenu "$OPTMNU_REVERB",			"ReverbEdit"
-	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar snd_mastervolume snd_sfxvolume snd_musicvolume snd_menuvolume snd_mididevice snd_waterreverb snd_pitched snd_channels"
-}
-
-/*=======================================
- *
- * Advanced Sound Options Menu
- *
- *=======================================*/
-
-OptionValue GusMemory
-{
-	0, "$OPTVAL_UNLIMITED"
-	1, "$OPTVAL_256K"
-	2, "$OPTVAL_512K"
-	3, "$OPTVAL_768K"
-	4, "$OPTVAL_1024K"
-}
-
-OptionValue OplCores
-{
-	0, "$OPTVAL_MAMEOPL2"
-	1, "$OPTVAL_DOSBOXOPL3"
-	2, "$OPTVAL_JAVAOPL3"
-	3, "$OPTVAL_NUKEDOPL3"
-}
-
-
-OptionMenu AdvSoundOptions protected
-{
-	Title "$ADVSNDMNU_TITLE"
-	Option "$ADVSNDMNU_SAMPLERATE",			"snd_samplerate", "SampleRates"
-	Option "$ADVSNDMNU_HRTF",				"snd_hrtf", "AutoOffOn"
-	StaticText " "
-
-	ifoption(openal)
-	{
-	StaticText " "
-		Submenu "$SNDMNU_OPENAL",		"OpenALSoundItems"
-	}
-
-	StaticText " "
-	Submenu "$SNDMNU_MIDIPLAYER",		"MidiPlayerOptions"
-	Submenu "$SNDMNU_MODREPLAYER",		"ModReplayerOptions"
-	StaticText " "
-	Command "$SNDMNU_RESTART",			"snd_reset"
-	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar snd_samplerate snd_hrtf i_soundinbackground"
-}
-
-OptionMenu GusConfigMenu protected
-{
-	Title "$ADVSNDMNU_SELCONFIG"
-}
-
-OptionMenu WildMidiConfigMenu protected
-{
-	Title "$ADVSNDMNU_SELCONFIG"
-}
-
-OptionMenu TimidityConfigMenu protected
-{
-	Title "$ADVSNDMNU_SELCONFIG"
-}
-
-OptionMenu FluidPatchsetMenu protected
-{
-	Title "$ADVSNDMNU_SELCONFIG"
-}
-
-OptionMenu ADLBankMenu protected
-{
-	Title "$ADVSNDMNU_OPLBANK"
-}
-
-OptionMenu ADLMIDICustomBanksMenu protected
-{
-	Title "$ADVSNDMNU_OPLBANKFILE"
-}
-
-OptionMenu OPNMIDICustomBanksMenu protected
-{
-	Title "$ADVSNDMNU_OPNBANKFILE"
-}
-
-
-/*=======================================
- *
- * Module Replayer Options Menu
- *
- *=======================================*/
-
-
-OptionValue ModQuality
-{
-	0.0, "$OPTVAL_ALIASING"
-	1.0, "$OPTVAL_LINEAR_1"
-	2.0, "$OPTVAL_CUBIC"
-	3.0, "$OPTVAL_BLEP"		// Band-limited step
-	4.0, "$OPTVAL_LINEARSLOW"
-	5.0, "$OPTVAL_BLAM"		// Band-limited linear
-	6.0, "$OPTVAL_CUBICSLOW"
-	7.0, "$OPTVAL_SINC"
-}
-
-
-OptionValue ModVolumeRamps
-{
-	0.0, "$OPTVAL_NONE"
-	1.0, "$OPTVAL_NOTEONOFFONLY"
-	2.0, "$OPTVAL_FULLRAMPING"
-}
-
-OptionValue ModReplayers
-{
-	0.0, "$OPTVAL_LIBXMP"
-	1.0, "$OPTVAL_DUMB"
-}
-
-
-OptionMenu ModReplayerOptions protected
-{
-	Title "$MODMNU_TITLE"
-	Option "$MODMNU_REPLAYER",				"mod_preferred_player", "ModReplayers"
-	Slider "$MODMNU_MASTERVOLUME",			"mod_dumb_mastervolume", 0.25, 4, 0.1, 1
-	Option "$ADVSNDMNU_SAMPLERATE",			"mod_samplerate", "SampleRates"
-	Option "$MODMNU_QUALITY",				"mod_interp", "ModQuality"
-	Option "$MODMNU_VOLUMERAMPING",			"mod_volramp", "ModVolumeRamps"
-	StaticText " "
-	Option "$MODMNU_CHIPOMATIC",			"mod_autochip", "OnOff"
-	// TODO if the menu system is ever rewritten: Provide a decent
-	// mechanism to edit the chip-o-matic settings like you can with
-	// the foo_dumb preferences in foobar2000.
-}
-
-/*=======================================
- *
- * MIDI player
- *
- *=======================================*/
-
- OptionValue TimidityReverb
- {
-	0, "$OPTVAL_OFF"
-	1, "$OPTVAL_STANDARD"
-	2, "$ADVSNDMNU_GLOBAL"
-	3, "$ADVSNDMNU_FREEVERB"
-	4, "$ADVSNDMNU_GLOBAL_FREEVERB"
- }
-
-  OptionMenu MidiPlayerOptions protected
- {
-	Title "$SNDMNU_MIDIPLAYER"
-	Submenu "$ADVSNDMNU_FLUIDSYNTH", "FluidsynthOptions", 0, 1
-	Submenu "$ADVSNDMNU_TIMIDITY", "TimidityOptions", 0, 1
-	Submenu "$ADVSNDMNU_GUSEMULATION", "GUSOptions", 0, 1
-	Submenu "$ADVSNDMNU_WILDMIDI", "WildMidiOptions", 0, 1
-	Submenu "$ADVSNDMNU_OPLSYNTHESIS", "OPLOptions", 0, 1
-	Submenu "$ADVSNDMNU_ADLMIDI", "ADLOptions", 0, 1
-	Submenu "$ADVSNDMNU_OPNMIDI", "OPNOptions", 0, 1
- }
-
- OptionMenu FluidsynthOptions protected
- {
-	Title "$ADVSNDMNU_FLUIDSYNTH"
-	LabeledSubMenu "$ADVSNDMNU_SELCONFIG",		"fluid_patchset", "FluidPatchsetMenu"
-	Slider "$ADVSNDMNU_FLUIDGAIN",			"fluid_gain", 0, 10, 0.5, 1
-	Option "$ADVSNDMNU_REVERB", 			"fluid_reverb", "OnOff"
-	Option "$ADVSNDMNU_CHORUS", 			"fluid_chorus", "OnOff"
-	Slider "$ADVSNDMNU_MIDIVOICES", 		"fluid_voices", 16, 4096, 16, 0
-	// other CVARs need to be revieved for usefulness
-	StaticText ""
-	StaticText "$ADVSNDMNU_ADVANCED_OPTIONS", gold
-	Slider "$ADVSNDMNU_REVERB_ROOM_SIZE",		"fluid_reverb_roomsize", 0, 1.2, 0.1, 1
-	Slider "$ADVSNDMNU_REVERB_DAMPING",		"fluid_reverb_damping", 0, 1.0, 0.1, 1
-	Slider "$ADVSNDMNU_REVERB_WIDTH",		"fluid_reverb_width", 0, 100.0, 0.1, 1
-	Slider "$ADVSNDMNU_REVERB_LEVEL",		"fluid_reverb_level", 0, 1.0, 0.1, 1
-	StaticText ""
-	Slider "$ADVSNDMNU_CHORUS_VOICES",		"fluid_chorus_voices", 0, 99, 1, 0
-	Slider "$ADVSNDMNU_CHORUS_LEVEL",		"fluid_chorus_level", 0, 10.0, 0.1, 1
-	Slider "$ADVSNDMNU_CHORUS_SPEED",		"fluid_chorus_speed", 0.29, 5.0, 0.1, 2
-	Slider "$ADVSNDMNU_CHORUS_DEPTH",		"fluid_chorus_depth", 0, 256.0, 0.1, 1
-	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar fluid_patchset fluid_gain fluid_voices fluid_reverb fluid_reverb_roomsize fluid_reverb_damping fluid_reverb_width fluid_reverb_level fluid_chorus fluid_chorus_voices fluid_chorus_level fluid_chorus_speed fluid_chorus_depth"
- }
-
- OptionMenu TimidityOptions protected
- {
-	Title "$ADVSNDMNU_TIMIDITY"
-	LabeledSubMenu "$ADVSNDMNU_SELCONFIG",		"timidity_config", "TimidityConfigMenu"
-	Option "$ADVSNDMNU_REVERB", 			"timidity_reverb", "TimidityReverb"
-	Slider "$ADVSNDMNU_REVERB_LEVEL", 		"timidity_reverb_level", 0, 127, 1, 0
-	Option "$ADVSNDMNU_CHORUS", 			"timidity_chorus", "OnOff"
-	// other CVARs need to be revieved for usefulness
-	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar timidity_config timidity_reverb timidity_reverb_level timidity_chorus"
- }
-
- OptionMenu GUSOptions protected
- {
-	Title "$ADVSNDMNU_GUSEMULATION"
-	LabeledSubMenu "$ADVSNDMNU_SELCONFIG",		"midi_config", "GusConfigMenu"
-	Slider "$ADVSNDMNU_MIDIVOICES",			"midi_voices", 16, 256, 4, 0
-	Option "$ADVSNDMNU_DMXGUS", 			"midi_dmxgus", "OnOff"
-	Option "$ADVSNDMNU_GUSMEMSIZE", 		"gus_memsize", "GusMemory"
-	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar midi_config midi_voices midi_dmxgus gus_memsize"
- }
-
-  OptionMenu WildMidiOptions protected
- {
-	Title "$ADVSNDMNU_WILDMIDI"
-	LabeledSubMenu "$ADVSNDMNU_SELCONFIG",		"wildmidi_config", "WildMidiConfigMenu"
-	Option "$ADVSNDMNU_REVERB", 			"wildmidi_reverb", "OnOff"
-	Option "$ADVSNDMNU_ADVRESAMPLING",		"wildmidi_enhanced_resampling", "OnOff"
-	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar wildmidi_config wildmidi_reverb wildmidi_enhanced_resampling"
- }
-
- OptionMenu OPLOptions protected
- {
- 	Title "$ADVSNDMNU_OPLSYNTHESIS"
-	Option "$ADVSNDMNU_OPLCORES", 			"opl_core", "OplCores"
-	Slider "$ADVSNDMNU_OPLNUMCHIPS", 		"opl_numchips", 1, 8, 1, 0
-	Option "$ADVSNDMNU_OPLFULLPAN",			"opl_fullpan", "OnOff"
-	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar opl_core opl_numchips opl_fullpan"
- }
-
- OptionValue AdlVolumeModels
- {
-	0, "$ADLVLMODEL_AUTO"
-	1, "$ADLVLMODEL_GENERIC"
-	2, "$ADLVLMODEL_NATIVE"
-	3, "$ADLVLMODEL_DMX"
-	4, "$ADLVLMODEL_APOGEE"
-	5, "$ADLVLMODEL_WIN9X"
-	6, "$ADLVLMODEL_DMX_FIXED"
-	7, "$ADLVLMODEL_APOGEE_FIXED"
-	8, "$ADLVLMODEL_AIL"
-	9, "$ADLVLMODEL_WIN9XGENERIC"
-	10, "$ADLVLMODEL_HMI"
-	11, "$ADLVLMODEL_HMIOLD"
- }
-
- OptionValue ADLOplCores
- {
-	0, "$OPTVAL_NUKEDOPL3"
-	1, "$OPTVAL_NUKEDOPL3174"
-	2, "$OPTVAL_DOSBOXOPL3"
-	3, "$OPTVAL_OPALOPL3"
-	4, "$OPTVAL_JAVAOPL3"
- }
-
- OptionValue OpnCores
- {
-	0, "$OPTVAL_MAMEOPN2"
-	1, "$OPTVAL_NUKEDOPN2"
-	2, "$OPTVAL_GENSOPN2"
-	4, "$OPTVAL_NP2OPNA"
-	5, "$OPTVAL_MAMEOPNA"
-	6, "$OPTVAL_PMDWINOPNA"
- }
-
- OptionMenu ADLOptions protected
- {
-	Title "$ADVSNDMNU_ADLMIDI"
-	Option "$ADVSNDMNU_OPLCORES",		 "adl_emulator_id", "ADLOplCores"
-	Option "$ADVSNDMNU_RUNPCMRATE",		 "adl_run_at_pcm_rate", "OnOff"
-	Slider "$ADVSNDMNU_ADLNUMCHIPS", 	 "adl_chips_count", 1, 32, 1, 0
-	Option "$ADVSNDMNU_OPLFULLPAN", 	 "adl_fullpan", "OnOff"
-	Option "$ADVSNDMNU_VLMODEL",		 "adl_volume_model", "AdlVolumeModels"
-	StaticText ""
-	LabeledSubmenu "$ADVSNDMNU_OPLBANK", "adl_bank", "ADLBankMenu"
-	StaticText ""
-	Option "$ADVSNDMNU_ADLCUSTOMBANK", 	 "adl_use_custom_bank", "OnOff"
-	LabeledSubmenu "$ADVSNDMNU_OPLBANKFILE", "adl_custom_bank", "ADLMIDICustomBanksMenu"
-	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar adl_emulator_id adl_run_at_pcm_rate adl_chips_count adl_fullpan adl_volume_model adl_use_custom_bank"
- }
-
- OptionMenu OPNOptions protected
- {
-	Title "$ADVSNDMNU_OPNMIDI"
-	Option "$ADVSNDMNU_OPNCORES",		 "opn_emulator_id", "OpnCores"
-	Option "$ADVSNDMNU_RUNPCMRATE",		 "opn_run_at_pcm_rate", "OnOff"
-	Slider "$ADVSNDMNU_OPNNUMCHIPS", 	 "opn_chips_count", 1, 32, 1, 0
-	Option "$ADVSNDMNU_OPLFULLPAN", 	 "opn_fullpan", "OnOff"
-	StaticText ""
-	Option "$ADVSNDMNU_OPNCUSTOMBANK", 	 "opn_use_custom_bank", "OnOff"
-	LabeledSubmenu "$ADVSNDMNU_OPNBANKFILE", "opn_custom_bank", "OPNMIDICustomBanksMenu"
-	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar opn_emulator_id opn_run_at_pcm_rate opn_chips_count opn_fullpan opn_use_custom_bank"
- }
-
-/*=======================================
- *
- * Change Renderer Menu
- *
- *=======================================*/
 
 OptionValue "RenderMode"
 {
 	0, "$OPTVAL_SWDOOM"
 	1, "$OPTVAL_SWDOOMTC"
-	4,  "$OPTVAL_HWPOLY"
+	4, "$OPTVAL_HWPOLY"
 }
-
-/*=======================================
- *
- * Video mode menu
- *
- *=======================================*/
 
 OptionValue ForceRatios
 {
@@ -2695,6 +1495,7 @@ OptionValue ForceRatios
 	4.0, "5:4"
 	6.0, "21:9"
 }
+
 OptionValue Ratios
 {
 	0.0, "4:3"
@@ -2703,8 +1504,9 @@ OptionValue Ratios
 	2.0, "16:10"
 	3.0, "17:10"
 	6.0, "21:9"
-	 -1, "$OPTVAL_ALL"
+	-1,  "$OPTVAL_ALL"
 }
+
 OptionValue ScaleModes
 {
 	0, "$OPTVAL_NORMAL"
@@ -2714,8 +1516,8 @@ OptionValue ScaleModes
 	4, "1280x800"
 	5, "$OPTVAL_CUSTOM"
 	1, "$OPTVAL_LOWEST"
-	7, "$OPTVAL_LOWEST12"
 }
+
 OptionValue CropAspect
 {
 	0, "$OPTVAL_STRETCH"
@@ -2724,51 +1526,51 @@ OptionValue CropAspect
 
 OptionValue MaxFps
 {
-	0, "$OPTVAL_UNLIMITED"
-	60, "$OPTVAL_60FPS"
-	75, "$OPTVAL_75FPS"
-	90, "$OPTVAL_90FPS"
+	0,   "$OPTVAL_UNLIMITED"
+	60,  "$OPTVAL_60FPS"
+	75,  "$OPTVAL_75FPS"
+	90,  "$OPTVAL_90FPS"
 	120, "$OPTVAL_120FPS"
 	144, "$OPTVAL_144FPS"
 	200, "$OPTVAL_200FPS"
 }
 
+OptionValue PreferBackend
+{
+	0, "$OPTVAL_OPENGL"
+	1, "$OPTVAL_VULKAN"
+	2, "$OPTVAL_OPENGLES"
+}
 
 OptionMenu VideoModeMenu protected
 {
 	Title "$VIDMNU_TITLE"
 
-	Option "$VIDMNU_PREFERBACKEND",		"vid_preferbackend", "PreferBackend"
+	Option "$VIDMNU_PREFERBACKEND",  vid_preferbackend, PreferBackend
 	StaticText " "
-	IfOption(SWRender)
-	{
-		Option "$VIDMNU_RENDERMODE",		"vid_rendermode", "RenderMode"
+	IfOption(SWRender) {
+		Option "$VIDMNU_RENDERMODE", vid_rendermode,    RenderMode
 	}
-	Option "$VIDMNU_FULLSCREEN",		"vid_fullscreen", "YesNo"
-
-	IfOption(Mac)
-	{
-		Option "$VIDMNU_HIDPI",			"vid_hidpi", "YesNo"
+	Option "$VIDMNU_FULLSCREEN",     vid_fullscreen,    YesNo
+	IfOption(Mac) {
+		Option "$VIDMNU_HIDPI",      vid_hidpi,         YesNo
 	}
-
-	Option "$VIDMNU_FORCEASPECT",		"vid_aspect", "ForceRatios"
-	Option "$VIDMNU_CROPASPECT",		"vid_cropaspect", "CropAspect"
-	Option "$VIDMNU_SCALEMODE",			"vid_scalemode", "ScaleModes"
-	Slider "$VIDMNU_SCALEFACTOR",		"vid_scalefactor", 0.25, 2.0, 0.25, 2
-
+	Option "$VIDMNU_FORCEASPECT",    vid_aspect,        ForceRatios
+	Option "$VIDMNU_CROPASPECT",     vid_cropaspect,    CropAspect
+	Option "$VIDMNU_SCALEMODE",      vid_scalemode,     ScaleModes
+	Slider "$VIDMNU_SCALEFACTOR",    vid_scalefactor,   0.25, 2.0, 0.25, 2, "", 0, Gray, 1.0, "$VALFORMAT_MULTIPLIER"
 	StaticText " "
-	Option "$DSPLYMNU_VSYNC",					"vid_vsync", "OnOff"
-	Slider "$VIDMNU_MAXFPS",					"vid_maxfps", 35, 500, 1
-	Option "$DSPLYMNU_CAPFPS",					"cl_capfps", "OffOn"
-	
+	Option "$DSPLYMNU_VSYNC",        vid_vsync,         OnOff
+	Slider "$VIDMNU_MAXFPS",         vid_maxfps,        35, 500, 1, 0, "", 0, Gray, 1.0, "$VALFORMAT_FPS"
+	Option "$DSPLYMNU_CAPFPS",       cl_capfps,         OffOn
 	StaticText ""
 	StaticText "$VIDMNU_CUSTOMRES"
-	TextField "$VIDMNU_CUSTOMX", menu_resolution_custom_width
-	TextField "$VIDMNU_CUSTOMY", menu_resolution_custom_height
-	Option "$VIDMNU_USELINEAR", "vid_scale_linear", "YesNo"
+	TextField "$VIDMNU_CUSTOMX",     menu_resolution_custom_width
+	TextField "$VIDMNU_CUSTOMY",     menu_resolution_custom_height
+	Option "$VIDMNU_USELINEAR",      vid_scale_linear,  YesNo
 	StaticText ""
-	Command "$VIDMNU_APPLYW", "menu_resolution_commit_changes 0"
-	Command "$VIDMNU_APPLYFS", "menu_resolution_commit_changes 1"
+	Command "$VIDMNU_APPLYW",        "menu_resolution_commit_changes 0"
+	Command "$VIDMNU_APPLYFS",       "menu_resolution_commit_changes 1"
 	StaticText ""
 
 	SubMenu "$VIDMNU_RESPRESET", CustomResolutionMenu
@@ -2781,32 +1583,32 @@ OptionMenu CustomResolutionMenu protected
 	StaticText "$VIDMNU_RESPRESETHEAD"
 	StaticText ""
 	StaticText "$VIDMNU_ASPECT43"
-	Command "640x480", "menu_resolution_set_custom 640 480"
-	Command "1024x768", "menu_resolution_set_custom 1024 768"
-	Command "1280x960", "menu_resolution_set_custom 1280 960"
-	Command "1600x1200", "menu_resolution_set_custom 1600 1200"
+	Command           "640x480", "menu_resolution_set_custom 640 480"
+	Command          "1024x768", "menu_resolution_set_custom 1024 768"
+	Command          "1280x960", "menu_resolution_set_custom 1280 960"
+	Command         "1600x1200", "menu_resolution_set_custom 1600 1200"
 	StaticText ""
 	StaticText "$VIDMNU_ASPECT54"
-	Command "1280x1024", "menu_resolution_set_custom 1280 1024"
+	Command         "1280x1024", "menu_resolution_set_custom 1280 1024"
 	StaticText ""
 	StaticText "$VIDMNU_ASPECT169"
-	Command "960x540", "menu_resolution_set_custom 960 540"
-	Command "(720p HD)   1280x720", "menu_resolution_set_custom 1280 720"
-	Command "1366x768", "menu_resolution_set_custom 1366 768"
-	Command "(1080p HD) 1920x1080", "menu_resolution_set_custom 1920 1080"
-	Command "(1440p HD) 2560x1440", "menu_resolution_set_custom 2560 1440"
-	Command "(4K UHD) 3840x2160", "menu_resolution_set_custom 3840 2160"
+	Command           "960x540", "menu_resolution_set_custom 960 540"
+	Command  "(720p)  1280x720", "menu_resolution_set_custom 1280 720"
+	Command          "1366x768", "menu_resolution_set_custom 1366 768"
+	Command "(1080p) 1920x1080", "menu_resolution_set_custom 1920 1080"
+	Command "(1440p) 2560x1440", "menu_resolution_set_custom 2560 1440"
+	Command    "(4K) 3840x2160", "menu_resolution_set_custom 3840 2160"
 	StaticText ""
 	StaticText "$VIDMNU_ASPECT1610"
-	Command "960x600", "menu_resolution_set_custom 960 600"
-	Command "1280x800", "menu_resolution_set_custom 1280 800"
-	Command "1440x900", "menu_resolution_set_custom 1440 900"
-	Command "1680x1050", "menu_resolution_set_custom 1680 1050"
-	Command "1920x1200", "menu_resolution_set_custom 1920 1200"
+	Command   "960x600",         "menu_resolution_set_custom 960 600"
+	Command  "1280x800",         "menu_resolution_set_custom 1280 800"
+	Command  "1440x900",         "menu_resolution_set_custom 1440 900"
+	Command "1680x1050",         "menu_resolution_set_custom 1680 1050"
+	Command "1920x1200",         "menu_resolution_set_custom 1920 1200"
 	StaticText ""
 	StaticText "$VIDMNU_ASPECT219"
-	Command "1920x810", "menu_resolution_set_custom 1920 810"
-	Command "2560x1080", "menu_resolution_set_custom 2560 1080"
+	Command  "1920x810",         "menu_resolution_set_custom 1920 810"
+	Command "2560x1080",         "menu_resolution_set_custom 2560 1080"
 }
 
 /*=======================================
@@ -3423,57 +2225,6 @@ OptionMenu "JoinMultiplayerMenu" protected
 	SafeCommand "$OPTMNU_DEFAULTS",				"mp_reset_defaults"
 }
 
-
-/*=======================================
- *
- * Network options menu
- *
- *=======================================*/
-
-OptionMenu NetworkOptions protected
-{
-	Title "$NETMNU_TITLE"
-	StaticText "$NETMNU_LOCALOPTIONS", 1
-	Option "$NETMNU_LINESPECIALPREDICTION",	"cl_predict_specials", "OnOff"
-	Slider "$NETMNU_PREDICTIONLERPSCALE",	"cl_rubberband_scale", 0.0, 1.0, 0.05, 2
-	Slider "$NETMNU_LERPTHRESHOLD",			"cl_rubberband_threshold", 0.0, 256.0, 8.0
-	StaticText " "
-	StaticText "$NETMNU_HOSTOPTIONS", 1
-	Option "$NETMNU_EXTRATICS",				"net_extratic", "ExtraTicMode"
-	Option "$NETMNU_TICBALANCE",			"net_ticbalance", "OnOff"
-
-}
-
-OptionValue ExtraTicMode
-{
-	0, "$OPTVAL_NONE"
-	1, "1"
-	2, "$OPTVAL_ALLUNACKNOWLEDGED"
-}
-
-OptionValue "LookupOrder"
-{
-	0, "$OPTVAL_OBVERSEFIRST"
-	1, "$OPTVAL_REVERSEFIRST"
-}
-
-OptionValue "SpriteclipModes"
-{
-	0, "$OPTVAL_NEVER"
-	1, "$OPTVAL_SMART"
-	2, "$OPTVAL_ALWAYS"
-	3, "$OPTVAL_SMARTER"
-	-1, "$OPTVAL_ANAMORPHIC"
-}
-
-OptionValue "EnhancedStealth"
-{
-	0, "$OPTVAL_NEVER"
-	1, "$OPTVAL_INFRAREDONLY"
-	2, "$OPTVAL_INFRAREDANDTORCH"
-	3, "$OPTVAL_ANYFIXEDCOLORMAP"
-}
-
 OptionValue "FilterModes"
 {
 	0, "$OPTVAL_NONE"
@@ -3519,19 +2270,19 @@ OptionValue "ShaderQuality"
 
 OptionValue "Anisotropy"
 {
-	1, "$OPTVAL_OFF"
-	2, "$OPTVAL_2X"
-	4, "$OPTVAL_4X"
-	8, "$OPTVAL_8X"
+	1,  "$OPTVAL_OFF"
+	2,  "$OPTVAL_2X"
+	4,  "$OPTVAL_4X"
+	8,  "$OPTVAL_8X"
 	16, "$OPTVAL_16X"
 }
 
 OptionValue "Multisample"
 {
-	1, "$OPTVAL_OFF"
-	2, "$OPTVAL_2X"
-	4, "$OPTVAL_4X"
-	8, "$OPTVAL_8X"
+	1,  "$OPTVAL_OFF"
+	2,  "$OPTVAL_2X"
+	4,  "$OPTVAL_4X"
+	8,  "$OPTVAL_8X"
 	16, "$OPTVAL_16X"
 	32, "$OPTVAL_32X"
 }
@@ -3571,7 +2322,6 @@ OptionValue "BillboardModes"
 	1, "$OPTVAL_XYAXIS"
 }
 
-
 OptionValue "Particles"
 {
 	0, "$OPTVAL_SQUARE"
@@ -3581,13 +2331,13 @@ OptionValue "Particles"
 
 OptionValue "HqResizeModes"
 {
-   0, "$OPTVAL_OFF"
-   1, "$OPTVAL_SCALENX"
-   2, "$OPTVAL_HQNX"
-   3, "$OPTVAL_HQNXMMX"
-   4, "$OPTVAL_NXBRZ"
-   5, "$OPTVAL_OLD_NXBRZ"
-   6, "$OPTVAL_NORMALNX"
+	0, "$OPTVAL_OFF"
+	1, "$OPTVAL_SCALENX"
+	2, "$OPTVAL_HQNX"
+	3, "$OPTVAL_HQNXMMX"
+	4, "$OPTVAL_NXBRZ"
+	5, "$OPTVAL_OLD_NXBRZ"
+	6, "$OPTVAL_NORMALNX"
 }
 
 OptionValue "HqResizeMultipliers"
@@ -3602,12 +2352,12 @@ OptionValue "HqResizeMultipliers"
 
 OptionValue "HqResizeModesNoMMX"
 {
-   0, "$OPTVAL_OFF"
-   1, "$OPTVAL_SCALENX"
-   2, "$OPTVAL_HQNX"
-   4, "$OPTVAL_NXBRZ"
-   5, "$OPTVAL_OLD_NXBRZ"
-   6, "$OPTVAL_NORMALNX"
+	0, "$OPTVAL_OFF"
+	1, "$OPTVAL_SCALENX"
+	2, "$OPTVAL_HQNX"
+	4, "$OPTVAL_NXBRZ"
+	5, "$OPTVAL_OLD_NXBRZ"
+	6, "$OPTVAL_NORMALNX"
 }
 
 OptionValue "FogMode"
@@ -3633,7 +2383,7 @@ OptionValue "FuzzStyle"
 	6, "$OPTVAL_NOISE"
 	7, "$OPTVAL_SMOOTHNOISE"
 	8, "$OPTVAL_SOFTWARE"
-	//5, "$OPTVAL_JAGGEDFUZZ" I can't see any difference between this and 4 so it's disabled for now.
+//	5, "$OPTVAL_JAGGEDFUZZ" I can't see any difference between this and 4 so it's disabled for now.
 }
 
 OptionValue VRMode
@@ -3658,10 +2408,13 @@ OptionValue VRMode
 
 OptionValue ShadowMapQuality
 {
-	128, "128"
-	256, "256"
-	512, "512"
+	128,  "128"
+	256,  "256"
+	512,  "512"
 	1024, "1024"
+	2048, "2048"
+	4096, "4096"
+	8192, "8192"
 }
 
 OptionValue ShadowMapFilter
@@ -3672,30 +2425,25 @@ OptionValue ShadowMapFilter
 	3, "$OPTVAL_PCF_HIGH"
 }
 
-
 OptionMenu "GLTextureGLOptions" protected
 {
 	Title "$GLTEXMNU_TITLE"
-	Option "$GLTEXMNU_TEXFILTER",		gl_texture_filter,				"FilterModes"
-	Option "$GLTEXMNU_ANISOTROPIC",		gl_texture_filter_anisotropic,	"Anisotropy"
 
-	ifOption(MMX)
-	{
-		Option "$GLTEXMNU_HQRESIZE",		gl_texture_hqresizemode,		"HqResizeModes"
+	Option "$GLTEXMNU_TEXFILTER",    gl_texture_filter,             FilterModes
+	Option "$GLTEXMNU_ANISOTROPIC",  gl_texture_filter_anisotropic, Anisotropy
+	ifOption(MMX) {
+		Option "$GLTEXMNU_HQRESIZE", gl_texture_hqresizemode,       HqResizeModes
+	} else {
+		Option "$GLTEXMNU_HQRESIZE", gl_texture_hqresizemode,       HqResizeModesNoMMX
 	}
-	else
-	{
-		Option "$GLTEXMNU_HQRESIZE",		gl_texture_hqresizemode,		"HqResizeModesNoMMX"
-	}
-	Option "$GLTEXMNU_HQRESIZEMULT",	gl_texture_hqresizemult,		"HqResizeMultipliers"
+	Option "$GLTEXMNU_HQRESIZEMULT", gl_texture_hqresizemult,       HqResizeMultipliers
 	StaticText "!HQRESIZE_WARNING!"
-
-	Option "$GLTEXMNU_RESIZETEX",		gl_texture_hqresize_textures,	"OnOff"
-	Option "$GLTEXMNU_RESIZESPR",		gl_texture_hqresize_sprites,	"OnOff"
-	Option "$GLTEXMNU_RESIZEFNT",		gl_texture_hqresize_fonts,		"OnOff"
-	Option "$GLTEXMNU_RESIZESKN",		gl_texture_hqresize_skins,		"OnOff"
-	Option "$GLTEXMNU_PRECACHETEX",		gl_precache,					"YesNo"
-	Option "$GLTEXMNU_SORTDRAWLIST", 	gl_sort_textures,				"YesNo"
+	Option "$GLTEXMNU_RESIZETEX",    gl_texture_hqresize_textures,  OnOff
+	Option "$GLTEXMNU_RESIZESPR",    gl_texture_hqresize_sprites,   OnOff
+	Option "$GLTEXMNU_RESIZEFNT",    gl_texture_hqresize_fonts,     OnOff
+	Option "$GLTEXMNU_RESIZESKN",    gl_texture_hqresize_skins,     OnOff
+	Option "$GLTEXMNU_PRECACHETEX",  gl_precache,                   YesNo
+	Option "$GLTEXMNU_SORTDRAWLIST", gl_sort_textures,              YesNo
 	StaticText " "
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar gl_texture_filter gl_texture_filter_anisotropic gl_texture_format gl_texture_usehires gl_texture_hqresizemode gl_texture_hqresizemult gl_texture_hqresize_textures gl_texture_hqresize_sprites gl_texture_hqresize_fonts gl_precache gl_sort_textures"
 	Class "GLTextureGLOptions"
@@ -3704,16 +2452,17 @@ OptionMenu "GLTextureGLOptions" protected
 OptionMenu "GLLightOptions" protected
 {
 	Title "$GLLIGHTMNU_TITLE"
-	Option "$GLLIGHTMNU_LIGHTSENABLED",			gl_lights,				"OnOff"
-	Option "$GLLIGHTMNU_LIGHTSPRITES",			gl_light_sprites,		"YesNo"
-	Option "$GLLIGHTMNU_LIGHTWEAPONS",			gl_light_weapons,		"YesNo"
-	Option "$GLLIGHTMNU_LIGHTPARTICLES",		gl_light_particles,		"YesNo"
-	Option "$GLLIGHTMNU_LIGHTSHADOWMAP",		gl_light_shadowmap,		"YesNo"
+
+	Option "$GLLIGHTMNU_LIGHTSENABLED",         r_dynlights,          OnOff
+	Option "$GLLIGHTMNU_LIGHTSPRITES",          gl_light_sprites,     YesNo
+	Option "$GLLIGHTMNU_LIGHTWEAPONS",          gl_light_weapons,     YesNo
+	Option "$GLLIGHTMNU_LIGHTPARTICLES",        gl_light_particles,   YesNo
+	Option "$GLLIGHTMNU_LIGHTSHADOWMAP",        gl_light_shadowmap,   YesNo
 
 	StaticText ""
 	StaticText "$GLLIGHTMNU_ADVANCED", gold
-	Option "$GLLIGHTMNU_LIGHTSHADOWMAPQUALITY", gl_shadowmap_quality,	"ShadowMapQuality"
-	Option "$GLLIGHTMNU_LIGHTSHADOWMAPFILTER", 	gl_shadowmap_filter,	"ShadowMapFilter"
+	Option "$GLLIGHTMNU_LIGHTSHADOWMAPQUALITY", gl_shadowmap_quality, ShadowMapQuality
+	Option "$GLLIGHTMNU_LIGHTSHADOWMAPFILTER",  gl_shadowmap_filter,  ShadowMapFilter
 	ScaleSlider "$GLLIGHTMNU_LIGHTSCULL",		gl_light_distance_cull, 0.0, 16000.0, 100.0, "$GLPREFMNU_CULLING_DISABLED"
 	Slider "$GLLIGHTMNU_MAXINTENSITY",			gl_light_max_intensity, 50, 2000, 50, 0
 	Slider "$GLLIGHTMNU_MAXCOLLECTEDSS",		gl_light_max_collected_subsectors, 0, 5000, 100, 0
@@ -3723,37 +2472,39 @@ OptionMenu "GLLightOptions" protected
 	ScaleSlider "$GLLIGHTMNU_WALL_SURFACE_LIGHT_BUDGET",	gl_light_wall_candidate_budget, 0, 32, 1, "$GLPREFMNU_LIMIT_DISABLED"
 	ScaleSlider "$GLLIGHTMNU_FLAT_SURFACE_LIGHT_BUDGET",	gl_light_flat_candidate_budget, 0, 32, 1, "$GLPREFMNU_LIMIT_DISABLED"
 	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS",				"resetcvar r_dynlights gl_lights gl_lights_checkside gl_light_sprites gl_light_particles gl_light_shadowmap gl_light_buffer_type gl_shadowmap_quality gl_shadowmap_filter gl_light_distance_cull gl_light_max_intensity gl_light_max_collected_subsectors gl_light_wall_max_lights gl_light_flat_max_lights gl_light_range_limit gl_light_wall_candidate_budget gl_light_flat_candidate_budget " 
+	SafeCommand "$OPTMNU_DEFAULTS",				"resetcvar r_dynlights gl_lights gl_lights_checkside gl_light_sprites gl_light_weapons gl_light_particles gl_light_shadowmap gl_light_buffer_type gl_shadowmap_quality gl_shadowmap_filter gl_light_distance_cull gl_light_max_intensity gl_light_max_collected_subsectors gl_light_wall_max_lights gl_light_flat_max_lights gl_light_range_limit gl_light_wall_candidate_budget gl_light_flat_candidate_budget"
 }
 
 OptionMenu "OpenGLOptions" protected
 {
 	Title "$GLMNU_TITLE"
-	Submenu "$GLPREFMNU_VRMODE",				"VR3DMenu"
-	Submenu "$GLMNU_POSTPROCESS",				"PostProcessMenu"
+	Submenu "$GLPREFMNU_VRMODE",                VR3DMenu,                  0, false, vid_preferbackend, 0, HideInv
+	Submenu "$GLMNU_POSTPROCESS",               PostProcessMenu,           0, false, vid_shadersupport
 	StaticText " "
-	Option "$GLPREFMNU_SECLIGHTMODE",			gl_lightmode,					"LightingModes"
-	Option "$GLPREFMNU_SWLMBANDED",				gl_bandedswlight,				"OnOff"
-	Option "$GLPREFMNU_FOGMODE",				gl_fogmode,						"FogMode"
-	Option "$GLPREFMNU_FOGFORCEFULLBRIGHT",		gl_brightfog,					"YesNo"
-	Slider "$GLPREFMNU_WPNLIGHTSTR",			gl_weaponlight,					0,32, 2
-	Option "$GLPREFMNU_PLANEREFLECTION",		gl_plane_reflection,			"OnOff"
-	Option "$GLPREFMNU_ENV",					gl_enhanced_nightvision,		"OnOff"
-	Option "$GLPREFMNU_ENVSTEALTH",				gl_enhanced_nv_stealth,			"EnhancedStealth"
-	Option "$GLPREFMNU_SPRCLIP",				gl_spriteclip,					"SpriteclipModes"
-	Option "$GLPREFMNU_SPRBLEND",				gl_sprite_blend,				"OnOff"
-	Option "$GLPREFMNU_FUZZSTYLE",				gl_fuzztype,					"FuzzStyle"
-	Option "$GLPREFMNU_SPRBILLBOARD",			gl_billboard_mode,				"BillboardModes"
-	Option "$GLPREFMNU_SPRBILLFACECAMERA",		gl_billboard_faces_camera,		"OnOff"
-	Option "$GLPREFMNU_SPRBILLFACECAMERAFORCE",	hw_force_cambbpref,				"OnOff"
-	Option "$GLPREFMNU_PARTICLESTYLE",			gl_particles_style,				"Particles"
-	Option "$GLPREFMNU_RENDERQUALITY",			gl_seamless,					"Precision"
-	//Option "$GLPREFMNU_CORONAS",				gl_coronas,						"OnOff"
-	Option "$GLPREFMNU_RENDERSKYDOME",			gl_skydome, 					"YesNo"
+	Option "$GLPREFMNU_SECLIGHTMODE",           gl_lightmode,              LightingModes
+	Option "$GLPREFMNU_SWLMBANDED",             gl_bandedswlight,          OnOff
+	Option "$GLPREFMNU_FOGMODE",                gl_fogmode,                FogMode
+	Option "$GLPREFMNU_FOGFORCEFULLBRIGHT",     gl_brightfog,              YesNo
+	Slider "$GLPREFMNU_WPNLIGHTSTR",            gl_weaponlight,            0,32, 2
+//	Option "$GLPREFMNU_WPNPURELIGHT",           gl_weapon_purelightlevel,  OnOff
+	Option "$GLPREFMNU_PLANEREFLECTION",        gl_plane_reflection,       OnOff
+	Option "$GLPREFMNU_ENVIRONMENTMAPMIRROR",   gl_mirror_envmap,          OnOff
+	Option "$GLPREFMNU_ENV",                    gl_enhanced_nightvision,   OnOff
+	Option "$GLPREFMNU_ENVSTEALTH",             gl_enhanced_nv_stealth,    EnhancedStealth
+	Option "$GLPREFMNU_SPRCLIP",                gl_spriteclip,             SpriteclipModes
+	Option "$GLPREFMNU_SPRBLEND",               gl_sprite_blend,           OnOff
+	Option "$GLPREFMNU_FUZZSTYLE",              gl_fuzztype,               FuzzStyle
+	Option "$GLPREFMNU_SPRBILLBOARD",           gl_billboard_mode,         BillboardModes
+	Option "$GLPREFMNU_SPRBILLFACECAMERA",      gl_billboard_faces_camera, OnOff
+	Option "$GLPREFMNU_SPRBILLFACECAMERAFORCE", hw_force_cambbpref,        OnOff
+	Option "$GLPREFMNU_PARTICLESTYLE",          gl_particles_style,        Particles
+	Option "$GLPREFMNU_RENDERQUALITY",          gl_seamless,               Precision
+//	Option "$GLPREFMNU_CORONAS",                gl_coronas,                OnOff
+	Option "$GLPREFMNU_RENDERSKYDOME",          gl_skydome,                YesNo
 	StaticText " "
-	Slider "$GLPREFMNU_MENUBLUR",				gl_menu_blur, 0, 5.0, 0.5, 2
-	StaticText " "
-	Option "$GLPREFMNU_MULTISAMPLE", 			gl_multisample,					"Multisample"
+	Slider "$GLPREFMNU_MENUBLUR",               gl_menu_blur,              0, 5.0, 0.5, 2, vid_shadersupport, 0, Hide
+	StaticText " ",                                                        -1, vid_shadersupport
+	Option "$GLPREFMNU_MULTISAMPLE",            gl_multisample,            Multisample
 	StaticText " "
 	Option "$GLPREFMNU_GLOBAL_FADE",						gl_global_fade, "OnOff"
 	Slider "$GLPREFMNU_GLOBAL_FADE_DENSITY",				gl_global_fade_density, 0.0001, 0.005, 0.0001, 4
@@ -3773,7 +2524,6 @@ OptionMenu "OpenGLOptions" protected
 	ScaleSlider "$GLPREFMNU_MAX_RENDERED_PORTALS",			gl_max_portals, -1, 20, 1, "$GLPREFMNU_PORTALS_DISABLED", "$GLPREFMNU_LIMIT_DISABLED"
 	StaticText " "
 	Option "$GLPREFMNU_MIRRORS",				gl_mirrors,						"OnOff"
-	Option "$GLPREFMNU_ENVIRONMENTMAPMIRROR",	gl_mirror_envmap,				"OnOff"
 	Option "$GLPREFMNU_MIRRORPLAYER",			gl_mirror_player,				"OnOff"
 	Slider "$GLPREFMNU_MIRRORRECURSIONS",		r_mirror_recursions, 0, 10, 1, 0
 	StaticText " "
@@ -3785,13 +2535,12 @@ OptionMenu "OpenGLOptions" protected
 OptionMenu "VR3DMenu" protected
 {
 	Title "$GLPREFMNU_VRMODE"
-	Option "$GLMNU_3DMODE",					vr_mode, 						"VRMode"
-	IfOption(Windows)
-	{
-		Option "$GLPREFMNU_VRQUADSTEREO",			vr_enable_quadbuffered,			"OnOff"
+	Option "$GLMNU_3DMODE",               vr_mode,                VRMode
+	IfOption(Windows) {
+		Option "$GLPREFMNU_VRQUADSTEREO", vr_enable_quadbuffered, OnOff
 	}
-	Slider "$GLPREFMNU_VRIPD",					vr_ipd,							0.041, 0.073, 0.001, 3
-	Slider "$GLPREFMNU_VRSCREENDIST",			vr_screendist,					0.2, 10.0, 0.1, 1
+	Slider "$GLPREFMNU_VRIPD",            vr_ipd,                 0.041, 0.073, 0.001, 3
+	Slider "$GLPREFMNU_VRSCREENDIST",     vr_screendist,          0.2, 10.0, 0.1, 1
 	StaticText " "
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_mode vr_enable_quadbuffered vr_ipd vr_screendist"
 }
@@ -3799,16 +2548,16 @@ OptionMenu "VR3DMenu" protected
 OptionMenu "PostProcessMenu" protected
 {
 	Title "$GLMNU_POSTPROCESS"
-	Option "$GLPREFMNU_BLOOM",		 			gl_bloom,						"OnOff"
-	Option "$GLPREFMNU_LENS",		 			gl_lens,						"OnOff"
-	Option "$GLPREFMNU_SSAO",		 			gl_ssao,						"SSAOModes"
-	Slider "$GLPREFMNU_SSAO_PORTALS",			gl_ssao_portals,				0.0, 4.0, 1.0, 0
-	Option "$GLPREFMNU_FXAA",		 			gl_fxaa,						"FXAAQuality"
-	Option "$GLPREFMNU_DITHER",		 			gl_dither_bpc,					"DitherModes"
-	Option "$GLPREFMNU_TONEMAP", 				gl_tonemap,						"TonemapModes"
+	Option "$GLPREFMNU_BLOOM",           gl_bloom,                    OnOff
+	Option "$GLPREFMNU_LENS",            gl_lens,                     OnOff
+	Option "$GLPREFMNU_SSAO",            gl_ssao,                     SSAOModes
+	Slider "$GLPREFMNU_SSAO_PORTALS",    gl_ssao_portals,             0.0, 4.0, 1.0, 0
+	Option "$GLPREFMNU_FXAA",            gl_fxaa,                     FXAAQuality
+	Option "$GLPREFMNU_DITHER",          gl_dither_bpc,               DitherModes
+	Option "$GLPREFMNU_TONEMAP",         gl_tonemap,                  TonemapModes
 	StaticText " "
-	Slider "$GLPREFMNU_PALTONEMAPPOWER",		gl_paltonemap_powtable,			0.2, 3.0, 0.1, 1
-	Option "$GLPREFMNU_PALTONEMAPORDER",		gl_paltonemap_reverselookup,	"LookupOrder"
+	Slider "$GLPREFMNU_PALTONEMAPPOWER", gl_paltonemap_powtable,      0.2, 3.0, 0.1, 1
+	Option "$GLPREFMNU_PALTONEMAPORDER", gl_paltonemap_reverselookup, LookupOrder
 	StaticText " "
 	Option "$GLPREFMNU_CUSTOMPOST",		 		gl_custompost,					"OnOff"
 	Option "$GLPREFMNU_CUSTOMSHADER",	 		gl_customshader,				"OnOff"
@@ -3818,12 +2567,1440 @@ OptionMenu "PostProcessMenu" protected
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar gl_bloom gl_lens gl_ssao gl_ssao_portals gl_fxaa gl_dither_bpc gl_tonemap gl_paltonemap_powtable gl_paltonemap_reverselookup gl_custompost gl_customshader gl_lite_shader"
 }
 
+OptionMenu "vkoptions"
+{
+	Title "$VK_TITLE"
+	StaticText "$VK_RESTART"
+	StaticText ""
+	TextField "$VKMNU_DEVICE", vk_device
+	Option "$VKMNU_HDR",       vk_hdr, OnOff
+	ifOption(OpenXR)
+	{
+		Option "$VRPREFMNU_MULTIVIEW",			"vr_openxr_multiview", "OnOff"
+		StaticText "$VRPREFMNU_MULTIVIEW_HELP", "Brown"
+	}
+}
+
+OptionValue "SpriteShadowModes"
+{
+	0, "$OPTVAL_OFF"
+	1, "$OPTVAL_DEFAULT"
+	2, "$OPTVAL_SPRSHADALWAYS"
+}
+
+//-------------------------------------------------------------------------------------------
+//
+// HUD menu
+//
+//-------------------------------------------------------------------------------------------
+
+OptionValue CrosshairHealthTypes
+{
+	0.0, "$TXT_NO"
+	1.0, "$OPTVAL_YES_STANDARD"
+	2.0, "$OPTVAL_YES_ENHANCED"
+	3.0, "$OPTVAL_INVERTED"
+}
+
+OptionValue DisplayTagsTypes
+{
+	0.0, "$OPTVAL_NONE"
+	1.0, "$OPTVAL_ITEMS"
+	2.0, "$OPTVAL_WEAPONS"
+	3.0, "$OPTVAL_BOTH"
+}
+
+OptionValue TextColors
+{
+	0.0, "$C_BRICK"
+	1.0, "$C_TAN"
+	2.0, "$C_GRAY"
+	3.0, "$C_GREEN"
+	4.0, "$C_BROWN"
+	5.0, "$C_GOLD"
+	6.0, "$C_RED"
+	7.0, "$C_BLUE"
+	8.0, "$C_ORANGE"
+	9.0, "$C_WHITE"
+	10.0, "$C_YELLOW"
+	11.0, "$C_DEFAULT"
+	12.0, "$C_BLACK"
+	13.0, "$C_LIGHTBLUE"
+	14.0, "$C_CREAM"
+	15.0, "$C_OLIVE"
+	16.0, "$C_DARKGREEN"
+	17.0, "$C_DARKRED"
+	18.0, "$C_DARKBROWN"
+	19.0, "$C_PURPLE"
+	20.0, "$C_DARKGRAY"
+	21.0, "$C_CYAN"
+	22.0, "$C_ICE"
+	23.0, "$C_FIRE"
+	24.0, "$C_SAPPHIRE"
+	25.0, "$C_TEAL"
+}
+
+OptionValue Crosshairs
+{
+	// will be filled in from the XHAIRS lump
+}
+
+OptionValue ZDoomHexen
+{
+	0.0, "$OPTVAL_ZDOOM"
+	1.0, "$OPTVAL_HEXEN"
+}
+
+OptionValue ZDoomStrife
+{
+	0.0, "$OPTVAL_ZDOOM"
+	1.0, "$OPTVAL_STRIFE"
+}
+
+OptionMenu "HUDOptions" protected
+{
+	Title "$HUDMNU_TITLE"
+
+	Submenu "$HUDMNU_SCALEOPT",               "ScalingOptions"
+	Submenu "$HUDMNU_ALTHUD",                 "AltHudOptions"
+	Submenu "$HUDMNU_MESSAGE",                "MessageOptions"
+	Submenu "$HUDMNU_FLASH",                  "FlashOptions"
+	Submenu "$DSPLYMNU_SCOREBOARD",           "ScoreboardOptions"
+	Submenu "$HUDMNU_FONTOPTIONS",            "FontOptions"
+	StaticText " "
+	Option "$HUDMNU_CROSSHAIRON",             "crosshairon", "OnOff"
+	Option "$HUDMNU_CROSSHAIR",               "crosshair", "Crosshairs"
+	Option "$HUDMNU_FORCECROSSHAIR",          "crosshairforce", "OnOff"
+	Option "$HUDMNU_GROWCROSSHAIR",           "crosshairgrow", "OnOff"
+	ColorPicker "$HUDMNU_CROSSHAIRCOLOR",     "crosshaircolor", crosshairhascolor
+	ColorPicker "$HUDMNU_CROSSHAIRCOLORFULL", "crosshaircolorFull", crosshairshowshealth
+	ColorPicker "$HUDMNU_CROSSHAIRCOLORMAX",  "crosshaircolorMax", crosshairshowshealth
+	Option "$HUDMNU_CROSSHAIRCOLORS",         "crosshaircolors", "CrosshairHealthTypes"
+	Slider "$HUDMNU_CROSSHAIRSCALE",          "crosshairscale", 0.1, 10.0, 0.1, 1, "", 0, Gray, 1.0, "$VALFORMAT_MULTIPLIER"
+	Slider "$HUDMNU_CROSSHAIRYOFFSET",        "crosshair_offset_y", -0.5, 0.5, 0.01, 2
+	StaticText " "
+	Option "$HUDMNU_NAMETAGS",                "displaynametags", "DisplayTagsTypes"
+	Option "$HUDMNU_NAMETAGCOLOR",            "nametagcolor", "TextColors", "displaynametags"
+	Option "$HUDMNU_OLDOUCH",                 "st_oldouch", "OnOff"
+	StaticText " "
+	Slider "$DSPLYMNU_MOVEBOB",               "movebob", 0, 1.0, 0.05, 2
+	Slider "$DSPLYMNU_STILLBOB",              "stillbob", 0, 1.0, 0.05, 2
+	Slider "$DSPLYMNU_BOBSPEED",              "wbobspeed", 0, 2.0, 0.1
+	Slider "$DSPLYMNU_BOBFIRE",               "wbobfire", 0, 1.0, 0.1
+	StaticText " "
+	Slider "$DSPLYMNU_MENUDIM",               "dimamount", 0, 1.0, 0.05, 2, "", 0, Gray, 100, "$VALFORMAT_PERCENT"
+	ColorPicker "$DSPLYMNU_DIMCOLOR",         "dimcolor"
+
+	StaticText " "
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar crosshairon crosshair crosshairforce crosshairgrow crosshaircolor crosshaircolors crosshairscale crosshair_offset_y displaynametags nametagcolor st_oldouch movebob stillbob wbobspeed wbobfire dimamount dimcolor"
+}
+
+OptionMenu "FlashOptions" protected
+{
+	Title "$HUDMNU_FLASH"
+	Option "$HUDMNU_HEXENFLASHES",			"pf_hexenweaps", "ZDoomHexen"
+	Option "$HUDMNU_POISONFLASHES",			"pf_poison", "ZDoomHexen"
+	Option "$HUDMNU_ICEFLASHES",			"pf_ice", "ZDoomHexen"
+	Option "$HUDMNU_HAZARDFLASHES",			"pf_hazard", "ZDoomStrife"
+	StaticText " "
+	Slider "$DSPLYMNU_BLOODFADE",				"blood_fade_scalar", 0.0, 1.0, 0.05, 2, "", 0, Gray, 100, "$VALFORMAT_PERCENT"
+	Slider "$DSPLYMNU_PICKUPFADE",				"pickup_fade_scalar", 0.0, 1.0, 0.05, 2, "", 0, Gray, 100, "$VALFORMAT_PERCENT"
+	Slider "$DSPLYMNU_POWERUPFADE",				"powerup_fade_scalar", 0.0, 1.0, 0.05, 2, "", 0, Gray, 100, "$VALFORMAT_PERCENT"
+	Slider "$DSPLYMNU_WATERFADE",				"underwater_fade_scalar", 0.0, 1.0, 0.05, 2, "", 0, Gray, 100, "$VALFORMAT_PERCENT"
+	StaticText " "
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar pf_hexenweaps pf_poison pf_ice pf_hazard blood_fade_scalar pickup_fade_scalar powerup_fade_scalar underwater_fade_scalar"
+}
+
+OptionMenu "ScalingOptions" protected
+{
+	Title "$SCALEMNU_TITLE"
+	ScaleSlider "$HUDMNU_UISCALE",				"uiscale", 0.0, 8.0, 1.0, "$SCALEMNU_ADAPT"
+	StaticText " "
+	// These will need a new control type.
+	StaticText "$SCALEMNU_OVERRIDE", 1
+	ScaleSlider "$SCALEMNU_MESSAGES", 			"con_scaletext", 0.0, 8.0, 1.0, "$SCALEMNU_USEUI"
+	ScaleSlider "$SCALEMNU_CONSOLE", 			"con_scale", 0.0, 8.0, 1.0, "$SCALEMNU_USEUI"
+	Option "$SCALEMNU_HUD_OLDSCALE",			"hud_oldscale", "OnOff"
+	Slider "$SCALEMNU_HUD_SCALEFACTOR",			"hud_scalefactor", 0.0, 1.0, 0.025, 0, "hud_oldscale", 1, Gray, 100, "$VALFORMAT_PERCENT"
+	ScaleSlider "$SCALEMNU_STATBAR",			"st_scale", -1.0, 8.0, 1.0, "$SCALEMNU_USEUI", "$SCALEMNU_USEFS", "hud_oldscale"
+	ScaleSlider "$SCALEMNU_HUD", 				"hud_scale", -1.0, 8.0, 1.0, "$SCALEMNU_USEUI", "$SCALEMNU_USEFS", "hud_oldscale"
+	ScaleSlider "$SCALEMNU_ALTHUD",				"hud_althudscale", 0.0, 8.0, 1.0, "$SCALEMNU_USEUI", "", "hud_oldscale"
+	StaticText " "
+	Option "$SCALEMNU_HUDASPECT", 				"hud_aspectscale", "OnOff"
+	StaticText " "
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar uiscale con_scaletext con_scale st_scale hud_scale hud_althudscale hud_aspectscale"
+	StaticText " "
+	StaticText "$SCALEMNU_SCALECLASSIC", 1
+	Option "$SCALEMNU_INTER",					"inter_classic_scaling", "OnOff"
+	Option "$SCALEMNU_BORDER",					"ui_screenborder_classic_scaling", "OnOff"
+	Slider "$SCALEMNU_FACTOR",					"classic_scaling_factor", 1.0, 3.0, 0.2, 1, "", 0, Gray, 1.0, "$VALFORMAT_MULTIPLIER"
+	Slider "$SCALEMNU_RATIO",					"classic_scaling_pixelaspect", 1.0, 1.2, 0.2, 1, "", 0, Gray, 1.0, "$VALFORMAT_MULTIPLIER"
+	StaticText " "
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar inter_classic_scaling ui_screenborder_classic_scaling classic_scaling_factor classic_scaling_pixelaspect"
+}
+
+//-------------------------------------------------------------------------------------------
+//
+// Alternative HUD
+//
+//-------------------------------------------------------------------------------------------
+
+OptionValue "AMCoordinates"
+{
+	0, "$OPTVAL_PLAYER"
+	1, "$OPTVAL_MAP"
+}
+
+OptionValue "AltHUDAmmo"
+{
+	0, "$OPTVAL_CURRENTWEAPON"
+	1, "$OPTVAL_AVAILABLEWEAPONS"
+	2, "$OPTVAL_ALLWEAPONS"
+}
+
+OptionValue "AltHUDTime"
+{
+	0, "$OPTVAL_OFF"
+	1, "$OPTVAL_LEVELMILLISECONDS"
+	2, "$OPTVAL_LEVELSECONDS"
+	3, "$OPTVAL_LEVEL"
+	4, "$OPTVAL_HUBSECONDS"
+	5, "$OPTVAL_HUB"
+	6, "$OPTVAL_TOTALSECONDS"
+	7, "$OPTVAL_TOTAL"
+	8, "$OPTVAL_SYSTEMSECONDS"
+	9, "$OPTVAL_SYSTEM"
+}
+
+OptionValue "AltHUDLag"
+{
+	0, "$OPTVAL_OFF"
+	1, "$OPTVAL_NETGAMESONLY"
+	2, "$OPTVAL_ALWAYS"
+}
+
+OptionValue "AltHUDAmmoOrder"
+{
+	0, "$OPTVAL_AMMOIMAGETEXT"
+	1, "$OPTVAL_AMMOTEXTIMAGE"
+}
+
+OptionMenu "AltHUDOptions" protected
+{
+	Title "$ALTHUDMNU_TITLE"
+	//Indent 220
+	Option "$ALTHUDMNU_ENABLE",					"hud_althud", "OnOff"
+	Option "$ALTHUDMNU_SHOWSECRETS",			"hud_showsecrets", "OnOff"
+	Option "$ALTHUDMNU_SHOWMONSTERS",			"hud_showmonsters", "OnOff"
+	Option "$ALTHUDMNU_SHOWITEMS",				"hud_showitems", "OnOff"
+	Option "$ALTHUDMNU_SHOWSTATS",				"hud_showstats", "OnOff"
+	Option "$ALTHUDMNU_SHOWBERSERK",			"hud_berserk_health", "OnOff"
+	Option "$ALTHUDMNU_SHOWWEAPONS",			"hud_showweapons", "OnOff"
+	Option "$ALTHUDMNU_SHOWTIMESTAT",			"hud_showtimestat", "OnOff"
+	Option "$ALTHUDMNU_SHOWAMMO",				"hud_showammo", "AltHUDAmmo"
+	Option "$ALTHUDMNU_SHOWTIME",				"hud_showtime", "AltHUDTime"
+	Option "$ALTHUDMNU_TIMECOLOR",				"hud_timecolor", "TextColors"
+	Option "$ALTHUDMNU_SHOWLAG",				"hud_showlag", "AltHUDLag"
+	Option "$ALTHUDMNU_AMMOORDER",				"hud_ammo_order", "AltHUDAmmoOrder"
+	Slider "$ALTHUDMNU_AMMORED",				"hud_ammo_red", 0, 100, 1, 0, "", 0, Gray, 1.0, "$VALFORMAT_PERCENT"
+	Slider "$ALTHUDMNU_AMMOYELLOW",				"hud_ammo_yellow", 0, 100, 1, 0, "", 0, Gray, 1.0, "$VALFORMAT_PERCENT"
+	Option "$ALTHUDMNU_SWAPHEALTHARMOR",		"hud_swaphealtharmor", "OnOff"
+	Slider "$ALTHUDMNU_HEALTHRED",				"hud_health_red", 0, 100, 1, 0, "", 0, Gray, 1.0, "$VALFORMAT_PERCENT"
+	Slider "$ALTHUDMNU_HEALTHYELLOW",			"hud_health_yellow", 0, 100, 1, 0, "", 0, Gray, 1.0, "$VALFORMAT_PERCENT"
+	Slider "$ALTHUDMNU_HEALTHGREEN",			"hud_health_green", 0, 100, 1, 0, "", 0, Gray, 1.0, "$VALFORMAT_PERCENT"
+	Slider "$ALTHUDMNU_ARMORRED",				"hud_armor_red", 0, 100, 1, 0, "", 0, Gray, 1.0, "$VALFORMAT_PERCENT"
+	Slider "$ALTHUDMNU_ARMORYELLOW",			"hud_armor_yellow", 0, 100, 1, 0, "", 0, Gray, 1.0, "$VALFORMAT_PERCENT"
+	Slider "$ALTHUDMNU_ARMORGREEN",				"hud_armor_green", 0, 100, 1, 0, "", 0, Gray, 1.0, "$VALFORMAT_PERCENT"
+	StaticText " "
+	StaticText "$ALTHUDMNU_AUTOMAPHUD", 1
+	option "$ALTHUDMNU_TITLECOLOR",				"hudcolor_titl", "TextColors"
+	option "$ALTHUDMNU_MAPTIMECOLOR",			"hudcolor_ltim", "TextColors"
+	option "$ALTHUDMNU_HUBTIMECOLOR",			"hudcolor_time", "TextColors"
+	option "$ALTHUDMNU_TOTALTIMECOLOR",			"hudcolor_ttim", "TextColors"
+	option "$ALTHUDMNU_COORDINATECOLOR",		"hudcolor_xyco", "TextColors"
+	option "$ALTHUDMNU_COORDINATEMODE",			"map_point_coordinates", "AMCoordinates"
+	option "$ALTHUDMNU_STATSNAMECOLOR",			"hudcolor_statnames", "TextColors"
+	option "$ALTHUDMNU_STATSCOLOR",				"hudcolor_stats", "TextColors"
+	StaticText " "
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar hud_althud hud_showsecrets hud_showmonsters hud_showitems hud_showstats hud_berserk_health hud_showweapons hud_showammo hud_showtime hud_timecolor hud_showlag hud_ammo_order hud_ammo_red hud_ammo_yellow hud_health_red hud_health_yellow hud_health_green hud_armor_red hud_armor_yellow hud_armor_green hudcolor_titl hudcolor_ltim hudcolor_time hudcolor_ttim hudcolor_xyco map_point_coordinates hudcolor_statnames hudcolor_stats"
+}
+
+//-------------------------------------------------------------------------------------------
+//
+// Haptics menu
+//
+//-------------------------------------------------------------------------------------------
+
+OptionValue HapticsCompatTypes
+{
+	0, "$OPTVAL_WARN"
+	1, "$OPTVAL_NONE"
+	2, "$OPTVAL_MATCH"
+	3, "$OPTVAL_ALL"
+}
+
+OptionMenu "HapticsOptions" protected
+{
+	Title		"$HAPMNU_TITLE"
+
+	ScaleSlider	"$JOYMNU_HAPTICS",			"haptics_strength",		0, 10, 1
+	Option 		"$HAPMNU_COMPAT",			"haptics_compat",		"HapticsCompatTypes"
+	StaticText	""
+	StaticText	"$HAPMNU_OPTIONS"
+	Option		"$HAPMNU_OPT_MENU",			"haptics_do_menus",		"OnOff"
+	Option		"$HAPMNU_OPT_ACTION",		"haptics_do_action",	"OnOff"
+	Option		"$HAPMNU_OPT_DAMAGE",		"haptics_do_damage",	"OnOff"
+	Option		"$HAPMNU_OPT_WORLD",		"haptics_do_world",		"OnOff"
+}
+
+//-------------------------------------------------------------------------------------------
+//
+// Misc menu
+//
+//-------------------------------------------------------------------------------------------
+
+OptionValue Autosave
+{
+	0,	"$OPTVAL_ALWAYS"
+	1,	"$OPTVAL_SCRIPTSONLY"
+	2,	"$OPTVAL_NEVER"
+}
+
+OptionValue dehopt
+{
+	0,	"$OPTVAL_NEVER"
+	1,	"$OPTVAL_ALL"
+	2,	"$OPTVAL_ONLYLASTONE"
+}
+
+OptionValue AlwaysTally
+{
+	0,	"$OPTVAL_MODDEFINED"
+	1,	"$OPTVAL_NOTHUBS"
+	2,	"$OPTVAL_WITHHUBS"
+}
+
+OptionValue SaveOrder
+{
+	0,	"$OPTVAL_ALPHABETICAL"
+	1,	"$OPTVAL_LASTSAVEDTIME"
+}
+
+OptionValue Endoom
+{
+	0.0, "$OPTVAL_OFF"
+	1.0, "$OPTVAL_ON"
+	2.0, "$OPTVAL_ONLYMODIFIED"
+}
+
+OptionMenu "MiscOptions" protected
+{
+	Title "$MISCMNU_TITLE"
+	//Indent 220
+	IfOption(Windows)
+	{
+		Option "$MISCMNU_MERGEKEYS", 			"k_mergekeys", "OnOff"
+		Option "$MISCMNU_WINFULLSCREENTOGGLE",	"k_allowfullscreentoggle", "OnOff"
+	}
+	IfOption(Mac)
+	{
+		Option "$MISCMNU_MACFULLSCREENTOGGLE",	"k_allowfullscreentoggle", "OnOff"
+	}
+	//Option "$MISCMNU_QUERYIWAD",				"queryiwad", "OnOff"
+	Option "$MISCMNU_DISABLEAUTOLOAD",			"disableautoload", "OnOff"
+	Option "$MISCMNU_LOADLIGHTS",				"autoloadlights", "OnOff"
+	Option "$MISCMNU_LOADBRIGHTMAPS",			"autoloadbrightmaps", "OnOff"
+	StaticText " "
+	Option "$MISCMNU_FVIEWBOB",            "fviewbob", "OnOff"
+	Option "$MISCMNU_NOCHEATS",					"nocheats", "OnOff"
+	Option "$MISCMNU_ALLCHEATS",				"allcheats", "OnOff"
+	Option "$MISCMNU_ENABLEAUTOSAVES",			"disableautosave", "Autosave"
+	Option "$MISCMNU_RESTARTONDEATH",			"cl_restartondeath", "OnOff"
+	Option "$MISCMNU_SAVELOADCONFIRMATION",		"saveloadconfirmation", "OnOff"
+	Slider "$MISCMNU_AUTOSAVECOUNT",			"autosavecount", 1, 20, 1, 0
+	Option "$MISCMNU_QUICKSAVEROTATION",		"quicksaverotation", "OnOff"
+	Slider "$MISCMNU_QUICKSAVECOUNT",			"quicksaverotationcount", 1, 20, 1, 0
+	Option "$MISCMNU_SAVEORDER",				"save_sort_order", "SaveOrder"
+	Option "$MISCMNU_DEHLOAD",					"dehload", "dehopt"
+	Option "$MISCMNU_ENABLESCRIPTSCREENSHOTS",	"enablescriptscreenshot", "OnOff"
+	Option "$MISCMNU_SETSLOTSTRICT",			"setslotstrict", "YesNo"
+	Option "$MISCMNU_INTERSCROLL",				"nointerscrollabort", "OffOn"
+	Option "$MISCMNU_PAUSEINBACKGROUND",		"i_pauseinbackground", "OnOff"
+	StaticText " "
+	Option "$MISCMNU_CACHENODES",				"gl_cachenodes", "OnOff"
+	Slider "$MISCMNU_CACHETIME",				"gl_cachetime", 0.0, 2.0, 0.1
+	SafeCommand "$MISCMNU_CLEARNODECACHE",		"clearnodecache"
+	StaticText " "
+	Option "$OPTMNU_LANGUAGE",					"language", "LanguageOptions"
+
+	StaticText " "
+	Option "$MISCMNU_QUICKEXIT",				"m_quickexit", "OnOff"
+	Option "$MISCMNU_SHOWEXPERIMENTAL",			"menu_showexperimental", "OnOff"
+
+	StaticText " "
+	Option	"$DSPLYMNU_SHOWENDOOM",			"showendoom", "Endoom"
+
+	StaticText " "
+	Option "$MISCMNU_CLEANMENU",				"m_cleanscale", "OffOn"
+	Option "$MISCMNU_CLEANSTAT",				"wi_cleantextscale", "OnOff"
+	Option "$MISCMNU_WIPERCENT",				"wi_percents", "OnOff"
+
+	StaticText " "
+	Option "$MISCMNU_ALWAYSTALLY",				"sv_alwaystally", "AlwaysTally"
+	StaticText ""
+	Option "$VIDMNU_SHOWFPSONHUD",		        "vid_fps", "OnOff"
+	Option "$MISCMNU_LOCK_FRAMERATE_IF_LOW_PERF",         "cl_capfps", "OnOff"
+
+	//StaticText " "
+	//Option "$MISCMNU_DISCORDRPC",				"i_discordrpc",	"OnOff"
+
+	StaticText " "
+	Option "$MISCMNU_DEVELOPERMODE",			"developer", "DevMessageLevels"
+
+	StaticText " "
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar k_mergekeys k_allowfullscreentoggle queryiwad disableautoload autoloadlights autoloadbrightmaps nocheats allcheats disableautosave saveloadconfirmation autosavecount quicksaverotation quicksaverotationcount dehload enablescriptscreenshot setslotstrict nointerscrollabort gl_cachenodes gl_cachetime clearnodecache m_quickexit menu_showexperimental showendoom menu_hideextreme sv_alwaystally vid_fps cl_capfps developer"
+}
+
+//-------------------------------------------------------------------------------------------
+//
+// Automap Menu
+//
+//-------------------------------------------------------------------------------------------
+
+OptionValue MapColorTypes
+{
+	-1, "$OPTVAL_DEFAULT"
+	0, "$OPTVAL_CUSTOM"
+	1, "$OPTVAL_TRADITIONALDOOM"
+	2, "$OPTVAL_TRADITIONALSTRIFE"
+	3, "$OPTVAL_TRADITIONALRAVEN"
+}
+
+OptionValue SecretTypes
+{
+	0, "$OPTVAL_NEVER"
+	1, "$OPTVAL_ONLYWHENFOUND"
+	2, "$OPTVAL_ALWAYS"
+}
+
+OptionValue RotateTypes
+{
+	0, "$OPTVAL_OFF"
+	1, "$OPTVAL_ON"
+	2, "$OPTVAL_ONFOROVERLAYONLY"
+}
+
+OptionValue OverlayTypes
+{
+	0, "$OPTVAL_OFF"
+	1, "$OPTVAL_OVERLAYNORMAL"
+	2, "$OPTVAL_OVERLAYONLY"
+}
+
+OptionValue MaplabelTypes
+{
+	0, "$OPTVAL_NEVER"
+	1, "$OPTVAL_ALWAYS"
+	2, "$OPTVAL_NOTFORHUBS"
+}
+
+OptionValue STSTypes
+{
+	0, "$OPTVAL_OFF"
+	1, "$OPTVAL_FRONT"
+	2, "$OPTVAL_ANIMATED"
+	3, "$OPTVAL_ROTATED"
+}
+
+OptionValue MapBackTypes
+{
+	0, "$OPTVAL_OFF"
+	1, "$OPTVAL_ON"
+	2, "$OPTVAL_MAPDEFINEDCOLORSONLY"
+}
+
+OptionValue MapTriggers
+{
+	0, "$OPTVAL_OFF"
+	1, "$OPTVAL_NODOORS"
+	2, "$OPTVAL_ON"
+}
+
+OptionString MapMarkFont
+{
+	"AMMNUMx", "$OPTVAL_DEFAULT"
+	"SmallFont", "$OPTVAL_SMALL"
+	"BigFont", "$OPTVAL_LARGE"
+	"ConsoleFont", "$OPTVAL_CONSOLE"
+}
+
+OptionMenu AutomapOptions protected
+{
+	Title "$AUTOMAPMNU_TITLE"
+
+	Option "$AUTOMAPMNU_COLORSET",				"am_colorset", "MapColorTypes"
+	Option "$AUTOMAPMNU_CUSTOMCOLORS",			"am_customcolors", "YesNo"
+	Submenu "$AUTOMAPMNU_SETCUSTOMCOLORS",		"MapColorMenu"
+
+	StaticText ""
+	Submenu "$AUTOMAPMNU_CONTROLS",				"MapControlsMenu"
+
+	StaticText ""
+	Option "$AUTOMAPMNU_ROTATE",				"am_rotate", "RotateTypes"
+	Option "$AUTOMAPMNU_FOLLOW",				"am_followplayer", "OnOff"
+	Option "$AUTOMAPMNU_OVERLAY",				"am_overlay", "OverlayTypes"
+	Option "$AUTOMAPMNU_TEXTURED",				"am_textured", "OnOff"
+	Slider "$AUTOMAPMNU_LINEALPHA",				"am_linealpha", 0.1, 1.0, 0.1, 1
+	Slider "$AUTOMAPMNU_LINETHICKNESS",			"am_linethickness", 1, 8, 1, 0
+	Option "$AUTOMAPMNU_LINEANTIALIASING",		"am_lineantialiasing", "OnOff"
+
+	StaticText ""
+	Option "$AUTOMAPMNU_SHOWITEMS",				"am_showitems", "OnOff"
+	Option "$AUTOMAPMNU_SHOWMONSTERS",			"am_showmonsters", "OnOff"
+	Option "$AUTOMAPMNU_SHOWSECRETS",			"am_showsecrets", "OnOff"
+	Option "$AUTOMAPMNU_SHOWTIME",				"am_showtime", "OnOff"
+	Option "$AUTOMAPMNU_SHOWTOTALTIME",			"am_showtotaltime", "OnOff"
+	Option "$AUTOMAPMNU_SHOWMAPLABEL",			"am_showmaplabel", "MaplabelTypes"
+	Option "$AUTOMAPMNU_SHOWLEVELNAME",			"am_showlevelname", "OnOff"
+
+	StaticText ""
+	Option "$AUTOMAPMNU_SHOWKEYS",				"am_showkeys", "OnOff"
+	Option "$AUTOMAPMNU_SHOWKEYS_ALWAYS",			"am_showkeys_always", "OnOff"
+
+	StaticText ""
+	Option "$AUTOMAPMNU_MAPSECRETS",			"am_map_secrets", "SecretTypes"
+	Option "$AUTOMAPMNU_DRAWMAPBACK",			"am_drawmapback", "MapBackTypes"
+	Option "$AUTOMAPMNU_SHOWTRIGGERLINES",		"am_showtriggerlines", "MapTriggers"
+	Option "$AUTOMAPMNU_SHOWTHINGSPRITES",		"am_showthingsprites", "STSTypes"
+
+	StaticText ""
+	Option "$AUTOMAPMNU_PTOVERLAY",				"am_portaloverlay", "OnOff"
+	Slider "$AUTOMAPMNU_EMPTYSPACEMARGIN",		"am_emptyspacemargin", 0, 90, 5, 0
+
+	StaticText ""
+	Option "$AUTOMAPMNU_MARKFONT",				"am_markfont", "MapMarkFont"
+	Option "$AUTOMAPMNU_MARKCOLOR",				"am_markcolor", "TextColors"
+}
+
+//-------------------------------------------------------------------------------------------
+//
+// Automap Controls
+//
+//-------------------------------------------------------------------------------------------
+
+OptionMenu MapControlsMenu protected
+{
+	Title "$MAPCNTRLMNU_TITLE"
+	ScrollTop 2
+	StaticTextSwitchable 	"$CNTRLMNU_SWITCHTEXT1", "$CNTRLMNU_SWITCHTEXT2", "ControlMessage"
+
+	StaticText ""
+	MapControl "$MAPCNTRLMNU_PANLEFT",			"+am_panleft"
+	MapControl "$MAPCNTRLMNU_PANRIGHT",			"+am_panright"
+	MapControl "$MAPCNTRLMNU_PANUP",			"+am_panup"
+	MapControl "$MAPCNTRLMNU_PANDOWN",			"+am_pandown"
+
+	StaticText ""
+	MapControl "$MAPCNTRLMNU_ZOOMIN",			"+am_zoomin"
+	MapControl "$MAPCNTRLMNU_ZOOMOUT",			"+am_zoomout"
+
+	StaticText ""
+	MapControl "$MAPCNTRLMNU_TOGGLEZOOM",		"am_gobig"
+	MapControl "$MAPCNTRLMNU_TOGGLEFOLLOW",		"am_togglefollow"
+	MapControl "$MAPCNTRLMNU_ROTATE",			"toggle am_rotate"
+	MapControl "$MAPCNTRLMNU_TOGGLEGRID",		"am_togglegrid"
+	MapControl "$MAPCNTRLMNU_TOGGLETEXTURE",	"am_toggletexture"
+
+	StaticText ""
+	MapControl "$MAPCNTRLMNU_SETMARK",			"am_setmark"
+	MapControl "$MAPCNTRLMNU_CLEARMARK",		"am_clearmarks"
+}
+
+//-------------------------------------------------------------------------------------------
+//
+// Automap Colors
+//
+//-------------------------------------------------------------------------------------------
+
+OptionMenu MapColorMenu protected
+{
+	Title "$MAPCOLORMNU_TITLE"
+	SafeCommand "$MAPCOLORMNU_DEFAULTMAPCOLORS", 		"am_restorecolors"
+	StaticText " "
+	Submenu "$MAPCOLORMNU_CHEATMODE",					"MapColorMenuCheats"
+	Submenu "$MAPCOLORMNU_OVERLAY",						"MapColorMenuOverlay"
+	Submenu "$MAPCOLORMNU_OVCHEATMODE",					"MapColorMenuCheatsOverlay"
+	StaticText " "
+	ColorPicker "$MAPCOLORMNU_BACKCOLOR",				"am_backcolor"
+	ColorPicker "$MAPCOLORMNU_YOURCOLOR",				"am_yourcolor"
+	ColorPicker "$MAPCOLORMNU_WALLCOLOR",				"am_wallcolor"
+	ColorPicker "$MAPCOLORMNU_FDWALLCOLOR",				"am_fdwallcolor"
+	ColorPicker "$MAPCOLORMNU_CDWALLCOLOR",				"am_cdwallcolor"
+	ColorPicker "$MAPCOLORMNU_EFWALLCOLOR",				"am_efwallcolor"
+	ColorPicker "$MAPCOLORMNU_GRIDCOLOR",				"am_gridcolor"
+	ColorPicker "$MAPCOLORMNU_XHAIRCOLOR",				"am_xhaircolor"
+	ColorPicker "$MAPCOLORMNU_NOTSEENCOLOR",			"am_notseencolor"
+	ColorPicker "$MAPCOLORMNU_LOCKEDCOLOR",				"am_lockedcolor"
+	ColorPicker "$MAPCOLORMNU_INTRALEVELCOLOR",			"am_intralevelcolor"
+	ColorPicker "$MAPCOLORMNU_INTERLEVELCOLOR",			"am_interlevelcolor"
+	ColorPicker "$MAPCOLORMNU_SECRETSECTORCOLOR",		"am_secretsectorcolor"
+	ColorPicker "$MAPCOLORMNU_UNEXPLOREDSECRETCOLOR",	"am_unexploredsecretcolor"
+	ColorPicker "$MAPCOLORMNU_SPECIALWALLCOLOR",		"am_specialwallcolor"
+	ColorPicker "$MAPCOLORMNU_SECTORFILLCOLOR",			"am_sectorfillcolor"
+	Slider "$MAPCOLORMNU_SECTORFILLALPHA",				"am_sectorfillalpha", 0.0, 1.0, 0.1, 1
+	ColorPicker "$MAPCOLORMNU_PORTAL",					"am_portalcolor"
+}
+
+OptionMenu MapColorMenuCheats protected
+{
+	Title "$MAPCOLORMNU_CHEATMODE"
+	ColorPicker "$MAPCOLORMNU_TSWALLCOLOR",				"am_tswallcolor"
+	ColorPicker "$MAPCOLORMNU_SECRETWALLCOLOR",			"am_secretwallcolor"
+	ColorPicker "$MAPCOLORMNU_THINGCOLOR",				"am_thingcolor"
+	ColorPicker "$MAPCOLORMNU_MONSTERCOLOR",			"am_thingcolor_monster"
+	ColorPicker "$MAPCOLORMNU_NONCOUNTINGMONSTERCOLOR",	"am_thingcolor_ncmonster"
+	ColorPicker "$MAPCOLORMNU_FRIENDCOLOR",				"am_thingcolor_friend"
+	ColorPicker "$MAPCOLORMNU_ITEMCOLOR",				"am_thingcolor_item"
+	ColorPicker "$MAPCOLORMNU_COUNTITEMCOLOR",			"am_thingcolor_citem"
+}
+
+OptionMenu MapColorMenuOverlay protected
+{
+	Title "$MAPCOLORMNU_OVERLAY"
+	ColorPicker "$MAPCOLORMNU_YOURCOLOR",				"am_ovyourcolor"
+	ColorPicker "$MAPCOLORMNU_WALLCOLOR",				"am_ovwallcolor"
+	ColorPicker "$MAPCOLORMNU_FDWALLCOLOR",				"am_ovfdwallcolor"
+	ColorPicker "$MAPCOLORMNU_CDWALLCOLOR",				"am_ovcdwallcolor"
+	ColorPicker "$MAPCOLORMNU_EFWALLCOLOR",				"am_ovefwallcolor"
+	ColorPicker "$MAPCOLORMNU_NOTSEENCOLOR",			"am_ovunseencolor"
+	ColorPicker "$MAPCOLORMNU_LOCKEDCOLOR",				"am_ovlockedcolor"
+	ColorPicker "$MAPCOLORMNU_INTRALEVELCOLOR",			"am_ovtelecolor"
+	ColorPicker "$MAPCOLORMNU_INTERLEVELCOLOR",			"am_ovinterlevelcolor"
+	ColorPicker "$MAPCOLORMNU_SECRETSECTORCOLOR",		"am_ovsecretsectorcolor"
+	ColorPicker "$MAPCOLORMNU_UNEXPLOREDSECRETCOLOR",	"am_ovunexploredsecretcolor"
+	ColorPicker "$MAPCOLORMNU_SPECIALWALLCOLOR",		"am_ovspecialwallcolor"
+	ColorPicker "$MAPCOLORMNU_SECTORFILLCOLOR",			"am_ovsectorfillcolor"
+	Slider "$MAPCOLORMNU_SECTORFILLALPHA",				"am_ovsectorfillalpha", 0.0, 1.0, 0.1, 1
+	ColorPicker "$MAPCOLORMNU_PORTAL",					"am_ovportalcolor"
+}
+
+OptionMenu MapColorMenuCheatsOverlay protected
+{
+	Title "$MAPCOLORMNU_OVCHEATMODE"
+	ColorPicker "$MAPCOLORMNU_TSWALLCOLOR",				"am_ovotherwallscolor"
+	ColorPicker "$MAPCOLORMNU_SECRETWALLCOLOR",			"am_ovsecretwallcolor"
+	ColorPicker "$MAPCOLORMNU_THINGCOLOR",				"am_ovthingcolor"
+	ColorPicker "$MAPCOLORMNU_MONSTERCOLOR",			"am_ovthingcolor_monster"
+	ColorPicker "$MAPCOLORMNU_NONCOUNTINGMONSTERCOLOR",	"am_ovthingcolor_ncmonster"
+	ColorPicker "$MAPCOLORMNU_FRIENDCOLOR",				"am_ovthingcolor_friend"
+	ColorPicker "$MAPCOLORMNU_ITEMCOLOR",				"am_ovthingcolor_item"
+	ColorPicker "$MAPCOLORMNU_COUNTITEMCOLOR",			"am_ovthingcolor_citem"
+}
+
+//-------------------------------------------------------------------------------------------
+//
+// Color Picker
+//
+//-------------------------------------------------------------------------------------------
+
+OptionMenu ColorPickerMenu protected
+{
+	Title "$MNU_COLORPICKER"
+	// This menu will be created by the calling code
+}
+
+//-------------------------------------------------------------------------------------------
+//
+// Messages
+//
+//-------------------------------------------------------------------------------------------
+
+OptionValue MessageLevels
+{
+	0.0, "$OPTVAL_ITEMPICKUP"
+	1.0, "$OPTVAL_OBITUARIES"
+	2.0, "$OPTVAL_CRITICALMESSAGES"
+}
+
+OptionValue DevMessageLevels
+{
+	0, "$OPTVAL_OFF"
+	1, "$OPTVAL_ERRORS"
+	2, "$OPTVAL_WARNINGS"
+	3, "$OPTVAL_NOTIFICATIONS"
+	4, "$OPTVAL_EVERYTHING"
+}
+
+OptionMenu MessageOptions protected
+{
+	Title 	"$MSGMNU_TITLE"
+	Option "$MSGMNU_SHOWMESSAGES",				"show_messages", "OnOff"
+	Slider "$MSGMNU_MESSAGEQUEUE",				"con_notifylines", 1, 10, 1,0
+	Slider "$MSGMNU_MESSAGEFADE",               "con_notifytime", 0.0, 10.0, 0.1,1
+	Option "$MSGMNU_STACKIDENTICAL",			"con_stackident", "OnOff"
+	Option "$MSGMNU_SHOWOBITUARIES",			"show_obituaries", "OnOff"
+	Option "$MSGMNU_SHOWSECRETS",				"cl_showsecretmessage", "OnOff"
+	Option "$MSGMNU_MESSAGELEVEL", 				"msg", "MessageLevels"
+	Option "$MSGMNU_DEVELOPER", 				"developer", "DevMessageLevels"
+	Option "$MSGMNU_CENTERMESSAGES",			"con_centernotify", "OnOff"
+	Option "$MSGMNU_PULSEMESSAGES",				"con_pulsetext", "OnOff"
+	Option "$MSGMNU_SUBTITLES",					"inter_subtitles", "OnOff"
+	StaticText " "
+	StaticText "$MSGMNU_MESSAGECOLORS", 1
+	StaticText " "
+	Option "$MSGMNU_ITEMPICKUP",				"msg0color", "TextColors"
+	Option "$MSGMNU_OBITUARIES",				"msg1color", "TextColors"
+	Option "$MSGMNU_CRITICALMESSAGES",			"msg2color", "TextColors"
+	Option "$MSGMNU_CHATMESSAGES",				"msg3color", "TextColors"
+	Option "$MSGMNU_TEAMMESSAGES",				"msg4color", "TextColors"
+	Option "$MSGMNU_CENTEREDMESSAGES",			"msgmidcolor", "TextColors"
+	StaticText " "
+	Option "$MSGMNU_SCREENSHOTMESSAGES",		"screenshot_quiet",	"OffOn"
+	Option "$MSGMNU_LONGSAVEMESSAGES",			"longsavemessages",	"OnOff"
+}
+
+//-------------------------------------------------------------------------------------------
+//
+// Scoreboard
+//
+//-------------------------------------------------------------------------------------------
+
+OptionMenu ScoreboardOptions protected
+{
+	Title "$SCRBRDMNU_TITLE"
+	StaticText "$SCRBRDMNU_COOPERATIVE", 1
+	StaticText " "
+	Option "$SCRBRDMNU_ENABLE",				"sb_cooperative_enable", "YesNo"
+	Option "$SCRBRDMNU_HEADERCOLOR",		"sb_cooperative_headingcolor", "TextColors"
+	Option "$SCRBRDMNU_YOURCOLOR",			"sb_cooperative_yourplayercolor", "TextColors"
+	Option "$SCRBRDMNU_OTHERPLAYERCOLOR",	"sb_cooperative_otherplayercolor", "TextColors"
+	StaticText " "
+	StaticText " "
+	StaticText "$SCRBRDMNU_DEATHMATCH", 1
+	StaticText " "
+	Option "$SCRBRDMNU_ENABLE",				"sb_deathmatch_enable",	"YesNo"
+	Option "$SCRBRDMNU_HEADERCOLOR",		"sb_deathmatch_headingcolor", "TextColors"
+	Option "$SCRBRDMNU_YOURCOLOR",			"sb_deathmatch_yourplayercolor", "TextColors"
+	Option "$SCRBRDMNU_OTHERPLAYERCOLOR",	"sb_deathmatch_otherplayercolor", "TextColors"
+	StaticText " "
+	StaticText " "
+	StaticText "$SCRBRDMNU_TEAMDEATHMATCH", 1
+	StaticText " "
+	Option "$SCRBRDMNU_ENABLE",				"sb_teamdeathmatch_enable", "YesNo"
+	Option "$SCRBRDMNU_HEADERCOLOR",		"sb_teamdeathmatch_headingcolor", "TextColors"
+}
+
+//-------------------------------------------------------------------------------------------
+//
+// Font options
+//
+//-------------------------------------------------------------------------------------------
+
+OptionMenu FontOptions protected
+{
+	Title "$HUDMNU_FONTOPTIONS"
+	Option "$FONTMNU_LOG",					"log_vgafont", "YesNo"
+	Option "$FONTMNU_DLG",					"dlg_vgafont", "YesNo"
+}
+
+//-------------------------------------------------------------------------------------------
+//
+// Gameplay Options (dmflags) Menu
+//
+//-------------------------------------------------------------------------------------------
+
+OptionValue  SmartAim
+{
+	0.0, "$OPTVAL_OFF"
+	1.0, "$OPTVAL_ON"
+	2.0, "$OPTVAL_NEVERFRIENDS"
+	3.0, "$OPTVAL_ONLYMONSTERS"
+}
+
+OptionValue  FallingDM
+{
+	0, "$OPTVAL_OFF"
+	1, "$OPTVAL_OLD"
+	2, "$OPTVAL_HEXEN"
+	3, "$OPTVAL_STRIFE"
+}
+
+OptionValue  JumpCrouchFreeLook
+{
+	0, "$OPTVAL_DEFAULT"
+	1, "$OPTVAL_OFF"
+	2, "$OPTVAL_ON"
+}
+
+OptionMenu GameplayOptions protected
+{
+	Position -35
+	Title 	"$GMPLYMNU_TITLE"
+	//Indent 222
+	Submenu "$GMPLYMNU_DEATHMATCH",				"DeathmatchOptions"
+	Submenu "$GMPLYMNU_COOPERATIVE",			"CoopOptions"
+	StaticText " "
+	Option "$GMPLYMNU_TEAMPLAY",				"teamplay",	"OnOff"
+	Slider	"$GMPLYMNU_TEAMDAMAGE",				"teamdamage", 0, 1, 0.05, 0, "", 0, Gray, 100, "$VALFORMAT_PERCENT"
+	StaticText " "
+	Option "$GMPLYMNU_SMARTAUTOAIM",			"sv_smartaim", "SmartAim"
+	StaticText " "
+	Option "$GMPLYMNU_PISTOLSTART",				"sv_pistolstart", "YesNo"
+	Option "$GMPLYMNU_FALLINGDAMAGE",			"sv_fallingdamage", "FallingDM"
+	Option "$GMPLYMNU_DROPWEAPON",				"sv_weapondrop", "YesNo"
+	Option "$GMPLYMNU_DOUBLEAMMO",				"sv_doubleammo", "YesNo"
+	Option "$GMPLYMNU_INFINITEAMMO",			"sv_infiniteammo", "YesNo"
+	Option "$GMPLYMNU_INFINITEINVENTORY",		"sv_infiniteinventory", "YesNo"
+	Option "$GMPLYMNU_NOMONSTERS",				"sv_nomonsters", "YesNo"
+	Option "$GMPLYMNU_NOMONSTERSTOEXIT",		"sv_killallmonsters", "YesNo"
+	Option "$GMPLYMNU_MONSTERSRESPAWN",			"sv_monsterrespawn", "YesNo"
+	Option "$GMPLYMNU_NORESPAWN",				"sv_norespawn", "YesNo"
+	Option "$GMPLYMNU_ITEMSRESPAWN",			"sv_itemrespawn", "YesNo"
+	Option "$GMPLYMNU_SUPERRESPAWN",			"sv_respawnsuper", "YesNo"
+	Option "$GMPLYMNU_FASTMONSTERS",			"sv_fastmonsters", "YesNo"
+	Option "$GMPLYMNU_INSTANTREACTION",			"sv_instantreaction", "YesNo"
+	Option "$GMPLYMNU_DEGENERATION",			"sv_degeneration", "YesNo"
+	Option "$GMPLYMNU_NOAUTOAIM",				"sv_noautoaim", "NoYes"
+	Option "$GMPLYMNU_NOVERTSPREAD",			"sv_novertspread", "NoYes"
+	Option "$GMPLYMNU_ALLOWSUICIDE",			"sv_disallowsuicide", "NoYes"
+	Option "$GMPLYMNU_ALLOWJUMP",				"sv_jump", "JumpCrouchFreeLook"
+	Option "$GMPLYMNU_ALLOWCROUCH",				"sv_crouch", "JumpCrouchFreeLook"
+	Option "$GMPLYMNU_ALLOWFREELOOK",			"sv_freelook", "JumpCrouchFreeLook"
+	Option "$GMPLYMNU_ALLOWFOV",				"sv_nofov", "NoYes"
+	Option "$GMPLYMNU_BFGFREEAIM",				"sv_nobfgaim", "NoYes"
+	Option "$GMPLYMNU_ALLOWAUTOMAP",			"sv_noautomap", "NoYes"
+	Option "$GMPLYMNU_AUTOMAPALLIES",			"sv_noautomapallies", "NoYes"
+	Option "$GMPLYMNU_ALLOWSPYING",				"sv_disallowspying", "NoYes"
+	Option "$GMPLYMNU_CHASECAM",				"sv_chasecam", "YesNo"
+	Option "$GMPLYMNU_DONTCHECKAMMO",			"sv_dontcheckammo", "NoYes"
+	Option "$GMPLYMNU_KILLBOSSSPAWNS",			"sv_killbossmonst", "YesNo"
+	Option "$GMPLYMNU_NOCOUNTENDMONSTER",		"sv_nocountendmonst", "NoYes"
+	Option "$GMPLYMNU_ALWAYSSPAWNMULTI",		"sv_alwaysspawnmulti", "YesNo"
+	Class "GameplayMenu"
+	StaticText " "
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar teamplay teamdamage sv_smartaim sv_fallingdamage sv_weapondrop sv_doubleammo sv_infiniteammo sv_infiniteinventory sv_nomonsters sv_killallmonsters sv_monsterrespawn sv_norespawn sv_itemrespawn sv_respawnsuper sv_fastmonsters sv_instantreaction sv_degeneration sv_noautoaim sv_disallowsuicide sv_jump sv_crouch sv_freelook sv_nofov sv_nobfgaim sv_noautomap sv_noautomapallies sv_disallowspying sv_chasecam sv_dontcheckammo sv_killbossmonst sv_nocountendmonst sv_alwaysspawnmulti"
+}
+
+OptionMenu DeathmatchOptions protected
+{
+	Position -35
+	Title 	"$GMPLYMNU_DEATHMATCH"
+
+	Option "$GMPLYMNU_WEAPONSSTAY",				"sv_weaponstay", "YesNo"
+	Option "$GMPLYMNU_ALLOWPOWERUPS",			"sv_noitems", "NoYes"
+	Option "$GMPLYMNU_ALLOWHEALTH",				"sv_nohealth", "NoYes"
+	Option "$GMPLYMNU_ALLOWARMOR",				"sv_noarmor", "NoYes"
+	Option "$GMPLYMNU_SPAWNFARTHEST",			"sv_spawnfarthest", "YesNo"
+	Option "$GMPLYMNU_SAMEMAP",					"sv_samelevel", "YesNo"
+	Option "$GMPLYMNU_FORCERESPAWN",			"sv_forcerespawn", "YesNo"
+	Option "$GMPLYMNU_ALLOWEXIT",				"sv_noexit", "NoYes"
+	Option "$GMPLYMNU_BARRELSRESPAWN",			"sv_barrelrespawn", "YesNo"
+	Option "$GMPLYMNU_RESPAWNPROTECTION",		"sv_respawnprotect", "YesNo"
+	Option "$GMPLYMNU_LOSEFRAG",				"sv_losefrag", "YesNo"
+	Option "$GMPLYMNU_KEEPFRAGS",				"sv_keepfrags", "YesNo"
+	Option "$GMPLYMNU_NOTEAMSWITCH",			"sv_noteamswitch", "YesNo"
+	Option "$GMPLYMNU_NOEXTRAAMMO",				"sv_noextraammo", "NoYes"
+	Class "GameplayMenu"
+}
+
+OptionMenu CoopOptions protected
+{
+	Position -35
+	Title 	"$GMPLYMNU_COOPERATIVE"
+
+	Option "$GMPLYMNU_MULTIPLAYERTHINGS",	 	"sv_nothingspawn", "NoYes"
+	Option "$GMPLYMNU_COOPTHINGS",	 			"sv_nocoopthings", "NoYes"
+	Option "$GMPLYMNU_COOPITEMS",	 			"sv_nocoopitems", "NoYes"
+	Option "$GMPLYMNU_MULTIPLAYERWEAPONS",	 	"sv_noweaponspawn", "NoYes"
+	Option "$GMPLYMNU_LOSEINVENTORY",			"sv_cooploseinventory", "YesNo"
+	Option "$GMPLYMNU_KEEPKEYS",				"sv_cooplosekeys", "NoYes"
+	Option "$GMPLYMNU_KEEPWEAPONS",				"sv_cooploseweapons", "NoYes"
+	Option "$GMPLYMNU_KEEPARMOR",				"sv_cooplosearmor", "NoYes"
+	Option "$GMPLYMNU_KEEPPOWERUPS",			"sv_cooplosepowerups", "NoYes"
+	Option "$GMPLYMNU_KEEPAMMO",				"sv_cooploseammo", "NoYes"
+	Option "$GMPLYMNU_LOSEHALFAMMO",			"sv_coophalveammo", "YesNo"
+	Option "$GMPLYMNU_SPAWNWHEREDIED",			"sv_samespawnspot", "YesNo"
+	Option "$GMPLYMNU_NOPLAYERCLIP",			"sv_noplayerclip", "YesNo"
+	Option "$GMPLYMNU_SHAREKEYS",				"sv_coopsharekeys", "YesNo"
+	Option "$GMPLYMNU_LOCALITEMS",				"sv_localitems", "YesNo"
+	Option "$GMPLYMNU_NOLOCALDROP",				"sv_nolocaldrops", "YesNo"
+	Option "$GMPLYMNU_REMEMBERWEAP",			"sv_rememberlastweapon", "YesNo"
+	Class "GameplayMenu"
+}
+
+//-------------------------------------------------------------------------------------------
+//
+// Compatibility Options Menu
+//
+//-------------------------------------------------------------------------------------------
+
+OptionValue CompatModes
+{
+	0, "$OPTVAL_DEFAULT"
+	1, "$OPTVAL_DOOM"
+	2, "$OPTVAL_DOOMSTRICT"
+	3, "$OPTVAL_BOOM"
+	6, "$OPTVAL_BOOMSTRICT"
+	5, "$OPTVAL_MBF"
+	7, "$OPTVAL_MBFSTRICT"
+	8, "$OPTVAL_MBF21"
+	9, "$OPTVAL_MBF21STRICT"
+	4, "$OPTVAL_ZDOOM2063"
+}
+
+OptionMenu "CompatibilityOptions" protected
+{
+	Position -35
+	Title "$CMPTMNU_TITLE"
+	Option "$CMPTMNU_AUTO",							"sv_autocompat", "OnOff"
+	Option "$CMPTMNU_MODE",							"compatmode", "CompatModes", "", 1
+	StaticText " "
+	Submenu "$CMPTMNU_ACTORBEHAVIOR",				"CompatActorMenu"
+	Submenu "$CMPTMNU_DEHACKEDBEHAVIOR",			"CompatDehackedMenu"
+	Submenu "$CMPTMNU_MAPACTIONBEHAVIOR",			"CompatMapMenu"
+	Submenu "$CMPTMNU_PHYSICSBEHAVIOR",				"CompatPhysicsMenu"
+	Submenu "$CMPTMNU_RENDERINGBEHAVIOR",			"CompatRenderMenu"
+	Submenu "$CMPTMNU_SOUNDBEHAVIOR",				"CompatSoundMenu"
+	Class "CompatibilityMenu"
+}
+
+OptionMenu "CompatActorMenu" protected
+{
+	Position -35
+	Title "$CMPTMNU_ACTORBEHAVIOR"
+	Option "$CMPTMNU_VILEGHOSTS",					"compat_VILEGHOSTS", "YesNo"
+	Option "$CMPTMNU_NOBLOCKFRIENDS",				"compat_NOBLOCKFRIENDS", "YesNo"
+	Option "$CMPTMNU_LIMITPAIN",					"compat_LIMITPAIN", "YesNo"
+	Option "$CMPTMNU_MBFMONSTERMOVE",				"compat_MBFMONSTERMOVE", "YesNo"
+	Option "$CMPTMNU_CROSSDROPOFF",					"compat_CROSSDROPOFF", "YesNo"
+	Option "$CMPTMNU_DROPOFF",						"compat_DROPOFF", "YesNo"
+	Option "$CMPTMNU_INVISIBILITY",					"compat_INVISIBILITY", "YesNo"
+	Option "$CMPTMNU_MINOTAUR",						"compat_MINOTAUR", "YesNo"
+	Option "$CMPTMNU_NOTOSSDROPS",					"compat_NOTOSSDROPS", "YesNo"
+	Option "$CMPTMNU_VOODOOZOMBIES",				"compat_voodoozombies", "YesNo"
+	Option "$CMPTMNU_OLDRANDOM",					"compat_oldrandom", "YesNo"
+	Class "CompatibilityMenu"
+}
+
+OptionMenu "CompatDehackedMenu" protected
+{
+	Position -35
+	Title "$CMPTMNU_DEHACKEDBEHAVIOR"
+	Option "$CMPTMNU_DEHHEALTH",					"compat_DEHHEALTH", "YesNo"
+	Option "$CMPTMNU_MUSHROOM",						"compat_MUSHROOM", "YesNo"
+	Class "CompatibilityMenu"
+}
+
+OptionMenu "CompatMapMenu" protected
+{
+	Position -35
+	Title "$CMPTMNU_MAPACTIONBEHAVIOR"
+	Option "$CMPTMNU_USEBLOCKING",					"compat_USEBLOCKING", "YesNo"
+	Option "$CMPTMNU_ANYBOSSDEATH",					"compat_ANYBOSSDEATH", "YesNo"
+	Option "$CMPTMNU_NODOORLIGHT",					"compat_NODOORLIGHT", "YesNo"
+	Option "$CMPTMNU_LIGHT",						"compat_LIGHT", "YesNo"
+	Option "$CMPTMNU_SHORTTEX",						"compat_SHORTTEX", "YesNo"
+	Option "$CMPTMNU_STAIRS",						"compat_stairs", "YesNo"
+	Option "$CMPTMNU_FLOORMOVE",					"compat_floormove", "YesNo"
+	Option "$CMPTMNU_POINTONLINE",					"compat_pointonline", "YesNo"
+	Option "$CMPTMNU_MULTIEXIT",					"compat_multiexit", "YesNo"
+	Option "$CMPTMNU_TELEPORT",						"compat_teleport", "YesNo"
+	Option "$CMPTMNU_FDTELEPORT",					"compat_fdteleport", "YesNo"
+	Option "$CMPTMNU_PUSHWINDOW",					"compat_pushwindow", "YesNo"
+	Option "$CMPTMNU_CHECKSWITCHRANGE",				"compat_checkswitchrange", "YesNo"
+	Option "$CMPTMNU_RAILINGHACK",					"compat_railing", "YesNo"
+	Option "$CMPTMNU_TRANSFERSECRET",				"compat_transfersecret", "YesNo"
+	Class "CompatibilityMenu"
+}
+
+OptionMenu "CompatPhysicsMenu" protected
+{
+	Position -35
+	Title "$CMPTMNU_PHYSICSBEHAVIOR"
+	Option "$CMPTMNU_NOPASSOVER",					"compat_nopassover", "YesNo"
+	Option "$CMPTMNU_BOOMSCROLL",					"compat_BOOMSCROLL", "YesNo"
+	Option "$CMPTMNU_BADANGLES",					"compat_badangles", "YesNo"
+	Option "$CMPTMNU_WALLRUN",						"compat_WALLRUN", "YesNo"
+	Option "$CMPTMNU_RAVENSCROLL",					"compat_RAVENSCROLL", "YesNo"
+	Option "$CMPTMNU_TRACE",						"compat_TRACE", "YesNo"
+	Option "$CMPTMNU_HITSCAN",						"compat_HITSCAN", "YesNo"
+	Option "$CMPTMNU_MISSILECLIP",					"compat_MISSILECLIP", "YesNo"
+	Option "$CMPTMNU_EXPLODE1",						"compat_explode1", "YesNo"
+	Option "$CMPTMNU_EXPLODE2",						"compat_explode2", "YesNo"
+	Option "$CMPTMNU_EMULATEMIKOPORTALS",			"compat_emulatemikoportals", "YesNo"
+	Class "CompatibilityMenu"
+}
+
+OptionMenu "CompatRenderMenu" protected
+{
+	Position -35
+	Title "$CMPTMNU_RENDERINGBEHAVIOR"
+	Option "$CMPTMNU_POLYOBJ",						"compat_POLYOBJ", "YesNo"
+	Option "$CMPTMNU_MASKEDMIDTEX",					"compat_MASKEDMIDTEX", "YesNo"
+	Option "$CMPTMNU_SPRITESORT",					"compat_SPRITESORT", "YesNo"
+	Class "CompatibilityMenu"
+}
+
+OptionMenu "CompatSoundMenu" protected
+{
+	Position -35
+	Title "$CMPTMNU_SOUNDBEHAVIOR"
+	Option "$CMPTMNU_SOUNDSLOTS",					"compat_soundslots", "YesNo"
+	Option "$CMPTMNU_SILENTPICKUP",					"compat_SILENTPICKUP", "YesNo"
+	Option "$CMPTMNU_SILENTINSTANTFLOORS",			"compat_silentinstantfloors", "YesNo"
+	Option "$CMPTMNU_SECTORSOUNDS",					"compat_SECTORSOUNDS", "YesNo"
+	Option "$CMPTMNU_SOUNDTARGET",					"compat_SOUNDTARGET", "YesNo"
+	Class "CompatibilityMenu"
+}
+
+//-------------------------------------------------------------------------------------------
+//
+// Sound Options Menu
+//
+//-------------------------------------------------------------------------------------------
+
+OptionValue SampleRates
+{
+	0,     "$OPTVAL_DEFAULT"
+	8000,  "$OPTVAL_8000HZ"
+	11025, "$OPTVAL_11025HZ"
+	22050, "$OPTVAL_22050HZ"
+	32000, "$OPTVAL_32000HZ"
+	44100, "$OPTVAL_44100HZ"
+	48000, "$OPTVAL_48000HZ"
+}
+
+OptionValue BufferSizes
+{
+	0,    "$OPTVAL_DEFAULT"
+	64,   "$OPTVAL_64SAMPLES"
+	128,  "$OPTVAL_128SAMPLES"
+	256,  "$OPTVAL_256SAMPLES"
+	512,  "$OPTVAL_512SAMPLES"
+	1024, "$OPTVAL_1024SAMPLES"
+	2048, "$OPTVAL_2048SAMPLES"
+	4096, "$OPTVAL_4096SAMPLES"
+}
+
+OptionValue BufferCounts
+{
+	0,  "$OPTVAL_DEFAULT"
+	2,  "2"
+	3,  "3"
+	4,  "4"
+	5,  "5"
+	6,  "6"
+	7,  "7"
+	8,  "8"
+	9,  "9"
+	10, "10"
+	11, "11"
+	12, "12"
+}
+
+OptionString ALDevices
+{
+	// filled in by the sound code
+}
+
+OptionString ALResamplers
+{
+	// filled in by the sound code
+}
+
+OptionString SpeakerModes
+{
+	"Auto",     "$OPTSTR_AUTO"
+	"Mono",     "$OPTSTR_MONO"
+	"Stereo",   "$OPTSTR_STEREO"
+	"Prologic", "$OPTSTR_PROLOGIC"
+	"Quad",     "$OPTSTR_QUAD"
+	"Surround", "$OPTSTR_SURROUND"
+	"5.1",      "$OPTSTR_5POINT1"
+	"7.1",      "$OPTSTR_7POINT1"
+}
+
+OptionString Resamplers
+{
+	"NoInterp", "$OPTSTR_NOINTERPOLATION"
+	"Linear",   "$OPTVAL_LINEAR_1"
+	"Cubic",    "$OPTVAL_CUBIC"
+	"Spline",   "$OPTSTR_SPLINE"
+}
+
+OptionValue MusicModes
+{
+	0, "$OPTVAL_NORMAL"
+	1, "$OPTVAL_DIRECTMIX"
+	2, "$OPTVAL_SUPERSTEREO"
+}
+
+OptionMenu OpenALSoundItems protected
+{
+	Title "$OPENALMNU_TITLE"
+
+	Option "$OPENALMNU_PLAYBACKDEVICE",   "snd_aldevice",         "ALDevices"
+	Option "$OPENALMNU_ENABLEEFX",        "snd_efx",              "OnOff"
+	Option "$OPENALMNU_RESAMPLER",        "snd_alresampler",      "ALResamplers"
+	StaticText " "
+	Option "$OPENALMNU_MUSICMODE",        "snd_musicmode",        "MusicModes"
+	Slider "$OPENALMNU_SUPERSTEREOWIDTH", "snd_superstereowidth", 0, 1, 0.05, 0, "", 0, Gray, 100, "$VALFORMAT_PERCENT"
+}
+
+OptionValue MidiDevices
+{
+	// No longer in use but kept around in case some mods use it.
+}
+
+OptionValue GusMemory
+{
+	0, "$OPTVAL_UNLIMITED"
+	1, "$OPTVAL_256K"
+	2, "$OPTVAL_512K"
+	3, "$OPTVAL_768K"
+	4, "$OPTVAL_1024K"
+}
+
+OptionValue OplCores
+{
+	0, "$OPTVAL_MAMEOPL2"
+	1, "$OPTVAL_DOSBOXOPL3"
+	2, "$OPTVAL_JAVAOPL3"
+	3, "$OPTVAL_NUKEDOPL3"
+}
+
+OptionMenu SoundOptions protected
+{
+	Title "$SNDMNU_TITLE"
+
+	Slider "$MODMNU_MASTERVOLUME",      "snd_mastervolume",    0, 1, 0.01, 0, "", 0, Gray, 100, "$VALFORMAT_PERCENT"
+	StaticText " "
+	Slider "$SNDMNU_SFXVOLUME",         "snd_sfxvolume",       0, 1, 0.01, 0, "", 0, Gray, 100, "$VALFORMAT_PERCENT"
+	Slider "$SNDMNU_MUSICVOLUME",       "snd_musicvolume",     0, 1, 0.01, 0, "", 0, Gray, 100, "$VALFORMAT_PERCENT"
+	Slider "$SNDMNU_FOOTSTEPVOLUME",    "snd_footstepvolume",  0, 1, 0.01, 0, "", 0, Gray, 100, "$VALFORMAT_PERCENT"
+	StaticText " "
+	Slider "$SNDMNU_MENUVOLUME",        "snd_menuvolume",      0, 1, 0.01, 0, "", 0, Gray, 100, "$VALFORMAT_PERCENT"
+	StaticText " "
+	Submenu "$SNDMNU_MIDIDEVICE",       "MidiDevicesMenu"
+	Submenu "$SNDMNU_MIDIPLAYER",       "MidiPlayerOptions"
+	StaticText " "
+	Slider "$SNDMNU_CHANNELS",          "snd_channels",        64, 256, 8, 0
+	Option "$SNDMNU_BACKGROUND",        "i_soundinbackground", "OnOff"
+	Option "$SNDMNU_UNDERWATERREVERB",  "snd_waterreverb",     "OnOff"
+	Option "$SNDMNU_RANDOMIZEPITCHES",  "snd_pitched",         "OnOff"
+	Option "$ADVSNDMNU_SAMPLERATE",     "snd_samplerate",      "SampleRates"
+	Option "$ADVSNDMNU_HRTF",           "snd_hrtf",            "AutoOffOn"
+	StaticText " "
+	ifoption(openal)
+	{
+		Submenu "$SNDMNU_OPENAL",       "OpenALSoundItems"
+	}
+	Submenu "$SNDMNU_MODREPLAYER",      "ModReplayerOptions"
+	Submenu "$OPTMNU_REVERB",           "ReverbEdit"
+	StaticText " "
+	Command "$SNDMNU_RESTART",          "snd_reset"
+	StaticText " "
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar snd_mastervolume snd_sfxvolume snd_musicvolume snd_footstepvolume snd_menuvolume snd_mididevice snd_waterreverb snd_pitched snd_channels snd_samplerate snd_hrtf i_soundinbackground"
+}
+
+OptionMenu MidiDevicesMenu protected
+{
+	title "$SNDMNU_MIDIDEVICE"
+}
+
+OptionMenu GusConfigMenu protected
+{
+	Title "$ADVSNDMNU_SELCONFIG"
+}
+
+OptionMenu WildMidiConfigMenu protected
+{
+	Title "$ADVSNDMNU_SELCONFIG"
+}
+
+OptionMenu TimidityConfigMenu protected
+{
+	Title "$ADVSNDMNU_SELCONFIG"
+}
+
+OptionMenu FluidPatchsetMenu protected
+{
+	Title "$ADVSNDMNU_SELCONFIG"
+}
+
+OptionMenu ADLBankMenu protected
+{
+	Title "$ADVSNDMNU_OPLBANK"
+}
+
+OptionMenu ADLMIDICustomBanksMenu protected
+{
+	Title "$ADVSNDMNU_OPLBANKFILE"
+}
+
+OptionMenu OPNMIDICustomBanksMenu protected
+{
+	Title "$ADVSNDMNU_OPNBANKFILE"
+}
+
+//-------------------------------------------------------------------------------------------
+//
+// Module Replayer Options Menu
+//
+//-------------------------------------------------------------------------------------------
+
+OptionValue ModQuality
+{
+	0.0, "$OPTVAL_ALIASING"
+	1.0, "$OPTVAL_LINEAR_1"
+	2.0, "$OPTVAL_CUBIC"
+	3.0, "$OPTVAL_BLEP" // Band-limited step
+	4.0, "$OPTVAL_LINEARSLOW"
+	5.0, "$OPTVAL_BLAM" // Band-limited linear
+	6.0, "$OPTVAL_CUBICSLOW"
+	7.0, "$OPTVAL_SINC"
+}
+
+OptionValue ModVolumeRamps
+{
+	0.0, "$OPTVAL_NONE"
+	1.0, "$OPTVAL_NOTEONOFFONLY"
+	2.0, "$OPTVAL_FULLRAMPING"
+}
+
+OptionValue ModReplayers
+{
+	0.0, "$OPTVAL_LIBXMP"
+	1.0, "$OPTVAL_DUMB"
+}
+
+OptionMenu ModReplayerOptions protected
+{
+	Title "$MODMNU_TITLE"
+
+	Option "$MODMNU_REPLAYER",      "mod_preferred_player",  "ModReplayers"
+	Slider "$MODMNU_MASTERVOLUME",  "mod_dumb_mastervolume", 0.25, 4, 0.1, 1
+	Option "$ADVSNDMNU_SAMPLERATE", "mod_samplerate",        "SampleRates"
+	Option "$MODMNU_QUALITY",       "mod_interp",            "ModQuality"
+	Option "$MODMNU_VOLUMERAMPING", "mod_volramp",           "ModVolumeRamps"
+	StaticText " "
+	Option "$MODMNU_CHIPOMATIC",    "mod_autochip",          "OnOff"
+
+	// TODO if the menu system is ever rewritten: Provide a decent
+	// mechanism to edit the chip-o-matic settings like you can with
+	// the foo_dumb preferences in foobar2000.
+}
+
+//-------------------------------------------------------------------------------------------
+//
+// MIDI player
+//
+//-------------------------------------------------------------------------------------------
+
+OptionValue TimidityReverb
+{
+	0, "$OPTVAL_OFF"
+	1, "$OPTVAL_STANDARD"
+	2, "$ADVSNDMNU_GLOBAL"
+	3, "$ADVSNDMNU_FREEVERB"
+	4, "$ADVSNDMNU_GLOBAL_FREEVERB"
+}
+
+OptionMenu MidiPlayerOptions protected
+{
+	Title "$SNDMNU_MIDIPLAYER"
+
+	StaticText "$SNDMNU_NOMIDIOPTIONS"
+}
+
+OptionMenu FluidsynthOptions protected
+{
+	Title "$ADVSNDMNU_FLUIDSYNTH"
+
+	LabeledSubMenu "$ADVSNDMNU_SELCONFIG", "fluid_patchset", "FluidPatchsetMenu"
+	Slider "$ADVSNDMNU_FLUIDGAIN",         "fluid_gain",     0, 10, 0.5, 1
+	Option "$ADVSNDMNU_REVERB",            "fluid_reverb",   "OnOff"
+	Option "$ADVSNDMNU_CHORUS",            "fluid_chorus",   "OnOff"
+	Slider "$ADVSNDMNU_MIDIVOICES",        "fluid_voices",   16, 4096, 16, 0
+
+	// other CVARs need to be revieved for usefulness
+	StaticText ""
+	StaticText "$ADVSNDMNU_ADVANCED_OPTIONS", gold
+	Slider "$ADVSNDMNU_REVERB_ROOM_SIZE",		"fluid_reverb_roomsize", 0, 1.2, 0.1, 1
+	Slider "$ADVSNDMNU_REVERB_DAMPING",		"fluid_reverb_damping", 0, 1.0, 0.1, 1
+	Slider "$ADVSNDMNU_REVERB_WIDTH",		"fluid_reverb_width", 0, 100.0, 0.1, 1
+	Slider "$ADVSNDMNU_REVERB_LEVEL",		"fluid_reverb_level", 0, 1.0, 0.1, 1
+	StaticText ""
+	Slider "$ADVSNDMNU_CHORUS_VOICES",		"fluid_chorus_voices", 0, 99, 1, 0
+	Slider "$ADVSNDMNU_CHORUS_LEVEL",		"fluid_chorus_level", 0, 10.0, 0.1, 1
+	Slider "$ADVSNDMNU_CHORUS_SPEED",		"fluid_chorus_speed", 0.29, 5.0, 0.1, 2
+	Slider "$ADVSNDMNU_CHORUS_DEPTH",		"fluid_chorus_depth", 0, 256.0, 0.1, 1
+	StaticText " "
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar fluid_patchset fluid_gain fluid_voices fluid_reverb fluid_reverb_roomsize fluid_reverb_damping fluid_reverb_width fluid_reverb_level fluid_chorus fluid_chorus_voices fluid_chorus_level fluid_chorus_speed fluid_chorus_depth"
+}
+
+OptionMenu TimidityOptions protected
+{
+	Title "$ADVSNDMNU_TIMIDITY"
+
+	LabeledSubMenu "$ADVSNDMNU_SELCONFIG", "timidity_config",       "TimidityConfigMenu"
+	Option "$ADVSNDMNU_REVERB",            "timidity_reverb",       "TimidityReverb"
+	Slider "$ADVSNDMNU_REVERB_LEVEL",      "timidity_reverb_level", 0, 127, 1, 0
+	Option "$ADVSNDMNU_CHORUS",            "timidity_chorus",       "OnOff"
+
+	// other CVARs need to be revieved for usefulness
+	StaticText " "
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar timidity_config timidity_reverb timidity_reverb_level timidity_chorus"
+}
+
+OptionMenu GUSOptions protected
+{
+	Title "$ADVSNDMNU_GUSEMULATION"
+
+	LabeledSubMenu "$ADVSNDMNU_SELCONFIG", "midi_config", "GusConfigMenu"
+	Slider "$ADVSNDMNU_MIDIVOICES",        "midi_voices", 16, 256, 4, 0
+	Option "$ADVSNDMNU_DMXGUS",            "midi_dmxgus", "OnOff"
+	Option "$ADVSNDMNU_GUSMEMSIZE",        "gus_memsize", "GusMemory"
+	StaticText " "
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar midi_config midi_voices midi_dmxgus gus_memsize"
+}
+
+OptionMenu WildMidiOptions protected
+{
+	Title "$ADVSNDMNU_WILDMIDI"
+
+	LabeledSubMenu "$ADVSNDMNU_SELCONFIG", "wildmidi_config",              "WildMidiConfigMenu"
+	Option "$ADVSNDMNU_REVERB",            "wildmidi_reverb",              "OnOff"
+	Option "$ADVSNDMNU_ADVRESAMPLING",     "wildmidi_enhanced_resampling", "OnOff"
+	StaticText " "
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar wildmidi_config wildmidi_reverb wildmidi_enhanced_resampling"
+}
+
+OptionMenu OPLOptions protected
+{
+	Title "$ADVSNDMNU_OPLSYNTHESIS"
+
+	Option "$ADVSNDMNU_OPLCORES",    "opl_core",     "OplCores"
+	Slider "$ADVSNDMNU_OPLNUMCHIPS", "opl_numchips", 1, 8, 1, 0
+	Slider "$ADVSNDMNU_OPLGAIN",     "opl_gain",     0, 10, 0.1, 1
+	Option "$ADVSNDMNU_OPLFULLPAN",  "opl_fullpan",  "OnOff"
+	StaticText " "
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar opl_core opl_numchips opl_gain opl_fullpan"
+}
+
+OptionValue AdlVolumeModels
+{
+	0,  "$ADLVLMODEL_AUTO"
+	1,  "$ADLVLMODEL_GENERIC"
+	2,  "$ADLVLMODEL_NATIVE"
+	3,  "$ADLVLMODEL_DMX"
+	4,  "$ADLVLMODEL_APOGEE"
+	5,  "$ADLVLMODEL_WIN9X"
+	6,  "$ADLVLMODEL_DMX_FIXED"
+	7,  "$ADLVLMODEL_APOGEE_FIXED"
+	8,  "$ADLVLMODEL_AIL"
+	9,  "$ADLVLMODEL_WIN9XGENERIC"
+	10, "$ADLVLMODEL_HMI"
+	11, "$ADLVLMODEL_HMIOLD"
+}
+
+OptionValue OpnVolumeModels
+{
+	0, "$OPNVLMODEL_AUTO"
+	1, "$OPNVLMODEL_GENERIC"
+	2, "$OPNVLMODEL_NATIVE"
+	3, "$OPNVLMODEL_DMX"
+	4, "$OPNVLMODEL_APOGEE"
+	5, "$OPNVLMODEL_WIN9X"
+}
+
+OptionValue AdlChanAllocs
+{
+	-1, "$ADLCHANALLOC_AUTO"
+	0,  "$ADLCHANALLOC_OFFDELAY"
+	1,  "$ADLCHANALLOC_SAMEINST"
+	2,  "$ADLCHANALLOC_ANYREL"
+}
+
+OptionValue ADLOplCores
+{
+	0,  "$OPTVAL_NUKEDOPL3"
+	1,  "$OPTVAL_NUKEDOPL3174"
+	2,  "$OPTVAL_DOSBOXOPL3"
+	3,  "$OPTVAL_OPALOPL3"
+	4,  "$OPTVAL_JAVAOPL3"
+	5,  "$OPTVAL_ESFMU"
+	6,  "$OPTVAL_MAMEOPL2"
+	7,  "$OPTVAL_YMFMOPL2"
+	8,  "$OPTVAL_YMFMOPL3"
+	9,  "$OPTVAL_LLENUKEDOPL2"
+	10, "$OPTVAL_LLENUKEDOPL3"
+}
+
+OptionValue OpnCores
+{
+	0,  "$OPTVAL_MAMEOPN2"
+	1,  "$OPTVAL_NUKEDOPN2YM3438"
+	2,  "$OPTVAL_GENSOPN2"
+	3,  "$OPTVAL_YMFMOPN2"
+	4,  "$OPTVAL_NP2OPNA"
+	5,  "$OPTVAL_MAMEOPNA"
+	6,  "$OPTVAL_YMFMOPNA"
+	// 7'th is a VGM Dumper, it should NEVER been used during normal runtime
+	8,  "$OPTVAL_NUKEDOPN2YM2612"
+	9,  "$OPTVAL_OPN2YM2612LLE"
+	// 10'th is the OPNA-LLE which wasn't included with the build due to impossibility to run in real-time
+	11, "$OPTVAL_OPN2YM3438LLE"
+	12, "$OPTVAL_OPN2YMF276LLE"
+}
+
+OptionMenu ADLOptions protected
+{
+	Title "$ADVSNDMNU_ADLMIDI"
+
+	Slider "$ADVSNDMNU_ADLGAIN",             "adl_gain",            0, 10, 0.1, 1
+	Option "$ADVSNDMNU_OPLCORES",            "adl_emulator_id",     "ADLOplCores"
+	Option "$ADVSNDMNU_RUNPCMRATE",          "adl_run_at_pcm_rate", "OnOff"
+	Slider "$ADVSNDMNU_ADLNUMCHIPS",         "adl_chips_count",     1, 32, 1, 0
+	Option "$ADVSNDMNU_OPLFULLPAN",          "adl_fullpan",         "OnOff"
+	Option "$ADVSNDMNU_VLMODEL",             "adl_volume_model",    "AdlVolumeModels"
+	Option "$ADVSNDMNU_CHANALLOC",           "adl_chan_alloc",      "AdlChanAllocs"
+	Option "$ADVSNDMNU_AUTOARPEGGIO",        "adl_auto_arpeggio",   "OnOff"
+	StaticText ""
+	LabeledSubmenu "$ADVSNDMNU_OPLBANK",     "adl_bank",            "ADLBankMenu"
+	StaticText ""
+	Option "$ADVSNDMNU_ADLCUSTOMBANK",       "adl_use_custom_bank", "OnOff"
+	Option "$ADVSNDMNU_ADLUSEWADBANK",       "adl_use_genmidi",     "OnOff"
+	LabeledSubmenu "$ADVSNDMNU_OPLBANKFILE", "adl_custom_bank",     "ADLMIDICustomBanksMenu"
+	StaticText " "
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar adl_gain adl_emulator_id adl_run_at_pcm_rate adl_chips_count adl_fullpan adl_volume_model adl_chan_alloc adl_auto_arpeggio adl_use_custom_bank adl_use_genmidi"
+}
+
+OptionMenu OPNOptions protected
+{
+	Title "$ADVSNDMNU_OPNMIDI"
+
+	Slider "$ADVSNDMNU_OPNGAIN",             "opn_gain",            0, 10, 0.1, 1
+	Option "$ADVSNDMNU_OPNCORES",            "opn_emulator_id",     "OpnCores"
+	Option "$ADVSNDMNU_RUNPCMRATE",          "opn_run_at_pcm_rate", "OnOff"
+	Slider "$ADVSNDMNU_OPNNUMCHIPS",         "opn_chips_count",     1, 32, 1, 0
+	Option "$ADVSNDMNU_OPLFULLPAN",          "opn_fullpan",         "OnOff"
+	Option "$ADVSNDMNU_VLMODEL",             "opn_volume_model",    "OpnVolumeModels"
+	Option "$ADVSNDMNU_CHANALLOC",           "opn_chan_alloc",      "AdlChanAllocs"
+	Option "$ADVSNDMNU_AUTOARPEGGIO",        "opn_auto_arpeggio",   "OnOff"
+	StaticText ""
+	Option "$ADVSNDMNU_OPNCUSTOMBANK",       "opn_use_custom_bank", "OnOff"
+	LabeledSubmenu "$ADVSNDMNU_OPNBANKFILE", "opn_custom_bank",     "OPNMIDICustomBanksMenu"
+	StaticText " "
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar opn_gain opn_emulator_id opn_run_at_pcm_rate opn_chips_count opn_fullpan opn_volume_model opn_chan_alloc opn_auto_arpeggio opn_use_custom_bank"
+}
+
 OptionMenu "ReverbEdit" protected
 {
 	Class "ReverbEdit"
 	Title "$OPTMNU_REVERB"
-	StaticTextSwitchable 	"", "", "EvironmentName", 1
-	StaticTextSwitchable 	"", "", "EvironmentID"
+	StaticTextSwitchable 	"", "", "EnvironmentName", 1
+	StaticTextSwitchable 	"", "", "EnvironmentID"
 	StaticText " "
 	Submenu "$REVMNU_SELECT", "ReverbSelect"
 	Option "$REVMNU_TEST", "eaxedit_test", OnOff
@@ -3843,107 +4020,232 @@ OptionMenu "ReverbSelect" protected
 OptionMenu "ReverbSettings" protected
 {
 	Title "$REVMNU_EDIT"
-	SafeCommand "$REVMNU_REVERT", "revertenvironment"
+	SafeCommand "$OPTMNU_DEFAULTS", "revertenvironment"
 	StaticText " "
-	SliderReverbEditOption "$REVMNU_Environment_Size", 1, 100, 0.01, 3, 1
-	SliderReverbEditOption "$REVMNU_Environment_Diffusion", 0, 1, 0.01, 3, 2
-	SliderReverbEditOption "$REVMNU_Room", -10000, 0, 1, 0, 3
-	SliderReverbEditOption "$REVMNU_Room_HF", -10000, 0, 1, 0, 4
-	SliderReverbEditOption "$REVMNU_Room_LF", -10000, 0, 1, 0, 5
-	SliderReverbEditOption "$REVMNU_Decay_Time", 1, 200, 0.01, 3, 6
-	SliderReverbEditOption "$REVMNU_Decay_HF_Ratio", 1, 20, 0.01, 3, 7
-	SliderReverbEditOption "$REVMNU_Decay_LF_Ratio", 1, 20, 0.01, 3, 8
-	SliderReverbEditOption "$REVMNU_Reflections", -10000, 1000, 1, 0, 9
-	SliderReverbEditOption "$REVMNU_Reflections_Delay", 0, 0.3, 1, 3, 10
-	SliderReverbEditOption "$REVMNU_Reflections_Pan_X", -2000, 2000, 1, 3, 11
-	SliderReverbEditOption "$REVMNU_Reflections_Pan_Y", -2000, 2000, 1, 3, 12
-	SliderReverbEditOption "$REVMNU_Reflections_Pan_Z", -2000, 2000, 1, 3, 13
-	SliderReverbEditOption "$REVMNU_Reverb", -10000, 2000, 1, 0, 14
-	SliderReverbEditOption "$REVMNU_Reverb_Delay", 0, 0.1, 0.01, 3, 15
-	SliderReverbEditOption "$REVMNU_Reverb_Pan_X", -2000, 2000, 1, 3, 16
-	SliderReverbEditOption "$REVMNU_Reverb_Pan_Y", -2000, 2000, 1, 3, 17
-	SliderReverbEditOption "$REVMNU_Reverb_Pan_Z", -2000, 2000, 1, 3, 18
-	SliderReverbEditOption "$REVMNU_Echo_Time", 0.075, 0.25, 0.005, 3, 19
-	SliderReverbEditOption "$REVMNU_Echo_Depth", 0, 1, 0.01, 3, 20
-	SliderReverbEditOption "$REVMNU_Modulation_Time", 0.04, 4, 0.01, 3, 21
-	SliderReverbEditOption "$REVMNU_Modulation_Depth",0, 1, 0.01, 3, 22
-	SliderReverbEditOption "$REVMNU_Air_Absorption_HF", -100, 0, 0.01, 3, 23
-	SliderReverbEditOption "$REVMNU_HF_Reference", 10000, 200000, 1, 3, 24
-	SliderReverbEditOption "$REVMNU_LF_Reference",20, 10000, 0.1, 3, 25
-	SliderReverbEditOption "$REVMNU_Room_Rolloff_Factor",0, 10, 0.01, 3, 26
-	SliderReverbEditOption "$REVMNU_Diffusion",0, 100, 0.01, 3, 27
-	SliderReverbEditOption "$REVMNU_Density",0, 100, 0.01, 3, 28
+	SliderReverbEditOption "$REVMNU_ENVIRONMENT_SIZE",        1,      100,    0.01,  2, 1,  1.0,    "$VALFORMAT_METER"
+	SliderReverbEditOption "$REVMNU_ENVIRONMENT_DIFFUSION",   0,      1,      0.01,  0, 2,  100.0,  "$VALFORMAT_PERCENT"
+	SliderReverbEditOption "$REVMNU_ROOM",                   -10000,  0,      10,    1, 3,  0.01,   "$VALFORMAT_DB"
+	SliderReverbEditOption "$REVMNU_ROOM_HF",                -10000,  0,      10,    1, 4,  0.01,   "$VALFORMAT_DB"
+	SliderReverbEditOption "$REVMNU_ROOM_LF",                -10000,  0,      10,    1, 5,  0.01,   "$VALFORMAT_DB"
+	SliderReverbEditOption "$REVMNU_DECAY_TIME",              0.1,    20.0,   0.01,  0, 6,  1000.0, "$VALFORMAT_MSECOND"
+	SliderReverbEditOption "$REVMNU_DECAY_HF_RATIO",          0.1,    2.0,    0.01,  2, 7,  1.0,    "$VALFORMAT_MULTIPLIER"
+	SliderReverbEditOption "$REVMNU_DECAY_LF_RATIO",          0.1,    2.0,    0.01,  2, 8,  1.0,    "$VALFORMAT_MULTIPLIER"
+	SliderReverbEditOption "$REVMNU_REFLECTIONS",            -10000,  1000,   10,    1, 9,  0.01,   "$VALFORMAT_DB"
+	SliderReverbEditOption "$REVMNU_REFLECTIONS_DELAY",       0,      0.3,    0.001, 0, 10, 1000.0, "$VALFORMAT_MSECOND"
+	SliderReverbEditOption "$REVMNU_REFLECTIONS_PAN_X",      -2000,   2000,   1,     3, 11, 1.0,    ""
+	SliderReverbEditOption "$REVMNU_REFLECTIONS_PAN_Y",      -2000,   2000,   1,     3, 12, 1.0,    ""
+	SliderReverbEditOption "$REVMNU_REFLECTIONS_PAN_Z",      -2000,   2000,   1,     3, 13, 1.0,    ""
+	SliderReverbEditOption "$REVMNU_REVERB",                 -10000,  2000,   10,    1, 14, 0.01,   "$VALFORMAT_DB"
+	SliderReverbEditOption "$REVMNU_REVERB_DELAY",            0,      0.1,    0.001, 0, 15, 1000.0, "$VALFORMAT_MSECOND"
+	SliderReverbEditOption "$REVMNU_REVERB_PAN_X",           -2000,   2000,   1,     3, 16, 1.0,    ""
+	SliderReverbEditOption "$REVMNU_REVERB_PAN_Y",           -2000,   2000,   1,     3, 17, 1.0,    ""
+	SliderReverbEditOption "$REVMNU_REVERB_PAN_Z",           -2000,   2000,   1,     3, 18, 1.0,    ""
+	SliderReverbEditOption "$REVMNU_ECHO_TIME",               0.075,  0.25,   0.005, 0, 19, 1000.0, "$VALFORMAT_MSECOND"
+	SliderReverbEditOption "$REVMNU_ECHO_DEPTH",              0,      1,      0.01,  0, 20, 100.0,  "$VALFORMAT_PERCENT"
+	SliderReverbEditOption "$REVMNU_MODULATION_TIME",         0.04,   4,      0.01,  0, 21, 1000.0, "$VALFORMAT_MSECOND"
+	SliderReverbEditOption "$REVMNU_MODULATION_DEPTH",        0,      1,      0.01,  0, 22, 100.0,  "$VALFORMAT_PERCENT"
+	SliderReverbEditOption "$REVMNU_AIR_ABSORPTION_HF",      -100,    0,      0.01,  2, 23, 1.0,    "$VALFORMAT_DB_P_METER"
+	SliderReverbEditOption "$REVMNU_HF_REFERENCE",            1000,   20000,  1,     0, 24, 1.0,    "$VALFORMAT_HZ"
+	SliderReverbEditOption "$REVMNU_LF_REFERENCE",            20,     1000,   0.1,   1, 25, 1.0,    "$VALFORMAT_HZ"
+	SliderReverbEditOption "$REVMNU_ROOM_ROLLOFF_FACTOR",     0,      10,     0.01,  2, 26, 1.0,    "$VALFORMAT_MULTIPLIER"
+	SliderReverbEditOption "$REVMNU_DIFFUSION",               0,      100,    0.01,  2, 27, 1.0,    "$VALFORMAT_PERCENT"
+	SliderReverbEditOption "$REVMNU_DENSITY",                 0,      100,    0.01,  2, 28, 1.0,    "$VALFORMAT_PERCENT"
 	StaticText " "
-	ReverbOption "$REVMNU_Reflections_Scale", 29, OnOff
-	ReverbOption "$REVMNU_Reflections_Delay_Scale", 30, OnOff
-	ReverbOption "$REVMNU_Decay_Time_Scale", 31, OnOff
-	ReverbOption "$REVMNU_Decay_HF_Limit", 32, OnOff
-	ReverbOption "$REVMNU_Reverb_Scale", 33, OnOff
-	ReverbOption "$REVMNU_Reverb_Delay_Scale", 34, OnOff
-	ReverbOption "$REVMNU_Echo_Time_Scale", 35, OnOff
-	ReverbOption "$REVMNU_Modulation_Time_Scale", 36, OnOff
+	ReverbOption "$REVMNU_REFLECTIONS_SCALE", 29, OnOff
+	ReverbOption "$REVMNU_REFLECTIONS_DELAY_SCALE", 30, OnOff
+	ReverbOption "$REVMNU_DECAY_TIME_SCALE", 31, OnOff
+	ReverbOption "$REVMNU_DECAY_HF_LIMIT", 32, OnOff
+	ReverbOption "$REVMNU_REVERB_SCALE", 33, OnOff
+	ReverbOption "$REVMNU_REVERB_DELAY_SCALE", 34, OnOff
+	ReverbOption "$REVMNU_ECHO_TIME_SCALE", 35, OnOff
+	ReverbOption "$REVMNU_MODULATION_TIME_SCALE", 36, OnOff
 }
 
 OptionMenu "ReverbNew" protected
 {
 	Title "$REVMNU_NEW"
-	ReverbSelect "$REVMNU_Based_on", "ReverbSelect"
-	TextField "$REVMNU_Name", "reverbedit_name"
+	ReverbSelect "$REVMNU_BASED_ON", "ReverbSelect"
+	TextField "$REVMNU_NAME", "reverbedit_name"
 	NumberField "$REVMNU_ID_1", "reverbedit_id1", 0, 255
 	NumberField "$REVMNU_ID_2", "reverbedit_id2", 0, 255
-	Command "$REVMNU_Create", "createenvironment", 0, 1
+	Command "$REVMNU_CREATE", "createenvironment", 0, 1
 }
 
 OptionMenu "ReverbSave" protected
 {
 	Class "ReverbSave"
 	Title "$REVMNU_SAVE"
-	Command "$REVMNU_Save", "savereverbs"
-	TextField "$REVMNU_File_name", "reverbsavename"
+	Command "$REVMNU_SAVE", "savereverbs"
+	TextField "$REVMNU_FILE_NAME", "reverbsavename"
 	StaticText ""
-	StaticText "$REVMNU_Environments_to_save"
+	StaticText "$REVMNU_ENVIRONMENTS_TO_SAVE"
 	// Rest is filled in by code.
 }
 
-/*=======================================
- *
- * Language menu
- *
- *=======================================*/
+//-------------------------------------------------------------------------------------------
+//
+// Accessibility Menu
+//
+//-------------------------------------------------------------------------------------------
+
+OptionMenu AccessibilityOptions protected
+{
+	Title "$ACCMNU_TITLE"
+
+	StaticText "$ACCMNU_TOOLTIP"
+	Slider "$ACCMNU_TOOLTIP_LINES", "m_tooltip_lines", 1, 6, 1, 0
+	Tooltip "$ACCMNU_TOOLTIP_EXAMPLE"
+	Slider "$ACCMNU_TOOLTIP_SPEED", "m_tooltip_speed", 1.0, 5.0, 1.0, 0
+	Tooltip "$ACCMNU_TOOLTIP_EXAMPLE"
+	Slider "$ACCMNU_TOOLTIP_DELAY", "m_tooltip_delay", 3.0, 15.0, 1.0, 0
+	Tooltip "$ACCMNU_TOOLTIP_EXAMPLE"
+	Slider "$ACCMNU_TOOLTIP_ALPHA", "m_tooltip_alpha", 0.2, 0.9, 0.05, 2
+	Tooltip "$ACCMNU_TOOLTIP_EXAMPLE"
+	ScaleSlider "$ACCMNU_TOOLTIP_CAP", "m_tooltip_capratio", 0.4, 2, 0.01, "$OPTVAL_OFF", "", "", 0, 'Gray', 2
+	Tooltip "$ACCMNU_TOOLTIP_EXAMPLE"
+	Option "$ACCMNU_TOOLTIP_SCALE", "m_tooltip_small", "OffOn"
+	Tooltip "$ACCMNU_TOOLTIP_EXAMPLE"
+
+	StaticText ""
+	StaticText "$ACCMNU_LIGHT"
+	Slider "$ACCMNU_LIGHT_EXTRA", "r_extralight", -64, 128, 1, 0
+	Tooltip "$ACCMNU_TOOLTIP_LIGHT_EXTRA"
+	Slider "$ACCMNU_LIGHT_RADIUS", "r_visibility", 0.0, 16.0, 1.0, 1
+	Tooltip "$ACCMNU_TOOLTIP_LIGHT_RADIUS"
+	
+	StaticText ""
+	Slider "$ACCMNU_DOUBLECLICK_THRESHOLD", "cl_doubleclickthreshold", 100, 600, 25, 0
+	Tooltip "$ACCMNU_TOOLTIP_DOUBLECLICK_THRESHOLD"
+	Slider "$DSPLYMNU_QUAKEINTENSITY",         r_quakeintensity,       0.0, 1.0, 0.05, 0, "", 0, Gray, 100, "$VALFORMAT_PERCENT"
+
+	StaticText ""
+	SafeCommand "$OPTMNU_DEFAULTS", "acc_reset2defaults"
+}
+
+//-------------------------------------------------------------------------------------------
+//
+// Network options menu
+//
+//-------------------------------------------------------------------------------------------
+
+OptionMenu NetworkOptions protected
+{
+	Title "$NETMNU_TITLE"
+	StaticText "$NETMNU_LOCALOPTIONS", 1
+	Option "$NETMNU_CHATTYPE",				"cl_showchat", "ChatTypes"
+	Option "$NETMNU_NOBOLDCHAT",			"cl_noboldchat", "OnOff"
+	Option "$NETMNU_NOCHATSND",				"cl_nochatsound", "OnOff"
+	Option "$NETMNU_LINESPECIALPREDICTION",	"cl_predict_specials", "OnOff"
+	Slider "$NETMNU_PREDICTIONLERPSCALE",	"cl_rubberband_scale", 0.0, 1.0, 0.05, 0, "", 0, Gray, 100, "$VALFORMAT_PERCENT"
+	Slider "$NETMNU_LERPTHRESHOLD",			"cl_rubberband_threshold", 0.0, 256.0, 8.0
+	StaticText " "
+	StaticText "$NETMNU_HOSTOPTIONS", 1
+	Option "$NETMNU_EXTRATICS",				"net_extratic", "OnOff"
+	Option "$NETMNU_BALANCETICS",			"net_ticbalance", "OnOff"
+	Option "$NETMNU_LIMITCONVO",			"net_limitconversations", "OnOff"
+	Option "$NETMNU_REPEATCOOLDOWN",		"net_repeatableactioncooldown", "OnOff"
+	Option "$NETMNU_DISABLEPAUSE",			"net_disablepause", "PauseTypes"
+	Option "$NETMNU_READYTYPE",				"net_cutscenereadytype", "ReadyTypes"
+	Slider "$NETMNU_READYPERCENT",			"net_cutscenereadypercent", "0", "1", "0.05", 0, "", 0, Gray, 100, "$VALFORMAT_PERCENT"
+	Slider "$NETMNU_READYCOUNTDOWN",		"net_cutscenecountdown", 0, 300, 5, 0, "", 0, Gray, 1.0, "$VALFORMAT_SECOND"
+	Slider "$NETMNU_CHATSLOMO",				"net_chatslowmode", 0, 300, 5, 0, "", 0, Gray, 1.0, "$VALFORMAT_SECOND"
+
+}
+
+OptionValue "PauseTypes"
+{
+	0, "$OPTVAL_OFF"
+	1, "$OPTVAL_HOSTONLY"
+	2, "$OPTVAL_ON"
+}
+
+OptionValue "ReadyTypes"
+{
+	0, "$OPTVAL_VOTE"
+	1, "$OPTVAL_ANYONE"
+	2, "$OPTVAL_HOSTONLY"
+}
+
+OptionValue "ChatTypes"
+{
+	0, "$OPTVAL_DISABLECHAT"
+	1, "$OPTVAL_TEAMONLYCHAT"
+	2, "$OPTVAL_GLOBALCHAT"
+}
+
+OptionValue "LookupOrder"
+{
+	0, "$OPTVAL_OBVERSEFIRST"
+	1, "$OPTVAL_REVERSEFIRST"
+}
+
+OptionValue "SpriteclipModes"
+{
+	0, "$OPTVAL_NEVER"
+	1, "$OPTVAL_SMART"
+	2, "$OPTVAL_ALWAYS"
+	3, "$OPTVAL_SMARTER"
+	-1, "$OPTVAL_ANAMORPHIC"
+}
+
+OptionValue "EnhancedStealth"
+{
+	0, "$OPTVAL_NEVER"
+	1, "$OPTVAL_INFRAREDONLY"
+	2, "$OPTVAL_INFRAREDANDTORCH"
+	3, "$OPTVAL_ANYFIXEDCOLORMAP"
+}
+
+//-------------------------------------------------------------------------------------------
+//
+// Language menu
+//
+//-------------------------------------------------------------------------------------------
 
 OptionString "LanguageOptions"
 {
 	"auto", "Auto"
-	"default", "English (US)"
-	"eng", "English (UK)"
+	// Since auto works, no reason to keep English at the top.
+	// This list is now alphabetical by language code.
+	"bs", "Босански (Bosnian)"
+	"ca", "Català (Catalan)"
 	"cs", "Česky (Czech)"
 	"da", "Dansk (Danish)"
 	"de", "Deutsch (German)"
-	"es", "Español (España) (Castilian Spanish)"
-	"esm", "Español (Latino) (Latin American Spanish)"
+	"en-GB", "English (UK)"
+	"en-US", "English (US)"
 	"eo", "Esperanto"
+	"es", "Español (España) (Castilian Spanish)"
+	"es-MX", "Español (Latino) (Latin American Spanish)"
 	"fi", "Suomi (Finnish)"
 	"fr", "Français (French)"
+	"hr", "Hrvatski (Croatian)"
 	"hu", "Magyar (Hungarian)"
+	"id", "Bahasa Indonesia (Indonesian)"
 	"it", "Italiano (Italian)"
-	"jp", "日本語 (Japanese)"
+	"ja", "日本語 (Japanese)"
 	"ko", "한국어 (Korean)"
+	"la", "Latina (Latin)"
+	"nb-NO", "Norsk Bokmål (Norwegian)"
 	"nl", "Nederlands (Dutch)"
-	"no", "Norsk Bokmål (Norwegian)"
 	"pl", "Polski (Polish)"
-	"ptg", "Português (European Portuguese)"
-	"pt", "Português do Brasil (Brazilian Portuguese)"
+	"pt", "Português (European Portuguese)"
+	"pt-BR", "Português do Brasil (Brazilian Portuguese)"
 	"ro", "Română (Romanian)"
 	"ru", "Русский (Russian)"
 	"sr", "Српски (Serbian)"
+	"sv", "Svenska (Swedish)"
 	"tr", "Türkçe (Turkish)"
+	"uk", "Українська (Ukrainian)"
+	"zh-Hans", "简体中文 (Simplified Chinese)"
+//	"zh-Hant", "繁体中文 (Traditional Chinese)"
 }
 
-/*=======================================
- *
- * Option Search menu
- *
- *=======================================*/
+//-------------------------------------------------------------------------------------------
+//
+// Option Search menu
+//
+//-------------------------------------------------------------------------------------------
 
 OptionMenu "os_Menu"
 {
@@ -4348,32 +4650,4 @@ OptionMenu "ExperimentalMenu"
 	Option "$EXPMNU_VANILLA_MELEE_ATTACK", "vanilla_melee_attack", "OnOff"
 	StaticText "$EXPMNU_TURN_TO_FACE_TARGET_AND_AUTO_FORWARD_MOTION", "Brown"
 	StaticText "$EXPMNU_DURING_MELEE_ATTACK_CHAINSAW_GAUNTLETS", "Brown"
-}
-
-/*=======================================
- *
- * Vulkan Menu
- *
- *=======================================*/
-
-OptionMenu "vkoptions"
-{
-	Title "$VK_TITLE"
-	//StaticText "$VK_WARNING"
-	StaticText "$VK_RESTART"
-	StaticText ""
-	TextField "$VKMNU_DEVICE",			vk_device
-	Option "$VKMNU_HDR",				"vk_hdr", "OnOff"
-	ifOption(OpenXR)
-	{
-		Option "$VRPREFMNU_MULTIVIEW",			"vr_openxr_multiview", "OnOff"
-		StaticText "$VRPREFMNU_MULTIVIEW_HELP", "Brown"
-	}
-}
-
-OptionValue "SpriteShadowModes"
-{
-	0, "$OPTVAL_OFF"
-	1, "$OPTVAL_DEFAULT"
-	2, "$OPTVAL_SPRSHADALWAYS"
 }

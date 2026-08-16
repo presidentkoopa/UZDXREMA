@@ -1,34 +1,23 @@
 /*
 ** vmexec.h
+**
 ** VM bytecode interpreter
 **
 **---------------------------------------------------------------------------
-** Copyright -2016 Randy Heit
+**
+** Copyright 2009-2016 Marisa Heit
 ** Copyright 2016-2017 Christoph Oelckers
-** All rights reserved.
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+**---------------------------------------------------------------------------
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
@@ -54,7 +43,8 @@ static int ExecScriptFunc(VMFrameStack *stack, VMReturn *ret, int numret)
 	const double *konstf = sfunc->KonstF;
 	const FString *konsts = sfunc->KonstS;
 	const FVoidObj *konsta = sfunc->KonstA;
-	const VMOP *pc = sfunc->Code;
+	f->PC = sfunc->Code;
+	const VMOP *&pc = f->PC;
 
 	assert(!(f->Func->VarFlags & VARF_Native) && "Only script functions should ever reach VMExec");
 
@@ -70,7 +60,9 @@ static int ExecScriptFunc(VMFrameStack *stack, VMReturn *ret, int numret)
 	{
 #if !COMPGOTO
 	VM_UBYTE op;
-	for(;;) switch(op = pc->op, a = pc->a, op)
+	for(;;) {
+	DebugServer::RuntimeEvents::EmitInstructionExecutionEvent(stack, ret, numret, pc);
+	switch(op = pc->op, a = pc->a, op)
 #else
 	pc--;
 	NEXTOP;
@@ -1540,7 +1532,7 @@ static int ExecScriptFunc(VMFrameStack *stack, VMReturn *ret, int numret)
 		ASSERTF(B); ASSERTF(C);
 		if (a & CMP_APPROX)
 		{
-			CMPJMP(fabs(reg.f[C] - reg.f[B]) < VM_EPSILON);
+			CMPJMP(fabs(reg.f[C] - reg.f[B]) < EQUAL_EPSILON);
 		}
 		else
 		{
@@ -1551,7 +1543,7 @@ static int ExecScriptFunc(VMFrameStack *stack, VMReturn *ret, int numret)
 		ASSERTF(B); ASSERTKF(C);
 		if (a & CMP_APPROX)
 		{
-			CMPJMP(fabs(konstf[C] - reg.f[B]) < VM_EPSILON);
+			CMPJMP(fabs(konstf[C] - reg.f[B]) < EQUAL_EPSILON);
 		}
 		else
 		{
@@ -1562,7 +1554,7 @@ static int ExecScriptFunc(VMFrameStack *stack, VMReturn *ret, int numret)
 		ASSERTF(B); ASSERTF(C);
 		if (a & CMP_APPROX)
 		{
-			CMPJMP((reg.f[B] - reg.f[C]) < -VM_EPSILON);
+			CMPJMP((reg.f[B] - reg.f[C]) < -EQUAL_EPSILON);
 		}
 		else
 		{
@@ -1573,7 +1565,7 @@ static int ExecScriptFunc(VMFrameStack *stack, VMReturn *ret, int numret)
 		ASSERTF(B); ASSERTKF(C);
 		if (a & CMP_APPROX)
 		{
-			CMPJMP((reg.f[B] - konstf[C]) < -VM_EPSILON);
+			CMPJMP((reg.f[B] - konstf[C]) < -EQUAL_EPSILON);
 		}
 		else
 		{
@@ -1584,7 +1576,7 @@ static int ExecScriptFunc(VMFrameStack *stack, VMReturn *ret, int numret)
 		ASSERTKF(B); ASSERTF(C);
 		if (a & CMP_APPROX)
 		{
-			CMPJMP((konstf[B] - reg.f[C]) < -VM_EPSILON);
+			CMPJMP((konstf[B] - reg.f[C]) < -EQUAL_EPSILON);
 		}
 		else
 		{
@@ -1595,7 +1587,7 @@ static int ExecScriptFunc(VMFrameStack *stack, VMReturn *ret, int numret)
 		ASSERTF(B); ASSERTF(C);
 		if (a & CMP_APPROX)
 		{
-			CMPJMP((reg.f[B] - reg.f[C]) <= -VM_EPSILON);
+			CMPJMP((reg.f[B] - reg.f[C]) <= -EQUAL_EPSILON);
 		}
 		else
 		{
@@ -1606,7 +1598,7 @@ static int ExecScriptFunc(VMFrameStack *stack, VMReturn *ret, int numret)
 		ASSERTF(B); ASSERTKF(C);
 		if (a & CMP_APPROX)
 		{
-			CMPJMP((reg.f[B] - konstf[C]) <= -VM_EPSILON);
+			CMPJMP((reg.f[B] - konstf[C]) <= -EQUAL_EPSILON);
 		}
 		else
 		{
@@ -1617,7 +1609,7 @@ static int ExecScriptFunc(VMFrameStack *stack, VMReturn *ret, int numret)
 		ASSERTKF(B); ASSERTF(C);
 		if (a & CMP_APPROX)
 		{
-			CMPJMP((konstf[B] - reg.f[C]) <= -VM_EPSILON);
+			CMPJMP((konstf[B] - reg.f[C]) <= -EQUAL_EPSILON);
 		}
 		else
 		{
@@ -1691,8 +1683,8 @@ static int ExecScriptFunc(VMFrameStack *stack, VMReturn *ret, int numret)
 	Do_EQV2:
 		if (a & CMP_APPROX)
 		{
-			CMPJMP(fabs(reg.f[B  ] - fcp[0]) < VM_EPSILON &&
-				   fabs(reg.f[B+1] - fcp[1]) < VM_EPSILON);
+			CMPJMP(fabs(reg.f[B  ] - fcp[0]) < EQUAL_EPSILON &&
+				   fabs(reg.f[B+1] - fcp[1]) < EQUAL_EPSILON);
 		}
 		else
 		{
@@ -1788,9 +1780,9 @@ static int ExecScriptFunc(VMFrameStack *stack, VMReturn *ret, int numret)
 	Do_EQV3:
 		if (a & CMP_APPROX)
 		{
-			CMPJMP(fabs(reg.f[B  ] - fcp[0]) < VM_EPSILON &&
-				   fabs(reg.f[B+1] - fcp[1]) < VM_EPSILON &&
-				   fabs(reg.f[B+2] - fcp[2]) < VM_EPSILON);
+			CMPJMP(fabs(reg.f[B  ] - fcp[0]) < EQUAL_EPSILON &&
+				   fabs(reg.f[B+1] - fcp[1]) < EQUAL_EPSILON &&
+				   fabs(reg.f[B+2] - fcp[2]) < EQUAL_EPSILON);
 		}
 		else
 		{
@@ -1878,10 +1870,10 @@ static int ExecScriptFunc(VMFrameStack *stack, VMReturn *ret, int numret)
 	Do_EQV4:
 		if (a & CMP_APPROX)
 		{
-			CMPJMP(fabs(reg.f[B  ] - fcp[0]) < VM_EPSILON &&
-				   fabs(reg.f[B+1] - fcp[1]) < VM_EPSILON &&
-				   fabs(reg.f[B+2] - fcp[2]) < VM_EPSILON &&
-				   fabs(reg.f[B+3] - fcp[3]) < VM_EPSILON);
+			CMPJMP(fabs(reg.f[B  ] - fcp[0]) < EQUAL_EPSILON &&
+				   fabs(reg.f[B+1] - fcp[1]) < EQUAL_EPSILON &&
+				   fabs(reg.f[B+2] - fcp[2]) < EQUAL_EPSILON &&
+				   fabs(reg.f[B+3] - fcp[3]) < EQUAL_EPSILON);
 		}
 		else
 		{
@@ -1957,6 +1949,9 @@ static int ExecScriptFunc(VMFrameStack *stack, VMReturn *ret, int numret)
 		NEXTOP;
 	}
 	}
+#if !COMPGOTO
+	}
+#endif
 #if 0
 	catch(VMException *exception)
 	{
@@ -1965,7 +1960,8 @@ static int ExecScriptFunc(VMFrameStack *stack, VMReturn *ret, int numret)
 
 		while(--try_depth >= 0)
 		{
-			pc = exception_frames[try_depth];
+			f->PC = exception_frames[try_depth];
+			pc = f->PC;
 			assert(pc->op == OP_CATCH);
 			while (pc->a > 1)
 			{
@@ -2106,7 +2102,7 @@ static void DoCast(const VMRegisters &reg, const VMFrame *f, int a, int b, int c
 		ASSERTS(a); ASSERTA(b);
 		if (reg.a[b] == nullptr) reg.s[a] = "null";
 		else reg.s[a].Format("%p", reg.a[b]);
-		break; 
+		break;
 	}
 
 	case CAST_S2I:
@@ -2128,7 +2124,7 @@ static void DoCast(const VMRegisters &reg, const VMFrame *f, int a, int b, int c
 		ASSERTS(a); ASSERTD(b);
 		FName name = FName(ENamedName(reg.d[b]));
 		reg.s[a] = name.IsValidName() ? name.GetChars() : "";
-		break; 
+		break;
 	}
 
 	case CAST_S2Co:

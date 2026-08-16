@@ -1,15 +1,34 @@
-
 #include "core/widget.h"
 #include "core/timer.h"
 #include "core/colorf.h"
+#include "core/theme.h"
+#include "window/window.h"
 #include <stdexcept>
+#include <cmath>
+#include <algorithm>
 
-Widget::Widget(Widget* parent, WidgetType type) : Type(type)
+Widget::Widget(Widget* parent, WidgetType type, RenderAPI renderAPI, struct WindowParams params) : Type(type)
 {
 	if (type != WidgetType::Child)
 	{
-		DispWindow = DisplayWindow::Create(this);
-		DispCanvas = Canvas::create(DispWindow.get());
+		Widget* owner = parent ? parent->Window() : nullptr;
+		params.popup = type == WidgetType::Popup;
+		params.utility = type == WidgetType::Utility;
+		DispWindow = DisplayWindow::Create(this, owner ? owner->DispWindow.get() : nullptr, renderAPI, params);
+		if (renderAPI == RenderAPI::Unspecified || renderAPI == RenderAPI::Bitmap)
+		{
+			DispCanvas = Canvas::create();
+			DispCanvas->attach(DispWindow.get());
+		}
+		SetStyleState("root");
+
+		SetWindowBackground(GetStyleColor("window-background"));
+		if (GetStyleColor("window-border").a > 0.0f)
+			SetWindowBorderColor(GetStyleColor("window-border"));
+		if (GetStyleColor("window-caption-color").a > 0.0f)
+			SetWindowCaptionColor(GetStyleColor("window-caption-color"));
+		if (GetStyleColor("window-caption-text-color").a > 0.0f)
+			SetWindowCaptionTextColor(GetStyleColor("window-caption-text-color"));
 	}
 
 	SetParent(parent);
@@ -17,6 +36,15 @@ Widget::Widget(Widget* parent, WidgetType type) : Type(type)
 
 Widget::~Widget()
 {
+	for (auto subscription: Subscriptions)
+		subscription->Subscribers.erase(this);
+
+	for (auto subscriber: Subscribers)
+		subscriber->Subscriptions.erase(this);
+
+	if (DispCanvas)
+		DispCanvas->detach();
+
 	while (LastChildObj)
 		delete LastChildObj;
 
@@ -24,6 +52,35 @@ Widget::~Widget()
 		delete FirstTimerObj;
 
 	DetachFromParent();
+}
+
+void Widget::Subscribe(Widget* subscriber)
+{
+	Subscribers.insert(subscriber);
+	subscriber->Subscriptions.insert(this);
+}
+
+void Widget::Unsubscribe(Widget* subscriber)
+{
+	Subscribers.erase(subscriber);
+	subscriber->Subscriptions.erase(this);
+}
+
+void Widget::NotifySubscribers(const WidgetEvent type)
+{
+	for (auto subscriber: Subscribers)
+		subscriber->Notify(this, type);
+}
+
+void Widget::SetCanvas(std::unique_ptr<Canvas> canvas)
+{
+	if (DispWindow)
+	{
+		if (DispCanvas)
+			DispCanvas->detach();
+		DispCanvas = std::move(canvas);
+		DispCanvas->attach(DispWindow.get());
+	}
 }
 
 void Widget::SetParent(Widget* newParent)
@@ -119,6 +176,18 @@ void Widget::SetWindowTitle(const std::string& text)
 	}
 }
 
+std::vector<std::shared_ptr<Image>> Widget::GetWindowIcon() const
+{
+	return WindowIcon;
+}
+
+void Widget::SetWindowIcon(const std::vector<std::shared_ptr<Image>>& images)
+{
+	WindowIcon = images;
+	if (DispWindow)
+		DispWindow->SetWindowIcon(WindowIcon);
+}
+
 Size Widget::GetSize() const
 {
 	return ContentGeometry.size();
@@ -138,10 +207,10 @@ Rect Widget::GetFrameGeometry() const
 
 void Widget::SetNoncontentSizes(double left, double top, double right, double bottom)
 {
-	Noncontent.Left = left;
-	Noncontent.Top = top;
-	Noncontent.Right = right;
-	Noncontent.Bottom = bottom;
+	SetStyleDouble("noncontent-left", left);
+	SetStyleDouble("noncontent-top", top);
+	SetStyleDouble("noncontent-right", right);
+	SetStyleDouble("noncontent-bottom", bottom);
 }
 
 void Widget::SetFrameGeometry(const Rect& geometry)
@@ -149,14 +218,18 @@ void Widget::SetFrameGeometry(const Rect& geometry)
 	if (Type == WidgetType::Child)
 	{
 		FrameGeometry = geometry;
-		double left = FrameGeometry.left() + Noncontent.Left;
-		double top = FrameGeometry.top() + Noncontent.Top;
-		double right = FrameGeometry.right() - Noncontent.Right;
-		double bottom = FrameGeometry.bottom() - Noncontent.Bottom;
+		double left = FrameGeometry.left() + GetNoncontentLeft();
+		double top = FrameGeometry.top() + GetNoncontentTop();
+		double right = FrameGeometry.right() - GetNoncontentRight();
+		double bottom = FrameGeometry.bottom() - GetNoncontentBottom();
 		left = std::min(left, FrameGeometry.right());
 		top = std::min(top, FrameGeometry.bottom());
 		right = std::max(right, FrameGeometry.left());
 		bottom = std::max(bottom, FrameGeometry.top());
+		left = GridFitPoint(left);
+		top = GridFitPoint(top);
+		right = GridFitPoint(right);
+		bottom = GridFitPoint(bottom);
 		ContentGeometry = Rect::ltrb(left, top, right, bottom);
 		OnGeometryChanged();
 	}
@@ -171,10 +244,12 @@ void Widget::Show()
 	if (Type != WidgetType::Child)
 	{
 		DispWindow->Show();
+		NotifySubscribers(WidgetEvent::VisibilityChange);
 	}
 	else if (HiddenFlag)
 	{
 		HiddenFlag = false;
+		NotifySubscribers(WidgetEvent::VisibilityChange);
 		Update();
 	}
 }
@@ -185,6 +260,15 @@ void Widget::ShowFullscreen()
 	{
 		DispWindow->ShowFullscreen();
 	}
+}
+
+bool Widget::IsFullscreen()
+{
+	if (Type != WidgetType::Child)
+	{
+		return DispWindow->IsWindowFullscreen();
+	}
+	return false;
 }
 
 void Widget::ShowMaximized()
@@ -216,18 +300,27 @@ void Widget::Hide()
 	if (Type != WidgetType::Child)
 	{
 		if (DispWindow)
+		{
 			DispWindow->Hide();
+			NotifySubscribers(WidgetEvent::VisibilityChange);
+		}
 	}
 	else if (!HiddenFlag)
 	{
 		HiddenFlag = true;
+		NotifySubscribers(WidgetEvent::VisibilityChange);
 		Update();
 	}
 }
 
 void Widget::ActivateWindow()
 {
-	if (Type != WidgetType::Child)
+	if(CaptureWidget && CaptureWidget->DispWindow && CaptureWidget != Window())
+	{ // auto-focus on modal windows
+		CaptureWidget->DispWindow->Restore();
+		CaptureWidget->ActivateWindow();
+	}
+	else if (Type != WidgetType::Child)
 	{
 		DispWindow->Activate();
 	}
@@ -290,9 +383,12 @@ void Widget::Update()
 void Widget::Repaint()
 {
 	Widget* w = Window();
-	w->DispCanvas->begin(WindowBackground);
-	w->Paint(w->DispCanvas.get());
-	w->DispCanvas->end();
+	if (w->DispCanvas)
+	{
+		w->DispCanvas->begin(w->WindowBackground);
+		w->Paint(w->DispCanvas.get());
+		w->DispCanvas->end();
+	}
 }
 
 void Widget::Paint(Canvas* canvas)
@@ -316,7 +412,26 @@ void Widget::Paint(Canvas* canvas)
 	canvas->popClip();
 }
 
-bool Widget::GetKeyState(EInputKey key)
+double Widget::GetPreferredWidth()
+{
+	return GetNoncontentLeft() + GetNoncontentRight();
+}
+
+double Widget::GetPreferredHeight()
+{
+	return GetNoncontentTop() + GetNoncontentBottom();
+}
+
+void Widget::OnPaintFrame(Canvas* canvas)
+{
+	WidgetStyle* style = WidgetTheme::GetTheme()->GetStyle(StyleClass);
+	if (style)
+	{
+		style->Paint(this, canvas, GetFrameGeometry().size());
+	}
+}
+
+bool Widget::GetKeyState(InputKey key)
 {
 	Widget* window = Window();
 	return window ? window->DispWindow->GetKeyState(key) : false;
@@ -353,7 +468,7 @@ bool Widget::IsVisible()
 void Widget::SetFocus()
 {
 	Widget* window = Window();
-	if (window)
+	if (window && window->FocusWidget != this)
 	{
 		if (window->FocusWidget)
 			window->FocusWidget->OnLostFocus();
@@ -403,7 +518,7 @@ void Widget::SetCursor(StandardCursor cursor)
 	}
 }
 
-void Widget::CaptureMouse()
+void Widget::SetPointerCapture()
 {
 	Widget* w = Window();
 	if (w && w->CaptureWidget != this)
@@ -413,13 +528,31 @@ void Widget::CaptureMouse()
 	}
 }
 
-void Widget::ReleaseMouseCapture()
+void Widget::ReleasePointerCapture()
 {
 	Widget* w = Window();
-	if (w && w->CaptureWidget != nullptr)
+	if (w && w->CaptureWidget == this)
 	{
 		w->CaptureWidget = nullptr;
 		w->DispWindow->ReleaseMouseCapture();
+	}
+}
+
+void Widget::SetModalCapture(bool rootWindow)
+{
+	Widget* w = Window(rootWindow);
+	if (w && w->CaptureWidget != this)
+	{
+		w->CaptureWidget = this;
+	}
+}
+
+void Widget::ReleaseModalCapture(bool rootWindow)
+{
+	Widget* w = Window(rootWindow);
+	if (w && w->CaptureWidget == this)
+	{
+		w->CaptureWidget = nullptr;
 	}
 }
 
@@ -439,12 +572,23 @@ void Widget::SetClipboardText(const std::string& text)
 		w->DispWindow->SetClipboardText(text);
 }
 
-Widget* Widget::Window()
+Widget* Widget::Window(bool rootWindow) const
 {
-	for (Widget* w = this; w != nullptr; w = w->Parent())
+	if(rootWindow)
+	{
+		const Widget* w = this;
+
+		while(w->Parent())
+		{
+			w = w->Parent();
+		}
+
+		return (w->DispWindow) ? const_cast<Widget*>(w) : nullptr;
+	}
+	else for (const Widget* w = this; w != nullptr; w = w->Parent())
 	{
 		if (w->DispWindow)
-			return w;
+			return const_cast<Widget*>(w);
 	}
 	return nullptr;
 }
@@ -456,14 +600,44 @@ Canvas* Widget::GetCanvas() const
 		if (w->DispCanvas)
 			return w->DispCanvas.get();
 	}
-	return nullptr;
+
+	struct DummyCanvas
+	{
+		DummyCanvas()
+		{
+			canvas = Canvas::create();
+			canvas->attach(nullptr);
+		}
+		std::unique_ptr<Canvas> canvas;
+	};
+
+	static DummyCanvas dummy;
+	return dummy.canvas.get();
+}
+
+bool Widget::IsParent(const Widget* w) const
+{
+	while (w)
+	{
+		w = w->Parent();
+		if (w == this)
+			return true;
+	}
+	return false;
+}
+
+bool Widget::IsChild(const Widget* w) const
+{
+	if (!w)
+		return false;
+	return w->IsParent(this);
 }
 
 Widget* Widget::ChildAt(const Point& pos)
 {
 	for (Widget* cur = LastChild(); cur != nullptr; cur = cur->PrevSibling())
 	{
-		if (!cur->HiddenFlag && cur->FrameGeometry.contains(pos))
+		if (cur->Type == WidgetType::Child && !cur->HiddenFlag && cur->FrameGeometry.contains(pos))
 		{
 			Widget* cur2 = cur->ChildAt(pos - cur->ContentGeometry.topLeft());
 			return cur2 ? cur2 : cur;
@@ -491,7 +665,7 @@ Point Widget::MapFromGlobal(const Point& pos) const
 	{
 		if (cur->DispWindow)
 		{
-			return p - cur->GetFrameGeometry().topLeft();
+			return cur->DispWindow->MapFromGlobal(p);
 		}
 		p -= cur->ContentGeometry.topLeft();
 	}
@@ -517,7 +691,7 @@ Point Widget::MapToGlobal(const Point& pos) const
 	{
 		if (cur->DispWindow)
 		{
-			return cur->GetFrameGeometry().topLeft() + p;
+			return cur->DispWindow->MapToGlobal(p);
 		}
 		p += cur->ContentGeometry.topLeft();
 	}
@@ -526,6 +700,7 @@ Point Widget::MapToGlobal(const Point& pos) const
 
 void Widget::OnWindowPaint()
 {
+	// TODO: holy shit, this causes so much startup lag. We need a real repaint system
 	Repaint();
 }
 
@@ -570,11 +745,29 @@ void Widget::OnWindowMouseMove(const Point& pos)
 	}
 }
 
-void Widget::OnWindowMouseDown(const Point& pos, EInputKey key)
+void Widget::OnWindowMouseLeave()
+{
+	if (HoverWidget)
+	{
+		for (Widget* w = HoverWidget; w; w = w->Parent())
+		{
+			w->OnMouseLeave();
+		}
+		HoverWidget = nullptr;
+	}
+}
+
+void Widget::OnWindowMouseDown(const Point& pos, InputKey key)
 {
 	if (CaptureWidget)
 	{
 		CaptureWidget->OnMouseDown(CaptureWidget->MapFrom(this, pos), key);
+
+		if(CaptureWidget->DispWindow && CaptureWidget != Window())
+		{ // auto-focus on modal windows
+			CaptureWidget->DispWindow->Restore();
+			CaptureWidget->ActivateWindow();
+		}
 	}
 	else
 	{
@@ -591,11 +784,17 @@ void Widget::OnWindowMouseDown(const Point& pos, EInputKey key)
 	}
 }
 
-void Widget::OnWindowMouseDoubleclick(const Point& pos, EInputKey key)
+void Widget::OnWindowMouseDoubleclick(const Point& pos, InputKey key)
 {
 	if (CaptureWidget)
 	{
 		CaptureWidget->OnMouseDoubleclick(CaptureWidget->MapFrom(this, pos), key);
+
+		if(CaptureWidget->DispWindow && CaptureWidget != Window())
+		{ // auto-focus on modal windows
+			CaptureWidget->DispWindow->Restore();
+			CaptureWidget->ActivateWindow();
+		}
 	}
 	else
 	{
@@ -612,7 +811,7 @@ void Widget::OnWindowMouseDoubleclick(const Point& pos, EInputKey key)
 	}
 }
 
-void Widget::OnWindowMouseUp(const Point& pos, EInputKey key)
+void Widget::OnWindowMouseUp(const Point& pos, InputKey key)
 {
 	if (CaptureWidget)
 	{
@@ -633,7 +832,7 @@ void Widget::OnWindowMouseUp(const Point& pos, EInputKey key)
 	}
 }
 
-void Widget::OnWindowMouseWheel(const Point& pos, EInputKey key)
+void Widget::OnWindowMouseWheel(const Point& pos, InputKey key)
 {
 	if (CaptureWidget)
 	{
@@ -672,13 +871,13 @@ void Widget::OnWindowKeyChar(std::string chars)
 		FocusWidget->OnKeyChar(chars);
 }
 
-void Widget::OnWindowKeyDown(EInputKey key)
+void Widget::OnWindowKeyDown(InputKey key)
 {
 	if (FocusWidget)
 		FocusWidget->OnKeyDown(key);
 }
 
-void Widget::OnWindowKeyUp(EInputKey key)
+void Widget::OnWindowKeyUp(InputKey key)
 {
 	if (FocusWidget)
 		FocusWidget->OnKeyUp(key);
@@ -686,9 +885,21 @@ void Widget::OnWindowKeyUp(EInputKey key)
 
 void Widget::OnWindowGeometryChanged()
 {
+	if (!DispWindow)
+		return;
 	Size size = DispWindow->GetClientSize();
 	FrameGeometry = Rect::xywh(0.0, 0.0, size.width, size.height);
-	ContentGeometry = FrameGeometry;
+
+	double left = FrameGeometry.left() + GetNoncontentLeft();
+	double top = FrameGeometry.top() + GetNoncontentTop();
+	double right = FrameGeometry.right() - GetNoncontentRight();
+	double bottom = FrameGeometry.bottom() - GetNoncontentBottom();
+	left = std::min(left, FrameGeometry.right());
+	top = std::min(top, FrameGeometry.bottom());
+	right = std::max(right, FrameGeometry.left());
+	bottom = std::max(bottom, FrameGeometry.top());
+	ContentGeometry = Rect::ltrb(left, top, right, bottom);
+
 	OnGeometryChanged();
 }
 
@@ -709,7 +920,152 @@ void Widget::OnWindowDpiScaleChanged()
 {
 }
 
+bool Widget::OnFileDrop(std::string path)
+{
+	bool res = false;
+	if (!Dropping)
+	{
+		Dropping = true;
+		res = (FocusWidget && FocusWidget->OnFileDrop(path)) || (ParentObj && ParentObj->OnFileDrop(path));
+	}
+	Dropping = false;
+	return res;
+}
+
+double Widget::GetDpiScale() const
+{
+	Widget* w = Window();
+	return w ? w->DispWindow->GetDpiScale() : 1.0;
+}
+
+double Widget::GridFitPoint(double p) const
+{
+	double dpiscale = GetDpiScale();
+	return std::round(p * dpiscale) / dpiscale;
+}
+
+double Widget::GridFitSize(double s) const
+{
+	if (s <= 0.0)
+		return 0.0;
+	double dpiscale = GetDpiScale();
+	return std::max(std::floor(s * dpiscale + 0.25), 1.0) / dpiscale;
+}
+
 Size Widget::GetScreenSize()
 {
 	return DisplayWindow::GetScreenSize();
+}
+
+void* Widget::GetNativeHandle()
+{
+	Widget* w = Window();
+	return w ? w->DispWindow->GetNativeHandle() : nullptr;
+}
+
+int Widget::GetNativePixelWidth()
+{
+	Widget* w = Window();
+	return w ? w->DispWindow->GetPixelWidth() : 0;
+}
+
+int Widget::GetNativePixelHeight()
+{
+	Widget* w = Window();
+	return w ? w->DispWindow->GetPixelHeight() : 0;
+}
+
+void Widget::SetStyleClass(const std::string& themeClass)
+{
+	if (StyleClass != themeClass)
+	{
+		StyleClass = themeClass;
+		Update();
+	}
+}
+
+void Widget::SetStyleState(const std::string& state)
+{
+	if (StyleState != state)
+	{
+		StyleState = state;
+		Update();
+	}
+}
+
+void Widget::SetStyleBool(const std::string& propertyName, bool value)
+{
+	StyleProperties[propertyName] = value;
+}
+
+void Widget::SetStyleInt(const std::string& propertyName, int value)
+{
+	StyleProperties[propertyName] = value;
+}
+
+void Widget::SetStyleDouble(const std::string& propertyName, double value)
+{
+	StyleProperties[propertyName] = value;
+}
+
+void Widget::SetStyleString(const std::string& propertyName, const std::string& value)
+{
+	StyleProperties[propertyName] = value;
+}
+
+void Widget::SetStyleColor(const std::string& propertyName, const Colorf& value)
+{
+	StyleProperties[propertyName] = value;
+}
+
+bool Widget::GetStyleBool(const std::string& propertyName) const
+{
+	auto it = StyleProperties.find(propertyName);
+	if (it != StyleProperties.end())
+		return std::get<bool>(it->second);
+	WidgetStyle* style = WidgetTheme::GetTheme()->GetStyle(StyleClass);
+	return style ? style->GetBool(StyleState, propertyName) : false;
+}
+
+int Widget::GetStyleInt(const std::string& propertyName) const
+{
+	auto it = StyleProperties.find(propertyName);
+	if (it != StyleProperties.end())
+		return std::get<int>(it->second);
+	WidgetStyle* style = WidgetTheme::GetTheme()->GetStyle(StyleClass);
+	return style ? style->GetInt(StyleState, propertyName) : 0;
+}
+
+double Widget::GetStyleDouble(const std::string& propertyName) const
+{
+	auto it = StyleProperties.find(propertyName);
+	if (it != StyleProperties.end())
+		return std::get<double>(it->second);
+	WidgetStyle* style = WidgetTheme::GetTheme()->GetStyle(StyleClass);
+	return style ? style->GetDouble(StyleState, propertyName) : 0.0;
+}
+
+std::string Widget::GetStyleString(const std::string& propertyName) const
+{
+	auto it = StyleProperties.find(propertyName);
+	if (it != StyleProperties.end())
+		return std::get<std::string>(it->second);
+	WidgetStyle* style = WidgetTheme::GetTheme()->GetStyle(StyleClass);
+	return style ? style->GetString(StyleState, propertyName) : std::string();
+}
+
+Colorf Widget::GetStyleColor(const std::string& propertyName) const
+{
+	auto it = StyleProperties.find(propertyName);
+	if (it != StyleProperties.end())
+		return std::get<Colorf>(it->second);
+	WidgetStyle* style = WidgetTheme::GetTheme()->GetStyle(StyleClass);
+	return style ? style->GetColor(StyleState, propertyName) : Colorf::transparent();
+}
+
+void Widget::NotifyWindow()
+{
+	Widget* w = Window();
+	if (w && w->DispWindow)
+		w->DispWindow->NotifyWindow();
 }

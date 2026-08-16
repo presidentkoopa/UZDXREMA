@@ -1,39 +1,30 @@
 /*
 ** vmframe.cpp
 **
+**
+**
 **---------------------------------------------------------------------------
-** Copyright -2016 Randy Heit
+**
+** Copyright 2009-2016 Marisa Heit
 ** Copyright 2016 Christoph Oelckers
-** All rights reserved.
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+**---------------------------------------------------------------------------
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
 
 #include <new>
 #include "dobject.h"
+#include "printf.h"
 #include "v_text.h"
 #include "stats.h"
 #include "c_dispatch.h"
@@ -43,6 +34,7 @@
 #include "jit.h"
 #include "c_cvars.h"
 #include "version.h"
+#include "common/scripting/dap/GameEventEmit.h"
 
 #ifdef HAVE_VM_JIT
 #ifdef __DragonFly__
@@ -264,14 +256,42 @@ int VMScriptFunction::PCToLine(const VMOP *pc)
 {
 	int PCIndex = int(pc - Code);
 	if (LineInfoCount == 1) return LineInfo[0].LineNumber;
+	unsigned MaxIdx = 0;
 	for (unsigned i = 1; i < LineInfoCount; i++)
 	{
 		if (LineInfo[i].InstructionIndex > PCIndex)
 		{
 			return LineInfo[i - 1].LineNumber;
 		}
+		if (LineInfo[i].InstructionIndex > LineInfo[MaxIdx].InstructionIndex)
+		{
+			MaxIdx = i;
+		}
+	}
+	if (PCIndex < CodeSize)
+	{
+		return LineInfo[MaxIdx].LineNumber;
 	}
 	return -1;
+}
+
+TArray<VMLocalVariable> VMScriptFunction::GetLocalVariableBlocksAt(const VMOP *pc)
+{
+	TArray<VMLocalVariable> ret;
+	// LocalVariableBlocks should already be sorted by start address.
+	std::vector<std::pair<const VMOP*, const VMOP*>> ranges;
+	for (auto &block : LocalVariableBlocks)
+	{
+		if (pc >= block.first.first && pc < block.first.second)
+		{
+			ranges.push_back(block.first);
+			for (auto &var : block.second)
+			{
+				ret.Push(var);
+			}
+		}
+	}
+	return ret;
 }
 
 static bool CanJit(VMScriptFunction *func)
@@ -318,7 +338,7 @@ int VMScriptFunction::FirstScriptCall(VMFunction *func, VMValue *params, int num
 	{
 		ThrowAbortException(X_OTHER, "attempt to call abstract function %s.", func->PrintableName);
 	}
-	
+
 	static_cast<VMScriptFunction*>(func)->JitCompile();
 
 	return func->ScriptCall(func, params, numparams, ret, numret);
@@ -553,6 +573,124 @@ VMFrame *VMFrameStack::PopFrame()
 }
 
 //===========================================================================
+// Templates for calling ZScript from C++ with type checks
+
+void VMCheckParamCount(VMFunction* func, int retcount, int argcount)
+{
+	if (func->Proto->ReturnTypes.SSize() != retcount)
+		I_FatalError("Incorrect return value passed to %s", func->PrintableName);
+	if (func->Proto->ArgumentTypes.SSize() != argcount)
+		I_FatalError("Incorrect parameter count passed to %s", func->PrintableName);
+}
+
+template<> void VMCheckParam<int>(VMFunction* func, int index)
+{
+	if (!func->Proto->ArgumentTypes[index]->isIntCompatible())
+		I_FatalError("%s argument %d is not an integer", func->PrintableName, index);
+}
+
+template<> void VMCheckParam<double>(VMFunction* func, int index)
+{
+	if (func->Proto->ArgumentTypes[index] != TypeFloat64)
+		I_FatalError("%s argument %d is not a double", func->PrintableName, index);
+}
+
+template<> void VMCheckParam<DVector2>(VMFunction* func, int index)
+{
+	if (func->Proto->ArgumentTypes[index] != TypeVector2)
+		I_FatalError("%s argument %d is not a vector2", func->PrintableName, index);
+}
+
+template<> void VMCheckParam<DVector3>(VMFunction* func, int index)
+{
+	if (func->Proto->ArgumentTypes[index] != TypeVector3)
+		I_FatalError("%s argument %d is not a vector3", func->PrintableName, index);
+}
+
+template<> void VMCheckParam<DVector4>(VMFunction* func, int index)
+{
+	if (func->Proto->ArgumentTypes[index] != TypeVector4)
+		I_FatalError("%s argument %d is not a vector4", func->PrintableName, index);
+}
+
+template<> void VMCheckParam<DQuaternion>(VMFunction* func, int index)
+{
+	if (func->Proto->ArgumentTypes[index] != TypeQuaternion)
+		I_FatalError("%s argument %d is not a quat", func->PrintableName, index);
+}
+
+template<> void VMCheckParam<FString>(VMFunction* func, int index)
+{
+	if (func->Proto->ArgumentTypes[index] != TypeString)
+		I_FatalError("%s argument %d is not a string", func->PrintableName, index);
+}
+
+template<> void VMCheckParam<DObject*>(VMFunction* func, int index)
+{
+	if (!func->Proto->ArgumentTypes[index]->isObjectPointer())
+		I_FatalError("%s argument %d is not an object", func->PrintableName, index);
+}
+
+template<> void VMCheckReturn<void>(VMFunction* func, int index)
+{
+}
+
+template<> void VMCheckReturn<int>(VMFunction* func, int index)
+{
+	if (!func->Proto->ReturnTypes[index]->isIntCompatible())
+		I_FatalError("%s return value %d is not an integer", func->PrintableName, index);
+}
+
+template<> void VMCheckReturn<double>(VMFunction* func, int index)
+{
+	if (func->Proto->ReturnTypes[index] != TypeFloat64)
+		I_FatalError("%s return value %d is not a double", func->PrintableName, index);
+}
+
+template<> void VMCheckReturn<DVector2>(VMFunction* func, int index)
+{
+	if (func->Proto->ReturnTypes[index] != TypeVector2)
+		I_FatalError("%s return value %d is not a vector2", func->PrintableName, index);
+}
+
+template<> void VMCheckReturn<DVector3>(VMFunction* func, int index)
+{
+	if (func->Proto->ReturnTypes[index] != TypeVector3)
+		I_FatalError("%s return value %d is not a vector3", func->PrintableName, index);
+}
+
+template<> void VMCheckReturn<DVector4>(VMFunction* func, int index)
+{
+	if (func->Proto->ReturnTypes[index] != TypeVector4)
+		I_FatalError("%s return value %d is not a vector4", func->PrintableName, index);
+}
+
+template<> void VMCheckReturn<DQuaternion>(VMFunction* func, int index)
+{
+	if (func->Proto->ReturnTypes[index] != TypeQuaternion)
+		I_FatalError("%s return value %d is not a quat", func->PrintableName, index);
+}
+
+template<> void VMCheckReturn<FString>(VMFunction* func, int index)
+{
+	if (func->Proto->ReturnTypes[index] != TypeString)
+		I_FatalError("%s return value %d is not a string", func->PrintableName, index);
+}
+
+template<> void VMCheckReturn<DObject*>(VMFunction* func, int index)
+{
+	if (!func->Proto->ReturnTypes[index]->isObjectPointer())
+		I_FatalError("%s return value %d is not an object", func->PrintableName, index);
+}
+
+void VMCallCheckResult(VMFunction* func, VMValue* params, int numparams, VMReturn* results, int numresults)
+{
+	int retval = VMCall(func, params, numparams, results, numresults);
+	if (retval != numresults)
+		I_FatalError("%s did not return the expected number of results", func->PrintableName);
+}
+
+//===========================================================================
 //
 // VMFrameStack :: Call
 //
@@ -569,7 +707,7 @@ int VMCall(VMFunction *func, VMValue *params, int numparams, VMReturn *results, 
 #if 0
 	try
 #endif
-	{	
+	{
 		if (func->VarFlags & VARF_Native)
 		{
 			return static_cast<VMNativeFunction *>(func)->NativeCall(VM_INVOKE(params, numparams, results, numresults, func->RegTypes));
@@ -699,7 +837,7 @@ void CVMAbortException::MaybePrintMessage()
 	auto m = GetMessage();
 	if (m != nullptr)
 	{
-		Printf(PRINT_NONOTIFY | PRINT_BOLD, TEXTCOLOR_RED "%s\n", m);
+		Printf(static_cast<PrintFlag>(PRINT_NONOTIFY | PRINT_BOLD), TEXTCOLOR_RED "%s\n", m);
 		SetMessage("");
 	}
 }
@@ -709,7 +847,9 @@ void CVMAbortException::MaybePrintMessage()
 {
 	va_list ap;
 	va_start(ap, moreinfo);
-	throw CVMAbortException(reason, moreinfo, ap);
+	CVMAbortException err(reason, moreinfo, ap);
+	DebugServer::RuntimeEvents::EmitExceptionEvent(reason, err.GetMessage(), err.stacktrace.GetChars());
+	throw err;
 }
 
 [[noreturn]] void ThrowAbortException(VMScriptFunction *sfunc, VMOP *line, EVMAbortException reason, const char *moreinfo, ...)
@@ -721,6 +861,7 @@ void CVMAbortException::MaybePrintMessage()
 	va_end(ap);
 
 	err.stacktrace.AppendFormat("Called from %s at %s, line %d\n", sfunc->PrintableName, sfunc->SourceFileName.GetChars(), sfunc->PCToLine(line));
+	DebugServer::RuntimeEvents::EmitExceptionEvent(reason, err.GetMessage(), err.stacktrace.GetChars());
 	throw err;
 }
 
@@ -797,4 +938,3 @@ CCMD(vmengine)
 	}
 	Printf("Usage: vmengine <default|checked|unchecked>\n");
 }
-

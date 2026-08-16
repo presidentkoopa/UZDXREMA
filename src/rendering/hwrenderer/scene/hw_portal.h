@@ -1,3 +1,20 @@
+/*
+** hw_portal.h
+**
+** portal maintenance classes for skyboxes, horizons etc. (API independent parts)
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 2004-2018 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
+
 #pragma once
 
 #include "tarray.h"
@@ -13,9 +30,9 @@ class FSkyBox;
 
 struct HWSkyInfo
 {
-	float x_offset[2];
+	float x_offset[3];
 	float y_offset;		// doubleskies don't have a y-offset
-	FGameTexture * texture[2];
+	FGameTexture * texture[3];
 	FTextureID skytexno1;
 	bool mirrored;
 	bool doublesky;
@@ -43,6 +60,17 @@ struct HWHorizonInfo
 
 struct FPortalSceneState;
 
+enum HWPortalTypes
+{
+	HWP_SKY = 0,
+	HWP_HORIZON,
+	HWP_SKYBOX,
+	HWP_SECTORSTACK,
+	HWP_PLANEMIRROR,
+	HWP_MIRROR,
+	HWP_LINETOLINE,
+};
+
 class HWPortal
 {
 	friend struct FPortalSceneState;
@@ -64,20 +92,23 @@ public:
 	TArray<HWWall> lines;
 	BoundingRect boundingBox;
 	int planesused = 0;
+	float zshift = 0.1; 	// HWPlaneMirrorPortal::DrawPortalStencil() z-fights with flats unless zshift >= 0.1
 	HWFlat flat;
 
-    HWPortal(FPortalSceneState *s, bool local = false) : mState(s), boundingBox(false)
-    {
-    }
-    virtual ~HWPortal() {}
-    virtual int ClipSeg(seg_t *seg, const DVector3 &viewpos) { return PClip_Inside; }
-    virtual int ClipSubsector(subsector_t *sub) { return PClip_Inside; }
-    virtual int ClipPoint(const DVector2 &pos) { return PClip_Inside; }
-    virtual linebase_t *ClipLine() { return nullptr; }
+	HWPortal(FPortalSceneState *s, bool local = false) : mState(s), boundingBox(false)
+	{
+	}
+	virtual ~HWPortal() {}
+	virtual int GetMirrorSide() const { return 0; };
+	virtual int ClipSeg(seg_t *seg, const DVector3 &viewpos) { return PClip_Inside; }
+	virtual int ClipSubsector(subsector_t *sub) { return PClip_Inside; }
+	virtual int ClipPoint(const DVector2 &pos) { return PClip_Inside; }
+	virtual linebase_t *ClipLine() { return nullptr; }
 	virtual void * GetSource() const = 0;	// GetSource MUST be implemented!
 	virtual const char *GetName() = 0;
 	virtual bool AllowSSAO() { return true; }
 	virtual bool IsSky() { return false; }
+	virtual int GetHWPortalType() { return HWP_SKY; }
 	virtual bool NeedCap() { return true; }
 	virtual bool NeedDepthBuffer() { return true; }
 	virtual void DrawContents(HWDrawInfo *di, FRenderState &state) = 0;
@@ -135,20 +166,20 @@ struct FPortalSceneState
 
 extern FPortalSceneState portalState;
 
-    
+
 class HWScenePortalBase : public HWPortal
 {
 protected:
-    HWScenePortalBase(FPortalSceneState *state) : HWPortal(state, false)
-    {
-        
-    }
+	HWScenePortalBase(FPortalSceneState *state) : HWPortal(state, false)
+	{
+
+	}
 public:
 	void ClearClipper(HWDrawInfo *di, Clipper *clipper);
 	virtual bool NeedDepthBuffer() { return true; }
 	virtual void DrawContents(HWDrawInfo *di, FRenderState &state)
 	{
-		if (Setup(di, state, (di->Viewpoint.IsAllowedOoB() ? di->rClipper : di->mClipper)))
+		if (Setup(di, state, (di->Viewpoint.bDoOob ? di->rClipper : di->mClipper)))
 		{
 			di->DrawScene(DM_PORTAL);
 			Shutdown(di, state);
@@ -212,6 +243,7 @@ protected:
 
 public:
 
+	virtual int GetHWPortalType() { return HWP_MIRROR; }
 	HWMirrorPortal(FPortalSceneState *state, line_t * line)
 		: HWLinePortal(state, line)
 	{
@@ -232,6 +264,7 @@ protected:
 
 public:
 
+	virtual int GetHWPortalType() { return HWP_LINETOLINE; }
 	HWLineToLinePortal(FPortalSceneState *state, FLinePortalSpan *ll)
 		: HWLinePortal(state, ll)
 	{
@@ -256,7 +289,7 @@ protected:
 
 public:
 
-
+	virtual int GetHWPortalType() { return HWP_SKYBOX; }
 	HWSkyboxPortal(FPortalSceneState *state, FSectorPortal * pt) : HWScenePortalBase(state)
 	{
 		portal = pt;
@@ -268,6 +301,7 @@ public:
 struct HWSectorStackPortal : public HWScenePortalBase
 {
 	TArray<subsector_t *> subsectors;
+
 protected:
 	bool Setup(HWDrawInfo *di, FRenderState &rstate, Clipper *clipper) override;
 	void DrawPortalStencil(FRenderState &state, int pass) override;
@@ -279,6 +313,7 @@ protected:
 
 public:
 
+	virtual int GetHWPortalType() { return HWP_SECTORSTACK; }
 	HWSectorStackPortal(FPortalSceneState *state, FSectorPortalGroup *pt) : HWScenePortalBase(state)
 	{
 		origin = pt;
@@ -304,10 +339,14 @@ protected:
 
 public:
 
+	virtual int GetHWPortalType() { return HWP_PLANEMIRROR; }
+	int GetMirrorSide() const override;
+
 	HWPlaneMirrorPortal(FPortalSceneState *state, secplane_t * pt) : HWScenePortalBase(state)
 	{
 		origin = pt;
 	}
+	void SetupCoverage(HWDrawInfo *di);
 
 };
 
@@ -327,7 +366,8 @@ protected:
 	virtual const char *GetName();
 
 public:
-	
+
+	virtual int GetHWPortalType() { return HWP_HORIZON; }
 	HWHorizonPortal(FPortalSceneState *state, HWHorizonInfo * pt, FRenderViewpoint &vp, bool local = false);
 };
 
@@ -344,13 +384,13 @@ protected:
 
 public:
 
+	virtual int GetHWPortalType() { return HWP_HORIZON; }
 	HWEEHorizonPortal(FPortalSceneState *state, FSectorPortal *pt) : HWPortal(state)
 	{
 		portal = pt;
 	}
 
 };
-
 
 struct HWSkyPortal : public HWPortal
 {
@@ -367,7 +407,7 @@ protected:
 
 public:
 
-
+	virtual int GetHWPortalType() { return HWP_SKY; }
 	HWSkyPortal(FSkyVertexBuffer *vertexbuffer, FPortalSceneState *state, HWSkyInfo *  pt, bool local = false)
 		: HWPortal(state, local)
 	{

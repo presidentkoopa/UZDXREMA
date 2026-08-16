@@ -1,3 +1,22 @@
+/*
+** weapons.zs
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2006-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
+
 class Weapon : StateProvider
 {
 	enum EFireMode
@@ -9,7 +28,7 @@ class Weapon : StateProvider
 
 	const ZOOM_INSTANT = 1;
 	const ZOOM_NOSCALETURNING = 2;
-	
+
 	deprecated("3.7") uint WeaponFlags;		// not to be used directly.
 	class<Ammo> AmmoType1, AmmoType2;		// Types of ammo used by self weapon
 	int AmmoGive1, AmmoGive2;				// Amount of each ammo to get when picking up weapon
@@ -55,7 +74,7 @@ class Weapon : StateProvider
 	virtual ui Vector3, Vector3 ModifyBobLayer3D(Vector3 Translation, Vector3 Rotation, int layer, double ticfrac) { return Translation, Rotation; }
 
 	virtual ui Vector3 ModifyBobPivotLayer3D(int layer, double ticfrac) { return BobPivot3D; }
-	
+
 	property AmmoGive: AmmoGive1;
 	property AmmoGive1: AmmoGive1;
 	property AmmoGive2: AmmoGive2;
@@ -108,18 +127,23 @@ class Weapon : StateProvider
 	flagdef NoDeathInput: WeaponFlags, 17;		// The weapon cannot be fired/reloaded/whatever when the player is dead
 	flagdef CheatNotWeapon: WeaponFlags, 18;	// Give cheat considers this not a weapon (used by Sigil)
 	flagdef NoAutoSwitchTo : WeaponFlags, 19;	// do not auto switch to this weapon ever!
+	// UZDXREMA: bits 20-25 are the fork's dual-wield / laser-sight identity and
+	// predate upstream promoting the old no-op BFG/Explosive placeholders to real
+	// flags. Upstream put BFG at 20 and Explosive at 21, which collides head-on
+	// with OffhandWeapon/NoHandSwitch, so upstream's two are renumbered to 26/27
+	// (WeaponFlags is a 32-bit int; 28-31 remain free). Do NOT move these back.
 	flagdef OffhandWeapon: WeaponFlags, 20;		// weapon is an offhand weapon
 	flagdef NoHandSwitch: WeaponFlags, 21;		// weapon cannot be moved from one hand to another
 	flagdef TwoHanded: WeaponFlags, 22;			// two handed weapon
 	flagdef NoAutoReverse: WeaponFlags, 23;		// prevent auto reverse of model and sprite when switching to offhand
 	flagdef HasLaserBeam: WeaponFlags, 24;		// weapon has a laser beam
 	flagdef HasHitscanTracer: WeaponFlags, 25;	// weapon forces hitscan tracer visuals on
+	flagdef BFG: WeaponFlags, 26;				// This weapon is a BFG (i.e BFG9000 and the Wraithverge)
+	flagdef Explosive: WeaponFlags, 27;			// This weapon is explosive (i.e Doom and Strife's Rocket Launchers)
 
 	// no-op flags
 	flagdef NoLMS: none, 0;
 	flagdef Allow_With_Respawn_Invul: none, 0;
-	flagdef BFG: none, 0;
-	flagdef Explosive: none, 0;
 
 	Default
 	{
@@ -159,7 +183,7 @@ class Weapon : StateProvider
 		MarkSound(UpSound);
 		MarkSound(ReadySound);
 	}
-	
+
 	virtual int, int CheckAddToSlots()
 	{
 		if (GetReplacement(GetClass()) == GetClass() && !bPowered_Up)
@@ -168,12 +192,21 @@ class Weapon : StateProvider
 		}
 		return -1, 0;
 	}
-	
+
+
+	// [AA] Called when the weapon is selected, including
+	// PowerWeaponLevel2 activation:
+	virtual void OnSelect(bool fromPowerup = false) {}
+
+	// [AA] Called when the weapon is deselected, including
+	// PowerWeaponLevel2 running out or being tossed:
+	virtual void OnDeselect(bool fromPowerup = false, bool onToss = false) {}
+
 	virtual State GetReadyState ()
 	{
 		return FindState('Ready');
 	}
-	
+
 	virtual State GetUpState ()
 	{
 		return FindState('Select');
@@ -191,7 +224,7 @@ class Weapon : StateProvider
 		if (s == null) s = FindState('Fire');
 		return s;
 	}
-	
+
 	virtual State GetAltAtkState (bool hold)
 	{
 		State s = null;
@@ -199,7 +232,7 @@ class Weapon : StateProvider
 		if (s == null) s = FindState('AltFire');
 		return s;
 	}
-	
+
 	virtual void PlayUpSound(Actor origin)
 	{
 		if (UpSound)
@@ -207,13 +240,13 @@ class Weapon : StateProvider
 			origin.A_StartSound(UpSound, CHAN_WEAPON);
 		}
 	}
-	
+
 	override String GetObituary(Actor victim, Actor inflictor, Name mod, bool playerattack)
 	{
 		// Weapons may never return HitObituary by default. Override this if it is needed.
 		return Obituary;
 	}
-	
+
 	action void A_GunFlash(statelabel flashlabel = null, int flags = 0)
 	{
 		let player = player;
@@ -251,7 +284,7 @@ class Weapon : StateProvider
 		}
 		player.SetPsprite(PSP_FLASH, flashstate, false, weapon);
 	}
-	
+
 	//---------------------------------------------------------------------------
 	//
 	// PROC A_Lower
@@ -305,7 +338,7 @@ class Weapon : StateProvider
 			return;
 		}
 		ResetPSprite(psp);
-		
+
 		if (player.playerstate == PST_DEAD)
 		{ // Player is dead, so don't bring up a pending weapon
 			// Player is dead, so keep the weapon off screen
@@ -357,7 +390,9 @@ class Weapon : StateProvider
 			return;
 		}
 		psp.y = WEAPONTOP;
-		
+
+		// UZDXREMA: hand-local `weapon`, not player.ReadyWeapon - raising the
+		// offhand weapon must enter the offhand weapon's ready state.
 		psp.SetState(weapon.GetReadyState());
 		return;
 	}
@@ -470,7 +505,7 @@ class Weapon : StateProvider
 		if (flags & WRF_AllowUser4) outflags |= hand ? WF_OFFHANDUSER4OK : WF_USER4OK;
 		return outflags;
 	}
-	
+
 	action void A_WeaponReady(int flags = 0)
 	{
 		if (!player) return;
@@ -479,7 +514,7 @@ class Weapon : StateProvider
 		if ((flags & WRF_NoFire) != WRF_NoFire)			DoReadyWeaponToFire(player.mo, !(flags & WRF_NoPrimary), !(flags & WRF_NoSecondary), hand);
 		if (!(flags & WRF_NoBob))						DoReadyWeaponToBob(player, hand);
 
-		player.WeaponState |= GetButtonStateFlags(flags, hand);														
+		player.WeaponState |= GetButtonStateFlags(flags, hand);
 		DoReadyWeaponDisableSwitch(player, flags & WRF_DisableSwitch, hand);
 	}
 
@@ -501,7 +536,7 @@ class Weapon : StateProvider
 			weap.CheckAmmo (weap.bAltFire ? Weapon.AltFire : Weapon.PrimaryFire, true);
 		}
 	}
-		
+
 	//===========================================================================
 	//
 	// A_ZoomFactor
@@ -545,7 +580,7 @@ class Weapon : StateProvider
 			weap.Crosshair = xhair;
 		}
 	}
-	
+
 	//===========================================================================
 	//
 	// Weapon :: TryPickup
@@ -739,12 +774,19 @@ class Weapon : StateProvider
 	{
 		// Only drop the weapon that is meant to be placed in a level. That is,
 		// only drop the weapon that normally gives you ammo.
-		if (SisterWeapon != NULL && 
+		if (SisterWeapon != NULL &&
 			Default.AmmoGive1 == 0 && Default.AmmoGive2 == 0 &&
 			(SisterWeapon.Default.AmmoGive1 > 0 || SisterWeapon.Default.AmmoGive2 > 0))
 		{
 			return SisterWeapon.CreateTossable (amt);
 		}
+
+		// [AA] This weapon was selected and its amount is about to become 0:
+		if (Amount == 1 && Owner != NULL && Owner.Player != NULL && Owner.Player.ReadyWeapon == self)
+		{
+			OnDeselect(onToss: true);
+		}
+
 		let copy = Weapon(Super.CreateTossable (-1));
 
 		if (copy != NULL)
@@ -925,6 +967,8 @@ class Weapon : StateProvider
 				if (player.PendingWeapon == NULL ||	player.PendingWeapon == WP_NOCHANGE)
 				{
 					player.refire = 0;
+					// Upstream's OnDeselect notification plus the fork's hand routing.
+					OnDeselect(fromPowerup: true);
 					if (hand == 0) player.ReadyWeapon = SisterWeapon;
 					if (hand == 1) player.OffhandWeapon = SisterWeapon;
 					player.SetPsprite(hand ? PSP_OFFHANDWEAPON : PSP_WEAPON, SisterWeapon.GetReadyState());
@@ -937,15 +981,23 @@ class Weapon : StateProvider
 				if (psp != null && psp.Caller == weap && psp.CurState.InStateSequence(ready))
 				{
 					// If the weapon changes but the state does not, we have to manually change the PSprite's caller here.
+					OnDeselect(fromPowerup: true);
 					psp.Caller = SisterWeapon;
 					if (hand == 0) player.ReadyWeapon = SisterWeapon;
 					if (hand == 1) player.OffhandWeapon = SisterWeapon;
 				}
-				else 
+				else
 				{
 					if (player.PendingWeapon == NULL || player.PendingWeapon == WP_NOCHANGE)
 					{
 						// Something went wrong. Initiate a regular weapon change.
+						// UZDXREMA: the fork defers to the normal pending-weapon
+						// path instead of upstream's immediate hard-coded
+						// PSP_WEAPON re-select, because only the deferred path is
+						// hand-aware (A_Raise -> DropWeapon(hand)). That path also
+						// already dispatches OnDeselect(), so upstream's extra
+						// OnDeselect(fromPowerup: true) is deliberately NOT added
+						// here - it would fire the virtual twice for one deselect.
 						player.PendingWeapon = SisterWeapon;
 					}
 				}
@@ -953,7 +1005,7 @@ class Weapon : StateProvider
 		}
 	}
 
-	
+
 	//===========================================================================
 	//
 	// Weapon :: PostMorphWeapon
@@ -997,13 +1049,13 @@ class Weapon : StateProvider
 	// next weapon to use.
 	//
 	//===========================================================================
-	
+
 	virtual bool CheckAmmo(int fireMode, bool autoSwitch, bool requireAmmo = false, int ammocount = -1)
 	{
 		int count1, count2;
 		int enough, enoughmask;
 		int lAmmoUse1;
-        int lAmmoUse2 = AmmoUse2;
+		int lAmmoUse2 = AmmoUse2;
 
 		if (sv_infiniteammo || (Owner.FindInventory ('PowerInfiniteAmmo', true) != null))
 		{
@@ -1068,7 +1120,7 @@ class Weapon : StateProvider
 		return false;
 	}
 
-		
+
 	//===========================================================================
 	//
 	// Weapon :: DepleteAmmo
@@ -1136,7 +1188,7 @@ class Weapon : StateProvider
 		bool ignoreskill = true;
 		double dropammofactor = G_SkillPropertyFloat(SKILLP_DropAmmoFactor);
 		// Default drop amount is half of regular amount * regular ammo multiplication
-		if (dropammofactor == -1) 
+		if (dropammofactor == -1)
 		{
 			dropammofactor = 0.5;
 			ignoreskill = false;
@@ -1151,19 +1203,19 @@ class Weapon : StateProvider
 		AmmoGive2 = int(AmmoGive2 * dropammofactor);
 		bIgnoreSkill = ignoreskill;
 	}
-	
+
 }
 
 class WeaponGiver : Weapon
 {
 	double AmmoFactor;
-	
+
 	Default
 	{
 		Weapon.AmmoGive1 -1;
 		Weapon.AmmoGive2 -1;
 	}
-	
+
 	override bool TryPickup(in out Actor toucher)
 	{
 		DropItem di = GetDropItems();
@@ -1214,7 +1266,7 @@ class WeaponGiver : Weapon
 		}
 		return false;
 	}
-	
+
 	//---------------------------------------------------------------------------
 	//
 	// Modifies the drop amount of this item according to the current skill's
@@ -1227,7 +1279,7 @@ class WeaponGiver : Weapon
 		bool ignoreskill = true;
 		double dropammofactor = G_SkillPropertyFloat(SKILLP_DropAmmoFactor);
 		// Default drop amount is half of regular amount * regular ammo multiplication
-		if (dropammofactor == -1) 
+		if (dropammofactor == -1)
 		{
 			dropammofactor = 0.5;
 			ignoreskill = false;
@@ -1236,8 +1288,8 @@ class WeaponGiver : Weapon
 		AmmoFactor = dropammofactor;
 		bIgnoreSkill = ignoreskill;
 	}
-	
-	
+
+
 }
 
 struct WeaponSlots native

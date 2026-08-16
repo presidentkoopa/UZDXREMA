@@ -1,32 +1,23 @@
 /*
 ** d_protocol.h
 **
+**
+**
 **---------------------------------------------------------------------------
-** Copyright 1998-2006 Randy Heit
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 1998-2016 Marisa Heit
+** Copyright 2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
@@ -35,6 +26,7 @@
 #define __D_PROTOCOL_H__
 
 #include "doomtype.h"
+#include "i_protocol.h"
 
 // The IFF routines here all work with big-endian IDs, even if the host
 // system is little-endian.
@@ -50,6 +42,7 @@
 #define NETD_ID		BIGE_ID('N','E','T','D')
 #define WEAP_ID		BIGE_ID('W','E','A','P')
 
+constexpr int MoreButtons = 0x80;
 
 struct zdemoheader_s {
 	uint8_t	demovermajor;
@@ -115,7 +108,7 @@ enum EDemoCommand
 	DEM_INVUSE,			// 19 4 bytes: ID of item to use
 	DEM_PAUSE,			// 20 Pause game
 	DEM_SAVEGAME,		// 21 String: Filename, String: Description
-	DEM_UNDONE3,		// 22 
+	DEM_UNDONE3,		// 22
 	DEM_UNDONE4,		// 23
 	DEM_UNDONE5,		// 24
 	DEM_UNDONE6,		// 25
@@ -166,9 +159,13 @@ enum EDemoCommand
 	DEM_NETEVENT,		// 70 String: Event name, Byte: Arg count; each arg is a 4-byte int
 	DEM_MDK,			// 71 String: Damage type
 	DEM_SETINV,			// 72 SetInventory
-	DEM_ENDSCREENJOB,
+	DEM_ENDSCREENJOB,	// 73
 	DEM_ZSC_CMD,		// 74 String: Command, Word: Byte size of command
 	DEM_CHANGESKILL,	// 75 Int: Skill
+	DEM_KICK,			// 76 Byte: Player number
+	DEM_READIED,		// 77
+	DEM_WEAPSELECT,		// 78 Byte: Slot
+	DEM_USEFLECHETTE,	// 79
 };
 
 // The following are implemented by cht_DoCheat in m_cheat.cpp
@@ -230,42 +227,16 @@ enum ECheatCommand
 	CHT_MASSACRE2
 };
 
-void StartChunk (int id, uint8_t **stream);
-void FinishChunk (uint8_t **stream);
-void SkipChunk (uint8_t **stream);
+void StartChunk (int id, TArrayView<uint8_t>& stream);
+void FinishChunk (TArrayView<uint8_t>& stream);
+void SkipChunk (TArrayView<uint8_t>& stream);
 
-int UnpackUserCmd (usercmd_t *ucmd, const usercmd_t *basis, uint8_t **stream);
-int PackUserCmd (const usercmd_t *ucmd, const usercmd_t *basis, uint8_t **stream);
-int WriteUserCmdMessage (usercmd_t *ucmd, const usercmd_t *basis, uint8_t **stream);
+void UnpackUserCmd(usercmd_t& ucmd, const usercmd_t* basis, TArrayView<uint8_t>& stream);
+void PackUserCmd(const usercmd_t& ucmd, const usercmd_t* basis, TArrayView<uint8_t>& stream);
+void WriteUserCmdMessage(const usercmd_t& ucmd, const usercmd_t *basis, TArrayView<uint8_t>& stream);
 
-// The data sampled per tick (single player)
-// and transmitted to other peers (multiplayer).
-// Mainly movements/button commands per game tick,
-// plus a checksum for internal state consistency.
-struct ticcmd_t
-{
-	usercmd_t	ucmd;
-	int16_t		consistancy;	// checks for net game
-};
-
-int SkipTicCmd (uint8_t **stream, int count);
-void ReadTicCmd (uint8_t **stream, int player, int tic);
-void RunNetSpecs (int player, int buf);
-
-uint8_t ReadInt8 (uint8_t **stream);
-int16_t ReadInt16 (uint8_t **stream);
-int32_t ReadInt32 (uint8_t **stream);
-int64_t ReadInt64(uint8_t** stream);
-float ReadFloat (uint8_t **stream);
-double ReadDouble(uint8_t** stream);
-char *ReadString (uint8_t **stream);
-const char *ReadStringConst(uint8_t **stream);
-void WriteInt8 (uint8_t val, uint8_t **stream);
-void WriteInt16 (int16_t val, uint8_t **stream);
-void WriteInt32 (int32_t val, uint8_t **stream);
-void WriteInt64(int64_t val, uint8_t** stream);
-void WriteFloat (float val, uint8_t **stream);
-void WriteDouble(double val, uint8_t** stream);
-void WriteString (const char *string, uint8_t **stream);
+void SkipUserCmdMessage(TArrayView<uint8_t>& stream);
+void ReadUserCmdMessage(TArrayView<uint8_t>& stream, int player, int tic);
+void RunPlayerCommands(int player, int tic);
 
 #endif //__D_PROTOCOL_H__

@@ -1,33 +1,22 @@
 /*
 ** p_acs.cpp
+**
 ** General BEHAVIOR management and ACS execution environment
 **
 **---------------------------------------------------------------------------
-** Copyright 1998-2012 Randy Heit
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 1998-2016 Marisa Heit
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 ** This code at one time made lots of little-endian assumptions.
@@ -37,47 +26,50 @@
 
 #include <assert.h>
 
-#include "templates.h"
-#include "doomdef.h"
-#include "p_local.h"
-#include "d_player.h"
-#include "p_spec.h"
-#include "p_acs.h"
-#include "p_saveg.h"
-#include "p_lnspec.h"
-#include "p_enemy.h"
+#include "a_morph.h"
+#include "a_sharedglobal.h"
+#include "actorinlines.h"
+#include "actorptrselect.h"
+#include "c_bind.h"
 #include "c_console.h"
 #include "c_dispatch.h"
+#include "cmdlib.h"
+#include "d_player.h"
+#include "decallib.h"
+#include "doomdef.h"
+#include "filesystem.h"
+#include "g_game.h"
+#include "g_levellocals.h"
+#include "gi.h"
+#include "gstrings.h"
+#include "m_png.h"
+#include "p_acs.h"
+#include "p_effect.h"
+#include "p_enemy.h"
+#include "p_lnspec.h"
+#include "p_local.h"
+#include "p_saveg.h"
+#include "p_setup.h"
+#include "p_spec.h"
+#include "p_terrain.h"
+#include "po_man.h"
+#include "printf.h"
+#include "r_sky.h"
+#include "r_utility.h"
+#include "s_music.h"
 #include "s_sndseq.h"
 #include "sbar.h"
-#include "a_sharedglobal.h"
-#include "filesystem.h"
-#include "r_sky.h"
-#include "gstrings.h"
-#include "gi.h"
-#include "g_game.h"
-#include "c_bind.h"
-#include "cmdlib.h"
-#include "m_png.h"
-#include "p_setup.h"
-#include "po_man.h"
-#include "actorptrselect.h"
-#include "serializer_doom.h"
-#include "serialize_obj.h"
-#include "decallib.h"
-#include "p_terrain.h"
-#include "version.h"
-#include "p_effect.h"
-#include "r_utility.h"
-#include "a_morph.h"
-#include "thingdef.h"
-#include "g_levellocals.h"
-#include "actorinlines.h"
-#include "types.h"
 #include "scriptutil.h"
-#include "s_music.h"
-#include "v_video.h"
+#include "serialize_obj.h"
+#include "serializer_doom.h"
+#include "templates.h"
 #include "texturemanager.h"
+#include "thingdef.h"
+#include "types.h"
+#include "v_video.h"
+#include "version.h"
+#include "dobjgc.h"
+#include "m_round.h"
 
 	// P-codes for ACS scripts
 	enum
@@ -375,40 +367,40 @@
 /*290*/	PCD_PLAYERCLASS,			// [GRB]
 		//[MW] start my p-codes
 		PCD_ANDSCRIPTVAR,
-		PCD_ANDMAPVAR, 
-		PCD_ANDWORLDVAR, 
-		PCD_ANDGLOBALVAR, 
-		PCD_ANDMAPARRAY, 
-		PCD_ANDWORLDARRAY, 
+		PCD_ANDMAPVAR,
+		PCD_ANDWORLDVAR,
+		PCD_ANDGLOBALVAR,
+		PCD_ANDMAPARRAY,
+		PCD_ANDWORLDARRAY,
 		PCD_ANDGLOBALARRAY,
-		PCD_EORSCRIPTVAR, 
-		PCD_EORMAPVAR, 
-/*300*/	PCD_EORWORLDVAR, 
-		PCD_EORGLOBALVAR, 
-		PCD_EORMAPARRAY, 
-		PCD_EORWORLDARRAY, 
+		PCD_EORSCRIPTVAR,
+		PCD_EORMAPVAR,
+/*300*/	PCD_EORWORLDVAR,
+		PCD_EORGLOBALVAR,
+		PCD_EORMAPARRAY,
+		PCD_EORWORLDARRAY,
 		PCD_EORGLOBALARRAY,
-		PCD_ORSCRIPTVAR, 
-		PCD_ORMAPVAR, 
-		PCD_ORWORLDVAR, 
-		PCD_ORGLOBALVAR, 
-		PCD_ORMAPARRAY, 
-/*310*/	PCD_ORWORLDARRAY, 
+		PCD_ORSCRIPTVAR,
+		PCD_ORMAPVAR,
+		PCD_ORWORLDVAR,
+		PCD_ORGLOBALVAR,
+		PCD_ORMAPARRAY,
+/*310*/	PCD_ORWORLDARRAY,
 		PCD_ORGLOBALARRAY,
-		PCD_LSSCRIPTVAR, 
-		PCD_LSMAPVAR, 
-		PCD_LSWORLDVAR, 
-		PCD_LSGLOBALVAR, 
-		PCD_LSMAPARRAY, 
-		PCD_LSWORLDARRAY, 
+		PCD_LSSCRIPTVAR,
+		PCD_LSMAPVAR,
+		PCD_LSWORLDVAR,
+		PCD_LSGLOBALVAR,
+		PCD_LSMAPARRAY,
+		PCD_LSWORLDARRAY,
 		PCD_LSGLOBALARRAY,
-		PCD_RSSCRIPTVAR, 
-/*320*/	PCD_RSMAPVAR, 
-		PCD_RSWORLDVAR, 
-		PCD_RSGLOBALVAR, 
-		PCD_RSMAPARRAY, 
-		PCD_RSWORLDARRAY, 
-		PCD_RSGLOBALARRAY, 
+		PCD_RSSCRIPTVAR,
+/*320*/	PCD_RSMAPVAR,
+		PCD_RSWORLDVAR,
+		PCD_RSGLOBALVAR,
+		PCD_RSMAPARRAY,
+		PCD_RSWORLDARRAY,
+		PCD_RSGLOBALARRAY,
 		//[MW] end my p-codes
 		PCD_GETPLAYERINFO,			// [GRB]
 		PCD_CHANGELEVEL,
@@ -470,7 +462,7 @@
 		PCD_TRANSLATIONRANGE4,
 		PCD_TRANSLATIONRANGE5,
 
-/*381*/	PCODE_COMMAND_COUNT
+/*385*/	PCODE_COMMAND_COUNT
 	};
 
 	// Some constants used by ACS scripts
@@ -540,7 +532,10 @@
 
 
 
+extern int Net_Arbitrator;
+
 FRandom pr_acs ("ACS");
+FCRandom pr_csacs("CSACS");
 
 // I imagine this much stack space is probably overkill, but it could
 // potentially get used with recursive functions.
@@ -611,7 +606,7 @@ inline float ACSToFloat(int acsval)
 
 inline int DoubleToACS(double val)
 {
-	return xs_Fix<16>::ToFix(val);
+	return FloatToFixed<16>(val);
 }
 
 inline DAngle ACSToAngle(int acsval)
@@ -650,6 +645,26 @@ struct CallReturn
 	unsigned int EntryInstrCount;
 };
 
+static AActor* GetScriptOwner(AActor& activator)
+{
+	return activator.player != nullptr ? activator.player->mo : &activator;
+}
+
+static bool ShouldIgnoreClientSideScript(AActor* activator)
+{
+	if (activator == nullptr || activator->IsClientSide())
+		return false;
+
+	AActor* owner = GetScriptOwner(*activator);
+	return !owner->Level->isConsolePlayer(owner);
+}
+
+// TODO: Disabled until a new flag can be created for UZDoom's specific type of
+// client-side handling. It was breaking too many existing CLIENTSIDE scripts.
+static bool IsClientSideScript(const ScriptPtr& script)
+{
+	return false;
+}
 
 class DLevelScript : public DObject
 {
@@ -673,7 +688,7 @@ public:
 	};
 
 	DLevelScript(FLevelLocals *l, AActor *who, line_t *where, int num, const ScriptPtr *code, FBehavior *module,
-		const int *args, int argcount, int flags);
+		const int *args, int argcount, int flags, bool clientside);
 
 	void Serialize(FSerializer &arc);
 	int RunScript();
@@ -706,6 +721,7 @@ protected:
 	TObjPtr<AActor*>	activator;
 	line_t			*activationline;
 	bool			backSide;
+	bool			bClientSide;
 	FFont			*activefont = nullptr;
 	int				hudwidth, hudheight;
 	int				ClipRectLeft, ClipRectTop, ClipRectWidth, ClipRectHeight;
@@ -733,6 +749,12 @@ protected:
 		}
 	}
 
+	FActorIterator GetActorIterator(int tid) const
+	{
+		return bClientSide ? Level->GetClientSideActorIterator(tid) : Level->GetActorIterator(tid);
+	}
+
+	DACSThinker* GetController() const;
 	void Link();
 	void Unlink();
 	void PutLast();
@@ -1325,7 +1347,7 @@ void ACSStringPool::ReadStrings(FSerializer &file, const char *key)
 void ACSStringPool::WriteStrings(FSerializer &file, const char *key) const
 {
 	int32_t i, poolsize = (int32_t)Pool.Size();
-	
+
 	if (poolsize == 0)
 	{ // No need to write if we don't have anything.
 		return;
@@ -1449,7 +1471,7 @@ void P_CollectACSGlobalStrings()
 		}
 	}
 	for(auto Level : AllLevels())
-	{ 
+	{
 		Level->Behaviors.MarkLevelVarStrings();
 	}
 	P_MarkWorldVarStrings();
@@ -1742,7 +1764,7 @@ static int UseInventory (FLevelLocals *Level, AActor *activator, const char *typ
 	}
 	if (activator == NULL)
 	{
-		for (int i = 0; i < MAXPLAYERS; ++i)
+		for (unsigned int i = 0; i < MAXPLAYERS; ++i)
 		{
 			if (Level->PlayerInGame(i))
 				ret += DoUseInv (Level->Players[i]->mo, info);
@@ -1982,11 +2004,7 @@ bool FBehaviorContainer::CheckAllGood ()
 
 void FBehaviorContainer::UnloadModules ()
 {
-	for (unsigned int i = StaticModules.Size(); i-- > 0; )
-	{
-		delete StaticModules[i];
-	}
-	StaticModules.Clear ();
+	StaticModules.DeleteAndClear();
 }
 
 FBehavior *FBehaviorContainer::GetModule (int lib)
@@ -2013,6 +2031,13 @@ void FBehaviorContainer::MarkLevelVarStrings()
 			script->MarkLocalVarStrings();
 		}
 	}
+	if (Level->ClientSideACSThinker != nullptr)
+	{
+		for (DLevelScript* script = Level->ClientSideACSThinker->Scripts; script != NULL; script = script->GetNext())
+		{
+			script->MarkLocalVarStrings();
+		}
+	}
 }
 
 void FBehaviorContainer::LockLevelVarStrings(int levelnum)
@@ -2026,6 +2051,13 @@ void FBehaviorContainer::LockLevelVarStrings(int levelnum)
 	if (Level->ACSThinker != nullptr)
 	{
 		for (DLevelScript *script = Level->ACSThinker->Scripts; script != NULL; script = script->GetNext())
+		{
+			script->LockLocalVarStrings(levelnum);
+		}
+	}
+	if (Level->ClientSideACSThinker != nullptr)
+	{
+		for (DLevelScript* script = Level->ClientSideACSThinker->Scripts; script != NULL; script = script->GetNext())
 		{
 			script->LockLocalVarStrings(levelnum);
 		}
@@ -2208,8 +2240,8 @@ FBehavior::FBehavior()
 	FunctionProfileData = NULL;
 
 }
-	
-	
+
+
 bool FBehavior::Init(FLevelLocals *Level, int lumpnum, FileReader * fr, int len, int reallumpnum)
 {
 	uint8_t *object;
@@ -2273,7 +2305,7 @@ bool FBehavior::Init(FLevelLocals *Level, int lumpnum, FileReader * fr, int len,
 		delete[] object;
 		return false;
 	}
-    LibraryID = Level->Behaviors.StaticModules.Push (this) << LIBRARYID_SHIFT;
+	LibraryID = Level->Behaviors.StaticModules.Push (this) << LIBRARYID_SHIFT;
 
 	if (fr == NULL)
 	{
@@ -3164,7 +3196,7 @@ inline bool FBehavior::CopyStringToArray(int arraynum, int index, int maxLength,
 	if ((unsigned)arraynum >= (unsigned)NumTotalArrays || index < 0)
 		return false;
 	const ArrayInfo *array = Arrays[arraynum];
-	
+
 	if ((signed)array->ArraySize - index < maxLength) maxLength = (signed)array->ArraySize - index;
 
 	while (maxLength-- > 0)
@@ -3327,6 +3359,12 @@ void FBehaviorContainer::StopMyScripts (AActor *actor)
 	if (controller != NULL)
 	{
 		controller->StopScriptsFor (actor);
+	}
+
+	controller = actor->Level->ClientSideACSThinker;
+	if (controller != NULL)
+	{
+		controller->StopScriptsFor(actor);
 	}
 }
 
@@ -3491,7 +3529,8 @@ void DLevelScript::Serialize(FSerializer &arc)
 		("cliprectheight", ClipRectHeight)
 		("wrapwidth", WrapWidth)
 		("inmodulescriptnum", InModuleScriptNumber)
-		("level", Level);
+		("level", Level)
+		("bclientside", bClientSide);
 
 	if (arc.isReading())
 	{
@@ -3506,10 +3545,14 @@ void DLevelScript::Serialize(FSerializer &arc)
 	}
 }
 
+DACSThinker* DLevelScript::GetController() const
+{
+	return bClientSide ? Level->ClientSideACSThinker : Level->ACSThinker;
+}
+
 void DLevelScript::Unlink ()
 {
-	DACSThinker *controller = Level->ACSThinker;
-
+	auto controller = GetController();
 	if (controller->LastScript == this)
 	{
 		controller->LastScript = prev;
@@ -3534,8 +3577,7 @@ void DLevelScript::Unlink ()
 
 void DLevelScript::Link ()
 {
-	DACSThinker *controller = Level->ACSThinker;
-
+	auto controller = GetController();
 	next = controller->Scripts;
 	GC::WriteBarrier(this, next);
 	if (controller->Scripts)
@@ -3554,8 +3596,7 @@ void DLevelScript::Link ()
 
 void DLevelScript::PutLast ()
 {
-	DACSThinker *controller = Level->ACSThinker;
-
+	auto controller = GetController();
 	if (controller->LastScript == this)
 		return;
 
@@ -3576,8 +3617,7 @@ void DLevelScript::PutLast ()
 
 void DLevelScript::PutFirst ()
 {
-	DACSThinker *controller = Level->ACSThinker;
-
+	auto controller = GetController();
 	if (controller->Scripts == this)
 		return;
 
@@ -3592,7 +3632,7 @@ int DLevelScript::Random (int min, int max)
 		std::swap (max, min);
 	}
 
-	return min + pr_acs(max - min + 1);
+	return min + (bClientSide ? pr_csacs(max - min + 1) : pr_acs(max - min + 1));
 }
 
 int DLevelScript::ThingCount (int type, int stringid, int tid, int tag)
@@ -3697,7 +3737,7 @@ void DLevelScript::ChangeFlat (int tag, int name, bool floorOrCeiling)
 
 int DLevelScript::CountPlayers ()
 {
-	int count = 0, i;
+	unsigned int count = 0, i;
 
 	for (i = 0; i < MAXPLAYERS; i++)
 		if (Level->PlayerInGame(i))
@@ -3850,7 +3890,7 @@ void DLevelScript::DoFadeRange (int r1, int g1, int b1, int a1,
 	bool fadingFrom = a1 >= 0;
 	float fr1 = 0, fg1 = 0, fb1 = 0, fa1 = 0;
 	float fr2, fg2, fb2, fa2;
-	int i;
+	unsigned int i;
 
 	fr2 = (float)r2 / 255.f;
 	fg2 = (float)g2 / 255.f;
@@ -3922,65 +3962,65 @@ void DLevelScript::DoSetFont (int fontnum)
 
 int DLevelScript::DoSetMaster (AActor *self, AActor *master)
 {
-    AActor *defs;
-    if (self->flags3&MF3_ISMONSTER)
-    {
-        if (master)
-        {
-            if (master->flags3&MF3_ISMONSTER)
-            {
-                self->FriendPlayer = 0;
-                self->master = master;
-                Level->total_monsters -= self->CountsAsKill();
-                self->flags = (self->flags & ~MF_FRIENDLY) | (master->flags & MF_FRIENDLY);
-                Level->total_monsters += self->CountsAsKill();
-                // Don't attack your new master
-                if (self->target == self->master) self->target = nullptr;
-                if (self->lastenemy == self->master) self->lastenemy = nullptr;
-                if (self->LastHeard == self->master) self->LastHeard = nullptr;
-                return 1;
-            }
-            else if (master->player)
-            {
-                // [KS] Be friendly to this player
-                self->master = nullptr;
-                Level->total_monsters -= self->CountsAsKill();
-                self->flags|=MF_FRIENDLY;
-                self->SetFriendPlayer(master->player);
+	AActor *defs;
+	if (self->flags3&MF3_ISMONSTER)
+	{
+		if (master)
+		{
+			if (master->flags3&MF3_ISMONSTER)
+			{
+				self->FriendPlayer = 0;
+				self->master = master;
+				Level->total_monsters -= self->CountsAsKill();
+				self->flags = (self->flags & ~MF_FRIENDLY) | (master->flags & MF_FRIENDLY);
+				Level->total_monsters += self->CountsAsKill();
+				// Don't attack your new master
+				if (self->target == self->master) self->target = nullptr;
+				if (self->lastenemy == self->master) self->lastenemy = nullptr;
+				if (self->LastHeard == self->master) self->LastHeard = nullptr;
+				return 1;
+			}
+			else if (master->player)
+			{
+				// [KS] Be friendly to this player
+				self->master = nullptr;
+				Level->total_monsters -= self->CountsAsKill();
+				self->flags|=MF_FRIENDLY;
+				self->SetFriendPlayer(master->player);
 
-                AActor * attacker=master->player->attacker;
-                if (attacker)
-                {
-                    if (!(attacker->flags&MF_FRIENDLY) || 
-                        (deathmatch && attacker->FriendPlayer!=0 && attacker->FriendPlayer!=self->FriendPlayer))
-                    {
-                        self->LastHeard = self->target = attacker;
-                    }
-                }
-                // And stop attacking him if necessary.
-                if (self->target == master) self->target = nullptr;
-                if (self->lastenemy == master) self->lastenemy = nullptr;
-                if (self->LastHeard == master) self->LastHeard = nullptr;
-                return 1;
-            }
-        }
-        else
-        {
-            self->master = nullptr;
-            self->FriendPlayer = 0;
-            // Go back to whatever friendliness we usually have...
-            defs = self->GetDefault();
-            Level->total_monsters -= self->CountsAsKill();
-            self->flags = (self->flags & ~MF_FRIENDLY) | (defs->flags & MF_FRIENDLY);
-            Level->total_monsters += self->CountsAsKill();
-            // ...And re-side with our friends.
-            if (self->target && !self->IsHostile (self->target)) self->target = nullptr;
-            if (self->lastenemy && !self->IsHostile (self->lastenemy)) self->lastenemy = nullptr;
-            if (self->LastHeard && !self->IsHostile (self->LastHeard)) self->LastHeard = nullptr;
-            return 1;
-        }
-    }
-    return 0;
+				AActor * attacker=master->player->attacker;
+				if (attacker)
+				{
+					if (!(attacker->flags&MF_FRIENDLY) ||
+						(deathmatch && attacker->FriendPlayer!=0 && attacker->FriendPlayer!=self->FriendPlayer))
+					{
+						self->LastHeard = self->target = attacker;
+					}
+				}
+				// And stop attacking him if necessary.
+				if (self->target == master) self->target = nullptr;
+				if (self->lastenemy == master) self->lastenemy = nullptr;
+				if (self->LastHeard == master) self->LastHeard = nullptr;
+				return 1;
+			}
+		}
+		else
+		{
+			self->master = nullptr;
+			self->FriendPlayer = 0;
+			// Go back to whatever friendliness we usually have...
+			defs = self->GetDefault();
+			Level->total_monsters -= self->CountsAsKill();
+			self->flags = (self->flags & ~MF_FRIENDLY) | (defs->flags & MF_FRIENDLY);
+			Level->total_monsters += self->CountsAsKill();
+			// ...And re-side with our friends.
+			if (self->target && !self->IsHostile (self->target)) self->target = nullptr;
+			if (self->lastenemy && !self->IsHostile (self->lastenemy)) self->lastenemy = nullptr;
+			if (self->LastHeard && !self->IsHostile (self->LastHeard)) self->LastHeard = nullptr;
+			return 1;
+		}
+	}
+	return 0;
 }
 
 int DoGetMasterTID (AActor *self)
@@ -4078,7 +4118,7 @@ void DLevelScript::SetActorProperty (int tid, int property, int value)
 	else
 	{
 		AActor *actor;
-		auto iterator = Level->GetActorIterator(tid);
+		auto iterator = GetActorIterator(tid);
 
 		while ((actor = iterator.Next()) != NULL)
 		{
@@ -4242,7 +4282,7 @@ void DLevelScript::DoSetActorProperty (AActor *actor, int property, int value)
 
 	case APROP_MasterTID:
 		AActor *other;
-		other = Level->SingleActorFromTID (value, NULL);
+		other = Level->SingleActorFromTID (value, bClientSide, NULL);
 		DoSetMaster (actor, other);
 		break;
 
@@ -4317,7 +4357,7 @@ void DLevelScript::DoSetActorProperty (AActor *actor, int property, int value)
 			{
 				actor->player->SoundClass = Level->Behaviors.LookupString(value);
 			}
-		}	
+		}
 		break;
 	case APROP_FriendlySeeBlocks:
 		actor->friendlyseeblocks = value;
@@ -4331,7 +4371,7 @@ void DLevelScript::DoSetActorProperty (AActor *actor, int property, int value)
 
 int DLevelScript::GetActorProperty (int tid, int property)
 {
-	AActor *actor = Level->SingleActorFromTID (tid, activator);
+	AActor *actor = Level->SingleActorFromTID (tid, bClientSide, activator);
 
 	if (actor == NULL)
 	{
@@ -4432,7 +4472,7 @@ int DLevelScript::GetActorProperty (int tid, int property)
 
 int DLevelScript::CheckActorProperty (int tid, int property, int value)
 {
-	AActor *actor = Level->SingleActorFromTID (tid, activator);
+	AActor *actor = Level->SingleActorFromTID (tid, bClientSide, activator);
 	const char *string = NULL;
 	if (actor == NULL)
 	{
@@ -4494,7 +4534,7 @@ int DLevelScript::CheckActorProperty (int tid, int property, int value)
 		case APROP_AttackSound:	string = S_GetSoundName(actor->AttackSound); break;
 		case APROP_PainSound:	string = S_GetSoundName(actor->PainSound); break;
 		case APROP_DeathSound:	string = S_GetSoundName(actor->DeathSound); break;
-		case APROP_ActiveSound:	string = S_GetSoundName(actor->ActiveSound); break; 
+		case APROP_ActiveSound:	string = S_GetSoundName(actor->ActiveSound); break;
 		case APROP_Species:		string = actor->GetSpecies().GetChars(); break;
 		case APROP_NameTag:		string = actor->GetTag(); break;
 		case APROP_DamageType:	string = actor->DamageType.GetChars(); break;
@@ -4506,7 +4546,7 @@ int DLevelScript::CheckActorProperty (int tid, int property, int value)
 
 bool DLevelScript::DoCheckActorTexture(int tid, AActor *activator, int string, bool floor)
 {
-	AActor *actor = Level->SingleActorFromTID(tid, activator);
+	AActor *actor = Level->SingleActorFromTID(tid, bClientSide, activator);
 	if (actor == NULL)
 	{
 		return 0;
@@ -4594,7 +4634,7 @@ int DLevelScript::DoClassifyActor(int tid)
 	}
 	else
 	{
-		auto it = Level->GetActorIterator(tid);
+		auto it = GetActorIterator(tid);
 		actor = it.Next();
 	}
 	if (actor == NULL)
@@ -4704,7 +4744,7 @@ enum EACSFunctions
 	ACSF_SpawnSpotForced,
 	ACSF_SpawnSpotFacingForced,
 	ACSF_CheckActorProperty,
-    ACSF_SetActorVelocity,
+	ACSF_SetActorVelocity,
 	ACSF_SetUserVariable,
 	ACSF_GetUserVariable,
 	ACSF_Radius_Quake2,
@@ -4716,7 +4756,7 @@ enum EACSFunctions
 	ACSF_SoundSequenceOnPolyobj,
 	ACSF_GetPolyobjX,
 	ACSF_GetPolyobjY,
-    ACSF_CheckSight,
+	ACSF_CheckSight,
 	ACSF_SpawnForced,
 	ACSF_AnnouncerSound,	// Skulltag
 	ACSF_SetPointer,
@@ -4826,7 +4866,7 @@ enum EACSFunctions
 int DLevelScript::SideFromID(int id, int side)
 {
 	if (side != 0 && side != 1) return -1;
-	
+
 	if (id == 0)
 	{
 		if (activationline == NULL) return -1;
@@ -5086,7 +5126,7 @@ void DLevelScript::SetActorAngle(AActor *activator, int tid, int angle, bool int
 	}
 	else
 	{
-		auto iterator = Level->GetActorIterator(tid);
+		auto iterator = GetActorIterator(tid);
 		AActor *actor;
 
 		while ((actor = iterator.Next()))
@@ -5108,7 +5148,7 @@ void DLevelScript::SetActorPitch(AActor *activator, int tid, int angle, bool int
 	}
 	else
 	{
-		auto iterator = Level->GetActorIterator(tid);
+		auto iterator = GetActorIterator(tid);
 		AActor *actor;
 
 		while ((actor = iterator.Next()))
@@ -5130,7 +5170,7 @@ void DLevelScript::SetActorRoll(AActor *activator, int tid, int angle, bool inte
 	}
 	else
 	{
-		auto iterator = Level->GetActorIterator(tid);
+		auto iterator = GetActorIterator(tid);
 		AActor *actor;
 
 		while ((actor = iterator.Next()))
@@ -5157,7 +5197,7 @@ void DLevelScript::SetActorTeleFog(AActor *activator, int tid, FString telefogsr
 	}
 	else
 	{
-		auto iterator = Level->GetActorIterator(tid);
+		auto iterator = GetActorIterator(tid);
 		AActor *actor;
 
 		PClassActor * src = PClass::FindActor(telefogsrc);
@@ -5177,7 +5217,7 @@ int DLevelScript::SwapActorTeleFog(AActor *activator, int tid)
 	int count = 0;
 	if (tid == 0)
 	{
-		if ((activator == NULL) || (activator->TeleFogSourceType == activator->TeleFogDestType)) 
+		if ((activator == NULL) || (activator->TeleFogSourceType == activator->TeleFogDestType))
 			return 0; //Does nothing if they're the same.
 
 		std::swap (activator->TeleFogSourceType, activator->TeleFogDestType);
@@ -5185,12 +5225,12 @@ int DLevelScript::SwapActorTeleFog(AActor *activator, int tid)
 	}
 	else
 	{
-		auto iterator = Level->GetActorIterator(tid);
+		auto iterator = GetActorIterator(tid);
 		AActor *actor;
-		
+
 		while ((actor = iterator.Next()))
 		{
-			if (actor->TeleFogSourceType == actor->TeleFogDestType) 
+			if (actor->TeleFogSourceType == actor->TeleFogDestType)
 				continue; //They're the same. Save the effort.
 
 			std::swap (actor->TeleFogSourceType, actor->TeleFogDestType);
@@ -5369,34 +5409,34 @@ int DLevelScript::CallFunction(int argCount, int funcIndex, int32_t *args, int &
 
 		case ACSF_GetActorVelX:
 			MIN_ARG_COUNT(1);
-			actor = Level->SingleActorFromTID(args[0], activator);
+			actor = Level->SingleActorFromTID(args[0], bClientSide, activator);
 			return actor != NULL? DoubleToACS(actor->Vel.X) : 0;
 
 		case ACSF_GetActorVelY:
 			MIN_ARG_COUNT(1);
-			actor = Level->SingleActorFromTID(args[0], activator);
+			actor = Level->SingleActorFromTID(args[0], bClientSide, activator);
 			return actor != NULL? DoubleToACS(actor->Vel.Y) : 0;
 
 		case ACSF_GetActorVelZ:
 			MIN_ARG_COUNT(1);
-			actor = Level->SingleActorFromTID(args[0], activator);
+			actor = Level->SingleActorFromTID(args[0], bClientSide, activator);
 			return actor != NULL? DoubleToACS(actor->Vel.Z) : 0;
 
 		case ACSF_GetNetID:
 			MIN_ARG_COUNT(2);
-			actor = Level->SelectActorFromTID(args[0], args[1], activator);
+			actor = Level->SelectActorFromTID(args[0], args[1], bClientSide, activator);
 			if (argCount > 2)
-				actor = COPY_AAPTREX(Level, actor, args[2]);
+				actor = COPY_AAPTREX(Level, actor, args[2], static_cast<EPTRClientSideState>(bClientSide));
 			return actor != nullptr ? actor->GetNetworkID() : NetworkEntityManager::WorldNetID;
 
 		case ACSF_SetPointer:
 			MIN_ARG_COUNT(2);
 			if (activator)
 			{
-				AActor *ptr = Level->SingleActorFromTID(args[1], activator);
+				AActor *ptr = Level->SingleActorFromTID(args[1], bClientSide, activator);
 				if (argCount > 2)
 				{
-					ptr = COPY_AAPTREX(Level, ptr, args[2]);
+					ptr = COPY_AAPTREX(Level, ptr, args[2], static_cast<EPTRClientSideState>(bClientSide));
 				}
 				if (ptr == activator) ptr = NULL;
 				ASSIGN_AAPTR(activator, args[0], ptr, (argCount > 3) ? args[3] : 0);
@@ -5408,18 +5448,18 @@ int DLevelScript::CallFunction(int argCount, int funcIndex, int32_t *args, int &
 			MIN_ARG_COUNT(1);
 			if (argCount > 1 && args[1] != AAPTR_DEFAULT) // condition (x != AAPTR_DEFAULT) is essentially condition (x).
 			{
-				activator = COPY_AAPTREX(Level, Level->SingleActorFromTID(args[0], activator), args[1]);
+				activator = COPY_AAPTREX(Level, Level->SingleActorFromTID(args[0], bClientSide, activator), args[1], static_cast<EPTRClientSideState>(bClientSide));
 			}
 			else
 			{
-				activator = Level->SingleActorFromTID(args[0], NULL);
+				activator = Level->SingleActorFromTID(args[0], bClientSide, NULL);
 			}
 			return activator != NULL;
-		
+
 		case ACSF_SetActivatorToTarget:
 			MIN_ARG_COUNT(1);
 			// [KS] I revised this a little bit
-			actor = Level->SingleActorFromTID(args[0], activator);
+			actor = Level->SingleActorFromTID(args[0], bClientSide, activator);
 			if (actor != NULL)
 			{
 				if (actor->player != NULL && actor->player->playerstate == PST_LIVE)
@@ -5444,7 +5484,7 @@ int DLevelScript::CallFunction(int argCount, int funcIndex, int32_t *args, int &
 			MIN_ARG_COUNT(1);
 			actor = dyn_cast<AActor>(NetworkEntityManager::GetNetworkEntity(args[0]));
 			if (argCount > 1)
-				actor = COPY_AAPTREX(Level, actor, args[1]);
+				actor = COPY_AAPTREX(Level, actor, args[1], static_cast<EPTRClientSideState>(bClientSide));
 			if (actor != nullptr)
 			{
 				activator = actor;
@@ -5454,7 +5494,7 @@ int DLevelScript::CallFunction(int argCount, int funcIndex, int32_t *args, int &
 
 		case ACSF_GetActorViewHeight:
 			MIN_ARG_COUNT(1);
-			actor = Level->SingleActorFromTID(args[0], activator);
+			actor = Level->SingleActorFromTID(args[0], bClientSide, activator);
 			if (actor != NULL)
 			{
 				if (actor->player != NULL)
@@ -5476,7 +5516,7 @@ int DLevelScript::CallFunction(int argCount, int funcIndex, int32_t *args, int &
 			{
 				return p[args[1]];
 			}
-			else 
+			else
 			{
 				return 0;
 			}
@@ -5514,6 +5554,7 @@ int DLevelScript::CallFunction(int argCount, int funcIndex, int32_t *args, int &
 		{
 			if (args[0] == 1) Level->skyspeed1 = ACSToFloat(args[1]);
 			else if (args[0] == 2) Level->skyspeed2 = ACSToFloat(args[1]);
+			else if (args[0] == 3) Level->skymistspeed = ACSToFloat(args[1]);
 			return 1;
 		}
 
@@ -5580,8 +5621,8 @@ int DLevelScript::CallFunction(int argCount, int funcIndex, int32_t *args, int &
 		case ACSF_CheckActorProperty:
 			MIN_ARG_COUNT(3);
 			return (CheckActorProperty(args[0], args[1], args[2]));
-        
-        case ACSF_SetActorVelocity:
+
+		case ACSF_SetActorVelocity:
 			MIN_ARG_COUNT(6);
 		{
 			DVector3 vel(ACSToDouble(args[1]), ACSToDouble(args[2]), ACSToDouble(args[3]));
@@ -5591,14 +5632,14 @@ int DLevelScript::CallFunction(int argCount, int funcIndex, int32_t *args, int &
 			}
 			else
 			{
-				auto iterator = Level->GetActorIterator(args[0]);
+				auto iterator = GetActorIterator(args[0]);
 
 				while ((actor = iterator.Next()))
 				{
 					P_Thing_SetVelocity(actor, vel, !!args[4], !!args[5]);
 				}
 			}
-			return 0; 
+			return 0;
 		}
 
 		case ACSF_SetUserVariable:
@@ -5618,8 +5659,8 @@ int DLevelScript::CallFunction(int argCount, int funcIndex, int32_t *args, int &
 				}
 				else
 				{
-					auto iterator = Level->GetActorIterator(args[0]);
-	                
+					auto iterator = GetActorIterator(args[0]);
+
 					while ( (actor = iterator.Next()) )
 					{
 						SetUserVariable(actor, varname, 0, args[2]);
@@ -5629,14 +5670,14 @@ int DLevelScript::CallFunction(int argCount, int funcIndex, int32_t *args, int &
 			}
 			return cnt;
 		}
-		
+
 		case ACSF_GetUserVariable:
 			MIN_ARG_COUNT(2);
 		{
 			FName varname(Level->Behaviors.LookupString(args[1]), true);
 			if (varname != NAME_None)
 			{
-				AActor *a = Level->SingleActorFromTID(args[0], activator); 
+				AActor *a = Level->SingleActorFromTID(args[0], bClientSide, activator);
 				return a != NULL ? GetUserVariable(a, varname, 0) : 0;
 			}
 			return 0;
@@ -5659,8 +5700,8 @@ int DLevelScript::CallFunction(int argCount, int funcIndex, int32_t *args, int &
 				}
 				else
 				{
-					auto iterator = Level->GetActorIterator(args[0]);
-	                
+					auto iterator = GetActorIterator(args[0]);
+
 					while ( (actor = iterator.Next()) )
 					{
 						SetUserVariable(actor, varname, args[2], args[3]);
@@ -5670,14 +5711,14 @@ int DLevelScript::CallFunction(int argCount, int funcIndex, int32_t *args, int &
 			}
 			return cnt;
 		}
-		
+
 		case ACSF_GetUserArray:
 			MIN_ARG_COUNT(3);
 		{
 			FName varname(Level->Behaviors.LookupString(args[1]), true);
 			if (varname != NAME_None)
 			{
-				AActor *a = Level->SingleActorFromTID(args[0], activator); 
+				AActor *a = Level->SingleActorFromTID(args[0], bClientSide, activator);
 				return a != NULL ? GetUserVariable(a, varname, args[2]) : 0;
 			}
 			return 0;
@@ -5691,14 +5732,14 @@ int DLevelScript::CallFunction(int argCount, int funcIndex, int32_t *args, int &
 		case ACSF_CheckActorClass:
 			MIN_ARG_COUNT(2);
 		{
-			AActor *a = Level->SingleActorFromTID(args[0], activator);
+			AActor *a = Level->SingleActorFromTID(args[0], bClientSide, activator);
 			return a == NULL ? false : a->GetClass()->TypeName == FName(Level->Behaviors.LookupString(args[1]));
 		}
 
 		case ACSF_GetActorClass:
 			MIN_ARG_COUNT(1);
 		{
-			AActor *a = Level->SingleActorFromTID(args[0], activator);
+			AActor *a = Level->SingleActorFromTID(args[0], bClientSide, activator);
 			return GlobalACSStrings.AddString(a == NULL ? "None" : a->GetClass()->TypeName.GetChars());
 		}
 
@@ -5782,10 +5823,10 @@ int DLevelScript::CallFunction(int argCount, int funcIndex, int32_t *args, int &
 				}
 			}
 			return FIXED_MAX;
-        
-        case ACSF_CheckSight:
+
+		case ACSF_CheckSight:
 			MIN_ARG_COUNT(3);
-        {
+		{
 			AActor *source;
 			AActor *dest;
 
@@ -5794,7 +5835,7 @@ int DLevelScript::CallFunction(int argCount, int funcIndex, int32_t *args, int &
 			if (args[2] & 1) flags |= SF_IGNOREWATERBOUNDARY;
 			if (args[2] & 2) flags |= SF_SEEPASTBLOCKEVERYTHING | SF_SEEPASTSHOOTABLELINES;
 
-			if (args[0] == 0) 
+			if (args[0] == 0)
 			{
 				source = (AActor *) activator;
 
@@ -5826,8 +5867,8 @@ int DLevelScript::CallFunction(int argCount, int funcIndex, int32_t *args, int &
 					}
 				}
 			}
-            return 0;
-        }
+			return 0;
+		}
 
 		case ACSF_SpawnForced:
 			MIN_ARG_COUNT(4);
@@ -5854,15 +5895,15 @@ int DLevelScript::CallFunction(int argCount, int funcIndex, int32_t *args, int &
 			break;
 
 		case ACSF_UniqueTID:
-			return Level->FindUniqueTID(argCount > 0 ? args[0] : 0, (argCount > 1 && args[1] >= 0) ? args[1] : 0);
+			return Level->FindUniqueTID(argCount > 0 ? args[0] : 0, (argCount > 1 && args[1] >= 0) ? args[1] : 0, bClientSide);
 
 		case ACSF_IsTIDUsed:
 			MIN_ARG_COUNT(1);
-			return Level->IsTIDUsed(args[0]);
+			return Level->IsTIDUsed(args[0], bClientSide);
 
 		case ACSF_Sqrt:
 			MIN_ARG_COUNT(1);
-			return xs_FloorToInt(g_sqrt(double(args[0])));
+			return RoundDown(g_sqrt(double(args[0])));
 
 		case ACSF_FixedSqrt:
 			MIN_ARG_COUNT(1);
@@ -6126,17 +6167,19 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 
 		case ACSF_GetWeapon:
 		{
-			int hand = (argCount > 0) ? args[0] : 0;
-			AActor *weap = hand ? activator->player->OffhandWeapon : activator->player->ReadyWeapon;
-            if (activator == NULL || activator->player == NULL || // Non-players do not have weapons
-                weap == NULL)
-            {
-                return GlobalACSStrings.AddString("None");
-            }
-            else
-            {
+			// [VR] Optional first arg selects the hand (0 = main, 1 = offhand).
+			const int hand = (argCount > 0) ? args[0] : 0;
+			AActor *weap = (activator == NULL || activator->player == NULL) // Non-players do not have weapons
+				? NULL
+				: (hand ? activator->player->OffhandWeapon : activator->player->ReadyWeapon);
+			if (weap == NULL)
+			{
+				return GlobalACSStrings.AddString("None");
+			}
+			else
+			{
 				return GlobalACSStrings.AddString(weap->GetClass()->TypeName.GetChars());
-            }
+			}
 		}
 
 		case ACSF_SpawnDecal:
@@ -6200,7 +6243,7 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 				}
 				else
 				{
-					auto it = Level->GetActorIterator(args[0]);
+					auto it = GetActorIterator(args[0]);
 					AActor *actor;
 
 					while ((actor = it.Next()) != NULL)
@@ -6219,7 +6262,7 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 		{
 			const char *type = Level->Behaviors.LookupString(args[1]);
 			AActor *inv;
-			
+
 			if (type != NULL)
 			{
 				if (args[0] == 0)
@@ -6235,9 +6278,9 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 				}
 				else
 				{
-					auto it = Level->GetActorIterator(args[0]);
+					auto it = GetActorIterator(args[0]);
 					AActor *actor;
-					
+
 					while ((actor = it.Next()) != NULL)
 					{
 						inv = actor->FindInventory(type);
@@ -6254,7 +6297,7 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 		case ACSF_CheckFlag:
 			MIN_ARG_COUNT(2);
 		{
-			AActor *actor = Level->SingleActorFromTID(args[0], activator);
+			AActor *actor = Level->SingleActorFromTID(args[0], bClientSide, activator);
 			if (actor != NULL)
 			{
 				return !!CheckActorFlag(actor, Level->Behaviors.LookupString(args[1]));
@@ -6312,7 +6355,7 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 					return 0;
 				}
 
-				AActor *actor = Level->SingleActorFromTID(args[0], activator);
+				AActor *actor = Level->SingleActorFromTID(args[0], bClientSide, activator);
 				if (actor != NULL)
 				{
 					auto powerup = actor->FindInventory(powerupclass);
@@ -6345,7 +6388,7 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 		case ACSF_PickActor:
 			MIN_ARG_COUNT(5);
 			{
-				actor = Level->SingleActorFromTID(args[0], activator);
+				actor = Level->SingleActorFromTID(args[0], bClientSide, activator);
 				if (actor == NULL)
 				{
 					return 0;
@@ -6397,10 +6440,10 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 				case 3: tid1 = args[2];
 				}
 
-				actor = Level->SingleActorFromTID(tid1, activator);
-				AActor * actor2 = tid2 == tid1 ? actor : Level->SingleActorFromTID(tid2, activator);
+				actor = Level->SingleActorFromTID(tid1, bClientSide, activator);
+				AActor * actor2 = tid2 == tid1 ? actor : Level->SingleActorFromTID(tid2, bClientSide, activator);
 
-				return COPY_AAPTREX(Level, actor, args[0]) == COPY_AAPTREX(Level, actor2, args[1]);
+				return COPY_AAPTREX(Level, actor, args[0], static_cast<EPTRClientSideState>(bClientSide)) == COPY_AAPTREX(Level, actor2, args[1], static_cast<EPTRClientSideState>(bClientSide));
 			}
 			break;
 
@@ -6408,7 +6451,7 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 			MIN_ARG_COUNT(1);
 			{
 				if (args[0] == 0) {
-					actor = Level->SingleActorFromTID(args[0], activator);
+					actor = Level->SingleActorFromTID(args[0], false, activator);
 					if (actor != NULL) {
 						return P_Thing_CanRaise(actor);
 					}
@@ -6420,7 +6463,7 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 				{
 					canraiseall &= P_Thing_CanRaise(actor);
 				}
-				
+
 				return canraiseall;
 			}
 			break;
@@ -6438,9 +6481,9 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 
 		case ACSF_GetActorRoll:
 			MIN_ARG_COUNT(1);
-			actor = Level->SingleActorFromTID(args[0], activator);
+			actor = Level->SingleActorFromTID(args[0], bClientSide, activator);
 			return actor != NULL? AngleToACS(actor->Angles.Roll) : 0;
-		
+
 		// [ZK] A_Warp in ACS
 		case ACSF_Warp:
 			MIN_ARG_COUNT(6);
@@ -6449,20 +6492,20 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 			{
 				return false;
 			}
-			
+
 			const int dest = args[0];
 			const int flags = args[5];
-			
+
 			AActor* const reference = ((flags & WARPF_USEPTR) && (AAPTR_DEFAULT != dest))
-				? COPY_AAPTREX(Level, activator, dest)
-				: Level->SingleActorFromTID(dest, activator);
+				? COPY_AAPTREX(Level, activator, dest, static_cast<EPTRClientSideState>(bClientSide))
+				: Level->SingleActorFromTID(dest, bClientSide, activator);
 
 			if (nullptr == reference)
 			{
 				// there is no actor to warp to
 				return false;
 			}
-			
+
 			const double xofs = ACSToDouble(args[1]);
 			const double yofs = ACSToDouble(args[2]);
 			const double zofs = ACSToDouble(args[3]);
@@ -6475,28 +6518,28 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 			{
 				return false;
 			}
-			
+
 			if (argCount > 6)
 			{
 				const char* const statename = Level->Behaviors.LookupString(args[6]);
-				
+
 				if (nullptr != statename)
 				{
 					const bool exact = argCount > 7 && !!args[7];
 					FState* const state = activator->GetClass()->FindStateByString(statename, exact);
-					
+
 					if (nullptr != state)
 					{
 						activator->SetState(state);
 					}
 				}
 			}
-			
+
 			return true;
 		}
 		case ACSF_GetMaxInventory:
 			MIN_ARG_COUNT(2);
-			actor = Level->SingleActorFromTID(args[0], activator);
+			actor = Level->SingleActorFromTID(args[0], bClientSide, activator);
 			if (actor != NULL)
 			{
 				return CheckInventory(actor, Level->Behaviors.LookupString(args[1]), true);
@@ -6535,7 +6578,7 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 				}
 			}
 			break;
-		
+
 		case ACSF_SpawnParticle:
 			MIN_ARG_COUNT(1);
 		{
@@ -6552,7 +6595,7 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 			int accelx = argCount > 10 ? args[10] : 0;
 			int accely = argCount > 11 ? args[11] : 0;
 			int accelz = argCount > 12 ? args[12] : 0;
-			int startalpha = argCount > 13 ? args[13] : 0xFF; // Byte trans			
+			int startalpha = argCount > 13 ? args[13] : 0xFF; // Byte trans
 			int fadestep = argCount > 14 ? args[14] : -1;
 			double endsize = argCount > 15 ? args[15] : -1.;
 
@@ -6578,19 +6621,19 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 			MIN_ARG_COUNT(3);
 		{
 			// [zombie] ACS version of A_CheckProximity
-			actor = Level->SingleActorFromTID(args[0], activator);
+			actor = Level->SingleActorFromTID(args[0], bClientSide, activator);
 			PClass *classname = PClass::FindClass(Level->Behaviors.LookupString(args[1]));
 			double distance = ACSToDouble(args[2]);
 			int count = argCount >= 4 ? args[3] : 1;
 			int flags = argCount >= 5 ? args[4] : 0;
 			int ptr = argCount >= 6 ? args[5] : AAPTR_DEFAULT;
-			return P_Thing_CheckProximity(Level, actor, classname, distance, count, flags, ptr);
+			return P_Thing_CheckProximity(Level, actor, classname, distance, count, flags, ptr, false, static_cast<EPTRClientSideState>(bClientSide));
 		}
 
 		case ACSF_CheckActorState:
 			MIN_ARG_COUNT(2);
 		{
-			actor = Level->SingleActorFromTID(args[0], activator);
+			actor = Level->SingleActorFromTID(args[0], bClientSide, activator);
 			const char *statename = Level->Behaviors.LookupString(args[1]);
 			bool exact = (argCount > 2) ? !!args[2] : false;
 			if (actor && statename)
@@ -6606,13 +6649,13 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 			const char *clsname = Level->Behaviors.LookupString(args[0]);
 			return !!PClass::FindActor(clsname);
 		}
-		
+
 		case ACSF_DamageActor: // [arookas] wrapper around P_DamageMobj
 			MIN_ARG_COUNT(6);
 		{
 			// (target, ptr_select1, inflictor, ptr_select2, amount, damagetype)
-			AActor* target = COPY_AAPTREX(Level, Level->SingleActorFromTID(args[0], activator), args[1]);
-			AActor* inflictor = COPY_AAPTREX(Level, Level->SingleActorFromTID(args[2], activator), args[3]);
+			AActor *target = COPY_AAPTREX(Level, Level->SingleActorFromTID(args[0], bClientSide, activator), args[1], static_cast<EPTRClientSideState>(bClientSide));
+			AActor* inflictor = COPY_AAPTREX(Level, Level->SingleActorFromTID(args[2], bClientSide, activator), args[3], static_cast<EPTRClientSideState>(bClientSide));
 			FName damagetype(Level->Behaviors.LookupString(args[5]));
 			return P_DamageMobj(target, inflictor, inflictor, args[4], damagetype);
 		}
@@ -6633,7 +6676,7 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 			}
 			else
 			{
-				auto it = Level->GetActorIterator(tid);
+				auto it = GetActorIterator(tid);
 				while ((actor = it.Next()) != nullptr)
 				{
 					// Don't log errors when affecting many actors because things might share a TID but not share the flag
@@ -6658,7 +6701,7 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 			}
 			else
 			{
-				auto it = Level->GetActorIterator(tid);
+				auto it = GetActorIterator(tid);
 				while ((actor = it.Next()) != nullptr)
 				{
 					actor->SetTranslation(trname);
@@ -6702,7 +6745,7 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 		case ACSF_GetActorFloorTexture:
 			MIN_ARG_COUNT(1);
 		{
-			auto a = Level->SingleActorFromTID(args[0], activator);
+			auto a = Level->SingleActorFromTID(args[0], bClientSide, activator);
 			if (a != nullptr)
 			{
 				return GlobalACSStrings.AddString(TexMan.GetGameTexture(a->floorpic)->GetName().GetChars());
@@ -6717,7 +6760,7 @@ doplaysound:			if (funcIndex == ACSF_PlayActorSound)
 		case ACSF_GetActorFloorTerrain:
 			MIN_ARG_COUNT(1);
 		{
-			auto a = Level->SingleActorFromTID(args[0], activator);
+			auto a = Level->SingleActorFromTID(args[0], bClientSide, activator);
 			if (a != nullptr)
 			{
 				return GlobalACSStrings.AddString(Terrains[a->floorterrain].Name.GetChars());
@@ -6904,7 +6947,6 @@ PClass *DLevelScript::GetClassForIndex(int index) const
 
 int DLevelScript::RunScript()
 {
-	DACSThinker *controller = Level->ACSThinker;
 	ACSLocalVariables locals(Localvars);
 	ACSLocalArrays noarrays;
 	ACSLocalArrays *localarrays = &noarrays;
@@ -6926,6 +6968,7 @@ int DLevelScript::RunScript()
 
 	// Hexen truncates all special arguments to bytes (only when using an old MAPINFO and old ACS format
 	const int specialargmask = ((Level->flags2 & LEVEL2_HEXENHACK) && activeBehavior->GetFormat() == ACS_Old) ? 255 : ~0;
+	auto controller = GetController();
 
 	switch (state)
 	{
@@ -6996,7 +7039,7 @@ int DLevelScript::RunScript()
 
 	while (state == SCRIPT_Running)
 	{
-		if ( ptr && !(ptr->Flags & SCRIPTF_Busy) && (++runaway > 2000000) )
+		if ( (++runaway > 2000000) && ptr && !(ptr->Flags & SCRIPTF_Busy) )
 		{
 			Printf ("Runaway %s terminated\n", ScriptPresentation(script).GetChars());
 			state = SCRIPT_PleaseRemove;
@@ -8590,7 +8633,7 @@ scriptwait:
 						FString uppername = Level->MapName;
 						uppername.ToUpper();
 						work += uppername;
-						break; 
+						break;
 					}
 
 					case PRINTNAME_NEXTLEVEL:
@@ -8865,7 +8908,7 @@ scriptwait:
 					if (type & HUDMSG_LOG)
 					{
 						int consolecolor = color >= CR_BRICK && color < NUM_TEXT_COLORS && color != CR_UNTRANSLATED ? color + 'A' : '-';
-						Printf(PRINT_HIGH | PRINT_NONOTIFY, "\n" TEXTCOLOR_ESCAPESTR "%c%s\n%s\n%s\n", consolecolor, console_bar, work.GetChars(), console_bar);
+						Printf(PRINT_NONOTIFY, "\n" TEXTCOLOR_ESCAPESTR "%c%s\n%s\n%s\n", consolecolor, console_bar, work.GetChars(), console_bar);
 					}
 				}
 			}
@@ -9150,7 +9193,7 @@ scriptwait:
 
 				if (STACK(7) != 0)
 				{
-					auto iterator = Level->GetActorIterator(STACK(7));
+					auto iterator = GetActorIterator(STACK(7));
 					AActor *actor;
 
 					while ( (actor = iterator.Next ()) )
@@ -9265,7 +9308,7 @@ scriptwait:
 			}
 			else
 			{
-				auto it = Level->GetActorIterator(STACK(1));
+				auto it = GetActorIterator(STACK(1));
 				AActor *actor;
 				for (actor = it.Next(); actor != NULL; actor = it.Next())
 				{
@@ -9293,7 +9336,7 @@ scriptwait:
 			}
 			else
 			{
-				auto it = Level->GetActorIterator(STACK(3));
+				auto it = GetActorIterator(STACK(3));
 				AActor *actor;
 				for (actor = it.Next(); actor != NULL; actor = it.Next())
 				{
@@ -9330,7 +9373,7 @@ scriptwait:
 			}
 			else
 			{
-				auto it = Level->GetActorIterator(STACK(3));
+				auto it = GetActorIterator(STACK(3));
 				AActor *actor;
 				for (actor = it.Next(); actor != NULL; actor = it.Next())
 				{
@@ -9354,7 +9397,7 @@ scriptwait:
 			break;
 
 		case PCD_CHECKACTORINVENTORY:
-			STACK(2) = CheckInventory (Level->SingleActorFromTID(STACK(2), NULL),
+			STACK(2) = CheckInventory (Level->SingleActorFromTID(STACK(2), bClientSide, NULL),
 										Level->Behaviors.LookupString (STACK(1)), false);
 			sp--;
 			break;
@@ -9378,7 +9421,7 @@ scriptwait:
 				}
 				else
 				{
-					auto it = Level->GetActorIterator(STACK(2));
+					auto it = GetActorIterator(STACK(2));
 					AActor *actor;
 					for (actor = it.Next(); actor != NULL; actor = it.Next())
 					{
@@ -9518,7 +9561,7 @@ scriptwait:
 		case PCD_SETACTORPOSITION:
 			{
 				bool result = false;
-				AActor *actor = Level->SingleActorFromTID (STACK(5), activator);
+				AActor *actor = Level->SingleActorFromTID (STACK(5), bClientSide, activator);
 				if (actor != NULL)
 					result = P_MoveThing(actor, DVector3(ACSToDouble(STACK(4)), ACSToDouble(STACK(3)), ACSToDouble(STACK(2))), !!STACK(1));
 				sp -= 4;
@@ -9530,7 +9573,7 @@ scriptwait:
 		case PCD_GETACTORY:
 		case PCD_GETACTORZ:
 			{
-				AActor *actor = Level->SingleActorFromTID(STACK(1), activator);
+				AActor *actor = Level->SingleActorFromTID(STACK(1), bClientSide, activator);
 				if (actor == NULL)
 				{
 					STACK(1) = 0;
@@ -9548,28 +9591,28 @@ scriptwait:
 
 		case PCD_GETACTORFLOORZ:
 			{
-				AActor *actor = Level->SingleActorFromTID(STACK(1), activator);
+				AActor *actor = Level->SingleActorFromTID(STACK(1), bClientSide, activator);
 				STACK(1) = actor == NULL ? 0 : DoubleToACS(actor->floorz);
 			}
 			break;
 
 		case PCD_GETACTORCEILINGZ:
 			{
-				AActor *actor = Level->SingleActorFromTID(STACK(1), activator);
+				AActor *actor = Level->SingleActorFromTID(STACK(1), bClientSide, activator);
 				STACK(1) = actor == NULL ? 0 : DoubleToACS(actor->ceilingz);
 			}
 			break;
 
 		case PCD_GETACTORANGLE:
 			{
-				AActor *actor = Level->SingleActorFromTID(STACK(1), activator);
+				AActor *actor = Level->SingleActorFromTID(STACK(1), bClientSide, activator);
 				STACK(1) = actor == NULL ? 0 : AngleToACS(actor->Angles.Yaw);
 			}
 			break;
 
 		case PCD_GETACTORPITCH:
 			{
-				AActor *actor = Level->SingleActorFromTID(STACK(1), activator);
+				AActor *actor = Level->SingleActorFromTID(STACK(1), bClientSide, activator);
 				STACK(1) = actor == NULL ? 0 : PitchToACS(actor->Angles.Pitch);
 			}
 			break;
@@ -9760,20 +9803,21 @@ scriptwait:
 			sp--;
 			break;
 
-        case PCD_CHECKWEAPON:
-            if (activator == NULL || activator->player == NULL || // Non-players do not have weapons
-                (activator->player->ReadyWeapon == NULL && activator->player->OffhandWeapon == NULL))
-            {
-                STACK(1) = 0;
-            }
-            else
-            {
+		case PCD_CHECKWEAPON:
+			// [VR] Matches either hand's weapon.
+			if (activator == NULL || activator->player == NULL || // Non-players do not have weapons
+				(activator->player->ReadyWeapon == NULL && activator->player->OffhandWeapon == NULL))
+			{
+				STACK(1) = 0;
+			}
+			else
+			{
 				auto weapname = FName(Level->Behaviors.LookupString (STACK(1)), true);
 				bool ismain = activator->player->ReadyWeapon && activator->player->ReadyWeapon->GetClass()->TypeName == weapname;
 				bool isoffhand = activator->player->OffhandWeapon && activator->player->OffhandWeapon->GetClass()->TypeName == weapname;
 				STACK(1) = ismain || isoffhand;
-            }
-            break;
+			}
+			break;
 
 		case PCD_SETWEAPON:
 			STACK(1) = ScriptUtil::Exec(NAME_SetWeapon, ScriptUtil::Pointer, activator.Get(), ScriptUtil::Class, GetClassForIndex(STACK(1)), ScriptUtil::End);
@@ -10006,7 +10050,7 @@ scriptwait:
 				}
 				else
 				{
-					auto iterator = Level->GetActorIterator(STACK(3));
+					auto iterator = GetActorIterator(STACK(3));
 					AActor *actor;
 					int count = 0;
 
@@ -10102,7 +10146,7 @@ scriptwait:
 
 		case PCD_GETACTORLIGHTLEVEL:
 		{
-			AActor *actor = Level->SingleActorFromTID(STACK(1), activator);
+			AActor *actor = Level->SingleActorFromTID(STACK(1), bClientSide, activator);
 			if (actor != NULL)
 			{
 				sector_t *sector = actor->Sector;
@@ -10140,7 +10184,7 @@ scriptwait:
 
 		case PCD_CHECKPLAYERCAMERA:
 			{
-				int playernum = STACK(1);
+				unsigned int playernum = STACK(1);
 
 				if (playernum < 0 || playernum >= MAXPLAYERS || !Level->PlayerInGame(playernum) ||
 					Level->Players[playernum]->camera == nullptr || Level->Players[playernum]->camera->player != nullptr)
@@ -10179,7 +10223,7 @@ scriptwait:
 				}
 				else
 				{
-					auto iterator = Level->GetActorIterator(tag);
+					auto iterator = GetActorIterator(tag);
 					TArray<AActor*> actorsToMorph;
 
 					while (AActor *actor = iterator.Next())
@@ -10195,7 +10239,7 @@ scriptwait:
 
 				STACK(7) = changes;
 				sp -= 6;
-			}	
+			}
 			break;
 
 		case PCD_UNMORPHACTOR:
@@ -10210,7 +10254,7 @@ scriptwait:
 				}
 				else
 				{
-					auto iterator = Level->GetActorIterator(tag);
+					auto iterator = GetActorIterator(tag);
 					TArray<AActor*> actorsToUnmorph;
 
 					while (AActor *actor = iterator.Next())
@@ -10226,7 +10270,7 @@ scriptwait:
 
 				STACK(2) = changes;
 				sp -= 1;
-			}	
+			}
 			break;
 
 		case PCD_SAVESTRING:
@@ -10235,7 +10279,7 @@ scriptwait:
 				const int str = GlobalACSStrings.AddString(work);
 				PushToStack(str);
 				STRINGBUILDER_FINISH(work);
-			}		
+			}
 			break;
 
 		case PCD_STRCPYTOSCRIPTCHRANGE:
@@ -10258,9 +10302,9 @@ scriptwait:
 				}
 
 				index += STACK(6);
-				
+
 				lookup = Level->Behaviors.LookupString (STACK(2));
-				
+
 				if (!lookup) {
 					// no data, operation complete
 	STRCPYTORANGECOMPLETE:
@@ -10289,7 +10333,7 @@ scriptwait:
 							localarrays->Set(locals, a, index++, *lookup);
 							if (! (*(lookup++))) goto STRCPYTORANGECOMPLETE; // complete with terminating 0
 						}
-						
+
 						Stack[sp-6] = !(*lookup); // true/success if only terminating 0 was not copied
 					}
 					break;
@@ -10312,7 +10356,7 @@ scriptwait:
 							ACS_WorldArrays[a][index++] = *lookup;
 							if (! (*(lookup++))) goto STRCPYTORANGECOMPLETE; // complete with terminating 0
 						}
-						
+
 						Stack[sp-6] = !(*lookup); // true/success if only terminating 0 was not copied
 					}
 					break;
@@ -10325,7 +10369,7 @@ scriptwait:
 							ACS_GlobalArrays[a][index++] = *lookup;
 							if (! (*(lookup++))) goto STRCPYTORANGECOMPLETE; // complete with terminating 0
 						}
-						
+
 						Stack[sp-6] = !(*lookup); // true/success if only terminating 0 was not copied
 					}
 					break;
@@ -10342,8 +10386,8 @@ scriptwait:
 			else
 				pc += 3;
 			break;
- 		}
- 	}
+		}
+	}
 
 	// There are several or more p-codes that can trigger a division or modulus of zero.
 	// Reset the active behavior back to the original if this happens.
@@ -10397,7 +10441,13 @@ scriptwait:
 static DLevelScript *P_GetScriptGoing (FLevelLocals *l, AActor *who, line_t *where, int num, const ScriptPtr *code, FBehavior *module,
 	const int *args, int argcount, int flags)
 {
-	DACSThinker *controller = l->ACSThinker;
+	// Intentionally not checking netgame status here as this should be consistent between singleplayer
+	// and multiplayer (this is how it will work should client/server ever get in, so force it now).
+	const bool clientside = IsClientSideScript(*code);
+	if (clientside && ShouldIgnoreClientSideScript(who))
+		return nullptr;
+
+	DACSThinker *controller = clientside ? l->ClientSideACSThinker : l->ACSThinker;
 	DLevelScript **running;
 
 	if (controller && !(flags & ACS_ALWAYS) && (running = controller->RunningScripts.CheckKey(num)) != NULL)
@@ -10410,16 +10460,28 @@ static DLevelScript *P_GetScriptGoing (FLevelLocals *l, AActor *who, line_t *whe
 		return NULL;
 	}
 
-	return Create<DLevelScript> (l, who, where, num, code, module, args, argcount, flags);
+	return Create<DLevelScript> (l, who, where, num, code, module, args, argcount, flags, clientside);
 }
 
 DLevelScript::DLevelScript (FLevelLocals *l, AActor *who, line_t *where, int num, const ScriptPtr *code, FBehavior *module,
-	const int *args, int argcount, int flags)
+	const int *args, int argcount, int flags, bool clientside)
 	: activeBehavior (module)
 {
 	Level = l;
-	if (Level->ACSThinker == nullptr)
-		Level->ACSThinker = Level->CreateThinker<DACSThinker>();
+	if (clientside)
+	{
+		if (Level->ClientSideACSThinker == nullptr)
+			Level->ClientSideACSThinker = Level->CreateClientSideThinker<DACSThinker>();
+
+		bClientSide = true;
+	}
+	else
+	{
+		if (Level->ACSThinker == nullptr)
+			Level->ACSThinker = Level->CreateThinker<DACSThinker>();
+
+		bClientSide = false;
+	}
 
 	script = num;
 	assert(code->VarCount >= code->ArgCount);
@@ -10446,11 +10508,11 @@ DLevelScript::DLevelScript (FLevelLocals *l, AActor *who, line_t *where, int num
 	// goes by while they're in their default state.
 
 	if (!(flags & ACS_ALWAYS))
-		Level->ACSThinker->RunningScripts[num] = this;
+		GetController()->RunningScripts[num] = this;
 
 	Link();
 
-	if (Level->flags2 & LEVEL2_HEXENHACK)
+	if (!clientside && (Level->flags2 & LEVEL2_HEXENHACK))
 	{
 		PutLast();
 	}
@@ -10458,14 +10520,20 @@ DLevelScript::DLevelScript (FLevelLocals *l, AActor *who, line_t *where, int num
 	DPrintf(DMSG_SPAMMY, "%s started.\n", ScriptPresentation(num).GetChars());
 }
 
-void SetScriptState (DACSThinker *controller, int script, DLevelScript::EScriptState state)
+void SetScriptState (FLevelLocals& level, int script, DLevelScript::EScriptState state)
 {
 	DLevelScript **running;
 
+	auto controller = level.ACSThinker;
 	if (controller != NULL && (running = controller->RunningScripts.CheckKey(script)) != NULL)
 	{
 		(*running)->SetState (state);
+		return;
 	}
+
+	controller = level.ClientSideACSThinker;
+	if (controller != NULL && (running = controller->RunningScripts.CheckKey(script)) != NULL)
+		(*running)->SetState(state);
 }
 
 void FLevelLocals::DoDeferedScripts ()
@@ -10477,33 +10545,32 @@ void FLevelLocals::DoDeferedScripts ()
 	for(int i = info->deferred.Size()-1; i>=0; i--)
 	{
 		acsdefered_t *def = &info->deferred[i];
+		scriptdata = Behaviors.FindScript(def->script, module);
+		if (scriptdata == nullptr)
+		{
+			Printf("P_DoDeferredScripts: Unknown %s\n", ScriptPresentation(def->script).GetChars());
+			continue;
+		}
+
 		switch (def->type)
 		{
 		case acsdefered_t::defexecute:
 		case acsdefered_t::defexealways:
-			scriptdata = Behaviors.FindScript (def->script, module);
-			if (scriptdata)
-			{
-				P_GetScriptGoing (this, (unsigned)def->playernum < MAXPLAYERS &&
-					PlayerInGame(def->playernum) ? Players[def->playernum]->mo : nullptr,
-					nullptr, def->script,
-					scriptdata, module,
-					def->args, 3,
-					def->type == acsdefered_t::defexealways ? ACS_ALWAYS : 0);
-			}
-			else
-			{
-				Printf ("P_DoDeferredScripts: Unknown %s\n", ScriptPresentation(def->script).GetChars());
-			}
+			P_GetScriptGoing (this, (unsigned)def->playernum < MAXPLAYERS &&
+				PlayerInGame(def->playernum) ? Players[def->playernum]->mo : nullptr,
+				nullptr, def->script,
+				scriptdata, module,
+				def->args, 3,
+				def->type == acsdefered_t::defexealways ? ACS_ALWAYS : 0);
 			break;
 
 		case acsdefered_t::defsuspend:
-			SetScriptState (ACSThinker, def->script, DLevelScript::SCRIPT_Suspended);
+			SetScriptState (*this, def->script, DLevelScript::SCRIPT_Suspended);
 			DPrintf (DMSG_SPAMMY, "Deferred suspend of %s\n", ScriptPresentation(def->script).GetChars());
 			break;
 
 		case acsdefered_t::defterminate:
-			SetScriptState (ACSThinker, def->script, DLevelScript::SCRIPT_PleaseRemove);
+			SetScriptState (*this, def->script, DLevelScript::SCRIPT_PleaseRemove);
 			DPrintf (DMSG_SPAMMY, "Deferred terminate of %s\n", ScriptPresentation(def->script).GetChars());
 			break;
 		}
@@ -10540,7 +10607,9 @@ static void addDefered (level_info_t *i, acsdefered_t::EType type, int script, c
 	}
 }
 
-EXTERN_CVAR (Bool, sv_cheats)
+// Allow debugging by default in singleplayer, but give the option to test request denials.
+CVAR(Bool, allowsingleplayerscripts, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, sv_allowallscripts, false, CVAR_SERVERINFO | CVAR_NOSAVE)
 
 int P_StartScript (FLevelLocals *Level, AActor *who, line_t *where, int script, const char *map, const int *args, int argcount, int flags)
 {
@@ -10551,24 +10620,31 @@ int P_StartScript (FLevelLocals *Level, AActor *who, line_t *where, int script, 
 
 		if ((scriptdata = Level->Behaviors.FindScript (script, module)) != NULL)
 		{
-			if ((flags & ACS_NET) && netgame && !sv_cheats)
+			// Make sure only scripts flagged as Net can be ran if requesting one.
+			if ((flags & ACS_NET) && !(scriptdata->Flags & SCRIPTF_Net)
+				&& !sv_allowallscripts && (netgame || !allowsingleplayerscripts))
 			{
-				// If playing multiplayer and cheats are disallowed, check to
-				// make sure only net scripts are run.
-				if (!(scriptdata->Flags & SCRIPTF_Net))
+				if (who->Level->isConsolePlayer(who))
+				{
+					Printf(PRINT_BOLD, "Non-net scripts are currently not requestable\n");
+				}
+				else if (consoleplayer == Net_Arbitrator && !IsClientSideScript(*scriptdata))
 				{
 					Printf(PRINT_BOLD, "%s tried to puke %s (\n",
 						who->player->userinfo.GetName(), ScriptPresentation(script).GetChars());
 					for (int i = 0; i < argcount; ++i)
 					{
-						Printf(PRINT_BOLD, "%d%s", args[i], i == argcount-1 ? "" : ", ");
+						Printf(PRINT_BOLD, "%d%s", args[i], i == argcount - 1 ? "" : ", ");
 					}
 					Printf(PRINT_BOLD, ")\n");
-					return false;
 				}
+
+				return false;
 			}
-			DLevelScript *runningScript = P_GetScriptGoing (Level, who, where, script,
+
+			DLevelScript* runningScript = P_GetScriptGoing(Level, who, where, script,
 				scriptdata, module, args, argcount, flags);
+
 			if (runningScript != NULL)
 			{
 				if (flags & ACS_WANTRESULT)
@@ -10602,7 +10678,7 @@ void P_SuspendScript (FLevelLocals *Level, int script, const char *map)
 	if (strnicmp (Level->MapName.GetChars(), map, 8))
 		addDefered (FindLevelInfo (map), acsdefered_t::defsuspend, script, NULL, 0, NULL);
 	else
-		SetScriptState (Level->ACSThinker, script, DLevelScript::SCRIPT_Suspended);
+		SetScriptState (*Level, script, DLevelScript::SCRIPT_Suspended);
 }
 
 void P_TerminateScript (FLevelLocals *Level, int script, const char *map)
@@ -10610,7 +10686,7 @@ void P_TerminateScript (FLevelLocals *Level, int script, const char *map)
 	if (strnicmp (Level->MapName.GetChars(), map, 8))
 		addDefered (FindLevelInfo (map), acsdefered_t::defterminate, script, NULL, 0, NULL);
 	else
-		SetScriptState (Level->ACSThinker, script, DLevelScript::SCRIPT_PleaseRemove);
+		SetScriptState (*Level, script, DLevelScript::SCRIPT_PleaseRemove);
 }
 
 FSerializer &Serialize(FSerializer &arc, const char *key, acsdefered_t &defer, acsdefered_t *def)
@@ -10799,7 +10875,7 @@ static void ShowProfileData(TArray<ProfileCollector> &profiles, int ilimit,
 
 	if (ilimit > 0)
 	{
-		Printf(TEXTCOLOR_ORANGE "Top %lld %ss:\n", ilimit, typelabels[functions]);
+		Printf(TEXTCOLOR_ORANGE "Top %d %ss:\n", ilimit, typelabels[functions]);
 		limit = (unsigned int)ilimit;
 	}
 	else
@@ -10934,4 +11010,16 @@ CCMD(acsprofile)
 ADD_STAT(ACS)
 {
 	return FStringf("ACS time: %f ms", ACSTime.TimeMS());
+}
+
+
+size_t DACSThinker::PropagateMark()
+{
+	TMapIterator<int, DLevelScript*> it(RunningScripts);
+	ScriptMap::Pair * pair;
+	while(it.NextPair(pair))
+	{
+		GC::Mark((DObject*&)pair->Value);
+	}
+	return Super::PropagateMark();
 }

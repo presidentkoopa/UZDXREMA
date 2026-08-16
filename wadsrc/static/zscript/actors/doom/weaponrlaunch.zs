@@ -1,3 +1,22 @@
+/*
+** weaponrlaunch.zs
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2006-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
+
 // --------------------------------------------------------------------------
 //
 // Rocket launcher
@@ -13,6 +32,7 @@ class RocketLauncher : DoomWeapon
 		Weapon.AmmoGive 2;
 		Weapon.AmmoType "RocketAmmo";
 		+WEAPON.NOAUTOFIRE
+		+WEAPON.EXPLOSIVE
 		Inventory.PickupMessage "$GOTLAUNCHER";
 		Tag "$TAG_ROCKETLAUNCHER";
 	}
@@ -157,7 +177,7 @@ extend class StateProvider
 			if (!weap.DepleteAmmo (weap.bAltFire, true))
 				return;
 		}
-		
+
 		SpawnPlayerMissile ("Rocket", aimflags:hand ? ALF_ISOFFHAND : 0);
 	}
 
@@ -184,7 +204,7 @@ extend class StateProvider
 			if (!weap.DepleteAmmo (weap.bAltFire, true))
 				return;
 		}
-			
+
 		// Temporarily raise the pitch to send the grenadetype slightly upwards
 		double savedpitch = pitch;
 		pitch -= 6.328125;

@@ -1,24 +1,21 @@
-//-----------------------------------------------------------------------------
-//
-// Copyright 1993-1996 id Software
-// Copyright 1999-2016 Randy Heit
-// Copyright 2016 Magnus Norddahl
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see http://www.gnu.org/licenses/
-//
-//-----------------------------------------------------------------------------
-//
+/*
+** r_walldraw.h
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2016 Magnus Norddahl
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 #pragma once
 
@@ -62,7 +59,7 @@ namespace swrenderer
 	private:
 		void ProcessStripedWall(const short *uwal, const short *dwal, const ProjectedWallTexcoords& texcoords);
 		void ProcessNormalWall(const short *uwal, const short *dwal, const ProjectedWallTexcoords& texcoords);
-		FLightNode* GetLightList();
+		TMap<FDynamicLight*, std::unique_ptr<FLightNode>>* GetLightList();
 
 		RenderThread* Thread = nullptr;
 
@@ -76,7 +73,7 @@ namespace swrenderer
 
 		ProjectedWallLight mLight;
 
-		FLightNode *light_list = nullptr;
+		TMap<FDynamicLight*, std::unique_ptr<FLightNode>> *light_list = nullptr;
 		bool mask = false;
 		bool additive = false;
 		fixed_t alpha = 0;

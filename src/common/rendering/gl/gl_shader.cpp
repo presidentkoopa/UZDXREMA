@@ -1,28 +1,17 @@
-// 
-//---------------------------------------------------------------------------
-//
-// Copyright(C) 2004-2016 Christoph Oelckers
-// All rights reserved.
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public License
-// along with this program.  If not, see http://www.gnu.org/licenses/
-//
-//--------------------------------------------------------------------------
-//
 /*
 ** gl_shader.cpp
 **
 ** GLSL shader handling
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 2004-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
 **
 */
 
@@ -42,6 +31,7 @@
 #include "i_specialpaths.h"
 #include "printf.h"
 #include "version.h"
+#include "stb_include.h"
 
 #include "gl_interface.h"
 #include "gl_debug.h"
@@ -112,7 +102,7 @@ static FString CreateProgramCacheName(bool create)
 {
 	FString path = M_GetCachePath(create);
 	if (create) CreatePath(path.GetChars());
-	path << "/shadercache.zdsc";
+	path << "/glshadercache";
 	return path;
 }
 
@@ -212,9 +202,101 @@ void SaveCachedProgramBinary(const FString &vertex, const FString &fragment, con
 	SaveShaders();
 }
 
+FString ProcessShaderError(const char * shaderError, TArray<FString> &filenames_for_error)
+{
+	//ugh, intel, amd and nvidia handle things differently so this has to be a mess
+	enum
+	{
+		READING_LUMP,
+		READING_LINE_COLON,
+		READING_LINE_PARENTHESES,
+		SKIP_TO_NEWLINE,
+	};
+
+	FString err(shaderError);
+	size_t cur = 0;
+	size_t state_start = 0;
+
+	size_t line_start = 0;
+	size_t num_end = 0;
+
+	int state = READING_LUMP;
+
+	int64_t lump_num = 0;
+
+	while(cur < err.Len())
+	{
+		if(state != SKIP_TO_NEWLINE)
+		{
+			while(err[cur] >= '0' && err[cur] <= '9')
+			{
+				cur++;
+			}
+
+			if(cur == state_start)
+			{
+				state = SKIP_TO_NEWLINE;
+			}
+			else if(state == READING_LUMP && (err[cur] == '(' || err[cur] == ':'))
+			{
+				FString lump_num_str = err.Mid(state_start, cur - state_start);
+				lump_num = lump_num_str.ToLong();
+				line_start = state_start;
+				state = (err[cur] == ':') ? READING_LINE_COLON : READING_LINE_PARENTHESES;
+				cur++;
+				state_start = cur;
+			}
+			else if((state == READING_LINE_COLON && err[cur] == ':') || (state == READING_LINE_PARENTHESES && err[cur] == ')'))
+			{
+				FString line_num_str = err.Mid(state_start, cur - state_start);
+
+				if(state == READING_LINE_PARENTHESES)
+				{
+					cur+= 3; // skip ") :"
+				}
+				else
+				{
+					cur++; // skip ":"
+				}
+
+				int64_t old_len = cur - line_start;
+				FString new_err = "File '" + filenames_for_error[lump_num - 1] + "', Line " + line_num_str + ": ";
+
+				int64_t diff = new_err.Len() - old_len;
+
+				err = err.Left(line_start) + new_err + err.Mid(line_start + old_len);
+
+				cur += diff;
+				state = SKIP_TO_NEWLINE;
+			}
+			else
+			{ // couldn't find a valid num, skip line
+				state = SKIP_TO_NEWLINE;
+			}
+		}
+		//not 'else if' to allow this to run immediately after
+		if(state == SKIP_TO_NEWLINE)
+		{
+			if(err[cur] == '\n' || err[cur] == '\r')
+			{
+				while(cur < err.Len() && (err[cur] == '\n' || err[cur] == '\r'))
+				{
+					cur++;
+				}
+				state_start = cur;
+				state = READING_LUMP;
+			}
+			else
+			{
+				cur++;
+			}
+		}
+	}
+	return err;
+}
+
 bool FShader::Load(const char * name, const char * vert_prog_lump, const char * frag_prog_lump, const char * proc_prog_lump, const char * light_fragprog, const char * defines)
 {
-	static char buffer[10000];
 	FString error;
 
 	FString i_data = R"(
@@ -233,12 +315,12 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 			vec4 uClipLine;
 
 			float uGlobVis;			// uGlobVis = R_GetGlobVis(r_visibility) / 32.0
-			int uPalLightLevels;	
+			int uPalLightLevels;
 			int uViewHeight;		// Software fuzz scaling
 			float uClipHeight;
 			float uClipHeightDirection;
 			int uShadowmapFilter;
-			
+
 			int uLightBlendMode;
 
 			// [BB] Glow wave -- see hw_viewpointuniforms.h. The scalars above
@@ -303,6 +385,13 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 			vec4 uShapeParams;
 			vec4 uShapeUnder;
 			vec4 uFogFollow;
+
+			// Upstream 5.0.0 thick-fog knobs. They are APPENDED here, after the
+			// last vec4, because that is where HWViewpointUniforms puts
+			// mThickFogDistance/mThickFogMultiplier and where vk_shader.cpp's
+			// ViewpointData puts them -- a uniform block is matched by OFFSET.
+			float uThickFogDistance;
+			float uThickFogMultiplier;
 		};
 
 		uniform int uTextureMode;
@@ -491,7 +580,7 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 #else
 	if ((gl.flags & RFL_SHADER_STORAGE_BUFFER) && screen->allowSSBO())
 		vp_comb << "#version 430 core\n";
-	else 
+	else
 		vp_comb << "#version 330 core\n";
 #endif
 	vp_comb << "#define SUPPORTS_SHADOWMAPS\n";
@@ -514,6 +603,7 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 	vp_comb << RemoveLayoutLocationDecl(GetStringFromLump(vp_lump), "out").GetChars() << "\n";
 	fp_comb << RemoveLayoutLocationDecl(GetStringFromLump(fp_lump), "in").GetChars() << "\n";
 	FString placeholder = "\n";
+	TArray<FString> filenames_for_error;
 
 	if (proc_prog_lump != NULL)
 	{
@@ -521,10 +611,33 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 
 		if (*proc_prog_lump != '#')
 		{
+			FString lump_filename(proc_prog_lump);
+			FString pp_data;
 			int pp_lump = fileSystem.CheckNumForFullName(proc_prog_lump, 0);	// if it's a core shader, ignore overrides by user mods.
-			if (pp_lump == -1) pp_lump = fileSystem.CheckNumForFullName(proc_prog_lump);
-			if (pp_lump == -1) I_Error("Unable to load '%s'", proc_prog_lump);
-			FString pp_data = GetStringFromLump(pp_lump);
+			if (pp_lump == -1)
+			{
+				pp_lump = fileSystem.CheckNumForFullName(proc_prog_lump);
+				if (pp_lump == -1)
+				{
+					I_Error("Unable to load '%s'", proc_prog_lump);
+				}
+				else
+				{
+					FString error = "";
+
+					pp_data = stb_include_string(GetStringFromLump(pp_lump), lump_filename, filenames_for_error, error);
+
+					if(!error.IsEmpty())
+					{
+						I_Error("Unable to load '%s': %s", proc_prog_lump, error.GetChars());
+					}
+				}
+			}
+			else
+			{ // skip includes processing for code shaders
+				pp_data = GetStringFromLump(pp_lump);
+				filenames_for_error.Push(lump_filename);
+			}
 
 			if (pp_data.IndexOf("ProcessMaterial") < 0 && pp_data.IndexOf("SetupMaterial") < 0)
 			{
@@ -632,37 +745,72 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 		glShaderSource(hVertProg, 1, &vp_ptr, &vp_size);
 		glShaderSource(hFragProg, 1, &fp_ptr, &fp_size);
 
+		GLint status = 0;
+
+		bool errored = false;
+
 		glCompileShader(hVertProg);
+
+		if (glGetShaderiv(hVertProg, GL_COMPILE_STATUS, &status); status == GL_FALSE)
+		{
+			TArray<char> buffer;
+			GLint info_log_length = 1;
+			glGetShaderiv(hVertProg, GL_INFO_LOG_LENGTH, &info_log_length);
+			buffer.Resize(info_log_length + 1);
+
+			glGetShaderInfoLog(hVertProg, info_log_length + 1, NULL, buffer.Data());
+			if (*buffer.Data())
+			{
+				//error << "Vertex shader:\n" << buffer.Data() << "\n";
+				error << "Vertex shader:\n" << ProcessShaderError(buffer.Data(), filenames_for_error) << "\n";
+			}
+
+			errored = true;
+		}
+
 		glCompileShader(hFragProg);
+
+		if (glGetShaderiv(hFragProg, GL_COMPILE_STATUS, &status); status == GL_FALSE)
+		{
+			TArray<char> buffer;
+			GLint info_log_length = 1;
+			glGetShaderiv(hFragProg, GL_INFO_LOG_LENGTH, &info_log_length);
+			buffer.Resize(info_log_length + 1);
+
+			glGetShaderInfoLog(hFragProg, info_log_length + 1, NULL, buffer.Data());
+			if (*buffer.Data())
+			{
+				error << "Fragment shader:\n" << ProcessShaderError(buffer.Data(), filenames_for_error) << "\n";
+			}
+
+			errored = true;
+		}
+
+		if(errored)
+		{
+			// only print message if there's an error.
+			I_Error("Errors Compiliong Shader '%s':\n%s\n", name, error.GetChars());
+		}
 
 		glAttachShader(hShader, hVertProg);
 		glAttachShader(hShader, hFragProg);
 
 		glLinkProgram(hShader);
 
-		glGetShaderInfoLog(hVertProg, 10000, NULL, buffer);
-		if (*buffer)
+		if (glGetProgramiv(hShader, GL_LINK_STATUS, &status); status == GL_FALSE)
 		{
-			error << "Vertex shader:\n" << buffer << "\n";
-		}
-		glGetShaderInfoLog(hFragProg, 10000, NULL, buffer);
-		if (*buffer)
-		{
-			error << "Fragment shader:\n" << buffer << "\n";
-		}
+			TArray<char> buffer;
+			GLint info_log_length = 1;
+			glGetProgramiv(hShader, GL_INFO_LOG_LENGTH, &info_log_length);
+			buffer.Resize(info_log_length + 1);
 
-		glGetProgramInfoLog(hShader, 10000, NULL, buffer);
-		if (*buffer)
-		{
-			error << "Linking:\n" << buffer << "\n";
-		}
-		GLint status = 0;
-		glGetProgramiv(hShader, GL_LINK_STATUS, &status);
-		linked = (status == GL_TRUE);
-		if (!linked)
-		{
-			// only print message if there's an error.
-			I_Error("Init Shader '%s':\n%s\n", name, error.GetChars());
+			glGetProgramInfoLog(hShader, info_log_length + 1, NULL, buffer.Data());
+			if (*buffer.Data())
+			{
+				error << "Linking:\n" << buffer.Data() << "\n";
+			}
+
+			I_Error("Errors Linking Shader '%s':\n%s\n", name, error.GetChars());
 		}
 		else if (glProgramBinary && IsShaderCacheActive())
 		{
@@ -770,7 +918,7 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 	if (lightmapindex != -1) glUniform1i(lightmapindex, 17);
 
 	glUseProgram(0);
-	return linked;
+	return true;
 }
 
 //==========================================================================
@@ -949,7 +1097,7 @@ bool FShaderCollection::CompileNextShader()
 		{
 			mCompileIndex = 0;
 			mCompileState++;
-			
+
 		}
 	}
 	else if (mCompileState == 1)

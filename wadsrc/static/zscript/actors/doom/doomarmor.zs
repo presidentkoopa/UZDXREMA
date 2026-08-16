@@ -1,3 +1,21 @@
+/*
+** doomarmor.zs
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2006-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 // Armor bonus --------------------------------------------------------------
 
@@ -14,6 +32,7 @@ class ArmorBonus : BasicArmorBonus
 		Armor.Maxsaveamount 200;
 		+COUNTITEM
 		+INVENTORY.ALWAYSPICKUP
+		Tag "$TAG_ARMORBONUS";
 	}
 	States
 	{
@@ -35,6 +54,7 @@ class GreenArmor : BasicArmorPickup
 		Inventory.Icon "ARM1A0";
 		Armor.SavePercent 33.335;
 		Armor.SaveAmount 100;
+		Tag "$TAG_GREENARMOR";
 	}
 	States
 	{
@@ -57,6 +77,7 @@ class BlueArmor : BasicArmorPickup
 		Inventory.Icon "ARM2A0";
 		Armor.Savepercent 50;
 		Armor.Saveamount 200;
+		Tag "$TAG_BLUEARMOR";
 	}
 	States
 	{
@@ -66,4 +87,3 @@ class BlueArmor : BasicArmorPickup
 		loop;
 	}
 }
-

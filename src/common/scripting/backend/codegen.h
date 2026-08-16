@@ -1,44 +1,28 @@
-#ifndef THINGDEF_EXP_H
-#define THINGDEF_EXP_H
-
 /*
-** thingdef_exp.h
+** codegen.h
 **
 ** Expression evaluation
 **
 **---------------------------------------------------------------------------
-** Copyright 2008 Christoph Oelckers
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 2008-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-** 4. When not used as part of ZDoom or a ZDoom derivative, this code will be
-**    covered by the terms of the GNU General Public License as published by
-**    the Free Software Foundation; either version 2 of the License, or (at
-**    your option) any later version.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: LicenseRef-ZDoom-Conditional
+**
 **---------------------------------------------------------------------------
 **
 */
+
+#ifndef THINGDEF_EXP_H
+#define THINGDEF_EXP_H
 
 #include "m_random.h"
 #include "sc_man.h"
@@ -56,7 +40,7 @@ struct FState; // needed for FxConstant. Maybe move the state constructor to a s
 #define SAFE_DELETE(p) if (p!=NULL) { delete p; p=NULL; }
 #define RESOLVE(p,c) if (p!=NULL) p = p->Resolve(c)
 #define ABORT(p) if (!(p)) { delete this; return NULL; }
-#define SAFE_RESOLVE(p,c) RESOLVE(p,c); ABORT(p) 
+#define SAFE_RESOLVE(p,c) RESOLVE(p,c); ABORT(p)
 #define SAFE_RESOLVE_OPT(p,c) if (p!=NULL) { SAFE_RESOLVE(p,c) }
 
 class VMFunctionBuilder;
@@ -335,7 +319,7 @@ protected:
 	{
 	}
 
-public:	
+public:
 	virtual ~FxExpression() {}
 	virtual FxExpression *Resolve(FCompileContext &ctx);
 
@@ -398,7 +382,7 @@ public:
 
 	FxIdentifier(FName i, const FScriptPosition &p);
 	FxExpression *Resolve(FCompileContext&);
-	FxExpression *ResolveMember(FCompileContext&, PContainerType*, FxExpression*&, PContainerType*);
+	FxExpression *ResolveMember(FCompileContext&, PContainerType*, FxExpression*&, PContainerType*, bool isConst = false);
 };
 
 
@@ -527,7 +511,7 @@ public:
 		ValueType = value.Type = TypeVMFunction;
 		isresolved = true;
 	}
-	
+
 	FxConstant(PFunction* rawptr, const FScriptPosition& pos) : FxExpression(EFX_Constant, pos)
 	{
 		value.pointer = rawptr;
@@ -1112,10 +1096,10 @@ public:
 //
 //==========================================================================
 
-class FxLtGtEq : public FxBinary
+class FxSpaceship : public FxBinary
 {
 public:
-	FxLtGtEq(FxExpression*, FxExpression*);
+	FxSpaceship(int, FxExpression*, FxExpression*);
 	FxExpression *Resolve(FCompileContext&);
 
 	ExpEmit Emit(VMFunctionBuilder *build);
@@ -1477,8 +1461,9 @@ class FxStructMember : public FxMemberBase
 {
 public:
 	FxExpression *classx;
+	bool IsConst;
 
-	FxStructMember(FxExpression*, PField*, const FScriptPosition&);
+	FxStructMember(FxExpression*, PField*, const FScriptPosition&, bool isConst = false);
 	~FxStructMember();
 	FxExpression *Resolve(FCompileContext&);
 	bool RequestAddress(FCompileContext &ctx, bool *writable);
@@ -1496,7 +1481,7 @@ class FxClassMember : public FxStructMember
 {
 public:
 
-	FxClassMember(FxExpression*, PField*, const FScriptPosition&);
+	FxClassMember(FxExpression*, PField*, const FScriptPosition&, bool isConst = false);
 };
 
 //==========================================================================
@@ -2336,7 +2321,7 @@ public:
 
 	FxExpression *Resolve(FCompileContext&)
 	{
-		// This should never reach the backend in a supported context, 
+		// This should never reach the backend in a supported context,
 		// it's just needed to extend argument lists with the skipped parameters and needs to be resolved by the parent node.
 		ScriptPosition.Message(MSG_ERROR, "Named arguments not supported here");
 		delete this;

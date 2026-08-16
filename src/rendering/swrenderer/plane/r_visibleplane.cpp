@@ -1,24 +1,21 @@
-//-----------------------------------------------------------------------------
-//
-// Copyright 1993-1996 id Software
-// Copyright 1999-2016 Randy Heit
-// Copyright 2016 Magnus Norddahl
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see http://www.gnu.org/licenses/
-//
-//-----------------------------------------------------------------------------
-//
+/*
+** r_visibleplane.cpp
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2016 Magnus Norddahl
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 #include <stdlib.h>
 #include <float.h>
@@ -66,7 +63,7 @@ namespace swrenderer
 		fillshort(top, viewwidth, 0x7fff);
 	}
 
-	void VisiblePlane::AddLights(RenderThread *thread, FLightNode *node)
+	void VisiblePlane::AddLights(RenderThread *thread, FSection *sec)
 	{
 		if (!r_dynlights)
 			return;
@@ -75,30 +72,39 @@ namespace swrenderer
 		if (cameraLight->FixedColormap() != NULL || cameraLight->FixedLightLevel() >= 0)
 			return; // [SP] no dynlights if invul or lightamp
 
-		while (node)
+		auto Level = sec->sector->Level;
+
+		if (Level->lightlists.flat_dlist.SSize() > sec->Index())
 		{
-			if (node->lightsource->IsActive() && (height.PointOnSide(node->lightsource->Pos) > 0))
+			TMap<FDynamicLight *, std::unique_ptr<FLightNode>>::Iterator it(Level->lightlists.flat_dlist[sec->Index()]);
+			TMap<FDynamicLight *, std::unique_ptr<FLightNode>>::Pair *pair;
+			while (it.NextPair(pair))
 			{
-				bool found = false;
-				VisiblePlaneLight *light_node = lights;
-				while (light_node)
+				auto node = pair->Value.get();
+				if (!node) continue;
+
+				if (node->lightsource->IsActive() && (height.PointOnSide(node->lightsource->Pos) > 0))
 				{
-					if (light_node->lightsource == node->lightsource)
+					bool found = false;
+					VisiblePlaneLight *light_node = lights;
+					while (light_node)
 					{
-						found = true;
-						break;
+						if (light_node->lightsource == node->lightsource)
+						{
+							found = true;
+							break;
+						}
+						light_node = light_node->next;
 					}
-					light_node = light_node->next;
-				}
-				if (!found)
-				{
-					VisiblePlaneLight *newlight = thread->FrameMemory->NewObject<VisiblePlaneLight>();
-					newlight->next = lights;
-					newlight->lightsource = node->lightsource;
-					lights = newlight;
+					if (!found)
+					{
+						VisiblePlaneLight *newlight = thread->FrameMemory->NewObject<VisiblePlaneLight>();
+						newlight->next = lights;
+						newlight->lightsource = node->lightsource;
+						lights = newlight;
+					}
 				}
 			}
-			node = node->nextLight;
 		}
 	}
 

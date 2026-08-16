@@ -1,7 +1,28 @@
+/*
+** constants.zs
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2006-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
+
 // for flag changer functions.
 const FLAG_NO_CHANGE = -1;
-const MAXPLAYERS = 8;
+const MAXPLAYERS = 64;
 const MAXPLAYERNAME = 15; // This was needed for mods
+const TEAM_NONE = 255;
+const TEAM_MAXIMUM = 16;
 
 enum EStateUseFlags
 {
@@ -195,7 +216,7 @@ enum EChangeVelocityFlags
 
 // Flags for A_WeaponReady
 enum EWeaponReadyFlags
-{ 
+{
 	WRF_NOBOB = 1,
 	WRF_NOSWITCH = 2,
 	WRF_NOPRIMARY = 4,
@@ -408,7 +429,7 @@ enum EActivationFlags
 	THINGSPEC_Activate			= 1<<8,		// The thing is activated when triggered
 	THINGSPEC_Deactivate		= 1<<9,		// The thing is deactivated when triggered
 	THINGSPEC_Switch			= 1<<10,	// The thing is alternatively activated and deactivated when triggered
-	
+
 	// Shorter aliases for same
 	AF_Default = 0,
 	AF_ThingActs = 1,
@@ -422,7 +443,7 @@ enum EActivationFlags
 	AF_Activate			= 1<<8,		// The thing is activated when triggered
 	AF_Deactivate		= 1<<9,		// The thing is deactivated when triggered
 	AF_Switch			= 1<<10,	// The thing is alternatively activated and deactivated when triggered
-	
+
 };
 
 // [MC] Flags for SetViewPos.
@@ -490,10 +511,10 @@ enum EPointerFlags
 	AAPTR_TARGET = 0x2,
 	AAPTR_MASTER = 0x4,
 	AAPTR_TRACER = 0x8,
-	
+
 	AAPTR_PLAYER_GETTARGET = 0x10,
 	AAPTR_PLAYER_GETCONVERSATION = 0x20,
-	
+
 	AAPTR_PLAYER1 = 0x40,
 	AAPTR_PLAYER2 = 0x80,
 	AAPTR_PLAYER3 = 0x100,
@@ -580,7 +601,7 @@ enum ELOFFlags
 
 	CLOFF_MUSTBEGHOST =			0x4000,
 	CLOFF_IGNOREGHOST =			0x8000,
-	
+
 	CLOFF_MUSTBESOLID =			0x10000,
 	CLOFF_BEYONDTARGET =		0x20000,
 
@@ -729,6 +750,9 @@ enum EParticleFlags
 	SPF_ROLLCENTER				= 1 << 13,
 	SPF_STRETCHPIXELS			= 1 << 14,
 	SPF_ALLOWSHADERS			= 1 << 15,
+	SPF_FADE_IN_OUT				= 1 << 16,
+	SPF_FADE_IN_HOLD_OUT		= 1 << 17,
+	SPF_NODYNAMICLIGHTING		= 1 << 18,
 
 	SPF_RELATIVE				= SPF_RELPOS|SPF_RELVEL|SPF_RELACCEL|SPF_RELANG
 };
@@ -833,8 +857,8 @@ enum EButtons
 {
 	BT_ATTACK		= 1<<0,	// Press "Fire".
 	BT_USE			= 1<<1,	// Use button, to open doors, activate switches.
-    BT_JUMP			= 1<<2,
-    BT_CROUCH		= 1<<3,
+	BT_JUMP			= 1<<2,
+	BT_CROUCH		= 1<<3,
 	BT_TURN180		= 1<<4,
 	BT_ALTATTACK	= 1<<5,	// Press your other "Fire".
 	BT_RELOAD		= 1<<6,	// [XA] Reload key. Causes state jump in A_WeaponReady.
@@ -916,7 +940,7 @@ struct FTranslatedLineTarget
 	double angleFromSource;
 	double attackAngleFromSource;
 	bool unlinked;	// found by a trace that went through an unlinked portal.
-	
+
 	native void TraceBleed(int damage, Actor missile);
 }
 
@@ -964,9 +988,9 @@ enum ELineTraceFlags
 }
 
 const DEFMELEERANGE = 64;
-const SAWRANGE = (64.+(1./65536.));	// use meleerange + 1 so the puff doesn't skip the flash (i.e. plays all states)
+const SAWRANGE = DEFMELEERANGE + double.equal_epsilon; // use meleerange + 1 so the puff doesn't skip the flash (i.e. plays all states)
 const MISSILERANGE = (32*64);
-const PLAYERMISSILERANGE = 8192;	// [RH] New MISSILERANGE for players
+const PLAYERMISSILERANGE = 8192; // [RH] New MISSILERANGE for players
 
 enum ESightFlags
 {
@@ -991,6 +1015,7 @@ enum EDmgFlags
 	DMG_NO_PAIN = 1024,
 	DMG_EXPLOSION = 2048,
 	DMG_NO_ENHANCE = 4096,
+	DMG_RAILGUN = 8192,
 }
 
 enum EReplace
@@ -1024,6 +1049,11 @@ enum EMapThingFlags
 	MTF_SECRET			= 0x080000,	// Secret pickup
 	MTF_NOINFIGHTING	= 0x100000,
 	MTF_NOCOUNT			= 0x200000,	// Removes COUNTKILL/COUNTITEM
+
+	// Thing spawn origins, what created this thing?
+	MTF_MAPTHING		= 0x400000, // Map spawned
+	MTF_CONSOLETHING	= 0x800000, // Console spawned (i.e summon)
+	MTF_NONSPAWNTHING	= (MTF_MAPTHING|MTF_CONSOLETHING), // [inkoalawetrust]: Rachael didn't want a dedicated MTF_SPAWNTHING flag taking up the field, so check if the other 2 flags aren't true instead.
 };
 
 enum ESkillProperty
@@ -1204,7 +1234,7 @@ enum EPlayerCheats
 	CF_BUDDHA			= 1 << 27,		// [SP] Buddha mode - take damage, but don't die
 	CF_NOCLIP2			= 1 << 30,		// [RH] More Quake-like noclip
 
-	// These flags no longer exist, but keep the names for some stray mod that might have used them. 
+	// These flags no longer exist, but keep the names for some stray mod that might have used them.
 	CF_DRAIN			= 0,
 	CF_HIGHJUMP			= 0,
 	CF_REFLECTION		= 0,
@@ -1268,7 +1298,7 @@ enum SPAC
 	SPAC_Use = 1<<1,		// when player uses line
 	SPAC_MCross = 1<<2,		// when monster crosses line
 	SPAC_Impact = 1<<3,		// when projectile hits line
-	SPAC_Push = 1<<4,		// when player pushes line	
+	SPAC_Push = 1<<4,		// when player pushes line
 	SPAC_PCross = 1<<5,		// when projectile crosses line
 	SPAC_UseThrough = 1<<6,	// when player uses line (doesn't block)
 	// SPAC_PTOUCH is mapped to SPAC_PCross|SPAC_Impact
@@ -1379,7 +1409,7 @@ enum ELevelFlags
 	LEVEL_CHANGEMAPCHEAT		= 0x40000000,	// Don't display cluster messages
 	LEVEL_VISITED				= 0x80000000,	// Used for intermission map
 
-	// The flags uint64_t is now split into 2 DWORDs 
+	// The flags uint64_t is now split into 2 DWORDs
 	LEVEL2_RANDOMPLAYERSTARTS	= 0x00000001,	// Select single player starts randomnly (no voodoo dolls)
 	LEVEL2_ALLMAP				= 0x00000002,	// The player picked up a map on this level
 
@@ -1396,7 +1426,7 @@ enum ELevelFlags
 	LEVEL2_CLIPMIDTEX			= 0x00000200,
 	LEVEL2_WRAPMIDTEX			= 0x00000400,
 
-	LEVEL2_CHECKSWITCHRANGE		= 0x00000800,	
+	LEVEL2_CHECKSWITCHRANGE		= 0x00000800,
 
 	LEVEL2_PAUSE_MUSIC_IN_MENUS	= 0x00001000,
 	LEVEL2_TOTALINFIGHTING		= 0x00002000,
@@ -1424,7 +1454,7 @@ enum ELevelFlags
 	LEVEL2_ENDGAME				= 0x20000000,	// This is an epilogue level that cannot be quit.
 	LEVEL2_NOAUTOSAVEHINT		= 0x40000000,	// tell the game that an autosave for this level does not need to be kept
 	LEVEL2_FORGETSTATE			= 0x80000000,	// forget this map's state in a hub
-	
+
 	// More flags!
 	LEVEL3_FORCEFAKECONTRAST	= 0x00000001,	// forces fake contrast even with fog enabled
 	LEVEL3_REMOVEITEMS			= 0x00000002,	// kills all INVBAR items on map change.
@@ -1448,6 +1478,8 @@ enum ELevelFlags
 	LEVEL3_LIGHTCREATED			= 0x00080000,	// a light had been created in the last frame
 	LEVEL3_NOFOGOFWAR			= 0x00100000,	// disables effect of r_radarclipper CVAR on this map
 	LEVEL3_SECRET				= 0x00200000,	// level is a secret level
+	LEVEL3_SKYMIST				= 0x00400000,   // level skyfog uses the skymist texture
+	LEVEL3_NOAMBIENTOCCLUSION	= 0x00800000,   // disables ambient occlusion on this map
 };
 
 // [RH] Compatibility flags.
@@ -1501,8 +1533,14 @@ enum ECompatFlags
 	COMPATF2_SCRIPTWAIT		= 1 << 11,	// Use old scriptwait implementation where it doesn't wait on a non-running script.
 	COMPATF2_AVOID_HAZARDS	= 1 << 12,	// another MBF thing.
 	COMPATF2_STAYONLIFT		= 1 << 13,	// yet another MBF thing.
-	COMPATF2_NOMBF21		= 1 << 14,	// disable MBF21 features that may clash with certain maps
+	COMPATF2_NOMBF21		= 1 << 14,	// Unused. Kept for backwards compatibility.
 	COMPATF2_VOODOO_ZOMBIES = 1 << 15,  // allow playerinfo, playerpawn, and voodoo health to all be different, and allow monster targetting of 'dead' players that have positive health
+	COMPATF2_FDTELEPORT		= 1 << 16,	// Emulate Final Doom's teleporter z glitch.
+	COMPATF2_NOACSARGCHECK	= 1 << 17,	// Disable arg count checking for ACS
+	COMPATF2_NOVDOLLLOCKMSG = 1 << 18,	// Voodoo dolls no longer trigger lock messages
+	COMPATF2_EMULATEMIKOPORTALS = 1 << 19, // Emulate Mikoportals Z Underflow
+	COMPATF2_RESERVEDLINEFLAG	= 1 << 20,	// disable certain linedef flag features that may clash with certain maps
+	COMPATF2_TRANSFERSECRET	= 1 << 21, // Allow Boom's Transfer Specials to transfer Secrets
 };
 
 enum HitWaterFlags
@@ -1563,9 +1601,9 @@ enum EVisualThinkerFlags
 	VTF_DontInterpolate	= 1 << 4, // disable all interpolation
 	VTF_AddLightLevel	= 1 << 5, // adds sector light level to 'LightLevel'
 
-	VTF_ParticleDefault = 0x40, 
-	VTF_ParticleSquare	= 0x80, 
-	VTF_ParticleRound	= 0xC0, 
+	VTF_ParticleDefault = 0x40,
+	VTF_ParticleSquare	= 0x80,
+	VTF_ParticleRound	= 0xC0,
 	VTF_ParticleSmooth	= 0x100,
 	VTF_IsParticle		= 0x1C0
 };
@@ -1576,4 +1614,17 @@ enum EParticleStyle
 	PT_SQUARE	= 0,
 	PT_ROUND	= 1,
 	PT_SMOOTH	= 2,
+};
+
+enum ESetBoneMode
+{
+	SB_CLEAR = 0,
+	SB_ADD = 1,
+	SB_REPLACE = 2,
+};
+
+enum EIQMFlags
+{
+	IQM_GET_BONE_INFO  =		1 << 2,
+	IQM_GET_BONE_INFO_RECALC  =	1 << 3, // RECALCULATE BONE INFO INSTANTLY WHEN STATE/ANIMATION CHANGES, MIGHT GET EXPENSIVE
 };

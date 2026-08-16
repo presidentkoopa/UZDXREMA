@@ -1,32 +1,22 @@
 /*
 ** p_effect.h
 **
+**
+**
 **---------------------------------------------------------------------------
-** Copyright 1998-2006 Randy Heit
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 1998-2016 Marisa Heit
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
@@ -79,29 +69,34 @@ enum EParticleFlags
 	SPF_ROLLCENTER				= 1 << 13,
 	SPF_STRETCHPIXELS			= 1 << 14,
 	SPF_ALLOWSHADERS			= 1 << 15,
+	SPF_FADE_IN_OUT				= 1 << 16,
+	SPF_FADE_IN_HOLD_OUT		= 1 << 17,
+	SPF_NODYNAMICLIGHTING		= 1 << 18,
 };
 
 class DVisualThinker;
 struct particle_t
 {
 	subsector_t* subsector; //+8 = 8
-    DVector3 Pos; //+24 = 32
-    FVector3 Vel; //+12 = 44
-    FVector3 Acc; //+12 = 56
+	DVector3 Pos; //+24 = 32
+	FVector3 Vel; //+12 = 44
+	FVector3 Acc; //+12 = 56
 	float    size, sizestep; //+8 = 64
-    float    fadestep, alpha; //+8 = 72
-    int32_t    ttl; // +4 = 76
-    int        color; //+4 = 80
-    FTextureID texture; // +4 = 84
-    ERenderStyle style; //+4 = 88
-    float Roll, RollVel, RollAcc; //+12 = 100
-    uint16_t    tnext, snext, tprev; //+6 = 106
-	uint16_t flags; //+2 = 108
-	// uint32_t padding; //+4 = 112
+	float    fadestep, alpha; //+8 = 72
+	int32_t    ttl; // +4 = 76
+	int        color; //+4 = 80
+	FTextureID texture; // +4 = 84
+	ERenderStyle style; //+4 = 88
+	float Roll, RollVel, RollAcc; //+12 = 100
+	uint16_t    tnext, snext, tprev; //+6 = 106
+	// uint16_t padding; //+2 = 108
+	uint32_t flags; //+4 = 112
 	FStandaloneAnimation animData; //+16 = 128
+	float	fadeoutstep; //+4 = 132
+	// float padding2; //+4 = 136
 };
 
-static_assert(sizeof(particle_t) == 128, "Only LP64/LLP64 is supported");
+static_assert(sizeof(particle_t) == 136, "Only LP64/LLP64 is supported");
 
 const uint16_t NO_PARTICLE = 0xffff;
 
@@ -134,13 +129,14 @@ struct FSpawnParticleParams
 
 	double startalpha;
 	double fadestep;
+	double fadeoutstep;
 
 	double startroll;
 	double rollvel;
 	double rollacc;
 };
 
-void P_SpawnParticle(FLevelLocals *Level, const DVector3 &pos, const DVector3 &vel, const DVector3 &accel, PalEntry color, double startalpha, int lifetime, double size, double fadestep, double sizestep, int flags = 0, FTextureID texture = FNullTextureID(), ERenderStyle style = STYLE_None, double startroll = 0, double rollvel = 0, double rollacc = 0);
+void P_SpawnParticle(FLevelLocals *Level, const DVector3 &pos, const DVector3 &vel, const DVector3 &accel, PalEntry color, double startalpha, int lifetime, double size, double fadestep, double sizestep, int flags = 0, FTextureID texture = FNullTextureID(), ERenderStyle style = STYLE_None, double startroll = 0, double rollvel = 0, double rollacc = 0, double fadeoutstep = 0);
 
 void P_InitEffects (void);
 

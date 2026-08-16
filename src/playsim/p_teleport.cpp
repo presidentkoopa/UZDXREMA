@@ -1,39 +1,31 @@
-//-----------------------------------------------------------------------------
-//
-// Copyright 1993-1996 id Software
-// Copyright 1994-1996 Raven Software
-// Copyright 1998-1998 Chi Hoang, Lee Killough, Jim Flynn, Rand Phares, Ty Halderman
-// Copyright 1999-2016 Randy Heit
-// Copyright 2002-2016 Christoph Oelckers
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see http://www.gnu.org/licenses/
-//
-//-----------------------------------------------------------------------------
-//
-// DESCRIPTION:
-//		Teleportation.
-//
-//-----------------------------------------------------------------------------
+/*
+** p_teleport.cpp
+**
+** Teleportation
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1994-1996 Raven Software
+** Copyright 1998-1998 Chi Hoang, Lee Killough, Jim Flynn, Rand Phares, Ty Halderman
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2002-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 #include <QzDoom/VrCommon.h>
 #include "d_player.h"
 #include "doomdef.h"
-#include "vm.h"
 #include "g_levellocals.h"
 #include "p_maputl.h"
-#include "gi.h"
 #include "r_utility.h"
+#include "vm.h"
 
 #define FUDGEFACTOR		10
 
@@ -190,6 +182,13 @@ bool P_Teleport (AActor *thing, DVector3 pos, DAngle angle, int flags)
 		if (resetpitch)
 		{
 			player->mo->Angles.Pitch = nullAngle;
+		}
+		if (player->mo == players[consoleplayer].mo || player->mo == players[consoleplayer].camera)
+		{
+			IFVIRTUALPTR(player->mo, AActor, PlayerTeleportedMakeRumble)
+			{
+				CallVM<void>(func, player->mo);
+			}
 		}
 	}
 	if (!(flags & TELF_KEEPORIENTATION))
@@ -575,7 +574,7 @@ bool FLevelLocals::EV_SilentLineTeleport (line_t *line, int side, AActor *thing,
 
 			// Is this really still necessary with real math instead of imprecise trig tables?
 #if 1
-			const double fudgeamount = 1. / 65536.;
+			const double fudgeamount = EQUAL_EPSILON;
 
 			int side = reverse || (player && stepdown);
 			int fudge = FUDGEFACTOR;

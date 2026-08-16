@@ -1,29 +1,19 @@
-// 
-//---------------------------------------------------------------------------
-//
-// Copyright(C) 2000-2016 Christoph Oelckers
-// All rights reserved.
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public License
-// along with this program.  If not, see http://www.gnu.org/licenses/
-//
-//--------------------------------------------------------------------------
-//
 /*
-** gl_bsp.cpp
+** hw_bsp.cpp
+**
 ** Main rendering loop / BSP traversal / visibility clipping
 **
-**/
+**---------------------------------------------------------------------------
+**
+** Copyright 2000-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 #include "p_lnspec.h"
 #include "p_local.h"
@@ -119,7 +109,7 @@ struct RenderJob
 		PortalJob,
 		TerminateJob	// inserted when all work is done so that the worker can return.
 	};
-	
+
 	int type;
 	subsector_t *sub;
 	seg_t *seg;
@@ -168,7 +158,7 @@ public:
 
 		return &pool[readindex++];
 	}
-	
+
 	void ReleaseAll()
 	{
 		readindex = 0;
@@ -439,7 +429,7 @@ void HWDrawInfo::UnclipSubsector(subsector_t *sub)
 		angle_t endAngle = clipper.GetClipAngle(seg->v1);
 
 		// Back side, i.e. backface culling	- read: endAngle >= startAngle!
-		if (startAngle-endAngle >= ANGLE_180)  
+		if (startAngle-endAngle >= ANGLE_180)
 		{
 			clipper.SafeRemoveClipRange(startAngle, endAngle);
 			clipper.SetBlocked(false);
@@ -565,7 +555,7 @@ void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
 	bool cachedBacksectorClip = false;
 	bool hasCachedBacksectorClip = false;
 	const bool isVisualPortalLine = seg->linedef != nullptr && seg->linedef->isVisualPortal();
-	const bool allowOoB = Viewpoint.IsAllowedOoB();
+	const bool allowOoB = Viewpoint.bDoOob;
 	const bool useRadarClip = allowOoB && r_radarclipper && !(Level->flags3 & LEVEL3_NOFOGOFWAR);
 
 	if (portalclip)
@@ -604,7 +594,7 @@ void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
 	}
 
 	// Back side, i.e. backface culling	- read: endAngle >= startAngle!
-	if (startAngle-endAngle<ANGLE_180)  
+	if (startAngle-endAngle<ANGLE_180)
 	{
 		return;
 	}
@@ -664,8 +654,15 @@ void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
 		return;
 	}
 
-	if (!seg->backsector)
+	// [XA] NOTE: ideally it'd be nice to collapse these checks into one,
+	// but it's possible to add & remove WALLF_BLOCKRENDERING via zscript
+	// so auto-setting it on 1s lines may result in a crash if someone
+	// later tries to remove the flag from a line.
+	if (!seg->backsector || (seg->sidedef->Flags & WALLF_BLOCKRENDERING))
 	{
+		// This is rendered as a one-sided wall, so drop any backsector the radar
+		// clipper above may have cached into 'backsector' via hw_FakeFlat.
+		backsector = nullptr;
 		if(!allowOoB)
 			if (!(seg->sidedef->Flags & WALLF_DITHERTRANS_MID)) clipper.SafeAddClipRange(startAngle, endAngle);
 	}
@@ -705,7 +702,7 @@ void HWDrawInfo::AddLine (seg_t *seg, bool portalclip)
 			}
 		}
 	}
-	else 
+	else
 	{
 		// Backsector for polyobj segs is always the containing sector itself
 		backsector = currentsector;
@@ -862,7 +859,7 @@ void HWDrawInfo::AddLines(subsector_t * sub, sector_t * sector)
 			{
 				if (!(sub->flags & SSECMF_DRAWN)) AddLine (seg, mClipPortal != nullptr);
 			}
-			else if (!(seg->sidedef->Flags & WALLF_POLYOBJ)) 
+			else if (!(seg->sidedef->Flags & WALLF_POLYOBJ))
 			{
 				AddLine (seg, mClipPortal != nullptr);
 			}
@@ -927,7 +924,7 @@ void HWDrawInfo::RenderThings(subsector_t * sub, sector_t * sector)
 		thing->validcount = validcount;
 		double distSq = -1.0;
 
-		if(Viewpoint.IsAllowedOoB() && thing->Sector->isSecret() && thing->Sector->wasSecret() && !r_radarclipper) continue; // This covers things that are touching non-secret sectors
+		if(Viewpoint.bDoOob && thing->Sector->isSecret() && thing->Sector->wasSecret() && !r_radarclipper) continue; // This covers things that are touching non-secret sectors
 		FIntCVar *cvar = thing->GetInfo()->distancecheck;
 		if (cvar != nullptr && *cvar >= 0)
 		{
@@ -964,7 +961,7 @@ void HWDrawInfo::RenderThings(subsector_t * sub, sector_t * sector)
 			sprite.Process(this, thing, sector, in_area, false);
 		}
 	}
-	
+
 	for (msecnode_t *node = sec->sectorportal_thinglist; node; node = node->m_snext)
 	{
 		AActor *thing = node->m_thing;
@@ -1085,7 +1082,7 @@ void HWDrawInfo::ProcessVisibleSubsector(subsector_t* sub, sector_t* sector, sec
 				SetupSprite.Unclock();
 			}
 		}
-		if (r_dithertransparency && Viewpoint.IsAllowedOoB() && (RTnum < MAXDITHERACTORS) && mCurrentPortal == nullptr)
+		if (r_dithertransparency && Viewpoint.bDoOob && (RTnum < MAXDITHERACTORS) && mCurrentPortal == nullptr)
 		{
 			// [DVR] Not parallelizable due to variables RTnum and RenderedTargets[]
 			for (auto p = sector->touching_renderthings; p != nullptr; p = p->m_snext)
@@ -1243,7 +1240,7 @@ void HWDrawInfo::DoSubsector(subsector_t * sub)
 		return;
 	}	// if we are inside a stacked sector portal which hasn't unclipped anything yet.
 
-	const bool allowOoB = Viewpoint.IsAllowedOoB();
+	const bool allowOoB = Viewpoint.bDoOob;
 	const bool useRadarClip = allowOoB && r_radarclipper && !(Level->flags3 & LEVEL3_NOFOGOFWAR);
 
 	if(allowOoB && sector->isSecret() && sector->wasSecret() && !r_radarclipper)
@@ -1263,9 +1260,8 @@ void HWDrawInfo::DoSubsector(subsector_t * sub)
 		bool anglevisible = false;
 		bool pitchvisible = !allowOoB; // No vertical clipping if viewpoint is not allowed out of bounds
 		bool radarvisible = !useRadarClip || ((sub->flags & SSECMF_DRAWN) && !deathmatch);
-		bool ceilreflect = (mCurrentPortal && strcmp(mCurrentPortal->GetName(), "Planemirror ceiling"));
-		bool floorreflect = (mCurrentPortal && strcmp(mCurrentPortal->GetName(), "Planemirror floor"));
-		double planez = (ceilreflect ? sector->ceilingplane.ZatPoint(Viewpoint.Pos) : sector->floorplane.ZatPoint(Viewpoint.Pos));
+		const int reflect = mCurrentPortal ? mCurrentPortal->GetMirrorSide() : 0; // -1 = ceiling, 1 = floor, 0 = none
+		const double planez = (reflect < 0 ? sector->ceilingplane.ZatPoint(Viewpoint.Pos) : sector->floorplane.ZatPoint(Viewpoint.Pos));
 		angle_t pitchtemp;
 		angle_t pitchmin = ANGLE_90;
 		angle_t pitchmax = 0;
@@ -1291,11 +1287,11 @@ void HWDrawInfo::DoSubsector(subsector_t * sub)
 				if (!pitchvisible)
 				{
 					pitchmin = clipperv.PointToPseudoPitch(seg->v1->fX(), seg->v1->fY(),
-														   (ceilreflect || floorreflect) ?
+														   (reflect != 0) ?
 														   2 * planez - sector->floorplane.ZatPoint(seg->v1) :
 														   sector->floorplane.ZatPoint(seg->v1));
 					pitchmax = clipperv.PointToPseudoPitch(seg->v1->fX(), seg->v1->fY(),
-														   (ceilreflect || floorreflect) ?
+														   (reflect != 0) ?
 														   2 * planez - sector->ceilingplane.ZatPoint(seg->v1) :
 														   sector->ceilingplane.ZatPoint(seg->v1));
 					pitchvisible |= clipperv.SafeCheckRange(pitchmin, pitchmax);
@@ -1304,12 +1300,12 @@ void HWDrawInfo::DoSubsector(subsector_t * sub)
 				if (!pitchvisible)
 				{
 					pitchtemp = clipperv.PointToPseudoPitch(seg->v2->fX(), seg->v2->fY(),
-															(ceilreflect || floorreflect) ?
+															(reflect != 0) ?
 															2 * planez - sector->floorplane.ZatPoint(seg->v2) :
 															sector->floorplane.ZatPoint(seg->v2));
 					if (int(pitchmin) > int(pitchtemp)) pitchmin = pitchtemp;
 					pitchtemp = clipperv.PointToPseudoPitch(seg->v2->fX(), seg->v2->fY(),
-															(ceilreflect || floorreflect) ?
+															(reflect != 0) ?
 															2 * planez - sector->ceilingplane.ZatPoint(seg->v2) :
 															sector->ceilingplane.ZatPoint(seg->v2));
 					if (int(pitchmax) < int(pitchtemp)) pitchmax = pitchtemp;
@@ -1388,7 +1384,7 @@ void HWDrawInfo::RenderBSPNode (void *node)
 			if (!(no_renderflags[bsp->Index()] & SSRF_SEEN))
 				return;
 		}
-		if (Viewpoint.IsOrtho())
+		if (Viewpoint.bDoOrtho)
 		{
 			if (!vClipper->CheckBoxOrthoPitch(bsp->bbox[side]))
 			{
@@ -1405,7 +1401,7 @@ void HWDrawInfo::RenderBSPNode (void *node)
 // No need for clipping inside frustum if no fog of war (How is this faster!)
 void HWDrawInfo::RenderOrthoNoFog()
 {
-	if (Viewpoint.IsOrtho() && ((Level->flags3 & LEVEL3_NOFOGOFWAR) || !r_radarclipper))
+	if (Viewpoint.bDoOrtho && ((Level->flags3 & LEVEL3_NOFOGOFWAR) || !r_radarclipper))
 	{
 		double vxdbl = Viewpoint.OffPos.X;
 		double vydbl = Viewpoint.OffPos.Y;
@@ -1431,7 +1427,7 @@ void HWDrawInfo::RenderBSP(void *node, bool drawpsprites)
 	// Give the DrawInfo the viewpoint in fixed point because that's what the nodes are.
 	viewx = FLOAT2FIXED(Viewpoint.Pos.X);
 	viewy = FLOAT2FIXED(Viewpoint.Pos.Y);
-	if (r_radarclipper && !(Level->flags3 & LEVEL3_NOFOGOFWAR) && Viewpoint.IsAllowedOoB())
+	if (r_radarclipper && !(Level->flags3 & LEVEL3_NOFOGOFWAR) && Viewpoint.bDoOob)
 	{
 		viewx = FLOAT2FIXED(Viewpoint.OffPos.X);
 		viewy = FLOAT2FIXED(Viewpoint.OffPos.Y);
@@ -1472,7 +1468,7 @@ void HWDrawInfo::RenderBSP(void *node, bool drawpsprites)
 				mesh.wallCycles = 0;
 			}
 
-			if (Viewpoint.IsOrtho() && ((Level->flags3 & LEVEL3_NOFOGOFWAR) || !r_radarclipper)) RenderOrthoNoFog();
+			if (Viewpoint.bDoOrtho && ((Level->flags3 & LEVEL3_NOFOGOFWAR) || !r_radarclipper)) RenderOrthoNoFog();
 			else RenderBSPNode(node);
 
 			sceneJobQueue.AddJob(RenderJob::TerminateJob, nullptr, nullptr);
@@ -1528,7 +1524,7 @@ void HWDrawInfo::RenderBSP(void *node, bool drawpsprites)
 		}
 		else
 		{
-			if (Viewpoint.IsOrtho() && ((Level->flags3 & LEVEL3_NOFOGOFWAR) || !r_radarclipper)) RenderOrthoNoFog();
+			if (Viewpoint.bDoOrtho && ((Level->flags3 & LEVEL3_NOFOGOFWAR) || !r_radarclipper)) RenderOrthoNoFog();
 			else RenderBSPNode(node);
 
 			sceneJobQueue.AddJob(RenderJob::TerminateJob, nullptr, nullptr);
@@ -1540,7 +1536,7 @@ void HWDrawInfo::RenderBSP(void *node, bool drawpsprites)
 	}
 	else
 	{
-		if (Viewpoint.IsOrtho() && ((Level->flags3 & LEVEL3_NOFOGOFWAR) || !r_radarclipper)) RenderOrthoNoFog();
+		if (Viewpoint.bDoOrtho && ((Level->flags3 & LEVEL3_NOFOGOFWAR) || !r_radarclipper)) RenderOrthoNoFog();
 		else RenderBSPNode(node);
 		Bsp.Unclock();
 	}

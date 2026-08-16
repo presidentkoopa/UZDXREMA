@@ -1,32 +1,23 @@
 /*
 ** c_bind.h
 **
+**
+**
 **---------------------------------------------------------------------------
-** Copyright 1998-2006 Randy Heit
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 1998-2016 Marisa Heit
+** Copyright 2006-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
@@ -42,7 +33,7 @@ struct event_t;
 class FConfigFile;
 class FCommandLine;
 
-void C_NameKeys (char *str, int first, int second);
+void C_NameKeys (char *str, int first, int second, bool colors = false);
 FString C_NameKeys (int *keys, int count, bool colors = false);
 
 class FKeyBindings
@@ -56,7 +47,7 @@ public:
 	int  GetKeysForCommand (const char *cmd, int *first, int *second);
 	TArray<int> GetKeysForCommand (const char *cmd);
 	void UnbindACommand (const char *str);
-	void UnbindAll ();
+	void UnbindAll (const TArray<int> *filter = nullptr);
 	void UnbindKey(const char *key);
 	void DoBind (const char *key, const char *bind);
 	void DefaultBind(const char *keyname, const char *cmd);
@@ -82,6 +73,7 @@ public:
 		return NULL;
 	}
 
+	const char *GetBind(const char *key);
 };
 
 extern FKeyBindings Bindings;
@@ -90,10 +82,11 @@ extern FKeyBindings AutomapBindings;
 
 
 bool C_DoKey (event_t *ev, FKeyBindings *binds, FKeyBindings *doublebinds);
+void C_TickQueuedInputs();
 
 // Stuff used by the customize controls menu
-void C_SetDefaultBindings ();
-void C_UnbindAll ();
+void C_SetDefaultBindings (const TArray<int> *filter = nullptr);
+void C_UnbindAll (const TArray<int> *filter = nullptr);
 
 extern const char *KeyNames[];
 
@@ -112,4 +105,3 @@ struct FKeySection
 extern TArray<FKeySection> KeySections;
 
 #endif //__C_BINDINGS_H__
-

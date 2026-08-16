@@ -1,23 +1,21 @@
-//-----------------------------------------------------------------------------
-//
-// Copyright 1993-1996 id Software
-// Copyright 1999-2016 Randy Heit
-// Copyright 2016 Magnus Norddahl
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see http://www.gnu.org/licenses/
-//
-//-----------------------------------------------------------------------------
+/*
+** r_sprite.cpp
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2016 Magnus Norddahl
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -124,7 +122,7 @@ namespace swrenderer
 					return;
 			}
 		}
-		
+
 
 		// [RH] Flip for mirrors
 		auto renderportal = thread->Portal.get();
@@ -167,15 +165,15 @@ namespace swrenderer
 		if (thing->flags5 & MF5_BRIGHT)
 			vis->renderflags |= RF_FULLBRIGHT;
 		vis->RenderStyle = thing->RenderStyle;
-		if (r_UseVanillaTransparency)
+		if (r_UseVanillaTransparency && (thing->renderflags & RF_ZDOOMTRANS))
 		{
-			if (thing->renderflags & RF_ZDOOMTRANS)
+			if (r_UseVanillaTransparency == 1 || AutoTrans.CheckKey(thing->GetClass()->TypeName) != nullptr)
 				vis->RenderStyle = LegacyRenderStyles[STYLE_Normal];
 		}
 		vis->FillColor = thing->fillcolor;
 		vis->Translation = thing->Translation;		// [RH] thing translation table
 		vis->FakeFlatStat = fakeside;
-		vis->Alpha = float(thing->Alpha);
+		vis->Alpha = float(thing->InterpolatedAlpha(thread->Viewport->viewpoint.TicFrac));
 		vis->fakefloor = fakefloor;
 		vis->fakeceiling = fakeceiling;
 		vis->pic = tex;
@@ -208,42 +206,50 @@ namespace swrenderer
 			float lit_red = 0;
 			float lit_green = 0;
 			float lit_blue = 0;
-			auto node = vis->section->lighthead;
-			while (node != nullptr)
+			auto Level = vis->sector->Level;
+
+			if (Level->lightlists.flat_dlist.SSize() > vis->section->Index())
 			{
-				FDynamicLight *light = node->lightsource;
-				if (light->ShouldLightActor(thing))
+				TMap<FDynamicLight *, std::unique_ptr<FLightNode>>::Iterator it(Level->lightlists.flat_dlist[vis->section->Index()]);
+				TMap<FDynamicLight *, std::unique_ptr<FLightNode>>::Pair *pair;
+				while (it.NextPair(pair))
 				{
-					float lx = (float)(light->X() - thing->X());
-					float ly = (float)(light->Y() - thing->Y());
-					float lz = (float)(light->Z() - thing->Center());
-					float LdotL = lx * lx + ly * ly + lz * lz;
-					float radius = node->lightsource->GetRadius();
-					if (radius * radius >= LdotL)
+					auto node = pair->Value.get();
+					if (!node) continue;
+
+					FDynamicLight *light = node->lightsource;
+					if (light->ShouldLightActor(thing))
 					{
-						float distance = sqrt(LdotL);
-						float attenuation = 1.0f - distance / radius;
-						if (attenuation > 0.0f)
-						{						
-							float red = light->GetRed() * (1.0f / 255.0f);
-							float green = light->GetGreen() * (1.0f / 255.0f);
-							float blue = light->GetBlue() * (1.0f / 255.0f);
-							/*if (light->IsSubtractive())
+						float lx = (float)(light->X() - thing->X());
+						float ly = (float)(light->Y() - thing->Y());
+						float lz = (float)(light->Z() - thing->Center());
+						float LdotL = lx * lx + ly * ly + lz * lz;
+						float radius = node->lightsource->GetRadius();
+						if (radius * radius >= LdotL)
+						{
+							float distance = sqrt(LdotL);
+							float attenuation = 1.0f - distance / radius;
+							if (attenuation > 0.0f)
 							{
-								float bright = FVector3(lr, lg, lb).Length();
-								FVector3 lightColor(lr, lg, lb);
-								red = (bright - lr) * -1;
-								green = (bright - lg) * -1;
-								blue = (bright - lb) * -1;
-							}*/
-						
-							lit_red += red * attenuation;
-							lit_green += green * attenuation;
-							lit_blue += blue * attenuation;
+								float red = light->GetRed() * (1.0f / 255.0f);
+								float green = light->GetGreen() * (1.0f / 255.0f);
+								float blue = light->GetBlue() * (1.0f / 255.0f);
+								/*if (light->IsSubtractive())
+								{
+									float bright = FVector3(lr, lg, lb).Length();
+									FVector3 lightColor(lr, lg, lb);
+									red = (bright - lr) * -1;
+									green = (bright - lg) * -1;
+									blue = (bright - lb) * -1;
+								}*/
+
+								lit_red += red * attenuation;
+								lit_green += green * attenuation;
+								lit_blue += blue * attenuation;
+							}
 						}
 					}
 				}
-				node = node->nextLight;
 			}
 			lit_red = clamp(lit_red * 255.0f, 0.0f, 255.0f);
 			lit_green = clamp(lit_green * 255.0f, 0.0f, 255.0f);

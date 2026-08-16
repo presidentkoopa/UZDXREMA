@@ -7,290 +7,451 @@ on:
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
+permissions:
+  contents: write
+  actions: write
+
+# =====================================================================================
+# [UZDXREMA] PORTING NOTE - VR release pipeline not yet re-homed. NEEDS HUMAN FOLLOW-UP.
+#
+# Upstream 5.0.0-rc.2 replaced this file's monolithic `build` job with reusable-workflow
+# driver jobs that only pass a matrix into ./.github/workflows/build_core.yml. The fork's
+# build and packaging STEPS therefore no longer have a home in this file. Every one of
+# them is recorded here so it can be ported into build_core.yml. Until that is done CI
+# passes but the published Windows artifacts ship WITHOUT VR.
+#
+# 1. Windows CMake flags (belong in `build_opts` / `build_opts_extra` of the Windows
+#    entries of *common_config below, but only once 2. supplies the headers - turning
+#    these on without the SDK makes the Windows configure step fail):
+#      -DENABLE_OPENVR=ON
+#      -DOPENVR_SDK_PATH=<absolute workspace path>/build/openvr-2.5.1
+#    (ENABLE_OPENXR was never enabled in fork CI - OpenVR only.)
+#
+# 2. OpenVR SDK fetch (belongs before build_core.yml's Configure step):
+#      OPENVR_SDK=openvr-2.5.1
+#      curl -LO https://github.com/emawind84/gzdoom/releases/download/ci_deps/${OPENVR_SDK}.tar.gz
+#      tar -xf ${OPENVR_SDK}.tar.gz          # extracted into <workspace>/build
+#
+# 3. vcpkg toolchain (what makes the vcpkg blocks in the root CMakeLists work):
+#      uses: lukka/run-vcpkg@v11             # if runner.os == 'Windows'
+#        vcpkgDirectory:   ${{ github.workspace }}/build/vcpkg
+#        vcpkgGitCommitId: b322364f06308bdd24823f9d8f03fe0cc86fd46f
+#      then: echo CMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" >> $GITHUB_ENV
+#
+# 4. Version stamp: the fork used proudust/gh-describe@v2 to export GIT_DESCRIBE.
+#    build_core.yml uses `git describe --tags --exclude x-*` instead - confirm the
+#    resulting version string is still what the fork expects before dropping gh-describe.
+#
+# 5. Packaging deltas against build_core.yml's `extra_files` mechanism. Its openal-soft
+#    and libsndfile URLs/hashes already match the fork's, so only these are fork-specific:
+#      zmusic.dll, from
+#        https://github.com/ZDoom/gzdoom/releases/download/g4.14.2/gzdoom-4-14-2-windows.zip
+#        sha256 6d01c5bb48610cebfa9dfd0b7705a1e20bfd56032a74484ac256d8c4e3c51bee
+#      Linux libzmusic.so.1, from
+#        https://github.com/ZDoom/gzdoom/releases/download/g4.14.2/gzdoom_4.14.2_amd64.deb
+#        sha256 15762da40d310d3688fb8a44ded3759424aa51a24277a024488a5b8aea573e2f
+#      the OpenVR runtime DLL
+#    (soundfont/uzdoom.sf2 and fm_banks copies are already handled by build_core.yml's
+#     `Package Windows` step; the fork's AppImage recipe tools/AppImageBuilder.yml plus
+#     tools/AppImageEntrypoint.sh are superseded by build_core.yml's linuxdeploy path.)
+# =====================================================================================
+
 jobs:
-  build:
-    name: ${{ matrix.config.name }} | ${{ matrix.config.build_type }}
-    runs-on: ${{ matrix.config.os }}
+  ci-init:
+    if: ${{ ! startsWith(github.event.ref, 'refs/tags/x-') }}
+    runs-on: ubuntu-latest
+    name: CI Init
+    outputs:
+      url: ${{ steps.details.outputs.url }}
+      tag: ${{ steps.tag.outputs.tag }}
+      mode: ${{ steps.emit.outputs.mode }}
+      branch: ${{ steps.branch.outputs.branch || steps.tag.outputs.branch }}
+    steps:
+      - id: details
+        shell: bash
+        env:
+          EVENT: ${{ toJson(github) }}
+        run: |
+          echo "${EVENT}"
+          echo "url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Branch
+        id: branch
+        if: ${{ vars.PUBLISH_RELEASES && github.ref_type == 'branch' }}
+        run: |
+          branch="${{ github.ref_name }}"
+          case "$branch" in
+            trunk) mode=preview ;;
+            experimental) mode=experimental ;;
+          esac
+          echo "mode=$mode" | tee -a "$GITHUB_OUTPUT"
+          echo "branch=$branch" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        if: ${{ github.ref_type == 'tag' }}
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Tag
+        id: tag
+        if: ${{ github.ref_type == 'tag' }}
+        run: |
+          tag="${{ github.ref_name }}"
+          if [[ "$tag" =~ ^([0-9]+\.[0-9]+)\.[0-9]+-? ]]; then
+            branch="${BASH_REMATCH[1]}"
+            if git merge-base --is-ancestor "$tag" "origin/$branch"; then
+              mode=stable
+            fi
+          fi
+          echo "tag=$tag" | tee -a "$GITHUB_OUTPUT"
+          echo "mode=$mode" | tee -a "$GITHUB_OUTPUT"
+          echo "branch=$branch" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Ready
+        id: emit
+        run: |
+          mode=${{ steps.branch.outputs.mode || steps.tag.outputs.mode }}
+          if [[ "${{ vars.PUBLISH_RELEASES }}" ]]; then
+            if [[ -n "$mode" ]]; then
+              echo "::notice::This build will be a '$mode' release"
+            else
+              echo "::notice::No release will be created for this build"
+            fi
+          else
+            echo "::notice::This repos has PUBLISH_RELEASES disabled"
+            mode=
+          fi
+          echo "mode=$mode" | tee -a "$GITHUB_OUTPUT"
+
+  ci-success:
+    needs:
+      - debinfo
+      - extra
+      - lint-appstream
+      - ci-init
+    runs-on: ubuntu-latest
+    name: CI Success
+    steps:
+      - name: Check Status
+        run: |
+          [[ "${{ contains(needs.*.result, 'failure') }}" == "false" ]] || exit 1
+          [[ "${{ contains(needs.*.result, 'cancelled') }}" == "false" ]] || exit 1
+
+# ======================
+# Release Configuration
+# ======================
+
+  ci-release-preview:
+    name: Preview
+    needs:
+      - release
+      - ci-init
+    if: ${{ needs.ci-init.outputs.mode == 'preview' }}
+    uses: ./.github/workflows/release_core.yml
+    secrets: inherit
+    with:
+      title: Preview
+      run-id: ${{ github.run_id }}
+      run-url: ${{ needs.ci-init.outputs.url }}
+      commit: ${{ github.sha }}
+      branch: ${{ needs.ci-init.outputs.branch }}
+      tag-name: x-preview
+      message: They are development builds, so they may be unstable and have issues. Please report any problems you find.
+      preview: true
+
+  ci-release-experimental:
+    name: Experimental
+    needs:
+      - release
+      - ci-init
+    if: ${{ needs.ci-init.outputs.mode == 'experimental' }}
+    uses: ./.github/workflows/release_core.yml
+    secrets: inherit
+    with:
+      title: Experimental
+      run-id: ${{ github.run_id }}
+      run-url: ${{ needs.ci-init.outputs.url }}
+      commit: ${{ github.sha }}
+      branch: ${{ needs.ci-init.outputs.branch }}
+      tag-name: x-testing
+      message: ⚠️ They are experimental development builds, specifically to test upcoming features. **Use at your own risk**.
+      label-name: experimental
+      preview: true
+
+  ci-release-stable:
+    name: Stable
+    needs:
+      - release
+      - ci-init
+    if: ${{ needs.ci-init.outputs.mode == 'stable' }}
+    uses: ./.github/workflows/release_core.yml
+    secrets: inherit
+    with:
+      title: Release
+      run-id: ${{ github.run_id }}
+      run-url: ${{ needs.ci-init.outputs.url }}
+      commit: ${{ github.sha }}
+      branch: ${{ needs.ci-init.outputs.branch }}
+      tag-name: ${{ needs.ci-init.outputs.tag }}
+      message: Release Draft
+      preview: false
+
+# ======================
+# Other Checks
+# ======================
+
+  lint-appstream:
+    needs:
+    - ci-init
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub/flatpak-builder-lint:latest
+    name: Lint Appstream
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref }}
+      - run: |
+          file=src/posix/freedesktop/org.zdoom.UZDoom.metainfo.xml
+          # These are here twice. First is to get nice output, second is to not make ci fail if network access fails
+          flatpak-builder-lint --gha-format appstream $file || true
+          AS_VALIDATE_NONET=1 flatpak-builder-lint appstream $file
+
+# ======================
+# Primary Build Configuration
+# ======================
+
+  debinfo:
+    needs:
+    - ci-init
+    name: ${{ matrix.config.name }} ${{ matrix.config.build_type }}
+    uses: ./.github/workflows/build_core.yml
+    secrets: inherit
+    with:
+      build_type: RelWithDebInfo
+      name: ${{ matrix.config.name }}
+      os: ${{ matrix.config.os }}
+      os_image: ${{ matrix.config.os_image || '' }}
+      build_opts: ${{ matrix.config.build_opts }} ${{ matrix.config.build_opts_extra }}
+      deps_cmdline: ${{ matrix.config.deps_cmdline }}
+      extra_files: ${{ matrix.config.extra_files }}
+      environment: ${{ needs.ci-init.outputs.mode }}
     strategy:
       fail-fast: false
       matrix:
-        config:
-        - name: Visual Studio 2022
-          os: windows-2022
-          extra_options: -DENABLE_OPENVR=ON -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
-          build_type: Release
-
-        - name: Visual Studio 2022
-          os: windows-2022
-          extra_options: -DENABLE_OPENVR=ON -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
-          build_type: RelWithDebInfo
-
-        - name: macOS
-          os: macos-14
-          extra_options: -DHAVE_VULKAN=ON -DHAVE_GLES2=OFF -DDYN_OPENAL=OFF -DOPENAL_INCLUDE_DIR=/opt/homebrew/opt/openal-soft/include/AL -DOPENAL_LIBRARY=/opt/homebrew/opt/openal-soft/lib/libopenal.dylib
-          deps_cmdline: |
-            brew install   \
-              dylibbundler \
-              fluid-synth  \
-              openal-soft  \
-              vulkan-volk  \
-              molten-vk    \
-              libvpx       \
-              sdl2
-          build_type: Release
-
-        - name: macOS
-          os: macos-14
-          extra_options: -DHAVE_VULKAN=ON -DHAVE_GLES2=OFF -DDYN_OPENAL=OFF -DOPENAL_INCLUDE_DIR=/opt/homebrew/opt/openal-soft/include/AL -DOPENAL_LIBRARY=/opt/homebrew/opt/openal-soft/lib/libopenal.dylib
-          deps_cmdline: |
-            brew install   \
-              dylibbundler \
-              fluid-synth  \
-              openal-soft  \
-              vulkan-volk  \
-              molten-vk    \
-              libvpx       \
-              sdl2
-          build_type: RelWithDebInfo
-
-        - name: Linux GCC
-          os: ubuntu-22.04
-          deps_cmdline: sudo apt-get update && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y libsdl2-dev libvpx-dev libwebp-dev waylandpp-dev libbz2-dev libomp-dev libopenal-dev
-          build_type: RelWithDebInfo
-
-        - name: Linux GCC
-          os: ubuntu-22.04
-          deps_cmdline: sudo apt-get update && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y libsdl2-dev libvpx-dev libwebp-dev waylandpp-dev libbz2-dev libomp-dev libopenal-dev
-          build_type: Release
-
-        - name: Linux GCC Legacy
-          os: ubuntu-22.04
-          deps_cmdline: sudo apt-get update && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y libsdl2-dev libvpx-dev libwebp-dev waylandpp-dev libbz2-dev libomp-dev libopenal-dev
-          build_type: RelWithDebInfo
-
-        - name: Linux GCC Legacy
-          os: ubuntu-22.04
-          deps_cmdline: sudo apt-get update && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y libsdl2-dev libvpx-dev libwebp-dev waylandpp-dev libbz2-dev libomp-dev libopenal-dev
-          build_type: Release
-
-    steps:
-    - name: Checkout QuestZDoom
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 1
-        submodules: true
-        path: ''
-    - run: git fetch --deepen=100
-
-    - name: Setup
-      id: ghd
-      uses: proudust/gh-describe@v2
-
-    - name: Setup vcpkg
-      uses: lukka/run-vcpkg@v11
-      if: runner.os == 'Windows'
-      with:
-        vcpkgDirectory: '${{ github.workspace }}/build/vcpkg'
-        vcpkgGitCommitId: 'b322364f06308bdd24823f9d8f03fe0cc86fd46f'
-
-    - name: Setup environment
-      if: runner.os == 'Windows'
-      shell: bash
-      run: echo CMAKE_TOOLCHAIN_FILE="${{ env.VCPKG_ROOT}}/scripts/buildsystems/vcpkg.cmake" >> $GITHUB_ENV
-
-    - name: Prepare OpenVR SDK dependency
-      shell: bash
-      run: |
-        mkdir -p build
-        export OPENVR_SDK=openvr-2.5.1
-        echo OPENVR_SDK="${OPENVR_SDK}" >> $GITHUB_ENV
-        cd build
-        curl -LO "https://github.com/emawind84/gzdoom/releases/download/ci_deps/${OPENVR_SDK}.tar.gz"
-        tar -xf "${OPENVR_SDK}.tar.gz"
-    
-    - name: Install Dependencies
-      shell: bash
-      run: |
-        if [[ -n "${{ matrix.config.deps_cmdline }}" ]]; then
-          eval ${{ matrix.config.deps_cmdline }}
-        fi
-        mkdir -p build
-        echo ZMUSIC_PREFIX_PATH= >> $GITHUB_ENV
-        if [[ "${{ runner.os }}" == 'macOS' ]]; then
-          export ZMUSIC_PACKAGE=zmusic-1.1.14-macos-static.tar.xz
-        elif [[ "${{ runner.os }}" == 'Linux' ]]; then
-          export ZMUSIC_PACKAGE=zmusic-1.1.14-linux.tar.xz
-        fi
-        if [[ -n "${ZMUSIC_PACKAGE}" ]]; then
-          cd build
-          curl -LO "https://github.com/coelckers/gzdoom/releases/download/ci_deps/${ZMUSIC_PACKAGE}"
-          tar -xf "${ZMUSIC_PACKAGE}"
-          echo ZMUSIC_PREFIX_PATH="${PWD}/zmusic" >> $GITHUB_ENV
-        fi
-
-    - name: Configure
-      shell: bash
-      run: |
-        cmake_args=(
-          -B build
-          -S .
-          -DCMAKE_BUILD_TYPE=${{ matrix.config.build_type }}
-          -DPK3_QUIET_ZIPDIR=ON
-          -DOPENVR_SDK_PATH=`pwd`/build/${OPENVR_SDK}
-          ${{ matrix.config.extra_options }}
-          -G Ninja
-        )
-        if [[ -n "${ZMUSIC_PREFIX_PATH}" ]]; then
-          cmake_args+=(-DCMAKE_PREFIX_PATH="${ZMUSIC_PREFIX_PATH}")
-        fi
-        cmake "${cmake_args[@]}"
-
-    - name: Build
-      shell: bash
-      run: |
-        export GIT_DESCRIBE="${{ steps.ghd.outputs.describe }}"
-        export MAKEFLAGS=--keep-going
-        cmake --build build --config ${{ matrix.config.build_type }}
-
-    - name: Create Package
-      shell: bash
-      run: |
-        function fetch() { { curl -L "$3" | tee "$1" | sha256sum ; } && { echo "$2 $1" | sha256sum -c - ; } ; }
-
-        cd build
-        mkdir package
-        packagename="${{ runner.os }}"-UZDoom-"${{ steps.ghd.outputs.describe }}"
-
-        7z a package/licenses.zip ../docs/licenses/*
-
-        if [[ "${{ runner.os }}" == 'Windows' ]]; then
-
-            fetch gzdoom.zip \
-                6d01c5bb48610cebfa9dfd0b7705a1e20bfd56032a74484ac256d8c4e3c51bee \
-                https://github.com/ZDoom/gzdoom/releases/download/g4.14.2/gzdoom-4-14-2-windows.zip
-            unzip -j gzdoom.zip zmusic.dll -d package
-
-            fetch oalsoft.zip \
-                ea8bc36fd7fa05f64e13400d20886de753a227202a4ea3781913489a26b36fc6 \
+        # these are shared between multiple build configs
+        config: &common_config
+          - name: Windows
+            os: windows-latest
+            build_opts: &msvc_opts -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DUSE_UPDATER=ON
+            build_opts_extra: ""
+            deps_cmdline: &msvc_deps >-
+              winget install --accept-source-agreements --verbose --exact --id=Ccache.Ccache
+            extra_files: &msvc_x86_files >-
+              oalsoft.zip
+                ea8bc36fd7fa05f64e13400d20886de753a227202a4ea3781913489a26b36fc6
                 https://github.com/kcat/openal-soft/releases/download/1.23.1/openal-soft-1.23.1-bin.zip
-            unzip -j oalsoft.zip openal-soft-1.23.1-bin/bin/Win64/soft_oal.dll -d package
-
-            fetch sndfile.zip \
-                2173935c0c1ed13cf627951d34483f9d405ead2eb473190461c42ba220643a3f \
+              sndfile.zip
+                2173935c0c1ed13cf627951d34483f9d405ead2eb473190461c42ba220643a3f
                 https://github.com/libsndfile/libsndfile/releases/download/1.2.2/libsndfile-1.2.2-win64.zip
-            unzip -j sndfile.zip libsndfile-1.2.2-win64/bin/sndfile.dll -d package
+              libcurl.zip
+                d290b4ee475968b04dcb2e0c4f046f2ff25c35c65d3e54259cef7cc6cea069e2
+                https://curl.se/windows/dl-8.20.0_5/curl-8.20.0_5-win64-mingw.zip
 
-            mkdir package/soundfonts
-            cp ../soundfont/uzdoom.sf2 package/soundfonts
+          - name: MacOS
+            os: macos-latest
+            build_opts: &mac_opts -DHAVE_VULKAN=ON -DHAVE_GLES2=OFF -DDYN_OPENAL=OFF -DDYN_SNDFILE=OFF
+            build_opts_extra: -DOPENAL_INCLUDE_DIR=/opt/homebrew/opt/openal-soft/include/AL -DOPENAL_LIBRARY=/opt/homebrew/opt/openal-soft/lib/libopenal.dylib
+            deps_cmdline: &mac_deps >-
+              brew install
+                dylibbundler
+                fluid-synth
+                openal-soft
+                vulkan-volk
+                molten-vk
+                ccache
+                libvpx
+                sdl2
+            extra_files: ""
 
-            mkdir package/fm_banks
-            cp ../fm_banks/GENMIDI.GS.wopl ../fm_banks/gs-by-papiezak-and-sneakernets.wopn package/fm_banks
+          - name: Linux
+            os: ubuntu-latest
+            os_image: debian:oldstable # use debian/ubuntu distro with oldest glibc, which supports the needed toolchain
+            build_opts: &linux_opts
+            build_opts_extra: -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19
+            deps_cmdline: &linux_deps >-
+              sudo apt-get -q install -y
+                libopenal-dev
+                waylandpp-dev
+                libsdl2-dev
+                libwebp-dev
+                libbz2-dev
+                libvpx-dev
+                gtk-update-icon-cache
+                libfile-mimeinfo-perl
+                desktop-file-utils
+                build-essential
+                ninja-build
+                p7zip-full
+                appstream
+                clang-19
+                ccache
+                cmake
+                fuse
+            extra_files: &linux_files_x86_64 >-
+              linuxdeploy
+                c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d
+                https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage
+              linuxdeploy-plugin-appimage
+                992d502a248e14ab185448ddf6f6e7d25558cb84d4623c354c3af350c25fccb3
+                https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-appimage-x86_64.AppImage
+              appimage-runtime
+                2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
+                https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64
 
-            if [[ -d "${{ matrix.config.build_type }}" ]]; then
-              mv ${{ matrix.config.build_type }}/* .
-            fi
-            cp uzdoom.* *.pk3 package
+  extra:
+    needs:
+    - ci-init
+    name: ${{ matrix.config.name }}
+    uses: ./.github/workflows/build_core.yml
+    secrets: inherit
+    with:
+      name: ${{ matrix.config.name }}
+      os: ${{ matrix.config.os }}
+      os_image: ${{ matrix.config.os_image || '' }}
+      build_opts: ${{ matrix.config.build_opts }} ${{ matrix.config.build_opts_extra }}
+      deps_cmdline: ${{ matrix.config.deps_cmdline }}
+      build_type: ${{ matrix.config.build_type }}
+      extra_files: ${{ matrix.config.extra_files }}
+      environment: ${{ needs.ci-init.outputs.mode }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config: # put bespoke configs here
+          - name: Linux GCC # I'm just here to make sure GCC doesn't break
+            os: ubuntu-latest
+            os_image: ubuntu:latest
+            build_opts: *linux_opts
+            build_opts_extra: ""
+            deps_cmdline: *linux_deps
+            extra_files: *linux_files_x86_64
+            build_type: RelWithDebInfo
 
-            cd package
-            7z a -sdel -r "${packagename}.zip" *
-            cd ..
+          - name: Windows MinGW GCC
+            os: windows-latest
+            build_opts: -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+            build_opts_extra: -DFORCE_NO_LTO=true
+            deps_cmdline: &mingw_deps |
+              pacman -S --noconfirm --needed
+                mingw-w64-x86_64-ccache
+                mingw-w64-x86_64-openal
+                mingw-w64-x86_64-libvpx
+                mingw-w64-x86_64-cmake
+                mingw-w64-x86_64-ninja
+                mingw-w64-x86_64-bzip2
+                mingw-w64-x86_64-clang
+                mingw-w64-x86_64-gcc
+                mingw-w64-x86_64-git
+            extra_files: ""
+            build_type: RelWithDebInfo
 
-        elif [[ "${{ runner.os }}" == 'macOS' ]]; then
+  optional:
+    needs:
+    - ci-init
+    - ci-success
+    name: ${{ matrix.config.name }}
+    uses: ./.github/workflows/build_core.yml
+    secrets: inherit
+    with:
+      name: ${{ matrix.config.name }}
+      os: ${{ matrix.config.os }}
+      os_image: ${{ matrix.config.os_image || '' }}
+      build_opts: ${{ matrix.config.build_opts }} ${{ matrix.config.build_opts_extra }}
+      deps_cmdline: ${{ matrix.config.deps_cmdline }}
+      build_type: ${{ matrix.config.build_type }}
+      extra_files: ${{ matrix.config.extra_files }}
+      environment: ${{ needs.ci-init.outputs.mode }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config: # put bespoke configs here
+          - name: Windows ARM (Testing)
+            os: windows-11-arm
+            build_opts: *msvc_opts
+            build_opts_extra: ""
+            deps_cmdline: *msvc_deps
+            extra_files: ""
+            build_type: RelWithDebInfo
 
-            if [[ ! -d uzdoom.app ]] && [[ -d ${{ matrix.config.build_type }}/uzdoom.app ]]; then
-                mv ${{ matrix.config.build_type }}/uzdoom.app uzdoom.app
-            fi
-            mv package/licenses.zip uzdoom.app/Contents/Resources
-            mv "${{ env.ZMUSIC_PREFIX_PATH }}/lib/libzmusic.dylib" libzmusic.1.dylib
-            cp *.pk3 uzdoom.app/Contents/MacOS
+          - name: Windows MinGW Clang
+            os: windows-latest
+            build_opts: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+            build_opts_extra: ""
+            deps_cmdline: *mingw_deps
+            extra_files: ""
+            build_type: RelWithDebInfo
 
-            if dsymutil uzdoom.app/Contents/MacOS/uzdoom; then
-              mv uzdoom.app/Contents/MacOS/uzdoom.dSYM uzdoom.app/Contents/Resources/
-            fi
+          - name: Linux ARM (Testing)
+            os: ubuntu-24.04-arm
+            build_opts: *linux_opts
+            build_opts_extra: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+            deps_cmdline: *linux_deps
+            extra_files: &linux_files_aarch64 >-
+              linuxdeploy
+                620095110d693282b8ebeb244a95b5e911cf8f65f76c88b4b47d16ae6346fcff
+                https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-aarch64.AppImage
+              linuxdeploy-plugin-appimage
+                83c292149274965a865dcd44c135cfca8ba28c6b7de3eb628d4b8b5f248af17c
+                https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-appimage-aarch64.AppImage
+              appimage-runtime
+                00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444
+                https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-aarch64
+            build_type: RelWithDebInfo
 
-            SIGN_ID="-"
-            SIGN_OPTS=""
+# ======================
+# Secondary Build Configuration
+# ======================
 
-            if [[ -n "${{ secrets.MACOS_CERTIFICATE }}" ]]; then
-                echo "${{ secrets.MACOS_CERTIFICATE }}" | base64 --decode > certificate.p12
-                security create-keychain -p "" build.keychain
-                security default-keychain -s build.keychain
-                security unlock-keychain -p "" build.keychain
-                security import certificate.p12 -k build.keychain -P "${{ secrets.MACOS_CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign
-                security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
+  release:
+    needs:
+    - ci-init
+    - ci-success
+    name: ${{ matrix.config.name }} ${{ matrix.config.build_type }}
+    uses: ./.github/workflows/build_core.yml
+    secrets: inherit
+    with:
+      build_type: Release
+      name: ${{ matrix.config.name }}
+      os: ${{ matrix.config.os }}
+      os_image: ${{ matrix.config.os_image || '' }}
+      build_opts: ${{ matrix.config.build_opts }} ${{ matrix.config.build_opts_extra }}
+      deps_cmdline: ${{ matrix.config.deps_cmdline }}
+      extra_files: ${{ matrix.config.extra_files }}
+      environment: ${{ needs.ci-init.outputs.mode }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config: *common_config
 
-                SIGN_ID="${{ secrets.MACOS_CERTIFICATE_ID }}"
-                SIGN_OPTS="--options=runtime"
-            fi
-
-            dylibbundler -ns -of -cd -b \
-              -x ./uzdoom.app/Contents/MacOS/uzdoom \
-              -d ./uzdoom.app/Contents/Libs \
-              -p @executable_path/../Libs/
-
-            xattr -cr uzdoom.app
-
-            find uzdoom.app/Contents/Libs -type f -name "*.dylib" -print0 | while IFS= read -r -d '' file; do
-                codesign --remove-signature "$file"
-                codesign --force $SIGN_OPTS -s "$SIGN_ID" "$file"
-            done
-
-            /usr/bin/codesign --force --deep $SIGN_OPTS -s "$SIGN_ID" uzdoom.app -v
-
-            cp -r uzdoom.app package
-
-            cd package
-            7z a -sdel -r "${packagename}.zip" *
-            cd ..
-
-        elif [[ "${{ runner.os }}" == 'Linux' ]]; then
-
-            ldd ./uzdoom
-
-            mkdir AppDir
-            cmake --install . --prefix "$(realpath AppDir)/usr"
-
-            fetch gzdoom.deb \
-                15762da40d310d3688fb8a44ded3759424aa51a24277a024488a5b8aea573e2f \
-                https://github.com/ZDoom/gzdoom/releases/download/g4.14.2/gzdoom_4.14.2_amd64.deb
-            dpkg --fsys-tarfile gzdoom.deb | tar -xO ./opt/gzdoom/libzmusic.so.1 > libzmusic.so.1
-            mkdir -p "$(realpath AppDir)/usr/lib/x86_64-linux-gnu"
-            mv libzmusic.so.1 "$(realpath AppDir)/usr/lib/x86_64-linux-gnu/"
-
-            cp ../tools/AppImageEntrypoint.sh "$(realpath AppDir)/usr/bin/uzdoom.sh"
-            chmod +x "$(realpath AppDir)/usr/bin/uzdoom.sh"
-
-            sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y libfuse2 || sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y libfuse2t64
-
-            fetch appimage-builder \
-                4b4f99cae9291d78ba12dbdabca7c0a67c72aa61eb2e5d424089171a9485e96f \
-                https://github.com/AppImageCrafters/appimage-builder/releases/download/v1.1.0/appimage-builder-1.1.0-x86_64.AppImage
-            chmod +x appimage-builder
-
-            export GIT_DESCRIBE="${{ steps.ghd.outputs.describe }}"
-            ./appimage-builder --skip-tests --recipe ../tools/AppImageBuilder.yml
-
-            # just for testing
-            ./*.AppImage --appimage-extract \
-              && { objdump -p squashfs-root/usr/bin/uzdoom | grep -o "GLIBC_[^ ]\+" | sort --version-sort ; } \
-              && { ldd squashfs-root/usr/bin/uzdoom | grep "not found" ; } \
-              && { rm -r squashfs-root ; } \
-              || true
-
-            mv *.AppImage "package/${packagename}.AppImage"
-            rm package/licenses.zip
-
-        fi
-
-    - name: Upload Package
-      uses: actions/upload-artifact@v4
-      with:
-        path: build/package
-        name: ${{ matrix.config.name }} ${{ matrix.config.build_type }}
-
-    - name: List Build Directory
-      if: always()
-      shell: bash
-      run: |
-        git status
-        ls -lR build
+  debug:
+    needs:
+    - ci-init
+    - ci-success
+    name: ${{ matrix.config.name }} ${{ matrix.config.build_type }}
+    uses: ./.github/workflows/build_core.yml
+    secrets: inherit
+    with:
+      build_type: Debug
+      name: ${{ matrix.config.name }}
+      os: ${{ matrix.config.os }}
+      os_image: ${{ matrix.config.os_image || '' }}
+      build_opts: ${{ matrix.config.build_opts }} ${{ matrix.config.build_opts_extra }}
+      deps_cmdline: ${{ matrix.config.deps_cmdline }}
+      extra_files: ${{ matrix.config.extra_files }}
+      environment: ${{ needs.ci-init.outputs.mode }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config: *common_config

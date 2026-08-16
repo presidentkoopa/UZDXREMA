@@ -1,33 +1,22 @@
 /*
 ** i_input.cpp
+**
 ** Handles input from keyboard, mouse, and joystick
 **
 **---------------------------------------------------------------------------
-** Copyright 1998-2009 Randy Heit
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 1998-2016 Marisa Heit
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
@@ -54,7 +43,6 @@
 #define GET_RAWINPUT_CODE_WPARAM(wParam)	((wParam) & 0xff)
 #endif
 
-
 #include "c_dispatch.h"
 #include "m_argv.h"
 #include "i_input.h"
@@ -74,13 +62,13 @@
 #include "c_buttons.h"
 #include "cmdlib.h"
 #include "i_mainwindow.h"
+#include "m_haptics.h"
 #include "common/rendering/hwrenderer/data/hw_vrmodes.h"
 
 // Compensate for w32api's lack
 #ifndef GET_XBUTTON_WPARAM
 #define GET_XBUTTON_WPARAM(wParam) (HIWORD(wParam))
 #endif
-
 
 #ifdef _DEBUG
 #define INGAME_PRIORITY_CLASS	NORMAL_PRIORITY_CLASS
@@ -90,7 +78,6 @@
 #endif
 
 FJoystickCollection *JoyDevices[NUM_JOYDEVICES];
-
 
 extern HINSTANCE g_hInst;
 
@@ -124,11 +111,15 @@ int BlockMouseMove;
 
 static bool EventHandlerResultForNativeMouse;
 
+// This is only used by the debugger to disable input while execution is paused.
+bool win32EnableInput = true;
 
 EXTERN_CVAR(Bool, i_pauseinbackground);
 
-
 CVAR (Bool, k_allowfullscreentoggle, true, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+
+FARG_ADVANCED(noidle, "Deprecated", "",
+	"No longer has any effect. Used to reduce priority class when window was in background.");
 
 bool I_AllowBackgroundGameInput()
 {
@@ -344,61 +335,62 @@ LRESULT CALLBACK WndProc (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	LRESULT result;
 
-	if (message == WM_INPUT)
-	{
-		UINT size;
-
-		if (!GetRawInputData((HRAWINPUT)lParam, RID_INPUT, NULL, &size, sizeof(RAWINPUTHEADER)) &&
-			size != 0)
+	if (win32EnableInput){
+		if (message == WM_INPUT)
 		{
-			TArray<uint8_t> array(size, true);
-			uint8_t *buffer = array.data();
-			if (GetRawInputData((HRAWINPUT)lParam, RID_INPUT, buffer, &size, sizeof(RAWINPUTHEADER)) == size)
+			UINT size;
+
+			if (!GetRawInputData((HRAWINPUT)lParam, RID_INPUT, NULL, &size, sizeof(RAWINPUTHEADER)) &&
+				size != 0)
 			{
-				int code = GET_RAWINPUT_CODE_WPARAM(wParam);
-				if (Keyboard == NULL || !Keyboard->ProcessRawInput((RAWINPUT *)buffer, code))
+				TArray<uint8_t> array(size, true);
+				uint8_t *buffer = array.data();
+				if (GetRawInputData((HRAWINPUT)lParam, RID_INPUT, buffer, &size, sizeof(RAWINPUTHEADER)) == size)
 				{
-					if (Mouse == NULL || !Mouse->ProcessRawInput((RAWINPUT *)buffer, code))
+					int code = GET_RAWINPUT_CODE_WPARAM(wParam);
+					if (Keyboard == NULL || !Keyboard->ProcessRawInput((RAWINPUT *)buffer, code))
 					{
-						if (JoyDevices[INPUT_RawPS2] != NULL)
+						if (Mouse == NULL || !Mouse->ProcessRawInput((RAWINPUT *)buffer, code))
 						{
-							JoyDevices[INPUT_RawPS2]->ProcessRawInput((RAWINPUT *)buffer, code);
+							if (JoyDevices[INPUT_RawPS2] != NULL)
+							{
+								JoyDevices[INPUT_RawPS2]->ProcessRawInput((RAWINPUT *)buffer, code);
+							}
 						}
 					}
 				}
 			}
+			return DefWindowProc(hWnd, message, wParam, lParam);
 		}
-		return DefWindowProc(hWnd, message, wParam, lParam);
-	}
 
-	if (CallHook(Keyboard, hWnd, message, wParam, lParam, &result))
-	{
-		return result;
-	}
-	if (CallHook(Mouse, hWnd, message, wParam, lParam, &result))
-	{
-		return result;
-	}
-	for (int i = 0; i < NUM_JOYDEVICES; ++i)
-	{
-		if (CallHook(JoyDevices[i], hWnd, message, wParam, lParam, &result))
+		if (CallHook(Keyboard, hWnd, message, wParam, lParam, &result))
 		{
 			return result;
 		}
-	}
-	if (GUICapture && GUIWndProcHook(hWnd, message, wParam, lParam, &result))
-	{
-		return result;
-	}
-
-	if (message == WM_LBUTTONDOWN && sysCallbacks.WantLeftButton() && sysCallbacks.WantLeftButton())
-	{
-		if (GUIWndProcHook(hWnd, message, wParam, lParam, &result))
+		if (CallHook(Mouse, hWnd, message, wParam, lParam, &result))
 		{
 			return result;
 		}
-	}
+		for (int i = 0; i < NUM_JOYDEVICES; ++i)
+		{
+			if (CallHook(JoyDevices[i], hWnd, message, wParam, lParam, &result))
+			{
+				return result;
+			}
+		}
+		if (GUICapture && GUIWndProcHook(hWnd, message, wParam, lParam, &result))
+		{
+			return result;
+		}
 
+		if (message == WM_LBUTTONDOWN && sysCallbacks.WantLeftButton() && sysCallbacks.WantLeftButton())
+		{
+			if (GUIWndProcHook(hWnd, message, wParam, lParam, &result))
+			{
+				return result;
+			}
+		}
+	}
 
 	switch (message)
 	{
@@ -449,11 +441,6 @@ LRESULT CALLBACK WndProc (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		break;
 
 	case WM_SYSKEYDOWN:
-		// Pressing Alt+Enter can toggle between fullscreen and windowed.
-		if (wParam == VK_RETURN && k_allowfullscreentoggle && !(lParam & 0x40000000))
-		{
-			ToggleFullscreen = !ToggleFullscreen;
-		}
 		// Pressing Alt+F4 quits the program.
 		if (wParam == VK_F4 && !(lParam & 0x40000000))
 		{
@@ -526,7 +513,7 @@ bool I_InitInput (void *hwnd)
 
 	Printf ("I_InitInput\n");
 
-	noidle = !!Args->CheckParm ("-noidle");
+	noidle = !!Args->CheckParm (FArg_noidle);
 	g_pdi = NULL;
 
 	hr = DirectInput8Create(g_hInst, DIRECTINPUT_VERSION, IID_IDirectInput8, (void **)&g_pdi, NULL);
@@ -559,7 +546,6 @@ bool I_InitInput (void *hwnd)
 	return TRUE;
 }
 
-
 // Free all input resources
 void I_ShutdownInput ()
 {
@@ -588,7 +574,7 @@ void I_ShutdownInput ()
 	}
 }
 
-void I_GetEvent ()
+void I_GetWindowEvent()
 {
 	MSG mess;
 
@@ -607,6 +593,11 @@ void I_GetEvent ()
 		}
 		DispatchMessage (&mess);
 	}
+}
+
+void I_GetEvent ()
+{
+	I_GetWindowEvent();
 
 	if (Keyboard != NULL)
 	{
@@ -629,6 +620,7 @@ void I_StartTic ()
 	EventHandlerResultForNativeMouse = sysCallbacks.WantNativeMouse && sysCallbacks.WantNativeMouse();
 	I_CheckNativeMouse (false, EventHandlerResultForNativeMouse);
 	I_GetEvent ();
+	Joy_RumbleTick();
 }
 
 //
@@ -648,14 +640,15 @@ void I_StartFrame ()
 	}
 }
 
-void I_GetAxes(float axes[NUM_JOYAXIS])
+void I_GetAxes(float axes[NUM_AXIS_CODES])
 {
 	int i;
 
-	for (i = 0; i < NUM_JOYAXIS; ++i)
+	for (i = 0; i < NUM_AXIS_CODES; ++i)
 	{
-		axes[i] = 0;
+		axes[i] = 0.0f;
 	}
+
 	if (use_joystick)
 	{
 		for (i = 0; i < NUM_JOYDEVICES; ++i)
@@ -787,7 +780,7 @@ bool FInputDevice::ProcessRawInput(RAWINPUT *raw, int code)
 //
 // FInputDevice :: WndProcHook
 //
-// Gives subclasses a chance to intercept window messages. 
+// Gives subclasses a chance to intercept window messages.
 //
 //==========================================================================
 
@@ -795,4 +788,3 @@ bool FInputDevice::WndProcHook(HWND hWnd, UINT message, WPARAM wParam, LPARAM lP
 {
 	return false;
 }
-

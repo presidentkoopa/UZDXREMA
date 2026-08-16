@@ -29,7 +29,7 @@ f6 quicksave
 f7 menu_endgame
 f8 togglemessages
 f9 quickload
-f11 bumpgamma
+f11 bumplight
 f10 menu_quit
 tab togglemap
 pause pause
@@ -49,35 +49,36 @@ pgdn +lookup
 del +lookdown
 end centerview
 
-// Xbox 360 / PS2 controllers
+// Gamepads
+lstickleft +moveleft
+lstickright +moveright
+lstickup +forward
+lstickdown +back
+rstickleft +left
+rstickright +right
+rstickup +lookup
+rstickdown +lookdown
 pad_a +use
+pad_b crouch
+pad_x +reload
 pad_y +jump
 rtrigger +attack
 ltrigger +altattack
 lshoulder weapprev
 rshoulder weapnext
+pad_start menu_main
+pad_back togglemap
+pad_touchpad togglemap
+rthumb +zoom
+guide pause
 dpadleft invprev
 dpadright invnext
 dpaddown invuse
-dpadup togglemap
-pad_start menu_main
-pad_back pause
-lthumb crouch
-
-// Generic gamepad bindings
-joy1 +use
-joy4 +jump
-axis6plus +attack
-axis3plus +altattack
-joy5 weapprev
-joy6 weapnext
-pov1left invprev
-pov1right invnext
-pov1down invuse
-pov1up togglemap
-joy8 menu_main
-joy7 pause
-joy10 crouch
+dpadup "slot 1"
+paddle_1 "slot 2"
+paddle_2 "slot 3"
+paddle_3 "slot 4"
+paddle_4 "slot 5"
 
 /* Default automap bindings */
 mapbind f am_togglefollow
@@ -107,13 +108,3 @@ mapbind dpadup +am_panup
 mapbind dpaddown +am_pandown
 mapbind lshoulder +am_zoomout
 mapbind rshoulder +am_zoomin
-
-mapbind joy3 am_togglefollow
-mapbind joy1 am_setmark
-mapbind joy2 am_clearmarks
-mapbind pov1right +am_panright
-mapbind pov1left +am_panleft
-mapbind pov1up +am_panup
-mapbind pov1down +am_pandown
-mapbind joy5 +am_zoomout
-mapbind joy6 +am_zoomin

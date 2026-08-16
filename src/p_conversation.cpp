@@ -1,33 +1,23 @@
 /*
-** p_converstation.cpp
+** p_conversation.cpp
+**
 ** Implements Strife style conversation dialogs
 **
 **---------------------------------------------------------------------------
-** Copyright 2004-2008 Randy Heit
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 2004-2016 Marisa Heit
+** Copyright 2006-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
@@ -322,7 +312,7 @@ void P_FreeStrifeConversations ()
 void P_StartConversation (AActor *npc, AActor *pc, bool facetalker, bool saveangle)
 {
 	AActor *oldtarget;
-	int i;
+	unsigned int i;
 
 	// Make sure this is actually a player.
 	if (pc == nullptr || pc->player == nullptr || npc == nullptr || !pc->Level->isPrimaryLevel()) return;
@@ -377,7 +367,7 @@ void P_StartConversation (AActor *npc, AActor *pc, bool facetalker, bool saveang
 	while (CurNode->ItemCheck.Size() > 0 && CurNode->ItemCheck[0].Item != NULL)
 	{
 		bool jump = true;
-		for (i = 0; i < (int)CurNode->ItemCheck.Size(); ++i)
+		for (i = 0; i < CurNode->ItemCheck.Size(); ++i)
 		{
 			if(!CheckStrifeItem (pc->player, CurNode->ItemCheck[i].Item, CurNode->ItemCheck[i].Amount))
 			{
@@ -446,7 +436,7 @@ void P_StartConversation (AActor *npc, AActor *pc, bool facetalker, bool saveang
 
 void P_ResumeConversation ()
 {
-	for (int i = 0; i < MAXPLAYERS; i++)
+	for (unsigned int i = 0; i < MAXPLAYERS; i++)
 	{
 		if (!playeringame[i])
 			continue;
@@ -532,7 +522,7 @@ static void HandleReply(player_t *player, bool isconsole, int nodenum, int reply
 					takestuff = false;
 				}
 			}
-	
+
 			if (takestuff)
 			{
 				auto item = Spawn(player->mo->Level, reply->GiveType);
@@ -550,7 +540,7 @@ static void HandleReply(player_t *player, bool isconsole, int nodenum, int reply
 					takestuff = false;
 				}
 			}
-		
+
 			if (reply->GiveType->IsDescendantOf("SlideshowStarter"))
 				G_StartSlideshow(primaryLevel, NAME_None, FSTATE_InLevel);
 		}
@@ -596,7 +586,7 @@ static void HandleReply(player_t *player, bool isconsole, int nodenum, int reply
 
 		player->SetLogText(log);
 	}
-	else if (reply->LogNumber != 0) 
+	else if (reply->LogNumber != 0)
 	{
 		player->SetLogNumber(reply->LogNumber);
 	}
@@ -667,7 +657,7 @@ static void HandleReply(player_t *player, bool isconsole, int nodenum, int reply
 //
 //============================================================================
 
-void P_ConversationCommand (int netcode, int pnum, uint8_t **stream)
+void P_ConversationCommand (int netcode, int pnum, TArrayView<uint8_t>& stream)
 {
 	player_t *player = &players[pnum];
 
@@ -720,7 +710,7 @@ static void TerminalResponse (const char *str)
 
 		if (StatusBar != NULL)
 		{
-			Printf(PRINT_HIGH | PRINT_NONOTIFY, "%s\n", str);
+			Printf(PRINT_NONOTIFY, "%s\n", str);
 			// The message is positioned a bit above the menu choices, because
 			// merchants can tell you something like this but continue to show
 			// their dialogue screen. I think most other conversations use this
@@ -761,3 +751,4 @@ DEFINE_FIELD(FStrifeDialogueReply, LogString);
 DEFINE_FIELD(FStrifeDialogueReply, NextNode);
 DEFINE_FIELD(FStrifeDialogueReply, LogNumber);
 DEFINE_FIELD(FStrifeDialogueReply, NeedsGold);
+DEFINE_FIELD(FStrifeDialogueReply, CloseDialog);

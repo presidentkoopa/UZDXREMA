@@ -1,34 +1,23 @@
 /*
 ** hw_shaderpatcher.cpp
+**
 ** Modifies shader source to account for different syntax versions or engine changes.
 **
 **---------------------------------------------------------------------------
-** Copyright(C) 2004-2018 Christoph Oelckers
-** Copyright(C) 2016-2018 Magnus Norddahl
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 2004-2018 Christoph Oelckers
+** Copyright 2016-2018 Magnus Norddahl
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
@@ -39,6 +28,7 @@
 #include "textures.h"
 #include "hw_renderstate.h"
 #include "v_video.h"
+#include "printf.h"
 
 
 static bool IsGlslWhitespace(char c)
@@ -81,8 +71,8 @@ FString RemoveLegacyUserUniforms(FString code)
 {
 	// User shaders must declare their uniforms via the GLDEFS file.
 
-	code.Substitute("uniform sampler2D tex;", "                      ");
-	code.Substitute("uniform float timer;", "                    ");
+	bool found = code.Substitute("uniform sampler2D tex;", "                      ");
+	found = code.Substitute("uniform float timer;", "                    ") || found;
 
 	// The following code searches for legacy uniform declarations in the shader itself and replaces them with whitespace.
 
@@ -120,12 +110,20 @@ FString RemoveLegacyUserUniforms(FString code)
 					chars[i] = ' ';
 			}
 			startIndex = statementEndIndex;
+			found = true;
 		}
 		else
 		{
 			startIndex = matchIndex + 7;
 		}
 	}
+
+	if(found)
+	{
+		DPrintf(DMSG_WARNING, TEXTCOLOR_ORANGE "timer and tex uniforms should not be explicitly declared.\n");
+	}
+
+	bool foundtexture2d = false;
 
 	// Also remove all occurences of the token 'texture2d'. Some shaders may still use this deprecated function to access a sampler.
 	// Modern GLSL only allows use of 'texture'.
@@ -135,6 +133,8 @@ FString RemoveLegacyUserUniforms(FString code)
 		if (matchIndex == -1)
 			break;
 
+		foundtexture2d = true;
+
 		// Check if this is a real token.
 		bool isKeywordStart = matchIndex == 0 || !isalnum(chars[matchIndex - 1] & 255);
 		bool isKeywordEnd = matchIndex + 9 == len || !isalnum(chars[matchIndex + 9] & 255);
@@ -143,6 +143,11 @@ FString RemoveLegacyUserUniforms(FString code)
 			chars[matchIndex + 7] = chars[matchIndex + 8] = ' ';
 		}
 		startIndex = matchIndex + 9;
+	}
+
+	if(foundtexture2d)
+	{
+		DPrintf(DMSG_WARNING, TEXTCOLOR_ORANGE "texture2d is deprecated, use texture instead.\n");
 	}
 
 	code.UnlockBuffer();
@@ -326,4 +331,3 @@ int DFrameBuffer::GetShaderCount()
 
 	return MAX_PASS_TYPES * (countof(defaultshaders) - 1 + usershaders.Size() + MAX_EFFECTS + SHADER_NoTexture);
 }
-

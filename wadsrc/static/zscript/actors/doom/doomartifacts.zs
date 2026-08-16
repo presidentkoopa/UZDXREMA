@@ -1,3 +1,22 @@
+/*
+** doomartifacts.zs
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2006-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
+
 // Invulnerability Sphere ---------------------------------------------------
 
 class InvulnerabilitySphere : PowerupGiver
@@ -12,6 +31,7 @@ class InvulnerabilitySphere : PowerupGiver
 		Powerup.Type "PowerInvulnerable";
 		Powerup.Color "InverseMap";
 		Inventory.PickupMessage "$GOTINVUL";
+		Tag "$TAG_INVULSPHERE";
 	}
 	States
 	{
@@ -35,6 +55,7 @@ class Soulsphere : Health
 		Inventory.MaxAmount 200;
 		Inventory.PickupMessage "$GOTSUPER";
 		Inventory.PickupSound "misc/p_pkup";
+		Tag "$TAG_SOULSPHERE";
 	}
 	States
 	{
@@ -76,6 +97,7 @@ class Megasphere : CustomInventory
 		+INVENTORY.ISARMOR
 		Inventory.PickupMessage "$GOTMSPHERE";
 		Inventory.PickupSound "misc/p_pkup";
+		Tag "$TAG_MEGASPHERE";
 	}
 	States
 	{
@@ -87,7 +109,7 @@ class Megasphere : CustomInventory
 		TNT1 A 0 A_GiveInventory("MegasphereHealth", 1);
 		Stop;
 	}
-}	
+}
 
 // Invisibility -------------------------------------------------------------
 
@@ -105,6 +127,7 @@ class BlurSphere : PowerupGiver
 		Powerup.Type "PowerInvisibility";
 		RenderStyle "Translucent";
 		Inventory.PickupMessage "$GOTINVIS";
+		Tag "$TAG_INVISSPHERE";
 	}
 	States
 	{
@@ -112,7 +135,7 @@ class BlurSphere : PowerupGiver
 		PINS ABCD 6 Bright;
 		Loop;
 	}
-}	
+}
 
 // Radiation suit (aka iron feet) -------------------------------------------
 
@@ -126,6 +149,7 @@ class RadSuit : PowerupGiver
 		Inventory.MaxAmount 0;
 		Inventory.PickupMessage "$GOTSUIT";
 		Powerup.Type "PowerIronFeet";
+		Tag "$TAG_RADSUIT";
 	}
 	States
 	{
@@ -133,7 +157,7 @@ class RadSuit : PowerupGiver
 		SUIT A -1 Bright;
 		Stop;
 	}
-}	
+}
 
 // infrared -----------------------------------------------------------------
 
@@ -147,6 +171,7 @@ class Infrared : PowerupGiver
 		Inventory.MaxAmount 0;
 		Powerup.Type "PowerLightAmp";
 		Inventory.PickupMessage "$GOTVISOR";
+		Tag "$TAG_VISOR";
 	}
 	States
 	{
@@ -156,7 +181,7 @@ class Infrared : PowerupGiver
 		Loop;
 	}
 }
-	
+
 // Allmap -------------------------------------------------------------------
 
 class Allmap : MapRevealer
@@ -169,6 +194,7 @@ class Allmap : MapRevealer
 		Inventory.MaxAmount 0;
 		Inventory.PickupSound "misc/p_pkup";
 		Inventory.PickupMessage "$GOTMAP";
+		Tag "$TAG_ALLMAP";
 	}
 	States
 	{
@@ -189,6 +215,7 @@ class Berserk : CustomInventory
 		+INVENTORY.ISHEALTH
 		Inventory.PickupMessage "$GOTBERSERK";
 		Inventory.PickupSound "misc/p_pkup";
+		Tag "$TAG_BERSERK";
 	}
 	States
 	{
@@ -202,4 +229,3 @@ class Berserk : CustomInventory
 		Stop;
 	}
 }
-	

@@ -5,35 +5,19 @@
 ** internal format to the format used by the rest of the game.
 **
 **---------------------------------------------------------------------------
-** Copyright 2002-2006 Randy Heit
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 2002-2016 Marisa Heit
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-** 4. When not used as part of ZDoom or a ZDoom derivative, this code will be
-**    covered by the terms of the GNU General Public License as published by
-**    the Free Software Foundation; either version 2 of the License, or (at
-**    your option) any later version.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: LicenseRef-ZDoom-Conditional
+**
 **---------------------------------------------------------------------------
 **
 */
@@ -54,13 +38,11 @@
 
 void FNodeBuilder::Extract (FLevelLocals &theLevel)
 {
-	int i;
-
-	auto &outVerts = theLevel.vertexes; 
+	auto &outVerts = theLevel.vertexes;
 	int vertCount = Vertices.Size ();
 	outVerts.Alloc(vertCount);
 
-	for (i = 0; i < vertCount; ++i)
+	for (int i = 0; i < vertCount; ++i)
 	{
 		outVerts[i].set(Vertices[i].x, Vertices[i].y);
 	}
@@ -68,13 +50,17 @@ void FNodeBuilder::Extract (FLevelLocals &theLevel)
 	auto &outSubs = theLevel.subsectors;
 	auto subCount = Subsectors.Size();
 	outSubs.Alloc(subCount);
-	memset(&outSubs[0], 0, subCount * sizeof(subsector_t));
+	memset((void*)&outSubs[0], 0, subCount * sizeof(subsector_t));
 
 	auto &outNodes = theLevel.nodes;
 	auto nodeCount = Nodes.Size ();
 	outNodes.Alloc(nodeCount);
 
-	memcpy (&outNodes[0], &Nodes[0], nodeCount*sizeof(node_t));
+	for (unsigned i = 0; i < nodeCount; ++i)
+	{
+		outNodes[i] = Nodes[i];
+	}
+
 	for (unsigned i = 0; i < nodeCount; ++i)
 	{
 		D(Printf(PRINT_LOG, "Node %d:  Splitter[%08x,%08x] [%08x,%08x]\n", i,
@@ -135,7 +121,11 @@ void FNodeBuilder::Extract (FLevelLocals &theLevel)
 	}
 	else
 	{
-		memcpy (&outSubs[0], &Subsectors[0], subCount*sizeof(subsector_t));
+		for (unsigned i = 0; i < subCount; ++i)
+		{
+			outSubs[i] = Subsectors[i];
+		}
+
 		auto segCount = Segs.Size ();
 		outSegs.Alloc(segCount);
 		for (unsigned i = 0; i < segCount; ++i)
@@ -161,7 +151,7 @@ void FNodeBuilder::Extract (FLevelLocals &theLevel)
 
 	D(Printf("%i segs, %i nodes, %i subsectors\n", segCount, nodeCount, subCount));
 
-	for (i = 0; i < Level.NumLines; ++i)
+	for (int i = 0; i < Level.NumLines; ++i)
 	{
 		Level.Lines[i].v1 = &outVerts[(size_t)Level.Lines[i].v1];
 		Level.Lines[i].v2 = &outVerts[(size_t)Level.Lines[i].v2];
@@ -180,10 +170,18 @@ void FNodeBuilder::ExtractMini (FMiniBSP *bsp)
 	}
 
 	bsp->Subsectors.Resize(Subsectors.Size());
-	memset(&bsp->Subsectors[0], 0, Subsectors.Size() * sizeof(subsector_t));
+	for (i = 0; i < bsp->Subsectors.Size(); ++i)
+	{
+		bsp->Subsectors[i].sprites.Clear();
+		memset((void*)&bsp->Subsectors[i], 0, sizeof(subsector_t));
+	}
 
 	bsp->Nodes.Resize(Nodes.Size());
-	memcpy(&bsp->Nodes[0], &Nodes[0], Nodes.Size()*sizeof(node_t));
+	for (i = 0; i < Nodes.Size(); ++i)
+	{
+		bsp->Nodes[i] = Nodes[i];
+	}
+
 	for (i = 0; i < Nodes.Size(); ++i)
 	{
 		D(Printf(PRINT_LOG, "Node %d:\n", i));
@@ -228,7 +226,11 @@ void FNodeBuilder::ExtractMini (FMiniBSP *bsp)
 	}
 	else
 	{
-		memcpy(&bsp->Subsectors[0], &Subsectors[0], Subsectors.Size()*sizeof(subsector_t));
+		for (i = 0; i < Subsectors.Size(); ++i)
+		{
+			bsp->Subsectors[i] = Subsectors[i];
+		}
+
 		bsp->Segs.Resize(Segs.Size());
 		for (i = 0; i < Segs.Size(); ++i)
 		{

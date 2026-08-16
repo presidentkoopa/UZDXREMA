@@ -1,32 +1,22 @@
 /*
 ** dthinker.h
 **
+**
+**
 **---------------------------------------------------------------------------
-** Copyright 1998-2006 Randy Heit
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 1998-2016 Marisa Heit
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
@@ -45,6 +35,7 @@ struct FState;
 class DThinker;
 class FSerializer;
 struct FLevelLocals;
+struct ProfileInfo;
 
 class FThinkerIterator;
 
@@ -59,9 +50,11 @@ struct FThinkerList
 	DThinker *GetTail() const;
 	bool IsEmpty() const;
 	void DestroyThinkers();
-	bool DoDestroyThinkers();
-	int TickThinkers(FThinkerList *dest);	// Returns: # of thinkers ticked
-	int ProfileThinkers(FThinkerList *dest);
+	bool DoDestroyThinkers(bool& destroyed);
+	void RemoveTravellers(bool saveGame);
+	void OnLoad();
+	int TickThinkers(FThinkerList *dest, int& counter);	// Returns: # of thinkers ticked
+	int ProfileThinkers(FThinkerList *dest, int& counter, TMap<FName, ProfileInfo>& profiles);
 	void SaveList(FSerializer &arc);
 
 private:
@@ -79,9 +72,12 @@ struct FThinkerCollection
 	}
 
 	void RunThinkers(FLevelLocals *Level);	// The level is needed to tick the lights
+	void RunClientSideThinkers(FLevelLocals* Level);
 	void DestroyAllThinkers(bool fullgc = true);
+	void CleanUpTravellers(bool saveGame);
 	void SerializeThinkers(FSerializer &arc, bool keepPlayers);
 	void MarkRoots();
+	void OnLoad();
 	DThinker *FirstThinker(int statnum);
 	void Link(DThinker *thinker, int statnum);
 
@@ -91,6 +87,8 @@ private:
 
 	friend class FThinkerIterator;
 };
+
+extern bool bTravelling;
 
 class DThinker : public DObject
 {
@@ -107,8 +105,11 @@ public:
 	void CallPostSerialize();
 	void Serialize(FSerializer &arc) override;
 	size_t PropagateMark();
-	
+
 	void ChangeStatNum (int statnum);
+	inline int GetStatNum() const { return _statNum; }
+	// This is temporary and should only be used with the rollback functionality.
+	inline void RollbackStatNum(int statNum) { _statNum = statNum; }
 
 private:
 	void Remove();
@@ -119,6 +120,7 @@ private:
 	friend class DObject;
 	friend class FDoomSerializer;
 
+	int8_t _statNum = -1;
 	DThinker *NextThinker = nullptr, *PrevThinker = nullptr;
 
 public:
@@ -133,14 +135,15 @@ protected:
 	const PClass *m_ParentType;
 private:
 	FLevelLocals *Level;
+	FThinkerCollection* m_ThinkerPool;
 	DThinker *m_CurrThinker;
 	uint8_t m_Stat;
 	bool m_SearchStats;
 	bool m_SearchingFresh;
 
 public:
-	FThinkerIterator (FLevelLocals *Level, const PClass *type, int statnum=MAX_STATNUM+1);
-	FThinkerIterator (FLevelLocals *Level, const PClass *type, int statnum, DThinker *prev);
+	FThinkerIterator (FLevelLocals *Level, const PClass *type, int statnum=MAX_STATNUM+1, bool clientside = false);
+	FThinkerIterator (FLevelLocals *Level, const PClass *type, int statnum, DThinker *prev, bool clientside = false);
 	DThinker *Next (bool exact = false);
 	void Reinit ();
 };
@@ -148,19 +151,19 @@ public:
 template <class T> class TThinkerIterator : public FThinkerIterator
 {
 public:
-	TThinkerIterator (FLevelLocals *Level, int statnum=MAX_STATNUM+1) : FThinkerIterator (Level, RUNTIME_CLASS(T), statnum)
+	TThinkerIterator (FLevelLocals *Level, int statnum=MAX_STATNUM+1, bool clientside = false) : FThinkerIterator (Level, RUNTIME_CLASS(T), statnum, clientside)
 	{
 	}
-	TThinkerIterator (FLevelLocals *Level, int statnum, DThinker *prev) : FThinkerIterator (Level, RUNTIME_CLASS(T), statnum, prev)
+	TThinkerIterator (FLevelLocals *Level, int statnum, DThinker *prev, bool clientside = false) : FThinkerIterator (Level, RUNTIME_CLASS(T), statnum, prev, clientside)
 	{
 	}
-	TThinkerIterator (FLevelLocals *Level, const PClass *subclass, int statnum=MAX_STATNUM+1) : FThinkerIterator(Level, subclass, statnum)
+	TThinkerIterator (FLevelLocals *Level, const PClass *subclass, int statnum=MAX_STATNUM+1, bool clientside = false) : FThinkerIterator(Level, subclass, statnum, clientside)
 	{
 	}
-	TThinkerIterator (FLevelLocals *Level, FName subclass, int statnum=MAX_STATNUM+1) : FThinkerIterator(Level, PClass::FindClass(subclass), statnum)
+	TThinkerIterator (FLevelLocals *Level, FName subclass, int statnum=MAX_STATNUM+1, bool clientside = false) : FThinkerIterator(Level, PClass::FindClass(subclass), statnum, clientside)
 	{
 	}
-	TThinkerIterator (FLevelLocals *Level, FName subclass, int statnum, DThinker *prev) : FThinkerIterator(Level, PClass::FindClass(subclass), statnum, prev)
+	TThinkerIterator (FLevelLocals *Level, FName subclass, int statnum, DThinker *prev, bool clientside = false) : FThinkerIterator(Level, PClass::FindClass(subclass), statnum, prev, clientside)
 	{
 	}
 	T *Next (bool exact = false)

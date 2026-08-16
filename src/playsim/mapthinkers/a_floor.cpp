@@ -1,30 +1,23 @@
-//-----------------------------------------------------------------------------
-//
-// Copyright 1993-1996 id Software
-// Copyright 1994-1996 Raven Software
-// Copyright 1998-1998 Chi Hoang, Lee Killough, Jim Flynn, Rand Phares, Ty Halderman
-// Copyright 1999-2016 Randy Heit
-// Copyright 2002-2016 Christoph Oelckers
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see http://www.gnu.org/licenses/
-//
-//-----------------------------------------------------------------------------
-//
-// DESCRIPTION:
-//		Floor animation: raising stairs.
-//
-//-----------------------------------------------------------------------------
+/*
+** a_floor.cpp
+**
+** Floor animation: raising stairs.
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1994-1996 Raven Software
+** Copyright 1998-1998 Chi Hoang, Lee Killough, Jim Flynn, Rand Phares, Ty Halderman
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2002-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 #include "doomdef.h"
 #include "p_local.h"
@@ -153,7 +146,7 @@ void DFloor::Tick ()
 		return;
 
 	res = m_Sector->MoveFloor (m_Speed, m_FloorDestDist, m_Crush, m_Direction, m_Hexencrush, m_Instant);
-	
+
 	if (res == EMoveResult::pastdest)
 	{
 		SN_StopSequence (m_Sector, CHAN_FLOOR);
@@ -482,7 +475,7 @@ bool FLevelLocals::CreateFloor(sector_t *sec, DFloor::EFloor floortype, line_t *
 
 		// [Graf Zahl]
 		// Don't make sounds for instant movement hacks but make an exception for
-		// switches that activate their own back side. 
+		// switches that activate their own back side.
 		if (!(sec->Level->i_compatflags & COMPATF_SILENT_INSTANT_FLOORS))
 		{
 			if (!line || !(line->activation & (SPAC_Use | SPAC_Push)) || line->backsector != sec)
@@ -622,7 +615,7 @@ bool FLevelLocals::EV_BuildStairs (int tag, DFloor::EStair type, line_t *line, d
 	int 				ok;
 	int					persteptime;
 	bool 				rtn = false;
-	
+
 	sector_t*			sec;
 	sector_t*			tsec = NULL;
 	sector_t*			prev = NULL;
@@ -650,7 +643,7 @@ bool FLevelLocals::EV_BuildStairs (int tag, DFloor::EStair type, line_t *line, d
 		{
 			continue;
 		}
-		
+
 		// new floor thinker
 		rtn = true;
 		floor = CreateThinker<DFloor> (sec);
@@ -674,7 +667,7 @@ bool FLevelLocals::EV_BuildStairs (int tag, DFloor::EStair type, line_t *line, d
 
 		texture = sec->GetTexture(sector_t::floor);
 		osecnum = secnum;				//jff 3/4/98 preserve loop index
-		
+
 		// Find next sector to raise
 		// 1. Find 2-sided line with same sector side[0] (lowest numbered)
 		// 2. Other side is the next sector to raise
@@ -810,7 +803,7 @@ bool FLevelLocals::EV_DoDonut (int tag, line_t *line, double pillarspeed, double
 	DFloor*				floor;
 	vertex_t*			spot;
 	double				height;
-		
+
 	rtn = false;
 
 	auto itr = GetSectorTagIterator(tag, line);
@@ -821,7 +814,7 @@ bool FLevelLocals::EV_DoDonut (int tag, line_t *line, double pillarspeed, double
 		// ALREADY MOVING?	IF SO, KEEP GOING...
 		if (s1->PlaneMoving(sector_t::floor))
 			continue; // safe now, because we check that tag is non-0 in the looping condition [fdari]
-						
+
 		rtn = true;
 		s2 = getNextSector (s1->Lines[0], s1);	// s2 is pool's sector
 		if (!s2)								// note lowest numbered line around
@@ -835,7 +828,7 @@ bool FLevelLocals::EV_DoDonut (int tag, line_t *line, double pillarspeed, double
 			if (ln->backsector == nullptr || ln->backsector == s1)
 				continue;
 			s3 = ln->backsector;
-			
+
 			//	Spawn rising slime
 			floor = CreateThinker<DFloor> (s2);
 			floor->m_Type = DFloor::donutRaise;
@@ -850,7 +843,7 @@ bool FLevelLocals::EV_DoDonut (int tag, line_t *line, double pillarspeed, double
 			height = FindHighestFloorPoint (s3, &spot);
 			floor->m_FloorDestDist = s2->floorplane.PointToDist (spot, height);
 			floor->StartFloorSound ();
-			
+
 			//	Spawn lowering donut-hole
 			floor = CreateThinker<DFloor> (s1);
 			floor->m_Type = DFloor::floorLowerToNearest;
@@ -1130,7 +1123,7 @@ bool FLevelLocals::EV_DoChange (line_t *line, EChange changetype, int tag)
 	while ((secnum = it.Next()) >= 0)
 	{
 		sec = &sectors[secnum];
-              
+
 		rtn = true;
 
 		// handle trigger or numeric change type
@@ -1332,7 +1325,7 @@ bool FLevelLocals::EV_StartWaggle (int tag, line_t *line, int height, int speed,
 	while ((sectorIndex = itr.Next()) >= 0)
 	{
 		sector = &sectors[sectorIndex];
-		if ((!ceiling && sector->PlaneMoving(sector_t::floor)) || 
+		if ((!ceiling && sector->PlaneMoving(sector_t::floor)) ||
 			(ceiling && sector->PlaneMoving(sector_t::ceiling)))
 		{ // Already busy with another thinker
 			continue;

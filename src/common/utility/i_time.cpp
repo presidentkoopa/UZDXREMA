@@ -1,34 +1,23 @@
 /*
 ** i_time.cpp
+**
 ** Implements the timer
 **
 **---------------------------------------------------------------------------
-** Copyright 1998-2016 Randy Heit
+**
+** Copyright 1998-2016 Marisa Heit
 ** Copyright 2017 Magnus Norddahl
-** All rights reserved.
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+**---------------------------------------------------------------------------
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
@@ -37,6 +26,7 @@
 #include <thread>
 #include <assert.h>
 #include "i_time.h"
+#include "vm.h"
 
 //==========================================================================
 //
@@ -222,4 +212,51 @@ void I_ResetInputTime()
 {
 	// Reset lastinputtime to current time.
 	lastinputtime = I_msTimeF();
+}
+
+static double DeltaTime = 0.0;
+static uint64_t PrevTime = 0u;
+
+void ClearPrevTime()
+{
+	PrevTime = 0u;
+}
+
+void SetDeltaTime()
+{
+	const uint64_t time = I_nsTime();
+	if (!PrevTime)
+		PrevTime = time;
+
+	// Track delta time in seconds since this is more commonly useful, but don't
+	// go lower than 5 FPS or higher than 1000 FPS for consistency.
+	DeltaTime = clamp<double>((time - PrevTime) * 0.000000001, 0.001, 0.2);
+	PrevTime = time;
+}
+
+double GetDeltaTime(bool current)
+{
+	const uint64_t time = I_nsTime();
+	if (!PrevTime)
+		return 0.0;
+
+	return DeltaTime + (current ? (time - PrevTime) * 0.000000001 : 0.0);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(DObject, GetDeltaTime, GetDeltaTime)
+{
+	PARAM_PROLOGUE;
+	PARAM_BOOL(current);
+	ACTION_RETURN_FLOAT(GetDeltaTime(current));
+}
+
+double GetPhysicsTimeStep()
+{
+	return 1.0 / GameTicRate;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(DObject, GetPhysicsTimeStep, GetPhysicsTimeStep)
+{
+	PARAM_PROLOGUE;
+	ACTION_RETURN_FLOAT(GetPhysicsTimeStep());
 }

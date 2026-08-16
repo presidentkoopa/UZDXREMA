@@ -1,24 +1,19 @@
-// 
-//---------------------------------------------------------------------------
-//
-// Copyright(C) 2003-2016 Christoph Oelckers
-// All rights reserved.
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public License
-// along with this program.  If not, see http://www.gnu.org/licenses/
-//
-//--------------------------------------------------------------------------
-//
+/*
+** hw_skyportal.cpp
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 2003-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 #include "doomtype.h"
 #include "g_level.h"
@@ -83,7 +78,7 @@ void HWSkyPortal::DrawContents(HWDrawInfo *di, FRenderState &state)
 	}
 	else
 	{
-		if (origin->texture[0]==origin->texture[1] && origin->doublesky) origin->doublesky=false;	
+		if (origin->texture[0]==origin->texture[1] && origin->doublesky) origin->doublesky=false;
 
 		if (origin->texture[0])
 		{
@@ -91,19 +86,29 @@ void HWSkyPortal::DrawContents(HWDrawInfo *di, FRenderState &state)
 			vertexBuffer->RenderDome(state, origin->texture[0], origin->x_offset[0], origin->y_offset, origin->mirrored, FSkyVertexBuffer::SKYMODE_MAINLAYER, !!(di->Level->flags & LEVEL_FORCETILEDSKY));
 			state.SetTextureMode(TM_NORMAL);
 		}
-		
+
 		state.AlphaFunc(Alpha_Greater, 0.f);
-		
+
 		if (origin->doublesky && origin->texture[1])
 		{
 			vertexBuffer->RenderDome(state, origin->texture[1], origin->x_offset[1], origin->y_offset, false, FSkyVertexBuffer::SKYMODE_SECONDLAYER, !!(di->Level->flags & LEVEL_FORCETILEDSKY));
 		}
+	}
 
-		if (di->Level->skyfog>0 && !di->isFullbrightScene()  && (origin->fadecolor & 0xffffff) != 0)
+	if (di->Level->skyfog>0 && (origin->fadecolor & 0xffffff) != 0)
+	{
+		PalEntry FadeColor = origin->fadecolor;
+		FadeColor.a = clamp<int>(di->Level->skyfog, 0, 255);
+
+		if (di->Level->flags3 & LEVEL3_SKYMIST && origin->texture[2])
 		{
-			PalEntry FadeColor = origin->fadecolor;
-			FadeColor.a = clamp<int>(di->Level->skyfog, 0, 255);
-
+			float misth = origin->texture[2]->GetDisplayHeight();
+			float myscale = di->Level->hw_skymistyscale;
+			float myoffset = (myscale - 1.0)*0.857*misth; // [DVR] Why so many magic numbers when it comes to sky??
+			vertexBuffer->RenderDome(state, origin->texture[2], origin->x_offset[2], myoffset, false, FSkyVertexBuffer::SKYMODE_FOGLAYER, !!(di->Level->flags & LEVEL_FORCETILEDSKY), 0, (myscale == 0.0 ? 0 : 240.0/misth/myscale), FadeColor);
+		}
+		else if (!di->isFullbrightScene())
+		{
 			state.EnableTexture(false);
 			state.SetObjectColor(FadeColor);
 			state.Draw(DT_Triangles, 0, 12);

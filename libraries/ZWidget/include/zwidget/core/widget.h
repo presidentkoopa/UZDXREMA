@@ -2,6 +2,9 @@
 
 #include <string>
 #include <memory>
+#include <variant>
+#include <unordered_map>
+#include <unordered_set>
 #include "canvas.h"
 #include "rect.h"
 #include "colorf.h"
@@ -9,18 +12,28 @@
 
 class Canvas;
 class Timer;
+class Dropdown;
+class PushButton;
 
 enum class WidgetType
 {
 	Child,
 	Window,
-	Popup
+	Popup,
+	Utility
+};
+
+enum class WidgetEvent
+{
+	VisibilityChange,
+
+	// TODO: add more events
 };
 
 class Widget : DisplayWindowHost
 {
 public:
-	Widget(Widget* parent = nullptr, WidgetType type = WidgetType::Child);
+	Widget(Widget* parent = nullptr, WidgetType type = WidgetType::Child, RenderAPI api = RenderAPI::Unspecified, struct WindowParams = {});
 	virtual ~Widget();
 
 	void SetParent(Widget* parent);
@@ -29,8 +42,8 @@ public:
 	std::string GetWindowTitle() const;
 	void SetWindowTitle(const std::string& text);
 
-	// Icon GetWindowIcon() const;
-	// void SetWindowIcon(const Icon& icon);
+	std::vector<std::shared_ptr<Image>> GetWindowIcon() const;
+	void SetWindowIcon(const std::vector<std::shared_ptr<Image>>& images);
 
 	// Widget content box
 	Size GetSize() const;
@@ -39,15 +52,44 @@ public:
 
 	// Widget noncontent area
 	void SetNoncontentSizes(double left, double top, double right, double bottom);
-	double GetNoncontentLeft() const { return Noncontent.Left; }
-	double GetNoncontentTop() const { return Noncontent.Top; }
-	double GetNoncontentRight() const { return Noncontent.Right; }
-	double GetNoncontentBottom() const { return Noncontent.Bottom; }
+	double GetNoncontentLeft() const { return GridFitSize(GetStyleDouble("noncontent-left")); }
+	double GetNoncontentTop() const { return GridFitSize(GetStyleDouble("noncontent-top")); }
+	double GetNoncontentRight() const { return GridFitSize(GetStyleDouble("noncontent-right")); }
+	double GetNoncontentBottom() const { return GridFitSize(GetStyleDouble("noncontent-bottom")); }
+
+	// Get the DPI scale factor for the window the widget is located on
+	double GetDpiScale() const;
+
+	// Align point to the nearest physical screen pixel
+	double GridFitPoint(double p) const;
+	Point GridFitPoint(double x, double y) const { return GridFitPoint(Point(x, y)); }
+	Point GridFitPoint(Point p) const { return Point(GridFitPoint(p.x), GridFitPoint(p.y)); }
+
+	// Convert size to exactly covering physical screen pixels
+	double GridFitSize(double s) const;
+	Size GridFitSize(double w, double h) const { return GridFitSize(Size(w, h)); }
+	Size GridFitSize(Size s) const { return Size(GridFitSize(s.width), GridFitSize(s.height)); }
 
 	// Widget frame box
 	Rect GetFrameGeometry() const;
 	void SetFrameGeometry(const Rect& geometry);
 	void SetFrameGeometry(double x, double y, double width, double height) { SetFrameGeometry(Rect::xywh(x, y, width, height)); }
+
+	// Style properties
+	void SetStyleClass(const std::string& styleClass);
+	const std::string& GetStyleClass() const { return StyleClass; }
+	void SetStyleState(const std::string& state);
+	const std::string& GetStyleState() const { return StyleState; }
+	void SetStyleBool(const std::string& propertyName, bool value);
+	void SetStyleInt(const std::string& propertyName, int value);
+	void SetStyleDouble(const std::string& propertyName, double value);
+	void SetStyleString(const std::string& propertyName, const std::string& value);
+	void SetStyleColor(const std::string& propertyName, const Colorf& value);
+	bool GetStyleBool(const std::string& propertyName) const;
+	int GetStyleInt(const std::string& propertyName) const;
+	double GetStyleDouble(const std::string& propertyName) const;
+	std::string GetStyleString(const std::string& propertyName) const;
+	Colorf GetStyleColor(const std::string& propertyName) const;
 
 	void SetWindowBackground(const Colorf& color);
 	void SetWindowBorderColor(const Colorf& color);
@@ -62,6 +104,9 @@ public:
 	void ShowNormal();
 	void Hide();
 
+	void Subscribe(Widget* subscriber);
+	void Unsubscribe(Widget* subscriber);
+
 	void ActivateWindow();
 
 	void Close();
@@ -73,6 +118,7 @@ public:
 	bool IsEnabled();
 	bool IsVisible();
 	bool IsHidden();
+	bool IsFullscreen();
 
 	void SetFocus();
 	void SetEnabled(bool value);
@@ -82,18 +128,25 @@ public:
 	void LockCursor();
 	void UnlockCursor();
 	void SetCursor(StandardCursor cursor);
-	void CaptureMouse();
-	void ReleaseMouseCapture();
 
-	bool GetKeyState(EInputKey key);
+	void SetPointerCapture();
+	void ReleasePointerCapture();
+
+	void SetModalCapture(bool rootWindow = false);
+	void ReleaseModalCapture(bool rootWindow = false);
+
+	bool GetKeyState(InputKey key);
 
 	std::string GetClipboardText();
 	void SetClipboardText(const std::string& text);
 
-	Widget* Window();
+	Widget* Window(bool rootWindow = false) const;
 	Canvas* GetCanvas() const;
 	Widget* ChildAt(double x, double y) { return ChildAt(Point(x, y)); }
 	Widget* ChildAt(const Point& pos);
+
+	bool IsParent(const Widget* w) const;
+	bool IsChild(const Widget* w) const;
 
 	Widget* Parent() const { return ParentObj; }
 	Widget* PrevSibling() const { return PrevSiblingObj; }
@@ -111,24 +164,40 @@ public:
 
 	static Size GetScreenSize();
 
+	void SetCanvas(std::unique_ptr<Canvas> canvas);
+	void* GetNativeHandle();
+	int GetNativePixelWidth();
+	int GetNativePixelHeight();
+	virtual double GetPreferredWidth();
+	virtual double GetPreferredHeight();
+
+	// Vulkan support:
+	std::vector<std::string> GetVulkanInstanceExtensions() { return Window()->DispWindow->GetVulkanInstanceExtensions(); }
+	VkSurfaceKHR CreateVulkanSurface(VkInstance instance) { return Window()->DispWindow->CreateVulkanSurface(instance); }
+
 protected:
-	virtual void OnPaintFrame(Canvas* canvas) { }
+	virtual void OnPaintFrame(Canvas* canvas);
 	virtual void OnPaint(Canvas* canvas) { }
-	virtual bool OnMouseDown(const Point& pos, int key) { return false; }
-	virtual bool OnMouseDoubleclick(const Point& pos, int key) { return false; }
-	virtual bool OnMouseUp(const Point& pos, int key) { return false; }
-	virtual bool OnMouseWheel(const Point& pos, EInputKey key) { return false; }
+	virtual bool OnMouseDown(const Point& pos, InputKey key) { return false; }
+	virtual bool OnMouseDoubleclick(const Point& pos, InputKey key) { return false; }
+	virtual bool OnMouseUp(const Point& pos, InputKey key) { return false; }
+	virtual bool OnMouseWheel(const Point& pos, InputKey key) { return false; }
 	virtual void OnMouseMove(const Point& pos) { }
 	virtual void OnMouseLeave() { }
 	virtual void OnRawMouseMove(int dx, int dy) { }
 	virtual void OnKeyChar(std::string chars) { }
-	virtual void OnKeyDown(EInputKey key) { }
-	virtual void OnKeyUp(EInputKey key) { }
+	virtual void OnKeyDown(InputKey key) { }
+	virtual void OnKeyUp(InputKey key) { }
 	virtual void OnGeometryChanged() { }
 	virtual void OnClose() { delete this; }
 	virtual void OnSetFocus() { }
 	virtual void OnLostFocus() { }
 	virtual void OnEnableChanged() { }
+	void OnWindowNotified() override {};
+
+	void NotifyWindow(); // used to wake up a window from another thread
+
+	virtual void Notify(Widget* source, const WidgetEvent type) { };
 
 private:
 	void DetachFromParent();
@@ -138,19 +207,23 @@ private:
 	// DisplayWindowHost
 	void OnWindowPaint() override;
 	void OnWindowMouseMove(const Point& pos) override;
-	void OnWindowMouseDown(const Point& pos, EInputKey key) override;
-	void OnWindowMouseDoubleclick(const Point& pos, EInputKey key) override;
-	void OnWindowMouseUp(const Point& pos, EInputKey key) override;
-	void OnWindowMouseWheel(const Point& pos, EInputKey key) override;
+	void OnWindowMouseLeave() override;
+	void OnWindowMouseDown(const Point& pos, InputKey key) override;
+	void OnWindowMouseDoubleclick(const Point& pos, InputKey key) override;
+	void OnWindowMouseUp(const Point& pos, InputKey key) override;
+	void OnWindowMouseWheel(const Point& pos, InputKey key) override;
 	void OnWindowRawMouseMove(int dx, int dy) override;
 	void OnWindowKeyChar(std::string chars) override;
-	void OnWindowKeyDown(EInputKey key) override;
-	void OnWindowKeyUp(EInputKey key) override;
+	void OnWindowKeyDown(InputKey key) override;
+	void OnWindowKeyUp(InputKey key) override;
 	void OnWindowGeometryChanged() override;
 	void OnWindowClose() override;
 	void OnWindowActivated() override;
 	void OnWindowDeactivated() override;
 	void OnWindowDpiScaleChanged() override;
+	bool OnFileDrop(std::string path) override;
+
+	void NotifySubscribers(const WidgetEvent type);
 
 	WidgetType Type = {};
 
@@ -167,26 +240,33 @@ private:
 
 	Colorf WindowBackground = Colorf::fromRgba8(240, 240, 240);
 
-	struct
-	{
-		double Left = 0.0;
-		double Top = 0.0;
-		double Right = 0.0;
-		double Bottom = 0.0;
-	} Noncontent;
-
 	std::string WindowTitle;
+	std::vector<std::shared_ptr<Image>> WindowIcon;
 	std::unique_ptr<DisplayWindow> DispWindow;
 	std::unique_ptr<Canvas> DispCanvas;
 	Widget* FocusWidget = nullptr;
 	Widget* CaptureWidget = nullptr;
 	Widget* HoverWidget = nullptr;
 	bool HiddenFlag = false;
+	bool Dropping = false;
 
 	StandardCursor CurrentCursor = StandardCursor::arrow;
+
+	std::string StyleClass = "widget";
+	std::string StyleState;
+	typedef std::variant<bool, int, double, std::string, Colorf> PropertyVariant;
+	std::unordered_map<std::string, PropertyVariant> StyleProperties;
 
 	Widget(const Widget&) = delete;
 	Widget& operator=(const Widget&) = delete;
 
+	std::unordered_set<Widget*> Subscribers;
+	std::unordered_set<Widget*> Subscriptions;
+
 	friend class Timer;
+	friend class OpenFileDialog;
+	friend class OpenFolderDialog;
+	friend class SaveFileDialog;
+	friend class Dropdown;
+	friend class PushButton;
 };

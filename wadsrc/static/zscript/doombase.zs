@@ -1,3 +1,21 @@
+/*
+** doombase.zs
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2006-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 extend struct _
 {
@@ -17,12 +35,66 @@ extend struct _
 	native readonly Weapon WP_NOCHANGE;
 	deprecated("3.8", "Use Actor.isFrozen() or Level.isFrozen() instead") native readonly bool globalfreeze;
 	native int LocalViewPitch;
-	
+
 	// sandbox state in multi-level setups:
 	native play @PlayerInfo players[MAXPLAYERS];
 	native readonly bool playeringame[MAXPLAYERS];
 	native play LevelLocals Level;
 
+	native readonly Array<@EpisodeInfo> AllEpisodes;
+	native readonly Array<@SkillInfo> AllSkills;
+}
+
+struct EpisodeInfo native
+{
+	native readonly string mEpisodeName;
+	native readonly string mEpisodeMap;
+	native readonly string mPicName;
+	native readonly int8 mShortcut;
+	native readonly bool mNoSkill;
+}
+
+struct SkillInfo native
+{
+	native readonly Name SkillName;
+	native readonly double AmmoFactor, DoubleAmmoFactor, DropAmmoFactor;
+	native readonly double DamageFactor;
+	native readonly double ArmorFactor;
+	native readonly double HealthFactor;
+	native readonly double KickbackFactor;
+
+	native readonly bool FastMonsters;
+	native readonly bool SlowMonsters;
+	native readonly bool DisableCheats;
+	native readonly bool AutoUseHealth;
+
+	native readonly bool EasyBossBrain;
+	native readonly bool EasyKey;
+	native readonly bool NoMenu;
+	native readonly int RespawnCounter;
+	native readonly int RespawnLimit;
+	native readonly double Aggressiveness;
+	native readonly int SpawnFilter;
+	native readonly bool SpawnMulti;
+	native readonly bool InstantReaction;
+	native readonly bool SpawnMultiCoopOnly;
+	native readonly int ACSReturn;
+	native readonly string MenuName;
+	native readonly string PicName;
+	native readonly Map<Name, string> MenuNamesForPlayerClass;
+	native readonly bool MustConfirm;
+	native readonly string MustConfirmText;
+	native readonly int8 Shortcut;
+	native readonly string TextColor;
+	native readonly Map<Name, Name> Replace;
+	native readonly Map<Name, Name> Replaced;
+	native readonly double MonsterHealth;
+	native readonly double FriendlyHealth;
+	native readonly bool NoPain;
+	native readonly int Infighting;
+	native readonly bool PlayerRespawn;
+
+	native int GetTextColor() const;
 }
 
 extend struct TexMan
@@ -110,6 +182,7 @@ extend struct GameInfoStruct
 	native double normforwardmove[2];
 	native double normsidemove[2];
 	native bool mHideParTimes;
+	native readonly double BloodSplatDecalDistance;
 }
 
 extend class Object
@@ -142,16 +215,13 @@ extend class Object
 	native static void MarkSound(Sound snd);
 	native static uint BAM(double angle);
 	native static void SetMusicVolume(float vol);
-	native clearscope static Object GetNetworkEntity(uint id);
-	native play void EnableNetworking(bool enable);
-	native clearscope uint GetNetworkID() const;
 }
 
 class Thinker : Object native play
 {
 	enum EStatnums
 	{
- 		// Thinkers that don't actually think
+		// Thinkers that don't actually think
 		STAT_INFO,								// An info queue
 		STAT_DECAL,								// A decal
 		STAT_AUTODECAL,							// A decal that can be automatically deleted
@@ -186,22 +256,42 @@ class Thinker : Object native play
 
 
 	native LevelLocals Level;
-	
+
 	virtual native void Tick();
 	virtual native void PostBeginPlay();
 	virtual void OnLoad() {}
+	native void AddToTravellingList();
 	native void ChangeStatNum(int stat);
-	
+	native clearscope int GetStatNum() const;
+
 	static clearscope int Tics2Seconds(int tics)
 	{
 		return int(tics / TICRATE);
 	}
 
+	//===========================================================================
+	//
+	// Called before the Thinker moves to another map, in case it needs to do
+	// special clean-up.
+	//
+	//===========================================================================
+
+	virtual void PreTravelled() {}
+
+	//===========================================================================
+	//
+	// Called after the Thinker moved to another map, in case it needs to do
+	// special reinitialization.
+	//
+	//===========================================================================
+
+	virtual void Travelled() {}
+
 }
 
 class ThinkerIterator : Object native
 {
-	native static ThinkerIterator Create(class<Object> type = "Actor", int statnum=Thinker.MAX_STATNUM+1);
+	native static ThinkerIterator Create(class<Object> type = "Actor", int statnum=Thinker.MAX_STATNUM+1, bool clientSide = false);
 	native Thinker Next(bool exact = false);
 	native void Reinit();
 }
@@ -221,7 +311,7 @@ class BlockThingsIterator : Object native
 	native Actor thing;
 	native Vector3 position;
 	native int portalflags;
-	
+
 	native static BlockThingsIterator Create(Actor origin, double checkradius = -1, bool ignorerestricted = false);
 	native static BlockThingsIterator CreateFromPos(double checkx, double checky, double checkz, double checkh, double checkradius, bool ignorerestricted);
 	native bool Next();
@@ -232,7 +322,7 @@ class BlockLinesIterator : Object native
 	native Line CurLine;
 	native Vector3 position;
 	native int portalflags;
-	
+
 	native static BlockLinesIterator Create(Actor origin, double checkradius = -1);
 	native static BlockLinesIterator CreateFromPos(Vector3 pos, double checkh, double checkradius, Sector sec = null);
 	native bool Next();
@@ -339,6 +429,7 @@ struct LevelInfo native
 	native readonly String NextSecretMap;
 	native readonly String SkyPic1;
 	native readonly String SkyPic2;
+	native readonly String SkyMistPic;
 	native readonly String F1Pic;
 	native readonly int cluster;
 	native readonly int partime;
@@ -354,6 +445,8 @@ struct LevelInfo native
 	native readonly int musicorder;
 	native readonly float skyspeed1;
 	native readonly float skyspeed2;
+	native readonly float skymistspeed;
+	native readonly float skymistyscale;
 	native readonly int cdtrack;
 	native readonly double gravity;
 	native readonly double aircontrol;
@@ -364,6 +457,8 @@ struct LevelInfo native
 	native readonly int fogdensity;
 	native readonly int outsidefogdensity;
 	native readonly int skyfog;
+	native readonly float thickfogdistance;
+	native readonly float thickfogmultiplier;
 	native readonly float pixelstretch;
 	native readonly name RedirectType;
 	native readonly String RedirectMapName;
@@ -394,9 +489,10 @@ struct FSpawnParticleParams
 	native Vector3 pos;
 	native Vector3 vel;
 	native Vector3 accel;
-	
+
 	native double startalpha;
 	native double fadestep;
+	native double fadeoutstep; // unlike fadestep, this is always expected to be a positive value.
 
 	native double startroll;
 	native double rollvel;
@@ -412,7 +508,7 @@ struct LevelLocals native
 		UDMF_Sector,
 		//UDMF_Thing // not implemented
 	};
-	
+
 	const CLUSTER_HUB = 0x00000001;	// Cluster uses hub behavior
 
 
@@ -422,7 +518,7 @@ struct LevelLocals native
 	native readonly Array<@Vertex> Vertexes;
 	native readonly Array<@LinePortal> LinePortals;
 	native internal readonly Array<@SectorPortal> SectorPortals;
-	
+
 	native readonly int time;
 	native readonly int maptime;
 	native readonly int totaltime;
@@ -444,8 +540,11 @@ struct LevelLocals native
 	native readonly int musicorder;
 	native readonly TextureID skytexture1;
 	native readonly TextureID skytexture2;
+	native readonly TextureID skymisttexture;
 	native float skyspeed1;
 	native float skyspeed2;
+	native float skymistspeed;
+	native float skymistyscale;
 	native int total_secrets;
 	native int found_secrets;
 	native int total_items;
@@ -477,6 +576,8 @@ struct LevelLocals native
 	native readonly int fogdensity;
 	native readonly int outsidefogdensity;
 	native readonly int skyfog;
+	native readonly float thickfogdistance;
+	native readonly float thickfogmultiplier;
 	native readonly float pixelstretch;
 	native readonly float MusicVolume;
 	native name deathsequence;
@@ -502,10 +603,10 @@ struct LevelLocals native
 	native bool IsFreelookAllowed() const;
 	native void StartIntermission(Name type, int state) const;
 	native play SpotState GetSpotState(bool create = true);
-	native int FindUniqueTid(int start = 0, int limit = 0);
+	native clearscope int FindUniqueTid(int start = 0, int limit = 0, bool clientSide = false);
 	native uint GetSkyboxPortal(Actor actor);
 	native void ReplaceTextures(String from, String to, int flags);
-    clearscope native HealthGroup FindHealthGroup(int id);
+	clearscope native HealthGroup FindHealthGroup(int id);
 	native vector3, int PickDeathmatchStart();
 	native vector3, int PickPlayerStart(int pnum, int flags = 0);
 	native int isFrozen() const;
@@ -523,7 +624,7 @@ struct LevelLocals native
 	native clearscope vector2 Vec2Diff(vector2 v1, vector2 v2) const;
 	native clearscope vector3 Vec3Diff(vector3 v1, vector3 v2) const;
 	native clearscope vector3 SphericalCoords(vector3 viewpoint, vector3 targetPos, vector2 viewAngles = (0, 0), bool absolute = false) const;
-	
+
 	native clearscope vector2 Vec2Offset(vector2 pos, vector2 dir, bool absolute = false) const;
 	native clearscope vector3 Vec2OffsetZ(vector2 pos, vector2 dir, double atz, bool absolute = false) const;
 	native clearscope vector3 Vec3Offset(vector3 pos, vector3 dir, bool absolute = false) const;
@@ -532,6 +633,8 @@ struct LevelLocals native
 	native clearscope int PointOnLineSide(Vector2 pos, Line l, bool precise = false) const;
 	native clearscope int ActorOnLineSide(Actor mo, Line l) const;
 	native clearscope int BoxOnLineSide(Vector2 pos, double radius, Line l) const;
+
+	native clearscope int PlayerNum(PlayerInfo player) const;
 
 	// [BB] Names for the billboard payloads, facing modes and flags below.
 	// These mirror EBillboardPayload / EBillboardFacing / EBillboardFlags in
@@ -1141,15 +1244,20 @@ struct LevelLocals native
 	native String GetChecksum() const;
 
 	native void ChangeSky(TextureID sky1, TextureID sky2 );
+	native void ChangeSkyMist(TextureID skymist, bool usemist = true, float skymistyscale = 1.0);
+	native void SetSkyFog(int fogdensity);
+	native void SetThickFog(float distance, float multiplier);
 	native void ForceLightning(int mode = 0, sound tempSound = "");
 
-	native SectorTagIterator CreateSectorTagIterator(int tag, line defline = null);
-	native LineIdIterator CreateLineIdIterator(int tag);
-	native ActorIterator CreateActorIterator(int tid, class<Actor> type = "Actor");
+	native play Thinker CreateThinker(class<Thinker> type, int statnum = Thinker.STAT_DEFAULT);
+	native clearscope Thinker CreateClientSideThinker(class<Thinker> type, int statnum = Thinker.STAT_DEFAULT);
+	native clearscope SectorTagIterator CreateSectorTagIterator(int tag, line defline = null);
+	native clearscope LineIdIterator CreateLineIdIterator(int tag);
+	native clearscope ActorIterator CreateActorIterator(int tid, class<Actor> type = "Actor", bool clientSide = false);
 
 	String TimeFormatted(bool totals = false)
 	{
-		int sec = Thinker.Tics2Seconds(totals? totaltime : time); 
+		int sec = Thinker.Tics2Seconds(totals? totaltime : time);
 		return String.Format("%02d:%02d:%02d", sec / 3600, (sec % 3600) / 60, sec % 60);
 	}
 
@@ -1163,8 +1271,11 @@ struct LevelLocals native
 	native String GetClusterName();
 	native String GetEpisodeName();
 
-	native void SpawnParticle(FSpawnParticleParams p);
-	native VisualThinker SpawnVisualThinker(Class<VisualThinker> type);
+	native clearscope void SpawnParticle(FSpawnParticleParams p);
+	native play VisualThinker SpawnVisualThinker(Class<VisualThinker> type);
+	native clearscope VisualThinker SpawnClientSideVisualThinker(Class<VisualThinker> type);
+
+	clearscope native static bool WorldPaused(bool checkLag = false);
 }
 
 // a few values of this need to be readable by the play code.
@@ -1186,8 +1297,8 @@ struct State native
 	native readonly int sprite;
 	native readonly int16 Tics;
 	native readonly uint16 TicRange;
-	native readonly uint8 Frame;		
-	native readonly uint8 UseFlags;	
+	native readonly uint8 Frame;
+	native readonly uint8 UseFlags;
 	native readonly int Misc1;
 	native readonly int Misc2;
 	native readonly uint16 bSlow;
@@ -1197,7 +1308,7 @@ struct State native
 	native readonly bool bSameFrame;
 	native readonly bool bCanRaise;
 	native readonly bool bDehacked;
-	
+
 	native int DistanceTo(state other) const;
 	native bool ValidateSpriteFrame() const;
 	native TextureID, bool, Vector2 GetSpriteTexture(int rotation, int skin = 0, Vector2 scale = (0,0), int spritenum = -1, int framenum = -1) const;
@@ -1334,7 +1445,7 @@ class Door : MovingCeiling native
 	native readonly double	m_BotDist, m_OldFloorDist;
 	native readonly Vertex	m_BotSpot;
 	native readonly double	m_Speed;
-	
+
 	// 1 = up, 0 = waiting at top, -1 = down
 	enum EDirection
 	{
@@ -1407,7 +1518,7 @@ class Floor : MovingFloor native
 		stairSync = 2,
 		stairCrush = 4,
 	};
-	
+
 	native readonly EFloor			m_Type;
 	native readonly int				m_Crush;
 	native readonly bool			m_Hexencrush;
@@ -1498,7 +1609,7 @@ class Ceiling : MovingCeiling native
 	{
 		return level.CreateCeiling(sec, type, ln, speed, speed2, height, crush, silent, change, crushmode);
 	}
-	
+
 }
 
 struct LookExParams
@@ -1517,7 +1628,7 @@ class Lighting : SectorEffect native
 
 struct Shader native
 {
-	// This interface was deprecated for the pointless player dependency 
+	// This interface was deprecated for the pointless player dependency
 	private static bool IsConsolePlayer(PlayerInfo player)
 	{
 		return player && player.mo && player == players[consoleplayer];

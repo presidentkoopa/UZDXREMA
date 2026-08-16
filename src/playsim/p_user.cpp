@@ -1,101 +1,72 @@
-//-----------------------------------------------------------------------------
-//
-// Copyright 1993-1996 id Software
-// Copyright 1994-1996 Raven Software
-// Copyright 1998-1998 Chi Hoang, Lee Killough, Jim Flynn, Rand Phares, Ty Halderman
-// Copyright 1999-2016 Randy Heit
-// Copyright 2002-2016 Christoph Oelckers
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see http://www.gnu.org/licenses/
-//
-//-----------------------------------------------------------------------------
-//
-// DESCRIPTION:
-//		Player related stuff.
-//		Bobbing POV/weapon, movement.
-//		Pending weapon.
-//
-//-----------------------------------------------------------------------------
-
-/* For code that originates from ZDoom the following applies:
+/*
+** p_user.cpp
+**
+** Player related stuff
 **
 **---------------------------------------------------------------------------
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 1993-1996 id Software
+** Copyright 1994-1996 Raven Software
+** Copyright 1998-1998 Chi Hoang, Lee Killough, Jim Flynn, Rand Phares, Ty Halderman
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2002-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 **---------------------------------------------------------------------------
 **
+** For code that originates from ZDoom the following applies:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
+**---------------------------------------------------------------------------
+**
+** Player related stuff.
+** Bobbing POV/weapon, movement.
+** Pending weapon.
 */
 
 #include <QzDoom/VrCommon.h>
 
-#include "doomdef.h"
-#include "d_event.h"
-#include "p_local.h"
-#include "doomstat.h"
-#include "s_sound.h"
-#include "gi.h"
-#include "m_random.h"
-#include "p_pspr.h"
-#include "p_enemy.h"
-#include "a_sharedglobal.h"
 #include "a_keys.h"
-#include "filesystem.h"
-#include "cmdlib.h"
-#include "sbar.h"
-#include "intermission/intermission.h"
-#include "c_console.h"
-#include "c_dispatch.h"
-#include "d_net.h"
-#include "serializer_doom.h"
-#include "serialize_obj.h"
-#include "d_player.h"
-#include "r_utility.h"
-#include "p_blockmap.h"
 #include "a_morph.h"
-#include "p_spec.h"
-#include "vm.h"
-#include "g_levellocals.h"
-#include "actorinlines.h"
-#include "p_acs.h"
-#include "events.h"
-#include "g_game.h"
-#include "v_video.h"
-#include "gstrings.h"
-#include "s_music.h"
+#include "actorinlines.h" // IWYU pragma: keep
+#include "basics.h"
+#include "c_dispatch.h"
+#include "cmdlib.h"
+#include "d_event.h"
 #include "d_main.h"
+#include "d_net.h"
+#include "d_player.h"
+#include "doomdef.h"
+#include "doomstat.h"
+#include "events.h"
+#include "filesystem.h"
+#include "g_game.h"
+#include "g_levellocals.h"
+#include "gi.h"
+#include "gstrings.h"
 #include "hw_vrmodes.h"
+#include "i_net.h"
+#include "intermission/intermission.h"
+#include "m_random.h"
+#include "p_acs.h"
+#include "p_blockmap.h"
+#include "p_enemy.h"
+#include "p_local.h"
+#include "p_pspr.h"
+#include "p_spec.h"
+#include "r_utility.h"
+#include "s_music.h"
+#include "s_sound.h"
+#include "sbar.h"
+#include "serialize_obj.h" // IWYU pragma: keep
+#include "serializer_doom.h"
+#include "vm.h"
+
+extern int paused;
 
 static FRandom pr_skullpop ("SkullPop");
 
@@ -158,8 +129,8 @@ static void UpdateCanonicalMainHandPose(player_t *player)
 		const double shootz = player->mo->Center() - player->mo->Floorclip + player->mo->AttackOffset();
 		player->mo->AttackPos = player->mo->PosAtZ(shootz);
 	}
-	player->mo->AttackPitch = CmdAngleToDAngle(player->cmd.ucmd.weaponpitch);
-	player->mo->AttackAngle = CmdAngleToDAngle(player->cmd.ucmd.weaponyaw);
+	player->mo->AttackPitch = CmdAngleToDAngle(player->cmd.weaponpitch);
+	player->mo->AttackAngle = CmdAngleToDAngle(player->cmd.weaponyaw);
 	player->mo->AttackRoll = nullAngle;
 
 	// Multiplayer fake-6DoF uses a single canonical weapon aim. Mirror that
@@ -208,6 +179,8 @@ CUSTOM_CVAR(Float, cl_rubberband_limit, 756.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG
 		self = 0.0f;
 }
 
+EXTERN_CVAR (Int, cl_debugprediction)
+
 ColorSetList ColorSets;
 PainFlashList PainFlashes;
 
@@ -218,34 +191,328 @@ CUSTOM_CVAR(Float, fov, 90.f, CVAR_ARCHIVE | CVAR_USERINFO | CVAR_NOINITCALL)
 	p->SetFOV(fov);
 }
 
-static DVector3 LastPredictedPosition;
-static int LastPredictedPortalGroup;
-static int LastPredictedTic;
-
-static TArray<FRandom> PredictionRNG;
-
-static player_t PredictionPlayerBackup;
-static AActor *PredictionActor;
-static TArray<uint8_t> PredictionActorBackupArray;
-static TArray<AActor *> PredictionSectorListBackup;
-
-static TArray<sector_t *> PredictionTouchingSectorsBackup;
-static TArray<msecnode_t *> PredictionTouchingSectors_sprev_Backup;
-
-static TArray<sector_t *> PredictionRenderSectorsBackup;
-static TArray<msecnode_t *> PredictionRenderSectors_sprev_Backup;
-
-static TArray<sector_t *> PredictionPortalSectorsBackup;
-static TArray<msecnode_t *> PredictionPortalSectors_sprev_Backup;
-
-static TArray<FLinePortal *> PredictionPortalLinesBackup;
-static TArray<portnode_t *> PredictionPortalLines_sprev_Backup;
-
-struct
+// Iterate through the Actor's own link nodes, storing their index within the
+// list. This isn't guaranteed to give correct results, but that means someone
+// messed with the world in a way will desync things eventually regardless.
+// TODO: Add support for TID links.
+struct FPhysicsLinkBackup
 {
-	DVector3 Pos = {};
-	int Flags = 0;
-} static PredictionViewPosBackup;
+	// Track found link sources to make sure any additional ones are released. We don't want to
+	// accidentally fix linking bugs when doing the relink from unpredicting.
+	TMap<const sector_t*, bool> ValidSectors = {};
+	TArray<int> TouchingSectorsPos = {};
+	TMap<int, bool> ValidBlockNodes = {};
+	TArray<int> BlockmapPos = {};
+	int ThingPos = -1;
+	bool bInSector = false;
+
+	FPhysicsLinkBackup() = default;
+	FPhysicsLinkBackup(const AActor& mo)
+	{
+		for (auto node = mo.touching_sectorlist; node != nullptr; node = node->m_tnext)
+		{
+			int index = 0;
+			for (auto sNode = node->m_sector->touching_thinglist; sNode != nullptr; sNode = sNode->m_snext)
+			{
+				if (sNode->m_thing == &mo)
+					break;
+				++index;
+			}
+			TouchingSectorsPos.Push(index - 1);
+			ValidSectors[node->m_sector] = true;
+		}
+
+		if (mo.Sector != nullptr)
+		{
+			int index = 0;
+			for (auto act = mo.Sector->thinglist; act != nullptr; act = act->snext)
+			{
+				if (act == &mo)
+				{
+					bInSector = true;
+					break;
+				}
+				++index;
+			}
+			if (bInSector)
+				ThingPos = index - 1;
+		}
+
+		for (auto node = mo.BlockNode; node != nullptr; node = node->NextBlock)
+		{
+			int index = 0;
+			for (auto bNode = mo.Level->blockmap.blocklinks[node->BlockIndex]; bNode != nullptr; bNode = bNode->NextActor)
+			{
+				if (bNode->Me == &mo)
+					break;
+				++index;
+			}
+			BlockmapPos.Push(index - 1);
+			ValidBlockNodes[node->BlockIndex] = true;
+		}
+	}
+
+	void Restore(AActor& mo)
+	{
+		size_t count = 0u;
+		for (auto node = mo.touching_sectorlist; node != nullptr;)
+		{
+			if (ValidSectors.CheckKey(node->m_sector) == nullptr)
+			{
+				// This doesn't get updated in the unlinking for some reason, so we have to fix it
+				// manually...
+				auto next = node->m_tnext;
+				if (node == mo.touching_sectorlist)
+					mo.touching_sectorlist = next;
+				P_DelSecnode(node, &sector_t::touching_thinglist);
+				node = next;
+				continue;
+			}
+
+			if (count >= TouchingSectorsPos.Size())
+			{
+				// We still need to check for invalid sector nodes, so keep going.
+				node = node->m_tnext;
+				continue;
+			}
+
+			// Only the sector list needs to be relinked as the order of the thing list is
+			// deterministically rebuilt by its nature.
+			if (node->m_sprev == nullptr)
+				node->m_sector->touching_thinglist = node->m_snext;
+			else
+				node->m_sprev->m_snext = node->m_snext;
+			if (node->m_snext != nullptr)
+				node->m_snext->m_sprev = node->m_sprev;
+
+			int i = 0;
+			msecnode_t* prev = nullptr, * next = nullptr;
+			for (next = node->m_sector->touching_thinglist; next != nullptr; prev = next, next = next->m_snext)
+			{
+				if (i > TouchingSectorsPos[count])
+					break;
+				++i;
+			}
+			node->m_sprev = prev;
+			node->m_snext = next;
+			if (prev != nullptr)
+				prev->m_snext = node;
+			if (next != nullptr)
+				next->m_sprev = node;
+			if (prev == nullptr)
+				node->m_sector->touching_thinglist = node;
+
+			++count;
+			node = node->m_tnext;
+		}
+
+		if (bInSector && mo.Sector != nullptr)
+		{
+			*mo.sprev = mo.snext;
+			if (mo.snext != nullptr)
+				mo.snext->sprev = mo.sprev;
+
+			int i = 0;
+			AActor** next = nullptr;
+			for (next = &mo.Sector->thinglist; *next != nullptr; next = &(*next)->snext)
+			{
+				if (i > ThingPos)
+					break;
+				++i;
+			}
+
+			mo.snext = *next;
+			if (*next != nullptr)
+				(*next)->sprev = &mo.snext;
+			mo.sprev = next;
+			*mo.sprev = &mo;
+		}
+
+		count = 0u;
+		for (auto node = mo.BlockNode; node != nullptr;)
+		{
+			if (ValidBlockNodes.CheckKey(node->BlockIndex) == nullptr)
+			{
+				auto next = node->NextBlock;
+				if (next != nullptr)
+					next->PrevBlock = node->PrevBlock;
+				*(node->PrevBlock) = node->NextBlock;
+				if (node->NextActor != nullptr)
+					node->NextActor->PrevActor = node->PrevActor;
+				*(node->PrevActor) = node->NextActor;
+				node->Release();
+				node = next;
+				continue;
+			}
+
+			if (count >= BlockmapPos.Size())
+			{
+				// We still need to check for invalid blockmap nodes, so keep going.
+				node = node->NextBlock;
+				continue;
+			}
+
+			// Same as sector linking above.
+			*node->PrevActor = node->NextActor;
+			if (node->NextActor != nullptr)
+				node->NextActor->PrevActor = node->PrevActor;
+
+			int i = 0;
+			FBlockNode** next = nullptr;
+			for (next = &mo.Level->blockmap.blocklinks[node->BlockIndex]; *next != nullptr; next = &(*next)->NextActor)
+			{
+				if (i > BlockmapPos[count])
+					break;
+				++i;
+			}
+
+			node->NextActor = *next;
+			if (*next != nullptr)
+				(*next)->PrevActor = &node->NextActor;
+			node->PrevActor = next;
+			*node->PrevActor = node;
+
+			++count;
+			node = node->NextBlock;
+		}
+	}
+};
+
+struct FObjectBackup
+{
+private:
+	TObjPtr<DObject*> _obj = MakeObjPtr<DObject*>(nullptr);
+public:
+	FObjectBackup() = default;
+	FObjectBackup(DObject& obj)
+	{
+		_obj = &obj;
+	}
+
+	template<class T>
+	T* GetObject()
+	{
+		return dyn_cast<T>(_obj);
+	}
+};
+struct FActorBackup : public FObjectBackup
+{
+private:
+	FPhysicsLinkBackup _link = {};
+	int _statNum = -1;
+	int _tid = INT_MAX;
+public:
+	FActorBackup(AActor& act) : FObjectBackup(act)
+	{
+		_link = { act };
+	}
+
+	void PostBackup()
+	{
+		auto act = GetObject<AActor>();
+		if (act != nullptr)
+		{
+			// TODO: This needs to be handled properly in the rest of the physics code...
+			act->flags &= ~MF_PICKUP;
+			act->flags2 &= ~MF2_PUSHWALL;
+		}
+	}
+
+	void PreRollback()
+	{
+		auto act = GetObject<AActor>();
+		if (act == nullptr)
+			return;
+
+		// These won't relink properly on rollback so we need to keep the old values as
+		// they were. This still needs to be serialized in case the Actor was destroyed so we
+		// can relink it back in properly after it's been recreated.
+		_statNum = act->GetStatNum();
+		_tid = act->tid;
+		act->UnlinkFromWorld(nullptr);
+	}
+
+	void PostRollback()
+	{
+		auto act = GetObject<AActor>();
+		if (act == nullptr)
+			return;
+
+		if (_statNum == -1)
+			act->ChangeStatNum(act->GetStatNum());
+		else
+			act->RollbackStatNum(_statNum);
+
+		if (_tid == INT_MAX)
+		{
+			_tid = act->tid;
+			act->tid = 0;
+			act->SetTID(_tid);
+		}
+		else
+		{
+			act->tid = _tid;
+		}
+
+		act->LinkToWorld(nullptr);
+		// TODO: This might cause issues with emulating undefined behavior regarding things like polyobject collisions? Will need to be
+		// investigated further in case it breaks determinism.
+		_link.Restore(*act);
+
+		act->renderflags &= ~RF_NOINTERPOLATEVIEW;
+		act->flags8 &= ~MF8_RECREATELIGHTS;
+	}
+};
+
+struct FPredictionData
+{
+	bool bResetPrediction = false;
+	int LastPredictedTic = 0;
+
+	TArray<TObjPtr<DObject*>> RollbackObjectRefs = {};	// Try and reuse existing Objects when deserializing.
+	TArray<FObjectBackup> RollbackObjects = {};			// If these Objects no longer exist, they must be recreated instead of left as a null pointer.
+	TArray<FActorBackup> RollbackActors = {};
+	TArray<size_t> RollbackPlayers = {};				// Store by index instead of pointer so it'll never be invalid when deserializing.
+	FLevelLocals* RollbackLevel = nullptr;				// Save this for when opening the reader.
+	std::string_view RollbackData;		// Snapshot of all saved Objects.
+	FWriterBuffer RollbackWriterBuffer;
+	char ParseBuffer[262144] = {};
+	FReaderAllocator RollbackReaderAllocator;
+
+	FPredictionData() : RollbackReaderAllocator(ParseBuffer, sizeof(ParseBuffer)) {}
+
+	struct
+	{
+		DVector3 Pos = { 0.0, 0.0, 0.0 };
+		int PortalGroup = 0;
+		int Tic = -1;
+	} LastPos = {};
+
+	void ResetPos()
+	{
+		LastPos = {};
+	}
+
+	void ClearBackup()
+	{
+		RollbackObjectRefs.Clear();
+		RollbackObjects.Clear();
+		RollbackActors.Clear();
+		RollbackPlayers.Clear();
+		RollbackLevel = nullptr;
+		RollbackData = "";
+	}
+
+	void Mark()
+	{
+		// Try and avoid losing references to any Objects being used by a backed up entity, that way
+		// we can avoid pointers getting unnecessarily nulled. The fully rolled back Objects should
+		// also be in here which, if they weren't destroyed manually, allows us to skip the step of
+		// creating a new object should the reference get lost.
+		for (DObject* obj : RollbackObjectRefs)
+			GC::Mark(obj);
+	}
+} static PredictionData = {};
 
 // [GRB] Custom player classes
 TArray<FPlayerClass> PlayerClasses;
@@ -285,7 +552,7 @@ DEFINE_ACTION_FUNCTION(FPlayerClass, CheckSkin)
 //===========================================================================
 
 FString GetPrintableDisplayName(PClassActor *cls)
-{ 
+{
 	// Fixme; This needs a decent way to access the string table without creating a mess.
 	// [RH] ????
 	return cls->GetDisplayName();
@@ -351,7 +618,7 @@ player_t::~player_t()
 	DestroyPSprites();
 }
 
-void player_t::CopyFrom(player_t &p, bool copyPSP)
+void player_t::CopyFrom(player_t &p)
 {
 	mo = p.mo;
 	playerstate = p.playerstate;
@@ -366,6 +633,7 @@ void player_t::CopyFrom(player_t &p, bool copyPSP)
 	viewheight = p.viewheight;
 	deltaviewheight = p.deltaviewheight;
 	bob = p.bob;
+	BobTimer = p.BobTimer;
 	Vel = p.Vel;
 	centering = p.centering;
 	turnticks = p.turnticks;
@@ -406,6 +674,8 @@ void player_t::CopyFrom(player_t &p, bool copyPSP)
 	extralight = p.extralight;
 	fixedcolormap = p.fixedcolormap;
 	fixedlightlevel = p.fixedlightlevel;
+	FullbrightMode = p.FullbrightMode;
+	bForceFullbright = p.bForceFullbright;
 	morphTics = p.morphTics;
 	MorphedPlayerClass = p.MorphedPlayerClass;
 	MorphStyle = p.MorphStyle;
@@ -443,12 +713,9 @@ void player_t::CopyFrom(player_t &p, bool copyPSP)
 	SoundClass = p.SoundClass;
 	LastSafePos = p.LastSafePos;
 	angleOffsetTargets = p.angleOffsetTargets;
-	if (copyPSP)
-	{
-		// This needs to transfer ownership completely.
-		psprites = p.psprites;
-		p.psprites = nullptr;
-	}
+	// This needs to transfer ownership completely.
+	psprites = p.psprites;
+	p.psprites = nullptr;
 }
 
 size_t player_t::PropagateMark()
@@ -526,7 +793,7 @@ void player_t::SetLogText (const char *text)
 	if (mo && mo->CheckLocalView())
 	{
 		// Print log text to console
-		Printf(PRINT_HIGH | PRINT_NONOTIFY, TEXTCOLOR_GOLD "%s\n", LogText[0] == '$' ? GStrings.GetString(text + 1) : text);
+		Printf(PRINT_NONOTIFY, TEXTCOLOR_GOLD "%s\n", LogText[0] == '$' ? GStrings.GetString(text + 1) : text);
 	}
 }
 
@@ -563,8 +830,6 @@ DEFINE_ACTION_FUNCTION(_PlayerInfo, SetSubtitleNumber)
 	self->SetSubtitle(log, soundid);
 	return 0;
 }
-
-
 
 int player_t::GetSpawnClass()
 {
@@ -610,7 +875,7 @@ DEFINE_ACTION_FUNCTION(_PlayerInfo, SetSkin)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(player_t);
 	PARAM_INT(skinIndex);
-	if (skinIndex >= 0 && skinIndex < Skins.size())
+	if (skinIndex >= 0 && skinIndex < Skins.SSize())
 	{
 		// commented code - cvar_set calls this automatically, along with saving the skin selection.
 		//self->userinfo.SkinNumChanged(skinIndex);
@@ -699,8 +964,8 @@ DEFINE_ACTION_FUNCTION(FPlayerClass, GetColorSetName)
 
 static int GetPainFlash(AActor *info, int type)
 {
-	// go backwards through the list and return the first item with a 
-	// matching damage type for an ancestor of our class. 
+	// go backwards through the list and return the first item with a
+	// matching damage type for an ancestor of our class.
 	// This will always return the best fit because any parent class
 	// must be processed before its children.
 	for (int i = PainFlashes.Size() - 1; i >= 0; i--)
@@ -733,7 +998,6 @@ DEFINE_ACTION_FUNCTION_NATIVE(APlayerPawn, GetPainFlashForType, GetPainFlash)
 
 EXTERN_CVAR(Float, maxviewpitch)
 EXTERN_CVAR(Bool, cl_oldfreelooklimit);
-
 
 static int GetSoftPitch(bool down)
 {
@@ -771,7 +1035,6 @@ DEFINE_ACTION_FUNCTION(_PlayerInfo, SendPitchLimits)
 	return 0;
 }
 
-
 bool player_t::HasWeaponsInSlot(int slot) const
 {
 	for (int i = 0; i < weapons.SlotSize(slot); i++)
@@ -789,7 +1052,6 @@ DEFINE_ACTION_FUNCTION(_PlayerInfo, HasWeaponsInSlot)
 	ACTION_RETURN_BOOL(self->HasWeaponsInSlot(slot));
 }
 
-
 bool player_t::Resurrect()
 {
 	if (mo == nullptr || mo->IsKindOf(NAME_PlayerChunk)) return false;
@@ -800,7 +1062,7 @@ bool player_t::Resurrect()
 	mo->renderflags &= ~RF_INVISIBLE;
 	mo->Height = mo->GetDefault()->Height;
 	mo->radius = mo->GetDefault()->radius;
-	mo->special1 = 0;	// required for the Hexen fighter's fist attack. 
+	mo->special1 = 0;	// required for the Hexen fighter's fist attack.
 								// This gets set by AActor::Die as flag for the wimpy death and must be reset here.
 	mo->SetState(mo->SpawnState);
 	int pnum = mo->Level->PlayerNum(this);
@@ -837,6 +1099,68 @@ DEFINE_ACTION_FUNCTION(_PlayerInfo, Resurrect)
 	ACTION_RETURN_BOOL(self->Resurrect());
 }
 
+player_t* player_t::GetNextPlayer(player_t* p, bool noBots)
+{
+	int pNum = player_t::GetNextPlayerNumber(p == nullptr ? -1 : p - players, noBots);
+	return pNum != -1 ? &players[pNum] : nullptr;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(_PlayerInfo, GetNextPlayer, player_t::GetNextPlayer)
+{
+	PARAM_PROLOGUE;
+	PARAM_POINTER(p, player_t);
+	PARAM_BOOL(noBots);
+
+	ACTION_RETURN_POINTER(player_t::GetNextPlayer(p, noBots));
+}
+
+int player_t::GetNextPlayerNumber(int pNum, bool noBots)
+{
+	int m = MAXPLAYERS;
+	int i = max<int>(pNum + 1, 0);
+
+	for (; i < m; ++i)
+	{
+		if (playeringame[i] && (!noBots || players[i].Bot == nullptr))
+			break;
+	}
+
+	return i < m ? i : -1;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(_PlayerInfo, GetNextPlayerNumber, player_t::GetNextPlayerNumber)
+{
+	PARAM_PROLOGUE;
+	PARAM_INT(pNum);
+	PARAM_BOOL(noBots);
+
+	ACTION_RETURN_INT(player_t::GetNextPlayerNumber(pNum, noBots));
+}
+
+static int GetFullbrightMode(player_t* self)
+{
+	return self->GetFullbrightMode();
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(_PlayerInfo, GetFullbrightMode, GetFullbrightMode)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(player_t);
+	ACTION_RETURN_INT(self->GetFullbrightMode());
+}
+
+static void SetFullbrightMode(player_t* self, int mode, bool force)
+{
+	self->SetFullbrightMode(static_cast<EFullbrightMode>(mode), force);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(_PlayerInfo, SetFullbrightMode, SetFullbrightMode)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(player_t);
+	PARAM_INT(mode);
+	PARAM_BOOL(force);
+	self->SetFullbrightMode(static_cast<EFullbrightMode>(mode), force);
+	return 0;
+}
 
 DEFINE_ACTION_FUNCTION(_PlayerInfo, GetUserName)
 {
@@ -884,7 +1208,7 @@ DEFINE_ACTION_FUNCTION(_PlayerInfo, GetSkin)
 DEFINE_ACTION_FUNCTION(_PlayerInfo, GetSkinCount)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(player_t);
-	ACTION_RETURN_INT(Skins.size());
+	ACTION_RETURN_INT(Skins.SSize());
 }
 
 DEFINE_ACTION_FUNCTION(_PlayerInfo, GetGender)
@@ -941,10 +1265,9 @@ DEFINE_ACTION_FUNCTION(_PlayerInfo, GetStillBob)
 	ACTION_RETURN_FLOAT(self->userinfo.GetStillBob());
 }
 
-
 //===========================================================================
 //
-// 
+//
 //
 //===========================================================================
 
@@ -1017,7 +1340,7 @@ void PlayIdle (AActor *player)
 //
 // A_PlayerScream
 //
-// try to find the appropriate death sound and use suitable 
+// try to find the appropriate death sound and use suitable
 // replacements if necessary
 //
 //===========================================================================
@@ -1033,11 +1356,11 @@ DEFINE_ACTION_FUNCTION(AActor, A_PlayerScream)
 	{
 		if (self->DeathSound != NO_SOUND)
 		{
-			S_Sound (self, CHAN_VOICE, 0, self->DeathSound, 1, ATTN_NORM);
+			S_Sound (self, CHAN_VOICE, CHANF_NORUMBLE, self->DeathSound, 1, ATTN_NORM);
 		}
 		else
 		{
-			S_Sound (self, CHAN_VOICE, 0, "*death", 1, ATTN_NORM);
+			S_Sound (self, CHAN_VOICE, CHANF_NORUMBLE, "*death", 1, ATTN_NORM);
 		}
 		return 0;
 	}
@@ -1087,10 +1410,9 @@ DEFINE_ACTION_FUNCTION(AActor, A_PlayerScream)
 			}
 		}
 	}
-	S_Sound (self, chan, 0, sound, 1, ATTN_NORM);
+	S_Sound (self, chan, CHANF_NORUMBLE, sound, 1, ATTN_NORM);
 	return 0;
 }
-
 
 //===========================================================================
 //
@@ -1118,7 +1440,7 @@ void P_CheckPlayerSprite(AActor *actor, int &spritenum, DVector2 &scale)
 	if (player->mo == actor && player->crouchfactor < 0.75)
 	{
 		int crouchsprite = player->mo->IntVar(NAME_crouchsprite);
-		if (spritenum == actor->SpawnState->sprite || spritenum == crouchsprite) 
+		if (spritenum == actor->SpawnState->sprite || spritenum == crouchsprite)
 		{
 			crouchspriteno = crouchsprite;
 		}
@@ -1133,7 +1455,7 @@ void P_CheckPlayerSprite(AActor *actor, int &spritenum, DVector2 &scale)
 			crouchspriteno = -1;
 		}
 
-		if (crouchspriteno > 0) 
+		if (crouchspriteno > 0)
 		{
 			spritenum = crouchspriteno;
 		}
@@ -1167,7 +1489,7 @@ void P_FallingDamage (AActor *actor)
 
 	if (damagestyle == 0)
 		return;
-		
+
 	if (actor->floorsector->Flags & SECF_NOFALLINGDAMAGE)
 		return;
 
@@ -1199,7 +1521,7 @@ void P_FallingDamage (AActor *actor)
 			}
 		}
 		break;
-	
+
 	case DF_FORCE_FALLINGZD:		// ZDoom falling damage
 		if (vel <= 19)
 		{ // Not fast enough to hurt
@@ -1323,7 +1645,7 @@ DEFINE_ACTION_FUNCTION(APlayerPawn, CheckEnvironment)
 void P_CheckUse(player_t *player)
 {
 	// check for use
-	if (player->cmd.ucmd.buttons & BT_USE)
+	if (player->cmd.buttons & BT_USE)
 	{
 		if (!player->usedown)
 		{
@@ -1340,12 +1662,50 @@ void P_CheckUse(player_t *player)
 	}
 }
 
-
 DEFINE_ACTION_FUNCTION(APlayerPawn, CheckUse)
 {
 	PARAM_SELF_PROLOGUE(AActor);
 	P_CheckUse(self->player);
 	return 0;
+}
+
+void FSafePosition::Update(AActor& mobj, bool force)
+{
+	FSafePosition test;
+	test.Sector = mobj.Sector;
+	test.Pos = mobj.Pos();
+	test.Height = mobj.IsKindOf(NAME_PlayerPawn) ? mobj.FloatVar(NAME_FullHeight) : mobj.GetDefault()->Height;
+	test.MaxStepHeight = mobj.MaxStepHeight;
+	test.bValidPos = mobj.Sector != nullptr
+					&& ((!(mobj.flags2 & MF2_ONMOBJ) && mobj.Z() <= mobj.floorz && mobj.Z() - mobj.dropoffz <= mobj.MaxDropOffHeight) || mobj.waterlevel >= 3);
+
+	if (force || test.IsSafe(mobj.tid))
+		memcpy(this, &test, sizeof(FSafePosition));
+}
+
+bool FSafePosition::IsSafe(int tid) const
+{
+	// These need to be validated in real-time as the sector itself could've changed, leading to a valid
+	// position no longer being safe.
+	return bValidPos
+			&& NextHighestCeilingAt(Sector, Pos.X, Pos.Y, Pos.Z, Pos.Z + Height) - Pos.Z >= Height
+			&& !Sector->IsDangerous(Pos, Height, tid);
+}
+
+FSerializer& FSafePosition::Serialize(FSerializer& arc, const char* name)
+{
+	if (arc.BeginObject(name))
+	{
+		arc("sector", Sector)
+			("pos", Pos)
+			("height", Height)
+			("maxstepheight", MaxStepHeight)
+			("bvalidpos", bValidPos);
+
+		arc.EndObject();
+	}
+
+	return arc;
 }
 
 //----------------------------------------------------------------------------
@@ -1356,7 +1716,7 @@ DEFINE_ACTION_FUNCTION(APlayerPawn, CheckUse)
 
 void P_PlayerThink (player_t *player)
 {
-	ticcmd_t *cmd = &player->cmd;
+	usercmd_t *cmd = &player->cmd;
 
 	if (player->mo == NULL)
 	{
@@ -1389,17 +1749,16 @@ void P_PlayerThink (player_t *player)
 		player->angleOffsetTargets[i] = nullAngle;
 	}
 
+	// TODO: Should this be moved to the client-side logic like inventory tics?
 	if (player->SubtitleCounter > 0)
 	{
 		player->SubtitleCounter--;
 	}
 
-	if (player->playerstate == PST_LIVE
-		&& player->mo->Z() <= player->mo->floorz
-		&& !player->mo->Sector->IsDangerous(player->mo->Pos(), player->mo->Height))
-	{
-		player->LastSafePos = player->mo->Pos();
-	}
+	if (player->playerstate == PST_LIVE)
+		player->LastSafePos.Update(*player->mo);
+
+	++player->BobTimer;
 
 	// Bots do not think in freeze mode.
 	if (player->mo->Level->isFrozen() && player->Bot != nullptr)
@@ -1411,14 +1770,14 @@ void P_PlayerThink (player_t *player)
 	{
 		fprintf (debugfile, "tic %d for pl %d: (%f, %f, %f, %f) b:%02x p:%d y:%d f:%d s:%d u:%d\n",
 			gametic, (int)(player-players), player->mo->X(), player->mo->Y(), player->mo->Z(),
-			player->mo->Angles.Yaw.Degrees(), player->cmd.ucmd.buttons,
-			player->cmd.ucmd.pitch, player->cmd.ucmd.yaw, player->cmd.ucmd.forwardmove,
-			player->cmd.ucmd.sidemove, player->cmd.ucmd.upmove);
+			player->mo->Angles.Yaw.Degrees(), player->cmd.buttons,
+			player->cmd.pitch, player->cmd.yaw, player->cmd.forwardmove,
+			player->cmd.sidemove, player->cmd.upmove);
 	}
 
 	// Make unmodified copies for ACS's GetPlayerInput.
 	player->original_oldbuttons = player->original_cmd.buttons;
-	player->original_cmd = cmd->ucmd;
+	player->original_cmd = *cmd;
 	UpdateCanonicalMainHandPose(player);
 	// Don't interpolate the view for more than one tic
 	player->cheats &= ~CF_INTERPVIEW;
@@ -1434,14 +1793,25 @@ void P_PlayerThink (player_t *player)
 		VMCall(func, &param, 1, nullptr, 0);
 	}
 
-    previous_health = player->health;
+	if (BobType == PSPB_2D)
+		P_BobWeapon(player);
+	else if (BobType == PSPB_3D)
+		P_BobWeapon3D(player);
+
+	// Moved this to directly after player thinking to get more accurate velocity values. Also takes
+	// 3D vs 2D movement into account now.
+	if (!NetworkEntityManager::IsPredicting() && player->mo != nullptr)
+	{
+		double spd = (player->mo->flags & MF_NOGRAVITY) ? player->mo->Vel.Length() : player->mo->Vel.XY().Length();
+		player->mo->Level->velocities[player - players].SetVelocity(spd);
+	}
+
+	previous_health = player->health;
 }
 
 void P_PredictionLerpReset()
 {
-	LastPredictedPosition = DVector3{};
-	LastPredictedPortalGroup = 0;
-	LastPredictedTic = -1;
+	PredictionData.ResetPos();
 }
 
 void P_LerpCalculate(AActor* pmo, const DVector3& from, DVector3 &result, float scale, float threshold, float minMove)
@@ -1460,199 +1830,118 @@ void P_LerpCalculate(AActor* pmo, const DVector3& from, DVector3 &result, float 
 	result = pmo->Vec3Offset(-diff.X, -diff.Y, -diff.Z);
 }
 
-template<class nodetype, class linktype>
-void BackupNodeList(AActor *act, nodetype *head, nodetype *linktype::*otherlist, TArray<nodetype*, nodetype*> &prevbackup, TArray<linktype *, linktype *> &otherbackup)
+void P_MarkRollbackObjects()
 {
-	// The ordering of the touching_sectorlist needs to remain unchanged
-	// Also store a copy of all previous sector_thinglist nodes
-	prevbackup.Clear();
-	otherbackup.Clear();
+	PredictionData.Mark();
+}
 
-	for (auto mnode = head; mnode != nullptr; mnode = mnode->m_tnext)
+void P_ClearPredictionData()
+{
+	NetworkEntityManager::DisablePrediction();
+	PredictionData.ResetPos();
+	PredictionData.ClearBackup();
+	PredictionData.bResetPrediction = false;
+	PredictionData.LastPredictedTic = 0;
+}
+
+static void P_RollbackObject(DObject* obj, FSerializer& arc)
+{
+	if (!arc.MarkRollbackObject(obj))
+		return;
+
+	auto act = dyn_cast<AActor>(obj);
+	if (act != nullptr)
 	{
-		otherbackup.Push(mnode->m_sector);
+		PredictionData.RollbackActors.Push(FActorBackup{ *act });
+		if (act->player != nullptr && act->player->mo == act)
+			PredictionData.RollbackPlayers.Push(act->player - players);
 
-		for (auto snode = mnode->m_sector->*otherlist; snode; snode = snode->m_snext)
-		{
-			if (snode->m_thing == act)
-			{
-				prevbackup.Push(snode->m_sprev);
-				break;
-			}
-		}
+		// TODO: In the future these will be automatically handled by the net owner system, but handle them
+		// manually for now to increase stability.
+		P_RollbackObject(act->ViewPos, arc);
+		P_RollbackObject(act->modelData, arc);
+	}
+	else
+	{
+		PredictionData.RollbackObjects.Push({ *obj });
 	}
 }
 
-template<class nodetype, class linktype>
-nodetype *RestoreNodeList(AActor *act, nodetype *head, nodetype *linktype::*otherlist, TArray<nodetype*, nodetype*> &prevbackup, TArray<linktype *, linktype *> &otherbackup)
+static void P_RollbackPlayers(FSerializer& arc)
 {
-	// Destroy old refrences
-	nodetype *node = head;
-	while (node)
-	{
-		node->m_thing = NULL;
-		node = node->m_tnext;
-	}
+	if (!PredictionData.RollbackPlayers.Size() || !arc.BeginArray("players"))
+		return;
 
-	// Make the sector_list match the player's touching_sectorlist before it got predicted.
-	P_DelSeclist(head, otherlist);
-	head = NULL;
-	for (auto i = otherbackup.Size(); i-- > 0;)
+	for (auto p : PredictionData.RollbackPlayers)
 	{
-		head = P_AddSecnode(otherbackup[i], act, head, otherbackup[i]->*otherlist);
-	}
-	//act->touching_sectorlist = ctx.sector_list;	// Attach to thing
-	//ctx.sector_list = NULL;		// clear for next time
-
-	// In the old code this block never executed because of the commented-out NULL assignment above. Needs to be checked
-	node = head;
-	while (node)
-	{
-		if (node->m_thing == NULL)
+		if (arc.BeginObject(nullptr))
 		{
-			if (node == head)
-				head = node->m_tnext;
-			node = P_DelSecnode(node, otherlist);
-		}
-		else
-		{
-			node = node->m_tnext;
+			players[p].Serialize(arc);
+			arc.EndObject();
 		}
 	}
 
-	nodetype *snode;
-
-	// Restore sector thinglist order
-	for (auto i = otherbackup.Size(); i-- > 0;)
-	{
-		// If we were already the head node, then nothing needs to change
-		if (prevbackup[i] == NULL)
-			continue;
-
-		for (snode = otherbackup[i]->*otherlist; snode; snode = snode->m_snext)
-		{
-			if (snode->m_thing == act)
-			{
-				if (snode->m_sprev)
-					snode->m_sprev->m_snext = snode->m_snext;
-				else
-					snode->m_sector->*otherlist = snode->m_snext;
-				if (snode->m_snext)
-					snode->m_snext->m_sprev = snode->m_sprev;
-
-				snode->m_sprev = prevbackup[i];
-
-				// At the moment, we don't exist in the list anymore, but we do know what our previous node is, so we set its current m_snext->m_sprev to us.
-				if (snode->m_sprev->m_snext)
-					snode->m_sprev->m_snext->m_sprev = snode;
-				snode->m_snext = snode->m_sprev->m_snext;
-				snode->m_sprev->m_snext = snode;
-				break;
-			}
-		}
-	}
-	return head;
+	arc.EndArray();
 }
 
-void P_PredictPlayer (player_t *player)
+void P_PredictClient()
 {
-	int maxtic;
-
-	if (singletics ||
-		demoplayback ||
-		player->mo == NULL ||
-		player != player->mo->Level->GetConsolePlayer() ||
-		player->playerstate != PST_LIVE ||
-		!netgame ||
-		/*player->morphTics ||*/
-		(player->cheats & CF_PREDICTING))
-	{
+	if (gamestate != GS_LEVEL)
 		return;
-	}
 
-	maxtic = maketic;
-
-	if (gametic == maxtic)
+	player_t* player = &players[consoleplayer];
+	if (!NetworkEntityManager::IsPredicting())
 	{
-		return;
-	}
+		NetworkEntityManager::EnablePrediction();
+		PredictionData.bResetPrediction = true;
+		PredictionData.LastPredictedTic = gametic;
 
-	FRandom::SaveRNGState(PredictionRNG);
-
-	// Save original values for restoration later
-	PredictionPlayerBackup.CopyFrom(*player, false);
-
-	auto act = player->mo;
-	PredictionActor = player->mo;
-	PredictionActorBackupArray.Resize(act->GetClass()->Size);
-	memcpy(PredictionActorBackupArray.Data(), &act->snext, act->GetClass()->Size - ((uint8_t *)&act->snext - (uint8_t *)act));
-
-	// Since this is a DObject it needs to have its fields backed up manually for restore, otherwise any changes
-	// to it will be permanent while predicting. This is now auto-created on pawns to prevent creation spam.
-	if (act->ViewPos != nullptr)
-	{
-		PredictionViewPosBackup.Pos = act->ViewPos->Offset;
-		PredictionViewPosBackup.Flags = act->ViewPos->Flags;
-	}
-
-	act->flags &= ~MF_PICKUP;
-	act->flags2 &= ~MF2_PUSHWALL;
-	player->cheats |= CF_PREDICTING;
-
-	BackupNodeList(act, act->touching_sectorlist, &sector_t::touching_thinglist, PredictionTouchingSectors_sprev_Backup, PredictionTouchingSectorsBackup);
-	BackupNodeList(act, act->touching_rendersectors, &sector_t::touching_renderthings, PredictionRenderSectors_sprev_Backup, PredictionRenderSectorsBackup);
-	BackupNodeList(act, act->touching_sectorportallist, &sector_t::sectorportal_thinglist, PredictionPortalSectors_sprev_Backup, PredictionPortalSectorsBackup);
-	BackupNodeList(act, act->touching_lineportallist, &FLinePortal::lineportal_thinglist, PredictionPortalLines_sprev_Backup, PredictionPortalLinesBackup);
-
-	// Keep an ordered list off all actors in the linked sector.
-	PredictionSectorListBackup.Clear();
-	if (!(act->flags & MF_NOSECTOR))
-	{
-		AActor *link = act->Sector->thinglist;
-		
-		while (link != NULL)
+		FDoomSerializer writer = { player->mo->Level };
+		if (writer.OpenWriter(false, true))
 		{
-			PredictionSectorListBackup.Push(link);
-			link = link->snext;
+			FRandom::RollbackRNGState(writer);
+			P_RollbackObject(player->mo, writer);
+			P_RollbackPlayers(writer);
+			TArray<DObject*> fullRollback = {};
+			for (auto& a : PredictionData.RollbackActors)
+				fullRollback.Push(a.GetObject<DObject>());
+			for (auto& o : PredictionData.RollbackObjects)
+				fullRollback.Push(o.GetObject<DObject>());
+			PredictionData.RollbackData = writer.GetOutput(nullptr, &PredictionData.RollbackObjectRefs, &fullRollback);
+			PredictionData.RollbackLevel = player->mo->Level;
+			PredictionData.RollbackWriterBuffer = writer.CloseAndGetBuffer();
+
+			for (auto& a : PredictionData.RollbackActors)
+				a.PostBackup();
+			for (auto o : fullRollback)
+				o->ObjectFlags |= OF_Predicting;
 		}
 	}
 
-	// Blockmap ordering also needs to stay the same, so unlink the block nodes
-	// without releasing them. (They will be used again in P_UnpredictPlayer).
-	FBlockNode *block = act->BlockNode;
-
-	while (block != NULL)
-	{
-		if (block->NextActor != NULL)
-		{
-			block->NextActor->PrevActor = block->PrevActor;
-		}
-		*(block->PrevActor) = block->NextActor;
-		block = block->NextBlock;
-	}
-	act->BlockNode = NULL;
+	player->cheats |= CF_PREDICTING; // This is only here for backwards compat.
+	if (ClientTic <= PredictionData.LastPredictedTic || player->playerstate != PST_LIVE || (player->mo->ObjectFlags & OF_JustSpawned))
+		return;
 
 	// This essentially acts like a mini P_Ticker where only the stuff relevant to the client is actually
 	// called. Call order is preserved.
 	bool rubberband = false, rubberbandLimit = false;
 	DVector3 rubberbandPos = {};
-	const bool canRubberband = LastPredictedTic >= 0 && cl_rubberband_scale > 0.0f && cl_rubberband_scale < 1.0f;
+	const bool canRubberband = PredictionData.bResetPrediction && PredictionData.LastPos.Tic >= 0 && cl_rubberband_scale > 0.0f && cl_rubberband_scale < 1.0f;
 	const double rubberbandThreshold = max<float>(cl_rubberband_minmove, cl_rubberband_threshold);
-	for (int i = gametic; i < maxtic; ++i)
+	for (int i = PredictionData.LastPredictedTic; i < ClientTic; ++i)
 	{
 		// Make sure any portal paths have been cleared from the previous movement.
 		R_ClearInterpolationPath();
 		r_NoInterpolate = false;
-		// Because we're always predicting, this will get set by teleporters and then can never unset itself in the renderer properly.
 		player->mo->renderflags &= ~RF_NOINTERPOLATEVIEW;
 
 		// Got snagged on something. Start correcting towards the player's final predicted position. We're
 		// being intentionally generous here by not really caring how the player got to that position, only
 		// that they ended up in the same spot on the same tick.
-		if (canRubberband && LastPredictedTic == i)
+		if (canRubberband && PredictionData.LastPos.Tic == i)
 		{
-			DVector3 diff = player->mo->Pos() - LastPredictedPosition;
-			diff += player->mo->Level->Displacements.getOffset(player->mo->Sector->PortalGroup, LastPredictedPortalGroup);
+			DVector3 diff = player->mo->Pos() - PredictionData.LastPos.Pos;
+			diff += player->mo->Level->Displacements.getOffset(player->mo->Sector->PortalGroup, PredictionData.LastPos.PortalGroup);
 			double dist = diff.LengthSquared();
 			if (dist >= EQUAL_EPSILON * EQUAL_EPSILON && dist > rubberbandThreshold * rubberbandThreshold)
 			{
@@ -1662,8 +1951,11 @@ void P_PredictPlayer (player_t *player)
 			}
 		}
 
-		player->oldbuttons = player->cmd.ucmd.buttons;
-		player->cmd = localcmds[i % LOCALCMDTICS];
+		player->oldbuttons = player->cmd.buttons;
+		player->cmd = LocalCmds[i % LOCALCMDTICS];
+		if (paused)
+			continue;
+
 		player->mo->ClearInterpolation();
 		player->mo->ClearFOVInterpolation();
 		P_PlayerThink(player);
@@ -1673,7 +1965,7 @@ void P_PredictPlayer (player_t *player)
 	if (rubberband)
 	{
 		DPrintf(DMSG_NOTIFY, "Prediction mismatch at (%.3f, %.3f, %.3f)\nExpected: (%.3f, %.3f, %.3f)\nCorrecting to (%.3f, %.3f, %.3f)\n",
-			LastPredictedPosition.X, LastPredictedPosition.Y, LastPredictedPosition.Z,
+			PredictionData.LastPos.Pos.X, PredictionData.LastPos.Pos.Y, PredictionData.LastPos.Pos.Z,
 			rubberbandPos.X, rubberbandPos.Y, rubberbandPos.Z,
 			player->mo->X(), player->mo->Y(), player->mo->Z());
 
@@ -1688,115 +1980,65 @@ void P_PredictPlayer (player_t *player)
 			player->mo->renderflags &= ~RF_NOINTERPOLATEVIEW;
 
 			DVector3 snapPos = {};
-			P_LerpCalculate(player->mo, LastPredictedPosition, snapPos, cl_rubberband_scale, cl_rubberband_threshold, cl_rubberband_minmove);
-			player->mo->PrevPortalGroup = LastPredictedPortalGroup;
-			player->mo->Prev = LastPredictedPosition;
+			P_LerpCalculate(player->mo, PredictionData.LastPos.Pos, snapPos, cl_rubberband_scale, cl_rubberband_threshold, cl_rubberband_minmove);
+			player->mo->PrevPortalGroup = PredictionData.LastPos.PortalGroup;
+			player->mo->Prev = PredictionData.LastPos.Pos;
 			const double zOfs = player->viewz - player->mo->Z();
 			player->mo->SetXYZ(snapPos);
 			player->viewz = snapPos.Z + zOfs;
 		}
 	}
+	else if (paused)
+	{
+		r_NoInterpolate = true;
+	}
+
+	PredictionData.LastPredictedTic = ClientTic;
+	PredictionData.bResetPrediction = false;
 
 	// This is intentionally done after rubberbanding starts since it'll automatically smooth itself towards
 	// the right spot until it reaches it.
-	LastPredictedTic = maxtic;
-	LastPredictedPosition = player->mo->Pos();
-	LastPredictedPortalGroup = player->mo->Level->PointInSector(LastPredictedPosition)->PortalGroup;
+	PredictionData.LastPos.Tic = ClientTic;
+	PredictionData.LastPos.Pos = player->mo->Pos();
+	PredictionData.LastPos.PortalGroup = player->mo->Level->PointInSector(PredictionData.LastPos.Pos)->PortalGroup;
 }
 
-void P_UnPredictPlayer ()
+void P_UnPredictClient()
 {
-	player_t *player = &players[consoleplayer];
+	if (!NetworkEntityManager::IsPredicting())
+		return;
 
-	if (player->cheats & CF_PREDICTING)
+	NetworkEntityManager::DisablePrediction();
+
+	FDoomSerializer reader = { PredictionData.RollbackLevel };
+	if (reader.OpenReader(PredictionData.RollbackReaderAllocator, PredictionData.RollbackData.data(), PredictionData.RollbackData.size(), true))
 	{
-		unsigned int i;
-		AActor *act = player->mo;
+		for (auto& a : PredictionData.RollbackActors)
+			a.PreRollback();
 
-		if (act != PredictionActor)
+		FRandom::RollbackRNGState(reader);
+		reader.ReadObjectsFrom(PredictionData.RollbackObjectRefs);
+		if (reader.mObjectErrors)
+			I_Error("Failed to rollback game state");
+		P_RollbackPlayers(reader);
+		reader.Close();
+
+		TArray<DObject*> fullRollback = {};
+		for (auto& a : PredictionData.RollbackActors)
 		{
-			// Q: Can this happen? If yes, can we continue?
+			a.PostRollback();
+			fullRollback.Push(a.GetObject<DObject>());
 		}
-
-		FRandom::RestoreRNGState(PredictionRNG);
-
-		AActor *savedcamera = player->camera;
-
-		auto &actInvSel = act->PointerVar<AActor*>(NAME_InvSel);
-		auto InvSel = actInvSel;
-		int inventorytics = player->inventorytics;
-		const bool settings_controller = player->settings_controller;
-
-		player->CopyFrom(PredictionPlayerBackup, false);
-
-		player->settings_controller = settings_controller;
-		// Restore the camera instead of using the backup's copy, because spynext/prev
-		// could cause it to change during prediction.
-		player->camera = savedcamera;
-
-		FLinkContext ctx;
-		// Unlink from all list, including those which are not being handled by UnlinkFromWorld.
-		auto sectorportal_list = act->touching_sectorportallist;
-		auto lineportal_list = act->touching_lineportallist;
-		act->touching_sectorportallist = nullptr;
-		act->touching_lineportallist = nullptr;
-
-		act->UnlinkFromWorld(&ctx);
-		memcpy(&act->snext, PredictionActorBackupArray.Data(), PredictionActorBackupArray.Size() - ((uint8_t *)&act->snext - (uint8_t *)act));
-
-		if (act->ViewPos != nullptr)
+		for (auto& o : PredictionData.RollbackObjects)
+			fullRollback.Push(o.GetObject<DObject>());
+		for (auto o : fullRollback)
 		{
-			act->ViewPos->Offset = PredictionViewPosBackup.Pos;
-			act->ViewPos->Flags = PredictionViewPosBackup.Flags;
+			if (o != nullptr)
+				o->ObjectFlags &= ~OF_Predicting;
 		}
-
-		// The blockmap ordering needs to remain unchanged, too.
-		// Restore sector links and refrences.
-		// [ED850] This is somewhat of a duplicate of LinkToWorld(), but we need to keep every thing the same,
-		// otherwise we end up fixing bugs in blockmap logic (i.e undefined behaviour with polyobject collisions),
-		// which we really don't want to do here.
-		if (!(act->flags & MF_NOSECTOR))
-		{
-			sector_t *sec = act->Sector;
-			AActor *me, *next;
-			AActor **link;// , **prev;
-
-			// The thinglist is just a pointer chain. We are restoring the exact same things, so we can NULL the head safely
-			sec->thinglist = NULL;
-
-			for (i = PredictionSectorListBackup.Size(); i-- > 0;)
-			{
-				me = PredictionSectorListBackup[i];
-				link = &sec->thinglist;
-				next = *link;
-				if ((me->snext = next))
-					next->sprev = &me->snext;
-				me->sprev = link;
-				*link = me;
-			}
-
-			act->touching_sectorlist = RestoreNodeList(act, ctx.sector_list, &sector_t::touching_thinglist, PredictionTouchingSectors_sprev_Backup, PredictionTouchingSectorsBackup);
-			act->touching_rendersectors = RestoreNodeList(act, ctx.render_list, &sector_t::touching_renderthings, PredictionRenderSectors_sprev_Backup, PredictionRenderSectorsBackup);
-			act->touching_sectorportallist = RestoreNodeList(act, sectorportal_list, &sector_t::sectorportal_thinglist, PredictionPortalSectors_sprev_Backup, PredictionPortalSectorsBackup);
-			act->touching_lineportallist = RestoreNodeList(act, lineportal_list, &FLinePortal::lineportal_thinglist, PredictionPortalLines_sprev_Backup, PredictionPortalLinesBackup);
-		}
-
-		// Now fix the pointers in the blocknode chain
-		FBlockNode *block = act->BlockNode;
-
-		while (block != NULL)
-		{
-			*(block->PrevActor) = block;
-			if (block->NextActor != NULL)
-			{
-				block->NextActor->PrevActor = &block->NextActor;
-			}
-			block = block->NextBlock;
-		}
-
-		actInvSel = InvSel;
-		player->inventorytics = inventorytics;
 	}
+
+	PredictionData.ClearBackup();
 }
 
 void player_t::Serialize(FSerializer &arc)
@@ -1805,30 +2047,42 @@ void player_t::Serialize(FSerializer &arc)
 
 	arc("class", cls)
 		("mo", mo)
-		("camera", camera)
 		("playerstate", playerstate)
 		("cmd", cmd);
 
-	if (arc.isReading())
+	if (!arc.IsRollback())
 	{
-		userinfo.Reset(mo->Level->PlayerNum(this));
-		ReadUserInfo(arc, userinfo, skinname);
+		arc("camera", camera)
+			("inventorytics", inventorytics)
+			("settings_controller", settings_controller);
+
+		if (arc.isReading())
+		{
+			userinfo.Reset(mo->Level->PlayerNum(this));
+			ReadUserInfo(arc, userinfo, skinname);
+		}
+		else
+		{
+			WriteUserInfo(arc, userinfo);
+		}
 	}
 	else
 	{
-		WriteUserInfo(arc, userinfo);
+		arc("attackdown", attackdown)
+			("usedown", usedown);
 	}
 
+	int fbmode = FullbrightMode;
 	arc("desiredfov", DesiredFOV)
 		("fov", FOV)
 		("viewz", viewz)
 		("viewheight", viewheight)
 		("deltaviewheight", deltaviewheight)
 		("bob", bob)
+		("bobtimer", BobTimer)
 		("vel", Vel)
 		("centering", centering)
 		("health", health)
-		("inventorytics", inventorytics)
 		("fragcount", fragcount)
 		("spreecount", spreecount)
 		("multicount", multicount)
@@ -1838,7 +2092,6 @@ void player_t::Serialize(FSerializer &arc)
 		("pendingweapon", PendingWeapon)
 		("cheats", cheats)
 		("refire", refire)
-		("inconsistant", inconsistant)
 		("killcount", killcount)
 		("itemcount", itemcount)
 		("secretcount", secretcount)
@@ -1851,6 +2104,8 @@ void player_t::Serialize(FSerializer &arc)
 		("extralight", extralight)
 		("fixedcolormap", fixedcolormap)
 		("fixedlightlevel", fixedlightlevel)
+		("fullbrightmode", fbmode)
+		("bforcefullbright", bForceFullbright)
 		("morphTics", morphTics)
 		("morphedplayerclass", MorphedPlayerClass)
 		("morphstyle", MorphStyle)
@@ -1884,30 +2139,40 @@ void player_t::Serialize(FSerializer &arc)
 		("crouchfactor", crouchfactor)
 		("crouching", crouching)
 		("crouchdir", crouchdir)
+		("crouchoffset", crouchoffset)
 		("crouchviewdelta", crouchviewdelta)
 		("original_cmd", original_cmd)
 		("original_oldbuttons", original_oldbuttons)
 		("poisontype", poisontype)
 		("poisonpaintype", poisonpaintype)
 		("timefreezer", timefreezer)
-		("settings_controller", settings_controller)
 		("onground", onground)
 		("musinfoactor", MUSINFOactor)
 		("musinfotics", MUSINFOtics)
 		("soundclass", SoundClass)
 		("angleoffsettargets", angleOffsetTargets)
-		("lastsafepos", LastSafePos);
+		("lastdamagetype", LastDamageType);
+		// Uses a slightly different name since the type was changed, otherwise it would
+		// error out on loading older saves.
+		LastSafePos.Serialize(arc, "safepos");
 
-	if (arc.isWriting ())
+	if (!arc.IsRollback())
 	{
-		// If the player reloaded because they pressed +use after dying, we
-		// don't want +use to still be down after the game is loaded.
-		oldbuttons = ~0;
-		original_oldbuttons = ~0;
-	}
-	if (skinname.IsNotEmpty())
-	{
-		userinfo.SkinChanged(skinname.GetChars(), CurrentPlayerClass);
+		if (arc.isWriting())
+		{
+			// If the player reloaded because they pressed +use after dying, we
+			// don't want +use to still be down after the game is loaded.
+			oldbuttons = ~0;
+			original_oldbuttons = ~0;
+		}
+		else
+		{
+			FullbrightMode = static_cast<EFullbrightMode>(fbmode);
+		}
+		if (skinname.IsNotEmpty())
+		{
+			userinfo.SkinChanged(skinname.GetChars(), CurrentPlayerClass);
+		}
 	}
 }
 
@@ -1918,7 +2183,6 @@ bool P_IsPlayerTotallyFrozen(const player_t *player)
 		player->cheats & CF_TOTALLYFROZEN ||
 		player->mo->isFrozen();
 }
-
 
 //==========================================================================
 //
@@ -1936,6 +2200,7 @@ DEFINE_FIELD_X(PlayerInfo, player_t, viewz)
 DEFINE_FIELD_X(PlayerInfo, player_t, viewheight)
 DEFINE_FIELD_X(PlayerInfo, player_t, deltaviewheight)
 DEFINE_FIELD_X(PlayerInfo, player_t, bob)
+DEFINE_FIELD_X(PlayerInfo, player_t, BobTimer)
 DEFINE_FIELD_X(PlayerInfo, player_t, Vel)
 DEFINE_FIELD_X(PlayerInfo, player_t, centering)
 DEFINE_FIELD_X(PlayerInfo, player_t, turnticks)
@@ -2012,11 +2277,11 @@ DEFINE_FIELD_X(PlayerInfo, player_t, ConversationNPC)
 DEFINE_FIELD_X(PlayerInfo, player_t, ConversationPC)
 DEFINE_FIELD_X(PlayerInfo, player_t, ConversationNPCAngle)
 DEFINE_FIELD_X(PlayerInfo, player_t, ConversationFaceTalker)
-DEFINE_FIELD_NAMED_X(PlayerInfo, player_t, cmd.ucmd, cmd)
+DEFINE_FIELD_NAMED_X(PlayerInfo, player_t, cmd, cmd)
 DEFINE_FIELD_X(PlayerInfo, player_t, original_cmd)
 DEFINE_FIELD_X(PlayerInfo, player_t, userinfo)
 DEFINE_FIELD_X(PlayerInfo, player_t, weapons)
-DEFINE_FIELD_NAMED_X(PlayerInfo, player_t, cmd.ucmd.buttons, buttons)
+DEFINE_FIELD_NAMED_X(PlayerInfo, player_t, cmd.buttons, buttons)
 DEFINE_FIELD_X(PlayerInfo, player_t, SoundClass)
 DEFINE_FIELD_X(PlayerInfo, player_t, PlayInVR)
 

@@ -1,46 +1,29 @@
 /*
+** b_think.cpp
 **
+** Main AI of the bots
 **
 **---------------------------------------------------------------------------
+**
 ** Copyright 1999 Martin Colberg
-** Copyright 1999-2016 Randy Heit
+** Copyright 1999-2016 Marisa Heit
 ** Copyright 2005-2016 Christoph Oelckers
-** All rights reserved.
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 **---------------------------------------------------------------------------
 **
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
+**---------------------------------------------------------------------------
+**
+** Functions for the different states that the bot uses.
+** These functions are the main AI
 */
-/********************************
-* B_Think.c                     *
-* Description:                  *
-* Functions for the different   *
-* states that the bot           *
-* uses. These functions are     *
-* the main AI                   *
-*                               *
-*********************************/
 
 #include "doomdef.h"
 #include "doomstat.h"
@@ -58,7 +41,7 @@ static FRandom pr_botmove ("BotMove");
 //so this is what the bot does.
 void DBot::Think ()
 {
-	ticcmd_t *cmd = &netcmds[player - players][((gametic + 1)/ticdup)%BACKUPTICS];
+	usercmd_t *cmd = &player->cmd;
 
 	memset (cmd, 0, sizeof(*cmd));
 
@@ -78,13 +61,12 @@ void DBot::Think ()
 		ThinkForMove (cmd);
 		TurnToAng ();
 
-		cmd->ucmd.yaw = (short)((actor->Angles.Yaw - oldyaw).Degrees() * (65536 / 360.f)) / ticdup;
-		cmd->ucmd.pitch = (short)((oldpitch - actor->Angles.Pitch).Degrees() * (65536 / 360.f));
-		if (cmd->ucmd.pitch == -32768)
-			cmd->ucmd.pitch = -32767;
-		cmd->ucmd.pitch /= ticdup;
-		actor->Angles.Yaw = oldyaw + DAngle::fromDeg(cmd->ucmd.yaw * ticdup * (360 / 65536.f));
-		actor->Angles.Pitch = oldpitch - DAngle::fromDeg(cmd->ucmd.pitch * ticdup * (360 / 65536.f));
+		cmd->yaw = (short)((actor->Angles.Yaw - oldyaw).Degrees() * (65536 / 360.f));
+		cmd->pitch = (short)((oldpitch - actor->Angles.Pitch).Degrees() * (65536 / 360.f));
+		if (cmd->pitch == -32768)
+			cmd->pitch = -32767;
+		actor->Angles.Yaw = oldyaw + DAngle::fromDeg(cmd->yaw * (360 / 65536.f));
+		actor->Angles.Pitch = oldpitch - DAngle::fromDeg(cmd->pitch * (360 / 65536.f));
 	}
 
 	if (t_active)	t_active--;
@@ -101,14 +83,14 @@ void DBot::Think ()
 	}
 	else if (player->mo->health <= 0)
 	{ // Time to respawn
-		cmd->ucmd.buttons |= BT_USE;
+		cmd->buttons |= BT_USE;
 	}
 }
 
 #define THINKDISTSQ (50000.*50000./(65536.*65536.))
 //how the bot moves.
 //MAIN movement function.
-void DBot::ThinkForMove (ticcmd_t *cmd)
+void DBot::ThinkForMove (usercmd_t *cmd)
 {
 	double dist;
 	bool stuck;
@@ -136,8 +118,8 @@ void DBot::ThinkForMove (ticcmd_t *cmd)
 	{
 		Pitch (missile);
 		Angle = player->mo->AngleTo(missile);
-		cmd->ucmd.sidemove = sleft ? -SIDERUN : SIDERUN;
-		cmd->ucmd.forwardmove = -FORWARDRUN; //Back IS best.
+		cmd->sidemove = sleft ? -SIDERUN : SIDERUN;
+		cmd->forwardmove = -FORWARDRUN; //Back IS best.
 
 		if ((player->mo->Pos() - old).LengthSquared() < THINKDISTSQ
 			&& t_strafe<=0)
@@ -171,7 +153,7 @@ void DBot::ThinkForMove (ticcmd_t *cmd)
 				  is (Invulnerability) ||
 				  is (Invisibility) ||
 				  is (Megasphere)
-				 ) || 
+				 ) ||
 				 dist < (GETINCOMBAT/4) ||
 				 (GetBotInfo(player->ReadyWeapon).MoveCombatDist == 0)
 				)
@@ -208,22 +190,22 @@ void DBot::ThinkForMove (ticcmd_t *cmd)
 			GetBotInfo(player->ReadyWeapon).MoveCombatDist)
 		{
 			// If a monster, use lower speed (just for cooler apperance while strafing down doomed monster)
-			cmd->ucmd.forwardmove = (enemy->flags3 & MF3_ISMONSTER) ? FORWARDWALK : FORWARDRUN;
+			cmd->forwardmove = (enemy->flags3 & MF3_ISMONSTER) ? FORWARDWALK : FORWARDRUN;
 		}
 		else if (!stuck) //Too close, so move away.
 		{
 			// If a monster, use lower speed (just for cooler apperance while strafing down doomed monster)
-			cmd->ucmd.forwardmove = (enemy->flags3 & MF3_ISMONSTER) ? -FORWARDWALK : -FORWARDRUN;
+			cmd->forwardmove = (enemy->flags3 & MF3_ISMONSTER) ? -FORWARDWALK : -FORWARDRUN;
 		}
 
 		//Strafing.
 		if (enemy->flags3 & MF3_ISMONSTER) //It's just a monster so take it down cool.
 		{
-			cmd->ucmd.sidemove = sleft ? -SIDEWALK : SIDEWALK;
+			cmd->sidemove = sleft ? -SIDEWALK : SIDEWALK;
 		}
 		else
 		{
-			cmd->ucmd.sidemove = sleft ? -SIDERUN : SIDERUN;
+			cmd->sidemove = sleft ? -SIDERUN : SIDERUN;
 		}
 		Dofire (cmd); //Order bot to fire current weapon
 	}
@@ -246,11 +228,11 @@ void DBot::ThinkForMove (ticcmd_t *cmd)
 
 		matedist = player->mo->Distance2D(mate);
 		if (matedist > (FRIEND_DIST*2))
-			cmd->ucmd.forwardmove = FORWARDRUN;
+			cmd->forwardmove = FORWARDRUN;
 		else if (matedist > FRIEND_DIST)
-			cmd->ucmd.forwardmove = FORWARDWALK; //Walk, when starting to get close.
+			cmd->forwardmove = FORWARDWALK; //Walk, when starting to get close.
 		else if (matedist < FRIEND_DIST-(FRIEND_DIST/3)) //Got too close, so move away.
-			cmd->ucmd.forwardmove = -FORWARDWALK;
+			cmd->forwardmove = -FORWARDWALK;
 	}
 	else //Roam after something.
 	{
@@ -314,7 +296,7 @@ void DBot::ThinkForMove (ticcmd_t *cmd)
 				}
 				else if ((playeringame[(r&(MAXPLAYERS-1))]) && players[(r&(MAXPLAYERS-1))].mo->health > 0)
 				{
-					dest = players[(r&(MAXPLAYERS-1))].mo; 
+					dest = players[(r&(MAXPLAYERS-1))].mo;
 				}
 			}
 

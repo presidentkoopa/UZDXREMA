@@ -1,33 +1,23 @@
 /*
-** c_cmds.cpp
+** c_enginecmds.cpp
+**
 ** Miscellaneous game independent console commands.
 **
 **---------------------------------------------------------------------------
-** Copyright 1998-2006 Randy Heit
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 1998-2016 Marisa Heit
+** Copyright 2014-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
@@ -58,13 +48,16 @@
 
 extern FILE* Logfile;
 
+void ConsoleEndoom();
 CCMD (quit)
 {
+	ConsoleEndoom();
 	throw CExitEvent(0);
 }
 
 CCMD (exit)
 {
+	ConsoleEndoom();
 	throw CExitEvent(0);
 }
 
@@ -108,7 +101,15 @@ UNSAFE_CCMD (exec)
 
 void execLogfile(const char *fn, bool append)
 {
-	if ((Logfile = fopen(fn, append? "a" : "w")))
+	FString file = "log";
+	if (fn != nullptr && strlen(fn) > 0)
+	{
+		file.AppendFormat("-%s", fn);
+		C_SanitizeFileName(file);
+	}
+	file.AppendFormat(".txt");
+
+	if ((Logfile = fopen(file.GetChars(), append ? "a" : "w")))
 	{
 		const char *timestr = myasctime();
 		Printf("Log started: %s\n", timestr);
@@ -176,62 +177,19 @@ UNSAFE_CCMD (crashout)
 }
 #endif
 
-
-UNSAFE_CCMD (dir)
-{
-	FString path;
-
-	if (argv.argc() > 1)
-	{
-		path = NicePath(argv[1]);
-	}
-	else
-	{
-		path = I_GetCWD();;
-	}
-	auto base = ExtractFileBase(path.GetChars(), true);
-	FString bpath;
-	if (base.IndexOfAny("*?") >= 0)
-	{
-		bpath = ExtractFilePath(path.GetChars());
-	}
-	else
-	{
-		base = "*";
-		bpath = path;
-	}
-
-	FileSys::FileList list;
-	if (!FileSys::ScanDirectory(list, bpath.GetChars(), base.GetChars(), true))
-	{ 
-		Printf ("Nothing matching %s\n", path.GetChars());
-	}
-	else
-	{
-		Printf ("Listing of %s:\n", path.GetChars());
-		for(auto& entry : list)
-		{
-			if (entry.isDirectory)
-				Printf (PRINT_BOLD, "%s <dir>\n", entry.FileName.c_str());
-			else
-				Printf ("%s\n", entry.FileName.c_str());
-		}
-	}
-}
-
 //==========================================================================
 //
-// CCMD wdir
+// CCMD dir
 //
 // Lists the contents of a loaded wad file.
 //
 //==========================================================================
 
-CCMD (wdir)
+CCMD (dir)
 {
 	int wadnum;
 	if (argv.argc() != 2) wadnum = -1;
-	else 
+	else
 	{
 		wadnum = fileSystem.CheckIfResourceFileLoaded (argv[1]);
 		if (wadnum < 0)
@@ -308,4 +266,3 @@ CCMD(printlocalized)
 	}
 
 }
-

@@ -3,7 +3,7 @@
 
 #include "../../core/widget.h"
 
-enum TextLabelAlignment
+enum class TextLabelAlignment
 {
 	Left,
 	Center,
@@ -21,8 +21,8 @@ public:
 	void SetTextAlignment(TextLabelAlignment alignment);
 	TextLabelAlignment GetTextAlignment() const;
 
-	double GetPreferredWidth() const;
-	double GetPreferredHeight() const;
+	double GetPreferredWidth() override;
+	double GetPreferredHeight() override;
 
 protected:
 	void OnPaint(Canvas* canvas) override;

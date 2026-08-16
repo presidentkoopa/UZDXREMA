@@ -2,6 +2,10 @@
 
 # UZDXREMA — a rendering fork of DoomXR
 
+[![Continuous Integration][badge_git]][status_git]
+[![Engine Translation status][badge_trans]][status_trans]
+[![Game Translation status][badge_trans_games]][status_trans_games]
+
 A fork of [DoomXR](https://github.com/iAmErmac/DoomXR) that adds a **lighting
 and rendering feature set** on top of it. Everything DoomXR does — VR, dual
 tracked hands, OpenVR input, the mod compatibility below — is unchanged and
@@ -128,10 +132,10 @@ Optional mods tested with DoomXR:
 `build-dxr/RelWithDebInfo/`.
 
 For the general UZDoom build process, see UZDoom's
-[wiki](https://github.com/UZDoom/UZDoom/wiki/Compilation):
-[Linux](https://github.com/UZDoom/UZDoom/wiki/Compilation#linux) ·
-[MacOS](https://github.com/UZDoom/UZDoom/wiki/Compilation#macos) ·
-[Windows](https://github.com/UZDoom/UZDoom/wiki/Compilation#windows)
+[wiki][gh_wiki]:
+[Linux][gh_linux] ·
+[MacOS][gh_apple] ·
+[Windows][gh_windows]
 
 ---
 
@@ -144,11 +148,24 @@ Please see license files for individual contributor licenses.
 ### Source code licensed under the GPL v3
 ##### https://www.gnu.org/licenses/quick-guide-gplv3.en.html
 
+**Copyrights:**
+* Copyright 1993-1996 id Software
+* Copyright 1999-2016 Marisa Heit
+* Copyright 2002-2016 Christoph Oelckers
+* Copyright 2017-2025 GZDoom Maintainers and Contributors
+* Copyright 2025-2026 UZDoom Maintainers and Contributors
+
+See the [CONTRIBUTORS](CONTRIBUTORS) file for a full list of upstream code contributors.
+
+The **UZDoom Icon** was designed by **Carlos "Cardboard Marty" Sanchez**, copyrighted to the UZDoom Team, and licensed under **Creative Commons BY-SA 4.0**.
+
 ## Resources
-- https://zdoom.org/ - Home Page
-- https://forum.zdoom.org/ - Forum
-- https://zdoom.org/wiki/ - Wiki
-- https://dsc.gg/zdoom - Discord Server
+- [Home Page][home]
+- [Forum][forum]
+- [Wiki][wiki]
+- [Discord Server][community]
+- [Engine Translation][status_trans]
+- [Game Translation][status_trans_games]
 
 ## Credits
 
@@ -163,3 +180,26 @@ This fork stands on a long chain, and none of the work below is mine:
 Special thanks to Coraline of the EDGE team for allowing use of her
 [README.md](https://github.com/3dfxdev/EDGE/blob/master/README.md) as a
 template for the original.
+
+[gzdoom]: https://github.com/ZDoom/gzdoom/
+[zdoom]: https://github.com/rheit/zdoom/
+
+[repo]: https://github.com/UZDoom/UZDoom/
+[home]: https://zdoom.org/
+[wiki]: https://zdoom.org/wiki/
+[forum]: https://forum.zdoom.org/
+[community]: https://dsc.gg/zdoom
+
+[gh_wiki]: https://github.com/UZDoom/UZDoom/wiki/Compilation
+[gh_linux]: https://github.com/UZDoom/UZDoom/wiki/Compilation#linux
+[gh_windows]: https://github.com/UZDoom/UZDoom/wiki/Compilation#windows
+[gh_apple]: https://github.com/UZDoom/UZDoom/wiki/Compilation#macos
+
+[status_git]: https://github.com/UZDoom/UZDoom/actions/workflows/continuous_integration.yml
+[badge_git]: https://github.com/UZDoom/UZDoom/actions/workflows/continuous_integration.yml/badge.svg
+
+[badge_trans]: https://hosted.weblate.org/widget/uzdoom/svg-badge.svg
+[status_trans]: https://hosted.weblate.org/engage/uzdoom/
+
+[badge_trans_games]: https://hosted.weblate.org/widget/doom-engine-games/svg-badge.svg
+[status_trans_games]: https://hosted.weblate.org/engage/doom-engine-games/

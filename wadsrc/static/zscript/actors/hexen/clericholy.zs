@@ -1,3 +1,22 @@
+/*
+** clericholy.zs
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1994-1996 Raven Software
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2006-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 // Cleric Weapon Piece ------------------------------------------------------
 
@@ -79,12 +98,13 @@ class WraithvergeDrop : Actor
 class CWeapWraithverge : ClericWeapon
 {
 	int CHolyCount;
-	
+
 	Default
 	{
 		Health 3;
 		Weapon.SelectionOrder 3000;
 		+WEAPON.PRIMARY_USES_BOTH;
+		+WEAPON.BFG;
 		+Inventory.NoAttenPickupSound
 		Weapon.AmmoUse1 18;
 		Weapon.AmmoUse2 18;
@@ -209,10 +229,10 @@ class HolyMissile : Actor
 		SPIR P 1 Bright A_CHolyAttack2;
 		Stop;
 	}
-	
+
 	//============================================================================
 	//
-	// A_CHolyAttack2 
+	// A_CHolyAttack2
 	//
 	// 	Spawns the spirits
 	//============================================================================
@@ -337,7 +357,7 @@ class HolySpirit : Actor
 		SPIR FGHI 4;
 		Stop;
 	}
-	
+
 	//============================================================================
 	//
 	//
@@ -444,7 +464,7 @@ class HolySpirit : Actor
 		}
 		double ang = deltaangle(angle, AngleTo(target));
 		double delta = abs(ang);
-		
+
 		if (delta > thresh)
 		{
 			delta /= 2;
@@ -463,7 +483,7 @@ class HolySpirit : Actor
 		}
 		VelFromAngle();
 
-		if (!(Level.maptime&15) 
+		if (!(Level.maptime&15)
 			|| pos.z > target.pos.z + target.height
 			|| pos.z + height < target.pos.z)
 		{
@@ -559,7 +579,7 @@ class HolyTail : Actor
 		SPIR D -1;
 		Stop;
 	}
-	
+
 	//============================================================================
 	//
 	// SpawnSpiritTail

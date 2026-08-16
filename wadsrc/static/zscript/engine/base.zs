@@ -1,4 +1,25 @@
-
+/*
+** base.zs
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 2016-2017 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 // constants for A_PlaySound
 enum ESoundFlags
@@ -11,7 +32,7 @@ enum ESoundFlags
 	CHAN_5 = 5,
 	CHAN_6 = 6,
 	CHAN_7 = 7,
-	
+
 	// modifier flags
 	CHAN_LISTENERZ = 8,
 	CHAN_MAYBE_LOCAL = 16,
@@ -35,7 +56,8 @@ enum ESoundFlags
 	CHANF_TRANSIENT = 32768,    // Do not record in savegames - used for sounds that get restarted outside the sound system (e.g. ambients in SW and Blood)
 	CHANF_FORCE = 65536,		// Start, even if sound is paused.
 	CHANF_SINGULAR = 0x20000,	// Only start if no sound of this name is already playing.
-
+	CHANF_RUMBLE = 0x40000,		// Hint to rumble trigger rumble from sound
+	CHANF_NORUMBLE = 0x80000,	// Disable rumble even if it would normally happen
 
 	CHANF_LOOPING = CHANF_LOOP | CHANF_NOSTOP, // convenience value for replicating the old 'looping' boolean.
 
@@ -47,7 +69,6 @@ const ATTN_NONE = 0;
 const ATTN_NORM = 1;
 const ATTN_IDLE = 1.001;
 const ATTN_STATIC = 3;
-
 
 enum ERenderStyle
 {
@@ -72,7 +93,6 @@ enum ERenderStyle
 	STYLE_ColorAdd,			// Use color intensity as transparency factor and blend additively.
 
 };
-
 
 enum EGameState
 {
@@ -124,7 +144,6 @@ const TEXTCOLOR_BOLD			= "\034+";
 const TEXTCOLOR_CHAT			= "\034*";
 const TEXTCOLOR_TEAMCHAT		= "\034!";
 
-
 enum EMonospacing
 {
 	Mono_Off = 0,
@@ -145,6 +164,9 @@ enum EPrintLevel
 	PRINT_TYPES = 1023,		// Bitmask.
 	PRINT_NONOTIFY = 1024,	// Flag - do not add to notify buffer
 	PRINT_NOLOG = 2048,		// Flag - do not print to log file
+	PRINT_NOCONSOLE = 16384, // Flag - Don't add to console
+
+	PRINT_NOLOGCONSOLE = PRINT_NOLOG|PRINT_NOCONSOLE,
 };
 
 enum EDebugLevel
@@ -194,9 +216,10 @@ struct Vector3
 struct _ native unsafe(internal)	// These are the global variables, the struct is only here to avoid extending the parser for this.
 {
 	native readonly Array<class> AllClasses;
-    native internal readonly Map<Name , Service> AllServices;
+	native internal readonly Map<Name , Service> AllServices;
 	native readonly bool multiplayer;
 	native @KeyBindings Bindings;
+	native @KeyBindings DoubleBindings;
 	native @KeyBindings AutomapBindings;
 	native @KeyBindings DoubleBindings;
 	native readonly @GameInfoStruct gameinfo;
@@ -266,7 +289,6 @@ struct MusPlayingInfo native
 	native int baseorder;
 	native bool loop;
 	native readonly voidptr handle;
-	
 };
 
 struct TexMan
@@ -302,7 +324,7 @@ struct TexMan
 		ForceLookup = 128,
 		NoAlias = 256
 	};
-	
+
 	enum ETexReplaceFlags
 	{
 		NOT_BOTTOM			= 1,
@@ -322,7 +344,7 @@ struct TexMan
 	native static int CheckRealHeight(TextureID tex);
 	native static bool OkForLocalization(TextureID patch, String textSubstitute);
 	native static bool UseGamePalette(TextureID tex);
-	native static Canvas GetCanvas(String texture);
+	native static Canvas GetCanvas(String texture, int usetype = Type_Wall, int flags = 0);
 }
 
 /*
@@ -380,7 +402,6 @@ enum EScaleMode
 	FSMode_ScaleToFit43Top = 5,
 	FSMode_ScaleToFit43Bottom = 6,
 	FSMode_ScaleToHeight = 7,
-
 
 	FSMode_Max,
 
@@ -526,7 +547,7 @@ class Shape2D : Object native
 class Canvas : Object native abstract
 {
 	native void Clear(int left, int top, int right, int bottom, Color color, int palcolor = -1);
-	native void Dim(Color col, double amount, int x, int y, int w, int h, ERenderStyle style = STYLE_Translucent);
+	native void Dim(Color col, double amount, int x, int y, int w, int h, ERenderStyle style = STYLE_Translucent, bool overwritealpha = false);
 
 	native vararg void DrawTexture(TextureID tex, bool animate, double x, double y, ...);
 	native vararg void DrawShape(TextureID tex, bool animate, Shape2D s, ...);
@@ -585,6 +606,11 @@ struct Screen native
 	native static void ClearStencil();
 	native static void SetTransform(Shape2DTransform transform);
 	native static void ClearTransform();
+
+	native static double GetTextureWidth(TextureID texture, bool animated = false);
+	native static double GetTextureHeight(TextureID texture, bool animated = false);
+	native static double GetTextureLeftOffset(TextureID texture, bool animated = false);
+	native static double GetTextureTopOffset(TextureID texture, bool animated = false);
 }
 
 struct Font native
@@ -622,7 +648,7 @@ struct Font native
 		CR_TEAL,
 		NUM_TEXT_COLORS
 	};
-	
+
 	const TEXTCOLOR_BRICK			= "\034A";
 	const TEXTCOLOR_TAN				= "\034B";
 	const TEXTCOLOR_GRAY			= "\034C";
@@ -717,27 +743,27 @@ struct CVar native
 
 class CustomIntCVar abstract
 {
-    abstract int ModifyValue(Name CVarName, int val);
+	abstract int ModifyValue(Name CVarName, int val);
 }
 
 class CustomFloatCVar abstract
 {
-    abstract double ModifyValue(Name CVarName, double val);
+	abstract double ModifyValue(Name CVarName, double val);
 }
 
 class CustomStringCVar abstract
 {
-    abstract String ModifyValue(Name CVarName, String val);
+	abstract String ModifyValue(Name CVarName, String val);
 }
 
 class CustomBoolCVar abstract
 {
-    abstract bool ModifyValue(Name CVarName, bool val);
+	abstract bool ModifyValue(Name CVarName, bool val);
 }
 
 class CustomColorCVar abstract
 {
-    abstract Color ModifyValue(Name CVarName, Color val);
+	abstract Color ModifyValue(Name CVarName, Color val);
 }
 
 struct GIFont version("2.4")
@@ -774,17 +800,24 @@ class Object native
 	private native static Class<Object> BuiltinNameToClass(Name nm, Class<Object> filter);
 	private native static Object BuiltinClassCast(Object inptr, Class<Object> test);
 	private native static Function<void> BuiltinFunctionPtrCast(Function<void> inptr, voidptr newtype);
-	private native static void HandleDeprecatedFlags(Object obj, bool set, int index);
+	private native static bool HandleDeprecatedFlags(Object obj, bool set, int index);
 	private native static bool CheckDeprecatedFlags(Object obj, int index);
-	
+
 	native static Name ValidateNameIndex(int index);
 	static class<Object> FindClass(Name cls, class<Object> baseType = null) { return BuiltinNameToClass(cls, baseType); }
 
 	native static uint MSTime();
 	native static double MSTimeF();
+	native ui static double GetDeltaTime(bool current = false);
+	native clearscope static double GetPhysicsTimeStep();
 	native vararg static void ThrowAbortException(String fmt, ...);
 
 	native static Function<void> FindFunction(Class<Object> cls, Name fn);
+
+	native clearscope static Object GetNetworkEntity(uint id);
+	native play void EnableNetworking(bool enable);
+	native clearscope uint GetNetworkID() const;
+	native clearscope bool IsClientSide() const;
 
 	native virtualscope void Destroy();
 
@@ -939,8 +972,12 @@ struct StringStruct native unsafe(internal)
 	native String MakeLower() const;
 	native static int CharUpper(int ch);
 	native static int CharLower(int ch);
+
+	native bool IsInt() const;
+	native bool IsDouble() const;
 	native int ToInt(int base = 0) const;
 	native double ToDouble() const;
+
 	native void Split(out Array<String> tokens, String delimiter, EmptyTokenType keepEmpty = TOK_KEEPEMPTY) const;
 	native void AppendCharacter(int c);
 	native void DeleteLastCharacter();
@@ -950,12 +987,18 @@ struct StringStruct native unsafe(internal)
 	native void StripLeft(String junk = "");
 	native void StripRight(String junk = "");
 	native void StripLeftRight(String junk = "");
+
+	native int Compare(String other) const; // strcmp
+	native int CompareNoCase(String other) const; // stricmp
+
+	native bool IsEmpty() const; // strcmp
+	native bool IsNotEmpty() const; // stricmp
 }
 
 struct Translation version("2.4")
 {
 	Color colors[256];
-	
+
 	native TranslationID AddTranslation();
 	native static TranslationID MakeID(int group, int num);
 	native static TranslationID GetID(Name transname);
@@ -1025,7 +1068,7 @@ class ScriptScanner native
 	native void MustGetString();
 	native void MustGetStringName(String name);
 	native void MustGetBoolToken();
-	
+
 	// This DOES NOT advance the parser! This returns the string the parser got.
 	native String GetStringContents();
 

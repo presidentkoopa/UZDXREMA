@@ -1,34 +1,23 @@
 /*
 ** zcc-parse.lemon
+**
 ** ZScript parser grammar
 **
 **---------------------------------------------------------------------------
-** Copyright -2016 Randy Heit
+**
+** Copyright 2010-2016 Marisa Heit
 ** Copyright 2016-2017 Christoph Oelckers
-** All rights reserved.
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+**---------------------------------------------------------------------------
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
@@ -80,6 +69,7 @@ static void SetNodeLine(ZCC_TreeNode *name, int line)
 		ZCC_Identifier *Replaces;
 		ZCC_Identifier *Sealed;
 		VersionInfo Version;
+		FString *DeprecationMessage;
 	};
 
 	struct StateOpts {
@@ -153,7 +143,7 @@ static void SetNodeLine(ZCC_TreeNode *name, int line)
 %left OROR.
 %left ANDAND.
 %left EQEQ NEQ APPROXEQ.
-%left LT GT LTEQ GTEQ LTGTEQ IS.
+%left LT GT LTEQ GTEQ LTGTEQ LTEQGT IS.
 %left DOTDOT.
 %left OR.		/* Note that this is like the Ruby precedence for these */
 %left XOR.		/* three operators and not the C precedence, since */
@@ -232,6 +222,7 @@ class_head(X) ::= EXTEND CLASS(T) IDENTIFIER(A).
 	head->Version = {0, 0};
 	head->Type = nullptr;
 	head->Symbol = nullptr;
+	head->DeprecationMessage = nullptr;
 	X = head;
 }
 
@@ -247,6 +238,7 @@ class_head(X) ::= CLASS(T) IDENTIFIER(A) class_ancestry(B) class_flags(C).
 	head->Version = C.Version;
 	head->Type = nullptr;
 	head->Symbol = nullptr;
+	head->DeprecationMessage = C.DeprecationMessage;
 	X = head;
 }
 
@@ -255,15 +247,24 @@ class_ancestry(X) ::= .						{ X = NULL; }
 class_ancestry(X) ::= COLON dottable_id(A).	{ X = A; /*X-overwrites-A*/ }
 
 %type class_flags{ClassFlagsBlock}
-class_flags(X) ::= .										{ X.Flags = 0; X.Replaces = NULL; X.Version = {0,0}; X.Sealed = NULL; }
-class_flags(X) ::= class_flags(A) ABSTRACT.					{ X.Flags = A.Flags | ZCC_Abstract; X.Replaces = A.Replaces; X.Version = A.Version; X.Sealed = A.Sealed; }
-class_flags(X) ::= class_flags(A) FINAL.					{ X.Flags = A.Flags | ZCC_Final; X.Replaces = A.Replaces; X.Version = A.Version; X.Sealed =  A.Sealed;}
-class_flags(X) ::= class_flags(A) NATIVE.					{ X.Flags = A.Flags | ZCC_Native; X.Replaces = A.Replaces; X.Version = A.Version; X.Sealed =  A.Sealed; }
-class_flags(X) ::= class_flags(A) UI.						{ X.Flags = A.Flags | ZCC_UIFlag; X.Replaces = A.Replaces; X.Version = A.Version; X.Sealed =  A.Sealed; }
-class_flags(X) ::= class_flags(A) PLAY.						{ X.Flags = A.Flags | ZCC_Play; X.Replaces = A.Replaces; X.Version = A.Version; X.Sealed =  A.Sealed; }
-class_flags(X) ::= class_flags(A) REPLACES dottable_id(B).	{ X.Flags = A.Flags; X.Replaces = B; X.Version = A.Version; X.Sealed = A.Sealed; }
-class_flags(X) ::= class_flags(A) VERSION LPAREN STRCONST(C) RPAREN.	{ X.Flags = A.Flags | ZCC_Version; X.Replaces = A.Replaces; X.Version = C.String->GetChars(); X.Sealed =  A.Sealed; }
-class_flags(X) ::= class_flags(A) SEALED LPAREN states_opt(B) RPAREN.		{ X.Flags = A.Flags | ZCC_Sealed; X.Replaces = A.Replaces; X.Version = A.Version; X.Sealed = B; }
+class_flags(X) ::= .										{ X.Flags = 0; X.Replaces = NULL; X.Version = {0,0}; X.Sealed = NULL; X.DeprecationMessage = NULL; }
+class_flags(X) ::= class_flags(A) ABSTRACT.					{ X.Flags = A.Flags | ZCC_Abstract; X.Replaces = A.Replaces; X.Version = A.Version; X.Sealed = A.Sealed; X.DeprecationMessage = A.DeprecationMessage; }
+class_flags(X) ::= class_flags(A) FINAL.					{ X.Flags = A.Flags | ZCC_Final; X.Replaces = A.Replaces; X.Version = A.Version; X.Sealed = A.Sealed; X.DeprecationMessage = A.DeprecationMessage; }
+class_flags(X) ::= class_flags(A) NATIVE.					{ X.Flags = A.Flags | ZCC_Native; X.Replaces = A.Replaces; X.Version = A.Version; X.Sealed = A.Sealed; X.DeprecationMessage = A.DeprecationMessage; }
+class_flags(X) ::= class_flags(A) UI.						{ X.Flags = A.Flags | ZCC_UIFlag; X.Replaces = A.Replaces; X.Version = A.Version; X.Sealed = A.Sealed; X.DeprecationMessage = A.DeprecationMessage; }
+class_flags(X) ::= class_flags(A) PLAY.						{ X.Flags = A.Flags | ZCC_Play; X.Replaces = A.Replaces; X.Version = A.Version; X.Sealed = A.Sealed; X.DeprecationMessage = A.DeprecationMessage; }
+class_flags(X) ::= class_flags(A) REPLACES dottable_id(B).	{ X.Flags = A.Flags; X.Replaces = B; X.Version = A.Version; X.Sealed = A.Sealed; X.DeprecationMessage = A.DeprecationMessage; }
+class_flags(X) ::= class_flags(A) VERSION LPAREN STRCONST(C) RPAREN.	{ X.Flags = A.Flags | ZCC_Version; X.Replaces = A.Replaces; X.Version = C.String->GetChars(); X.Sealed = A.Sealed; X.DeprecationMessage = A.DeprecationMessage; }
+class_flags(X) ::= class_flags(A) SEALED LPAREN states_opt(B) RPAREN.		{ X.Flags = A.Flags | ZCC_Sealed; X.Replaces = A.Replaces; X.Version = A.Version; X.Sealed = B; X.DeprecationMessage = A.DeprecationMessage; }
+
+class_flags(X) ::= class_flags(A) DEPRECATED LPAREN STRCONST(C) opt_deprecation_message(D) RPAREN.
+{
+	X.Flags = A.Flags | ZCC_Deprecated;
+	X.Replaces = A.Replaces;
+	X.Version = C.String->GetChars();
+	X.Sealed =  A.Sealed;
+	X.DeprecationMessage = D.String;
+}
 
 /*----- Dottable Identifier -----*/
 // This can be either a single identifier or two identifiers connected by a .
@@ -412,6 +413,7 @@ struct_def(X) ::= STRUCT(T) IDENTIFIER(A) struct_flags(S) LBRACE opt_struct_body
 	def->Symbol = nullptr;
 	def->Version = S.Version;
 	def->Flags = S.Flags;
+	def->DeprecationMessage = S.DeprecationMessage;
 	X = def;
 }
 
@@ -422,18 +424,27 @@ struct_def(X) ::= EXTEND STRUCT(T) IDENTIFIER(A) LBRACE opt_struct_body(B) RBRAC
 	def->Body = B;
 	def->Type = nullptr;
 	def->Symbol = nullptr;
+	def->Version = {0, 0};
 	def->Flags = ZCC_Extension;
+	def->DeprecationMessage = nullptr;
 	X = def;
 }
 
 %type struct_flags{ClassFlagsBlock}
-struct_flags(X) ::= .													{ X.Flags = 0; X.Version = {0, 0}; }
-struct_flags(X) ::= struct_flags(A) UI.									{ X.Flags = A.Flags | ZCC_UIFlag; X.Version = A.Version; }
-struct_flags(X) ::= struct_flags(A) PLAY.								{ X.Flags = A.Flags | ZCC_Play; X.Version = A.Version; }
-struct_flags(X) ::= struct_flags(A) CLEARSCOPE.							{ X.Flags = A.Flags | ZCC_ClearScope; X.Version = A.Version; }
-struct_flags(X) ::= struct_flags(A) NATIVE.								{ X.Flags = A.Flags | ZCC_Native; X.Version = A.Version; }
-struct_flags(X) ::= struct_flags(A) UNSAFE LPAREN INTERNAL RPAREN.		{ X.Flags = A.Flags | ZCC_VMInternalStruct; X.Version = A.Version; }
-struct_flags(X) ::= struct_flags(A) VERSION LPAREN STRCONST(C) RPAREN.	{ X.Flags = A.Flags | ZCC_Version; X.Version = C.String->GetChars(); }
+struct_flags(X) ::= .													{ X.Flags = 0; X.Version = {0, 0}; X.DeprecationMessage = NULL; }
+struct_flags(X) ::= struct_flags(A) UI.									{ X.Flags = A.Flags | ZCC_UIFlag; X.Version = A.Version; X.DeprecationMessage = A.DeprecationMessage; }
+struct_flags(X) ::= struct_flags(A) PLAY.								{ X.Flags = A.Flags | ZCC_Play; X.Version = A.Version; X.DeprecationMessage = A.DeprecationMessage; }
+struct_flags(X) ::= struct_flags(A) CLEARSCOPE.							{ X.Flags = A.Flags | ZCC_ClearScope; X.Version = A.Version; X.DeprecationMessage = A.DeprecationMessage; }
+struct_flags(X) ::= struct_flags(A) NATIVE.								{ X.Flags = A.Flags | ZCC_Native; X.Version = A.Version; X.DeprecationMessage = A.DeprecationMessage; }
+struct_flags(X) ::= struct_flags(A) UNSAFE LPAREN INTERNAL RPAREN.		{ X.Flags = A.Flags | ZCC_VMInternalStruct; X.Version = A.Version; X.DeprecationMessage = A.DeprecationMessage; }
+struct_flags(X) ::= struct_flags(A) VERSION LPAREN STRCONST(C) RPAREN.	{ X.Flags = A.Flags | ZCC_Version; X.Version = C.String->GetChars(); X.DeprecationMessage = A.DeprecationMessage; }
+
+struct_flags(X) ::= struct_flags(A) DEPRECATED LPAREN STRCONST(C) opt_deprecation_message(D) RPAREN.
+{
+	X.Flags = A.Flags | ZCC_Deprecated;
+	X.Version = C.String->GetChars();
+	X.DeprecationMessage = D.String;
+}
 
 opt_struct_body(X) ::= .								{ X = NULL; }
 opt_struct_body(X) ::= struct_body(X).
@@ -754,18 +765,18 @@ light_list(X) ::= light_list(A) COMMA STRCONST(B).
 	strconst->Operation = PEX_ConstValue;
 	strconst->Type = TypeString;
 	strconst->StringVal = B.String;
-	AppendTreeNodeSibling(A, strconst); 
+	AppendTreeNodeSibling(A, strconst);
 	X = A; /*X-overwrites-A*/
 }
 
 /* A state action can be either a compound statement or a single action function call. */
-state_action(X) ::= LBRACE(T) statement_list(A) scanner_mode RBRACE.	
+state_action(X) ::= LBRACE(T) statement_list(A) scanner_mode RBRACE.
 {
 	NEW_AST_NODE(CompoundStmt,stmt,T);
 	stmt->Content = A;
 	X = stmt;
 }
-state_action(X) ::= LBRACE scanner_mode RBRACE.	
+state_action(X) ::= LBRACE scanner_mode RBRACE.
 {
 	X = NULL;
 }
@@ -1094,7 +1105,7 @@ func_ptr_params(X) ::= func_ptr_param_list(X).
 //	NEW_AST_NODE(FuncPtrParamDecl,parm,stat->sc->GetMessageLine());
 //	parm->Type = nullptr;
 //	parm->Flags = 0;
-//	X = A; /*X-overwrites-A*/ 
+//	X = A; /*X-overwrites-A*/
 //	AppendTreeNodeSibling(X, parm);
 //}
 
@@ -1333,8 +1344,8 @@ decl_flags(X) ::= decl_flags(F) DEPRECATED(B) LPAREN STRCONST(A) opt_deprecation
 	X->DeprecationMessage = C.String;
 }
 
-decl_flags(X) ::= decl_flags(F) VERSION(B) LPAREN STRCONST(A) RPAREN.	
-{ 
+decl_flags(X) ::= decl_flags(F) VERSION(B) LPAREN STRCONST(A) RPAREN.
+{
 	if (F == nullptr)
 	{
 		NEW_AST_NODE(DeclFlags,nil_f,B.SourceLoc);
@@ -1360,6 +1371,7 @@ decl_flag(X) ::= LATENT(T).		{ X.Int = ZCC_Latent; X.SourceLoc =  T.SourceLoc; }
 decl_flag(X) ::= FINAL(T).		{ X.Int = ZCC_Final; X.SourceLoc =  T.SourceLoc; }
 decl_flag(X) ::= META(T).		{ X.Int = ZCC_Meta; X.SourceLoc =  T.SourceLoc; }
 decl_flag(X) ::= TRANSIENT(T).	{ X.Int = ZCC_Transient; X.SourceLoc =  T.SourceLoc; }
+decl_flag(X) ::= NOROLLBACK(T). { X.Int = ZCC_NoRollback; X.SourceLoc = T.SourceLoc; }
 decl_flag(X) ::= READONLY(T).	{ X.Int = ZCC_ReadOnly; X.SourceLoc =  T.SourceLoc; }
 decl_flag(X) ::= INTERNAL(T).	{ X.Int = ZCC_Internal; X.SourceLoc =  T.SourceLoc; }
 decl_flag(X) ::= VIRTUAL(T).	{ X.Int = ZCC_Virtual; X.SourceLoc =  T.SourceLoc; }
@@ -1369,10 +1381,12 @@ decl_flag(X) ::= VARARG(T).     { X.Int = ZCC_VarArg; X.SourceLoc = T.SourceLoc;
 decl_flag(X) ::= UI(T).			{ X.Int = ZCC_UIFlag; X.SourceLoc = T.SourceLoc; }
 decl_flag(X) ::= PLAY(T).		{ X.Int = ZCC_Play; X.SourceLoc = T.SourceLoc; }
 decl_flag(X) ::= CLEARSCOPE(T). { X.Int = ZCC_ClearScope; X.SourceLoc = T.SourceLoc; }
+decl_flag(X) ::= UNSAFE(T) LPAREN CLEARSCOPE RPAREN. { X.Int = ZCC_UnsafeClearScope; X.SourceLoc = T.SourceLoc; }
 decl_flag(X) ::= VIRTUALSCOPE(T). { X.Int = ZCC_VirtualScope; X.SourceLoc = T.SourceLoc; }
 
-func_const(X) ::= .							{ X.Int = 0; X.SourceLoc = stat->sc->GetMessageLine(); }
-func_const(X) ::= CONST(T).					{ X.Int = ZCC_FuncConst; X.SourceLoc = T.SourceLoc; }
+func_const(X) ::= .									{ X.Int = 0; X.SourceLoc = stat->sc->GetMessageLine(); }
+func_const(X) ::= CONST(T).							{ X.Int = ZCC_FuncConst; X.SourceLoc = T.SourceLoc; }
+func_const(X) ::= UNSAFE(T) LPAREN CONST RPAREN.	{ X.Int = ZCC_FuncConstUnsafe; X.SourceLoc = T.SourceLoc; }
 
 opt_func_body(X) ::= SEMICOLON.				{ X = NULL; }
 opt_func_body(X) ::= function_body(X).
@@ -1392,7 +1406,7 @@ func_params(X) ::= func_param_list(A) COMMA ELLIPSIS.
 	parm->Name = NAME_None;
 	parm->Flags = 0;
 	parm->Default = nullptr;
-	X = A; /*X-overwrites-A*/ 
+	X = A; /*X-overwrites-A*/
 	AppendTreeNodeSibling(X, parm);
 }
 
@@ -1735,7 +1749,12 @@ expr(X) ::= expr(A) GTEQ expr(B).		/* a >= b */
 	BINARY_EXPR(A,B,PEX_GTEQ);
 	X = expr2;
 }
-expr(X) ::= expr(A) LTGTEQ expr(B).		/* a <>= b */
+expr(X) ::= expr(A) LTEQGT expr(B).		/* a <=> b */
+{
+	BINARY_EXPR(A,B,PEX_LTEQGT);
+	X = expr2;
+}
+expr(X) ::= expr(A) LTGTEQ expr(B).		/* a <>= b (deprecated in favour of <=>)*/
 {
 	BINARY_EXPR(A,B,PEX_LTGTEQ);
 	X = expr2;
@@ -1868,7 +1887,7 @@ expr(X) ::= expr(A) QUESTION expr(B) COLON expr(C).
 	X = expr;
 }
 
-/************ Expression Lists ***********/ 
+/************ Expression Lists ***********/
 
 %type expr_list{ZCC_Expression *}
 
@@ -2301,7 +2320,7 @@ labeled_statement(X) ::= DEFAULT(T) COLON.
 
 %type assign_statement{ZCC_AssignStmt *}
 
-// The grammar won't let this pass without some syntactic help. 
+// The grammar won't let this pass without some syntactic help.
 // Parentheses and braces aren't accepted either so brackets are the only way to get this through the parser without a conflict.
 assign_statement(X) ::= LBRACKET expr_list(A) RBRACKET EQ expr(B). [EQ]
 {
@@ -2336,8 +2355,8 @@ local_var(X) ::= type(A) variable_list_with_init(B).
 }
 
 %type var_init{ZCC_VarInit *}
-var_init(X) ::= IDENTIFIER(A).						
-{ 
+var_init(X) ::= IDENTIFIER(A).
+{
 	NEW_AST_NODE(VarInit,var,A);
 	var->Name = ENamedName(A.Int);
 	var->ArraySize = NULL;
@@ -2356,8 +2375,8 @@ var_init(X) ::= IDENTIFIER(A) array_size(B).
 	X = var;
 }
 
-var_init(X) ::= IDENTIFIER(A) EQ expr(B).						
-{ 
+var_init(X) ::= IDENTIFIER(A) EQ expr(B).
+{
 	NEW_AST_NODE(VarInit,var,A);
 	var->Name = ENamedName(A.Int);
 	var->ArraySize = NULL;
@@ -2367,7 +2386,7 @@ var_init(X) ::= IDENTIFIER(A) EQ expr(B).
 }
 
 var_init(X) ::= IDENTIFIER(A) EQ  LBRACE expr_list(C) RBRACE.	// this is for arrays which declare the size with the type
-{ 
+{
 	NEW_AST_NODE(VarInit,var,A);
 	var->Name = ENamedName(A.Int);
 	var->ArraySize = NULL;
@@ -2377,7 +2396,7 @@ var_init(X) ::= IDENTIFIER(A) EQ  LBRACE expr_list(C) RBRACE.	// this is for arr
 }
 
 var_init(X) ::= IDENTIFIER(A) array_size(B) EQ  LBRACE expr_list(C) RBRACE.
-{ 
+{
 	NEW_AST_NODE(VarInit,var,A);
 	var->Name = ENamedName(A.Int);
 	var->ArraySize = B;
@@ -2387,7 +2406,7 @@ var_init(X) ::= IDENTIFIER(A) array_size(B) EQ  LBRACE expr_list(C) RBRACE.
 }
 
 var_init(X) ::= IDENTIFIER EQ  LBRACE error RBRACE.
-{ 
+{
 	X = NULL;
 }
 

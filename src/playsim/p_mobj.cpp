@@ -1,108 +1,77 @@
-//-----------------------------------------------------------------------------
-//
-// Copyright 1993-1996 id Software
-// Copyright 1994-1996 Raven Software
-// Copyright 1998-1998 Chi Hoang, Lee Killough, Jim Flynn, Rand Phares, Ty Halderman
-// Copyright 1999-2016 Randy Heit
-// Copyright 2002-2017 Christoph Oelckers
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see http://www.gnu.org/licenses/
-//
-//-----------------------------------------------------------------------------
-//
-// DESCRIPTION:
-//		Moving object handling. Spawn functions.
-//
-//-----------------------------------------------------------------------------
-
-/* For code that originates from ZDoom the following applies:
+/*
+** p_mobj.cpp
+**
+** Moving object handling. Spawn functions.
 **
 **---------------------------------------------------------------------------
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 1993-1996 id Software
+** Copyright 1994-1996 Raven Software
+** Copyright 1998-1998 Chi Hoang, Lee Killough, Jim Flynn, Rand Phares, Ty Halderman
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2002-2017 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**---------------------------------------------------------------------------
+**
+** For code that originates from ZDoom the following applies:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
 
 // HEADER FILES ------------------------------------------------------------
+
 #include <float.h>
 
-
-#include "m_random.h"
+#include "a_dynlight.h"
+#include "a_keys.h"
+#include "a_morph.h"
+#include "a_sharedglobal.h"
+#include "actorinlines.h"
+#include "b_bot.h"
+#include "basics.h"
+#include "c_dispatch.h"
+#include "cmdlib.h"
+#include "d_event.h"
+#include "d_net.h"
+#include "d_player.h"
+#include "decallib.h"
 #include "doomdef.h"
+#include "events.h"
+#include "fragglescript/t_fs.h"
+#include "g_game.h"
+#include "g_levellocals.h"
+#include "gi.h"
+#include "gstrings.h"
+#include "hu_stuff.h"
+#include "m_random.h"
+#include "model.h"
+#include "models.h"
+#include "p_acs.h"
+#include "p_checkposition.h"
+#include "p_conversation.h"
+#include "p_effect.h"
+#include "p_enemy.h"
+#include "p_lnspec.h"
 #include "p_local.h"
 #include "p_maputl.h"
-#include "p_lnspec.h"
-#include "p_effect.h"
-#include "p_terrain.h"
-#include "hu_stuff.h"
-#include "v_video.h"
-#include "c_dispatch.h"
-#include "b_bot.h"	//Added by MC:
-#include "a_sharedglobal.h"
-#include "gi.h"
-#include "sbar.h"
-#include "p_acs.h"
-#include "cmdlib.h"
-#include "decallib.h"
-#include "a_keys.h"
-#include "p_conversation.h"
-#include "g_game.h"
-#include "teaminfo.h"
-#include "r_sky.h"
-#include "d_event.h"
-#include "p_enemy.h"
-#include "gstrings.h"
-#include "po_man.h"
 #include "p_spec.h"
-#include "p_checkposition.h"
-#include "serializer_doom.h"
-#include "serialize_obj.h"
+#include "p_terrain.h"
+#include "r_sky.h"
 #include "r_utility.h"
-#include "thingdef.h"
-#include "d_player.h"
-#include "g_levellocals.h"
-#include "a_morph.h"
-#include "events.h"
-#include "actorinlines.h"
-#include "a_dynlight.h"
-#include "fragglescript/t_fs.h"
 #include "hw_vrmodes.h"
+#include "sbar.h"
+#include "serialize_obj.h" // IWYU pragma: keep
+#include "serializer_doom.h"
 #include "shadowinlines.h"
-#include "model.h"
-#include "d_net.h"
+#include "teaminfo.h"
+#include "thingdef.h"
 
 #include <QzDoom/VrCommon.h>
 
@@ -112,6 +81,7 @@
 #define WATER_SINK_SMALL_FACTOR	0.25
 #define WATER_SINK_SPEED		0.5
 #define WATER_JUMP_SPEED		3.5
+#define Z_UNDERFLOW             -32768.0
 
 // EXTERNAL FUNCTION PROTOTYPES --------------------------------------------
 
@@ -122,6 +92,7 @@ static void PlayerLandedOnThing (AActor *mo, AActor *onmobj);
 // EXTERNAL DATA DECLARATIONS ----------------------------------------------
 
 EXTERN_CVAR (Int,  cl_rockettrails)
+EXTERN_CVAR (Bool, haptics_do_action)
 EXTERN_CVAR (Bool, use_action_spawn_yzoffset)
 EXTERN_CVAR (Int, vr_mode)
 EXTERN_CVAR (Float, fov)
@@ -162,11 +133,16 @@ static FRandom pr_uniquetid("UniqueTID");
 // PUBLIC DATA DEFINITIONS -------------------------------------------------
 
 FRandom pr_spawnmobj ("SpawnActor");
+FCRandom pr_spawncsmobj("SpawnClientsideActor");
 FRandom pr_bounce("Bounce");
 FRandom pr_spawnmissile("SpawnMissile");
 
 CUSTOM_CVAR (Float, sv_gravity, 800.f, CVAR_SERVERINFO|CVAR_NOSAVE|CVAR_NOINITCALL)
 {
+	// test NAN and INF
+	if (((double)self != (double)self) || isinf((double)self))
+		sv_gravity = 800.f;
+
 	for (auto Level : AllLevels())
 	{
 		Level->gravity = self;
@@ -191,6 +167,7 @@ IMPLEMENT_POINTERS_START(AActor)
 	IMPLEMENT_POINTER(goal)
 	IMPLEMENT_POINTER(LastLookActor)
 	IMPLEMENT_POINTER(Inventory)
+	IMPLEMENT_POINTER(BlockingMobj)
 	IMPLEMENT_POINTER(LastHeard)
 	IMPLEMENT_POINTER(master)
 	IMPLEMENT_POINTER(Poisoner)
@@ -198,6 +175,14 @@ IMPLEMENT_POINTERS_START(AActor)
 	IMPLEMENT_POINTER(ViewPos)
 	IMPLEMENT_POINTER(modelData)
 IMPLEMENT_POINTERS_END
+
+IMPLEMENT_CLASS(DBehavior, false, true)
+IMPLEMENT_POINTERS_START(DBehavior)
+	IMPLEMENT_POINTER(Owner)
+IMPLEMENT_POINTERS_END
+
+DEFINE_FIELD(DBehavior, Owner)
+DEFINE_FIELD(DBehavior, Level)
 
 //==========================================================================
 //
@@ -207,13 +192,29 @@ IMPLEMENT_POINTERS_END
 
 void AActor::EnableNetworking(const bool enable)
 {
-	if (!enable)
+	if (!enable && !IsClientSide())
 	{
-		ThrowAbortException(X_OTHER, "Cannot disable networking on Actors. Consider a Thinker instead.");
+		ThrowAbortException(X_OTHER, "Cannot disable networking on Actors. Consider a Thinker or clientside Actor instead.");
 		return;
 	}
 
 	Super::EnableNetworking(true);
+}
+
+//==========================================================================
+//
+// AActor :: PropagateMark
+//
+//==========================================================================
+
+size_t AActor::PropagateMark()
+{
+	TMap<FName, TObjPtr<DBehavior*>>::Iterator it = { Behaviors };
+	TMap<FName, TObjPtr<DBehavior*>>::Pair* pair = nullptr;
+	while (it.NextPair(pair))
+		GC::Mark(pair->Value);
+
+	return Super::PropagateMark();
 }
 
 //==========================================================================
@@ -388,6 +389,7 @@ void AActor::Serialize(FSerializer &arc)
 		A("devthreshold", DefThreshold)
 		A("spriteangle", SpriteAngle)
 		A("spriterotation", SpriteRotation)
+		A("angledrolloffset", AngledRollOffset)
 		("alternative", alternative)
 		A("thrubits", ThruBits)
 		A("cameraheight", CameraHeight)
@@ -411,22 +413,26 @@ void AActor::Serialize(FSerializer &arc)
 		A("SpriteOffset", SpriteOffset)
 		("viewpos", ViewPos)
 		A("lightlevel", LightLevel)
-		A("userlights", UserLights)
 		A("WorldOffset", WorldOffset)
 		("modelData", modelData)
 		A("LandingSpeed", LandingSpeed)
-
 		("unmorphtime", UnmorphTime)
 		("morphflags", MorphFlags)
 		("premorphproperties", PremorphProperties)
 		("morphexitflash", MorphExitFlash)
 		("damagesource", damagesource)
-		A("decalgenerator", DecalGenerator);
-
+		("behaviors", Behaviors)
+		A("decalgenerator", DecalGenerator)
+		A("minrespawntics", MinRespawnTics)
+		A("respawndice", RespawnDice);
 
 		SerializeTerrain(arc, "floorterrain", floorterrain, &def->floorterrain);
 		SerializeArgs(arc, "args", args, def->args, special);
 
+		if (!arc.IsRollback())
+		{
+			arc("userlights", UserLights, def->UserLights);
+		}
 }
 
 #undef A
@@ -463,6 +469,327 @@ void AActor::PostSerialize()
 	UpdateWaterLevel(false);
 }
 
+//==========================================================================
+//
+// Behaviors allow for actions to be defined on Actors not coupled to
+// specific inventory tokens. Only one can be attached at a time.
+//
+//==========================================================================
+
+void DBehavior::Serialize(FSerializer& arc)
+{
+	Super::Serialize(arc);
+	arc("owner", Owner)
+		("level", Level);
+}
+
+void DBehavior::OnDestroy()
+{
+	if (Level != nullptr)
+		Level->RemoveActorBehavior(*this);
+
+	Super::OnDestroy();
+}
+
+bool AActor::RemoveBehavior(FName type)
+{
+	bool res = false;
+	auto b = Behaviors.CheckKey(type);
+	if (b != nullptr)
+	{
+		if (b->Get() != nullptr)
+		{
+			b->ForceGet()->Destroy();
+			res = true;
+		}
+
+		Behaviors.Remove(type);
+	}
+
+	return res;
+}
+
+static int RemoveBehavior(AActor* self, PClass* type)
+{
+	return self->RemoveBehavior(type->TypeName);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(AActor, RemoveBehavior, RemoveBehavior)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_CLASS_NOT_NULL(type, DBehavior);
+	ACTION_RETURN_BOOL(self->RemoveBehavior(type->TypeName));
+}
+
+DBehavior* AActor::AddBehavior(PClass& type)
+{
+	if (type.bAbstract || !type.IsDescendantOf(NAME_Behavior))
+		return nullptr;
+
+	auto b = FindBehavior(type.TypeName);
+	if (b == nullptr)
+	{
+		b = dyn_cast<DBehavior>(type.CreateNew());
+		if (b == nullptr)
+			return nullptr;
+
+		b->Owner = this;
+		b->ObjectFlags |= (ObjectFlags & OF_TransferrableFlags);
+
+		Behaviors[type.TypeName] = b;
+		Level->AddActorBehavior(*b);
+		IFOVERRIDENVIRTUALPTRNAME(b, NAME_Behavior, Initialize)
+		{
+			VMValue params[] = { b };
+			VMCall(func, params, 1, nullptr, 0);
+
+			if (!IsValidBehavior(*b))
+			{
+				RemoveBehavior(type.TypeName);
+				return nullptr;
+			}
+		}
+	}
+	else
+	{
+		IFOVERRIDENVIRTUALPTRNAME(b, NAME_Behavior, Reinitialize)
+		{
+			VMValue params[] = { b };
+			VMCall(func, params, 1, nullptr, 0);
+
+			if (!IsValidBehavior(*b))
+			{
+				RemoveBehavior(type.TypeName);
+				return nullptr;
+			}
+		}
+	}
+
+	return b;
+}
+
+static DBehavior* AddBehavior(AActor* self, PClass* type)
+{
+	return self->AddBehavior(*type);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(AActor, AddBehavior, AddBehavior)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_CLASS_NOT_NULL(type, DBehavior);
+	ACTION_RETURN_OBJECT(self->AddBehavior(*type));
+}
+
+void AActor::TickBehaviors()
+{
+	TArray<FName> toRemove = {};
+	TArray<DBehavior*> toTick = {};
+
+	TMap<FName, TObjPtr<DBehavior*>>::Iterator it = { Behaviors };
+	TMap<FName, TObjPtr<DBehavior*>>::Pair* pair = nullptr;
+	while (it.NextPair(pair))
+	{
+		auto b = pair->Value.Get();
+		if (b == nullptr)
+		{
+			toRemove.Push(pair->Key);
+			continue;
+		}
+
+		toTick.Push(b);
+	}
+
+	for (auto& b : toTick)
+	{
+		if (!IsValidBehavior(*b))
+		{
+			toRemove.Push(b->GetClass()->TypeName);
+			continue;
+		}
+
+		IFOVERRIDENVIRTUALPTRNAME(b, NAME_Behavior, Tick)
+		{
+			VMValue params[] = { b };
+			VMCall(func, params, 1, nullptr, 0);
+
+			if (!IsValidBehavior(*b))
+				toRemove.Push(b->GetClass()->TypeName);
+		}
+	}
+
+	for (auto& type : toRemove)
+		RemoveBehavior(type);
+}
+
+static void TickBehaviors(AActor* self)
+{
+	self->TickBehaviors();
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(AActor, TickBehaviors, TickBehaviors)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	self->TickBehaviors();
+	return 0;
+}
+
+static DBehavior* FindBehavior(AActor* self, PClass* type)
+{
+	return self->FindBehavior(type->TypeName);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(AActor, FindBehavior, FindBehavior)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_CLASS_NOT_NULL(type, DBehavior);
+	ACTION_RETURN_OBJECT(self->FindBehavior(type->TypeName));
+}
+
+void AActor::MoveBehaviors(AActor& from)
+{
+	if (&from == this)
+		return;
+
+	if (IsClientSide() != from.IsClientSide())
+		I_Error("Cannot move Behaviors between client-side and world Actors");
+
+	// Clean these up properly before transferring.
+	ClearBehaviors();
+
+	Behaviors.TransferFrom(from.Behaviors);
+
+	TArray<FName> toRemove = {};
+	TArray<DBehavior*> toTransfer = {};
+
+	// Clean up any empty behaviors that remained as well while
+	// changing the owner.
+	TMap<FName, TObjPtr<DBehavior*>>::Iterator it = { Behaviors };
+	TMap<FName, TObjPtr<DBehavior*>>::Pair* pair = nullptr;
+	while (it.NextPair(pair))
+	{
+		auto b = pair->Value.Get();
+		if (b == nullptr)
+		{
+			toRemove.Push(pair->Key);
+			continue;
+		}
+
+		b->Owner = this;
+		if (b->Level != Level)
+		{
+			b->Level->RemoveActorBehavior(*b);
+			Level->AddActorBehavior(*b);
+		}
+
+		toTransfer.Push(b);
+	}
+
+	for (auto& b : toTransfer)
+	{
+		if (!IsValidBehavior(*b))
+		{
+			toRemove.Push(b->GetClass()->TypeName);
+			continue;
+		}
+
+		IFOVERRIDENVIRTUALPTRNAME(b, NAME_Behavior, TransferredOwner)
+		{
+			VMValue params[] = { b, &from };
+			VMCall(func, params, 2, nullptr, 0);
+
+			if (!IsValidBehavior(*b))
+				toRemove.Push(b->GetClass()->TypeName);
+		}
+	}
+
+	for (auto& type : toRemove)
+		RemoveBehavior(type);
+}
+
+static void MoveBehaviors(AActor* self, AActor* from)
+{
+	self->MoveBehaviors(*from);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(AActor, MoveBehaviors, MoveBehaviors)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_OBJECT_NOT_NULL(from, AActor);
+	self->MoveBehaviors(*from);
+	return 0;
+}
+
+void AActor::ClearBehaviors(PClass* type)
+{
+	TArray<FName> toRemove = {};
+
+	TMap<FName, TObjPtr<DBehavior*>>::Iterator it = { Behaviors };
+	TMap<FName, TObjPtr<DBehavior*>>::Pair* pair = nullptr;
+	while (it.NextPair(pair))
+	{
+		auto b = pair->Value.Get();
+		if (type == nullptr || b == nullptr || b->IsKindOf(type))
+			toRemove.Push(pair->Key);
+	}
+
+	for (auto& type : toRemove)
+		RemoveBehavior(type);
+
+	// If not removing a specific type, clear whatever remains.
+	if (type == nullptr)
+		Behaviors.Clear();
+}
+
+static void ClearBehaviors(AActor* self, PClass* type)
+{
+	self->ClearBehaviors(type);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(AActor, ClearBehaviors, ClearBehaviors)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_CLASS(type, DBehavior);
+	self->ClearBehaviors(type);
+	return 0;
+}
+
+void AActor::UnlinkBehaviorsFromLevel()
+{
+	TArray<FName> toRemove = {};
+
+	TMap<FName, TObjPtr<DBehavior*>>::Iterator it = { Behaviors };
+	TMap<FName, TObjPtr<DBehavior*>>::Pair* pair = nullptr;
+	while (it.NextPair(pair))
+	{
+		auto b = pair->Value.Get();
+		if (b == nullptr)
+			toRemove.Push(pair->Key);
+		else
+			b->Level->RemoveActorBehavior(*b);
+	}
+
+	for (auto& type : toRemove)
+		RemoveBehavior(type);
+}
+
+void AActor::LinkBehaviorsToLevel()
+{
+	TArray<FName> toRemove = {};
+
+	TMap<FName, TObjPtr<DBehavior*>>::Iterator it = { Behaviors };
+	TMap<FName, TObjPtr<DBehavior*>>::Pair* pair = nullptr;
+	while (it.NextPair(pair))
+	{
+		auto b = pair->Value.Get();
+		if (b == nullptr)
+			toRemove.Push(pair->Key);
+		else
+			Level->AddActorBehavior(*b);
+	}
+
+	for (auto& type : toRemove)
+		RemoveBehavior(type);
+}
 
 //==========================================================================
 //
@@ -503,7 +830,6 @@ DEFINE_ACTION_FUNCTION_NATIVE(FState, InStateSequence, InStateSequence)
 	ACTION_RETURN_BOOL(InStateSequence(self, basestate));
 }
 
-
 bool AActor::IsMapActor()
 {
 	// [SP] Don't remove owned inventory objects.
@@ -522,7 +848,7 @@ bool AActor::IsMapActor()
 
 inline int GetTics(AActor* actor, FState * newstate)
 {
-	int tics = newstate->GetTics();
+	int tics = actor->IsClientSide() ? newstate->GetClientSideTics() : newstate->GetTics();
 	if (actor->isFast() && newstate->GetFast())
 	{
 		return tics - (tics>>1);
@@ -546,7 +872,7 @@ bool AActor::SetState (FState *newstate, bool nofunction)
 {
 	if (debugfile && player && (player->cheats & CF_PREDICTING))
 		fprintf (debugfile, "for pl %d: SetState while predicting!\n", Level->PlayerNum(player));
-	
+
 	int statelooplimit = 300000;
 	auto oldstate = state;
 	do
@@ -657,7 +983,6 @@ DEFINE_ACTION_FUNCTION(AActor, SetState)
 	ACTION_RETURN_BOOL(self->SetState(state, nofunction));
 };
 
-
 //============================================================================
 //
 // DestroyAllInventory
@@ -700,6 +1025,7 @@ DEFINE_ACTION_FUNCTION_NATIVE(AActor, DestroyAllInventory, DestroyAllInventory)
 	DestroyAllInventory(self);
 	return 0;
 }
+
 //============================================================================
 //
 // AActor :: UseInventory
@@ -842,8 +1168,8 @@ void AActor::CopyFriendliness (AActor *other, bool changeTarget, bool resetHealt
 	{
 		// LastHeard must be set as well so that A_Look can react to the new target if called
 		LastHeard = target = other->target;
-	}	
-	if (resetHealth) health = SpawnHealth();	
+	}
+	if (resetHealth) health = SpawnHealth();
 	if (health > 0) Level->total_monsters += CountsAsKill();
 }
 
@@ -870,6 +1196,9 @@ int P_GetRealMaxHealth(AActor *actor, int max)
 	// Max is 0 by default, preserving default behavior for P_GiveBody()
 	// calls while supporting health pickups.
 	auto player = actor->player;
+	auto orig_max = max;
+	int maxPickupHealth = actor->IntVar(NAME_MaxPickupHealth);
+
 	if (max <= 0)
 	{
 		max = actor->GetMaxHealth(true);
@@ -900,6 +1229,13 @@ int P_GetRealMaxHealth(AActor *actor, int max)
 		{
 			max += actor->IntVar(NAME_BonusHealth);
 		}
+	}
+	if (maxPickupHealth)
+	{
+		max = maxPickupHealth;
+		// Allow health items with greater MaxAmount values to work properly.
+		if (orig_max > 0 && orig_max > max)
+			max = orig_max;
 	}
 	return max;
 }
@@ -1040,7 +1376,7 @@ DEFINE_ACTION_FUNCTION(AActor, CheckLocalView)
 
 void AActor::DisableLocalRendering(const unsigned int pNum, const bool disable)
 {
-	if (pNum == consoleplayer)
+	if (pNum == static_cast<unsigned>(consoleplayer))
 		NoLocalRender = disable;
 }
 
@@ -1080,7 +1416,7 @@ DEFINE_ACTION_FUNCTION_NATIVE(AActor, ShouldRenderLocally, ShouldRenderLocally)
 //
 // AActor :: IsInsideVisibleAngles
 //
-// Returns true if this actor is within viewing angle/pitch visibility. 
+// Returns true if this actor is within viewing angle/pitch visibility.
 //
 //============================================================================
 
@@ -1089,17 +1425,17 @@ bool AActor::IsInsideVisibleAngles() const
 	// Don't bother masking if not wanted.
 	if (!(renderflags & RF_MASKROTATION))
 		return true;
-	
+
 	auto p = Level->GetConsolePlayer();
 
 	if (p == nullptr || p->camera == nullptr)
 		return true;
-	
+
 	DAngle anglestart = DAngle::fromDeg(VisibleStartAngle.Degrees());
 	DAngle angleend = DAngle::fromDeg(VisibleEndAngle.Degrees());
 	DAngle pitchstart = DAngle::fromDeg(VisibleStartPitch.Degrees());
 	DAngle pitchend = DAngle::fromDeg(VisibleEndPitch.Degrees());
-	
+
 	if (anglestart > angleend)
 	{
 		DAngle temp = anglestart;
@@ -1113,7 +1449,7 @@ bool AActor::IsInsideVisibleAngles() const
 		pitchstart = pitchend;
 		pitchend = temp;
 	}
-	
+
 
 	AActor *mo = p->camera;
 
@@ -1123,7 +1459,7 @@ bool AActor::IsInsideVisibleAngles() const
 		DVector3 diffang = r_viewpoint.Pos + offset - Pos();
 		DAngle to = diffang.Angle();
 
-		if (!(renderflags & RF_ABSMASKANGLE)) 
+		if (!(renderflags & RF_ABSMASKANGLE))
 			to = deltaangle(Angles.Yaw, to);
 
 		if ((to >= anglestart && to <= angleend))
@@ -1158,7 +1494,7 @@ bool AActor::IsVisibleToPlayer() const
 
 	if (!ShouldRenderLocally())
 		return false;
- 
+
 	if (VisibleToTeam != 0 && teamplay &&
 		(signed)(VisibleToTeam-1) != p->userinfo.GetTeam() )
 		return false;
@@ -1309,7 +1645,7 @@ static int Grind(AActor* actor, int items)
 				const AActor *defaults = GetDefaultByType (i);
 				if (defaults->SpawnState == NULL ||
 					sprites[defaults->SpawnState->sprite].numframes == 0)
-				{ 
+				{
 					i = NULL;
 				}
 			}
@@ -1356,11 +1692,11 @@ static int Grind(AActor* actor, int items)
 
 	// killough 11/98: kill touchy things immediately
 	if (actor->flags6 & MF6_TOUCHY && (actor->flags6 & MF6_ARMED || actor->IsSentient()))
-    {
+	{
 		actor->flags6 &= ~MF6_ARMED; // Disarm
 		P_DamageMobj (actor, NULL, NULL, actor->health, NAME_Crush, DMG_FORCED);  // kill object
 		return true;   // keep checking
-    }
+	}
 
 	if (!(actor->flags & MF_SOLID) || (actor->flags & MF_NOCLIP))
 	{
@@ -1459,6 +1795,40 @@ void SerializeModelID(FSerializer &arc, const char *key, int &id)
 			id = -1;
 		}
 	}
+}
+
+template<typename T>
+static FSerializer &SerializeBoneOverrideComponent(FSerializer &arc, const char *key, T &comp)
+{
+	arc.BeginObject(key);
+	arc("mode", comp.mode);
+	arc("prev_mode", comp.prev_mode);
+	arc("switchtic", comp.switchtic);
+	arc("interplen", comp.interplen);
+	arc("prev", comp.prev);
+	arc("cur", comp.cur);
+	arc.EndObject();
+	return arc;
+}
+
+FSerializer &Serialize(FSerializer &arc, const char *key, BoneOverride &mod, BoneOverride *def)
+{
+	arc.BeginObject(key);
+	SerializeBoneOverrideComponent(arc, "translation", mod.translation);
+	SerializeBoneOverrideComponent(arc, "rotation", mod.rotation);
+	SerializeBoneOverrideComponent(arc, "scaling", mod.scaling);
+	arc.EndObject();
+	return arc;
+}
+
+FSerializer &Serialize(FSerializer &arc, const char *key, TRS &trs, TRS *def)
+{
+	arc.BeginObject(key);
+	arc("translation", trs.translation);
+	arc("rotation", trs.rotation);
+	arc("scaling", trs.scaling);
+	arc.EndObject();
+	return arc;
 }
 
 FSerializer &Serialize(FSerializer &arc, const char *key, ModelOverride &mo, ModelOverride *def)
@@ -1566,11 +1936,12 @@ void DActorModelData::Serialize(FSerializer& arc)
 		("skinIDs", skinIDs)
 		("animationIDs", animationIDs)
 		("modelFrameGenerators", modelFrameGenerators)
+		("modelBoneOverrides", modelBoneOverrides)
 		("flags", flags)
 		("overrideFlagsSet", overrideFlagsSet)
 		("overrideFlagsClear", overrideFlagsClear)
-		("curAnim", curAnim)
-		("prevAnim", prevAnim);
+		("curAnim", anims.curAnim)
+		("prevAnim", anims.prevAnim);
 }
 
 void DActorModelData::OnDestroy()
@@ -1613,9 +1984,9 @@ void P_ExplodeMissile (AActor *mo, line_t *line, AActor *target, bool onsky, FNa
 	mo->Vel.Zero();
 	mo->effects = 0;		// [RH]
 	mo->flags &= ~MF_SHOOTABLE;
-	
+
 	FState *nextstate = nullptr;
-	
+
 	if (target != nullptr)
 	{
 		if (mo->flags7 & MF7_HITTARGET)	mo->target = target;
@@ -1628,7 +1999,7 @@ void P_ExplodeMissile (AActor *mo, line_t *line, AActor *target, bool onsky, FNa
 		}
 	}
 	if (nextstate == NULL) nextstate = mo->FindState(NAME_Death, damageType);
-	
+
 	if (onsky || (line != NULL && line->special == Line_Horizon))
 	{
 		if (!(mo->flags3 & MF3_SKYEXPLODE))
@@ -1743,7 +2114,6 @@ DEFINE_ACTION_FUNCTION(AActor, ExplodeMissile)
 	P_ExplodeMissile(self, line, target);
 	return 0;
 }
-
 
 void AActor::PlayBounceSound(bool onfloor, double volume)
 {
@@ -1952,9 +2322,9 @@ static int P_FaceMobj (AActor *source, AActor *target, DAngle *delta)
 bool AActor::CanSeek(AActor *target) const
 {
 	if (target->flags5 & MF5_CANTSEEK) return false;
-	if ((flags2 & MF2_DONTSEEKINVISIBLE) && 
-		((target->flags & MF_SHADOW) || 
-		 (target->renderflags & RF_INVISIBLE) || 
+	if ((flags2 & MF2_DONTSEEKINVISIBLE) &&
+		((target->flags & MF_SHADOW) ||
+		 (target->renderflags & RF_INVISIBLE) ||
 		 (target->flags8 & MF8_MINVISIBLE) ||
 		 !target->RenderStyle.IsVisible(target->Alpha)
 		)
@@ -2017,7 +2387,7 @@ bool P_SeekerMissile (AActor *actor, DAngle thresh, DAngle turnMax, bool precise
 	{ // Turn counter clockwise
 		actor->Angles.Yaw -= delta;
 	}
-	
+
 	if (!precise)
 	{
 		actor->VelFromAngle(speed);
@@ -2041,7 +2411,7 @@ bool P_SeekerMissile (AActor *actor, DAngle thresh, DAngle turnMax, bool precise
 			double aimheight = target->Height/2;
 			if (target->player)
 			{
-				aimheight = target->player->DefaultViewHeight();
+				aimheight = target->player->viewz - target->Z();
 			}
 			pitch = DVector2(dist, target->Z() + aimheight - actor->Center()).Angle();
 		}
@@ -2051,7 +2421,6 @@ bool P_SeekerMissile (AActor *actor, DAngle thresh, DAngle turnMax, bool precise
 	return true;
 }
 
-
 //
 // P_XYMovement
 //
@@ -2060,7 +2429,9 @@ bool P_SeekerMissile (AActor *actor, DAngle thresh, DAngle turnMax, bool precise
 #define STOPSPEED			(0x1000/65536.)
 #define CARRYSTOPSPEED		((0x1000*32/3)/65536.)
 
-double P_XYMovement (AActor *mo, DVector2 scroll) 
+// [UZDXREMA] Deliberately non-static: the VR device layer (vk_openxrdevice.cpp,
+// gl_openxrdevice.cpp, gl_openvr.cpp) calls this directly for roomscale locomotion.
+double P_XYMovement (AActor *mo, DVector2 scroll)
 {
 	static int pushtime = 0;
 	bool bForceSlide = !scroll.isZero();
@@ -2074,7 +2445,7 @@ double P_XYMovement (AActor *mo, DVector2 scroll)
 	double Oldfloorz = mo->floorz;
 	double oldz = mo->Z();
 
-	double maxmove = (mo->waterlevel < 1) || (mo->flags & MF_MISSILE) || 
+	double maxmove = (mo->waterlevel < 1) || (mo->flags & MF_MISSILE) ||
 					  (mo->player && mo->player->crouchoffset<-10) ? MAXMOVE : MAXMOVE/4;
 
 	if (mo->flags2 & MF2_WINDTHRUST && mo->waterlevel < 2 && !(mo->flags & MF_NOCLIP))
@@ -2239,10 +2610,10 @@ double P_XYMovement (AActor *mo, DVector2 scroll)
 		if (!P_TryMove (mo, ptry, true, walkplane, tm))
 		{
 			// blocked move
-			AActor *BlockingMobj = mo->BlockingMobj;
+			AActor *BlockingMobj = mo->BlockingMobj.ForceGet();
 			line_t *BlockingLine = mo->MovementBlockingLine = mo->BlockingLine;
 
-			// [ZZ] 
+			// [ZZ]
 			if (!BlockingLine && !BlockingMobj) // hit floor or ceiling while XY movement - sector actions
 			{
 				int hitpart = -1;
@@ -2257,7 +2628,7 @@ double P_XYMovement (AActor *mo, DVector2 scroll)
 				P_CheckFor3DCeilingHit(mo, mo->ceilingz, false);
 			}
 
-			if (!(mo->flags & MF_MISSILE) && (mo->BounceFlags & BOUNCE_MBF) 
+			if (!(mo->flags & MF_MISSILE) && (mo->BounceFlags & BOUNCE_MBF)
 				&& (BlockingMobj != NULL ? P_BounceActor(mo, BlockingMobj, false) : P_BounceWall(mo)))
 			{
 				// Do nothing, relevant actions already done in the condition.
@@ -2269,7 +2640,7 @@ double P_XYMovement (AActor *mo, DVector2 scroll)
 				{ // slide against wall
 					if (BlockingLine != NULL &&
 						mo->player && mo->waterlevel && mo->waterlevel < 3 &&
-						(mo->player->cmd.ucmd.forwardmove | mo->player->cmd.ucmd.sidemove) &&
+						(mo->player->cmd.forwardmove | mo->player->cmd.sidemove) &&
 						mo->BlockingLine->sidedef[1] != NULL)
 					{
 						double spd = mo->FloatVar(NAME_WaterClimbSpeed);
@@ -2419,7 +2790,7 @@ double P_XYMovement (AActor *mo, DVector2 scroll)
 			{
 				// If the new position does not match the desired position, the player
 				// must have gone through a teleporter or portal.
-				
+
 				if (mo->Vel.X == 0 && mo->Vel.Y == 0)
 				{
 					// Stop moving right now if it was a regular teleporter.
@@ -2496,7 +2867,7 @@ double P_XYMovement (AActor *mo, DVector2 scroll)
 						if (!(rover->flags&FF_EXISTS)) continue;
 						if (rover->flags&FF_SOLID && rover->top.plane->ZatPoint(mo) == mo->floorz) break;
 					}
-					if (i==mo->Sector->e->XFloor.ffloors.Size()) 
+					if (i==mo->Sector->e->XFloor.ffloors.Size())
 						return Oldfloorz;
 				}
 			}
@@ -2508,7 +2879,7 @@ double P_XYMovement (AActor *mo, DVector2 scroll)
 	// moving corresponding player:
 	if (fabs(mo->Vel.X) < STOPSPEED && fabs(mo->Vel.Y) < STOPSPEED
 		&& (!player || (player->mo != mo)
-			|| !(player->cmd.ucmd.forwardmove | player->cmd.ucmd.sidemove)))
+			|| !(player->cmd.forwardmove | player->cmd.sidemove)))
 	{
 		// if in a walking frame, stop moving
 		// killough 10/98:
@@ -2567,7 +2938,6 @@ double P_XYMovement (AActor *mo, DVector2 scroll)
 	return Oldfloorz;
 }
 
-
 static void P_MonsterFallingDamage (AActor *mo)
 {
 	int damage;
@@ -2613,6 +2983,12 @@ static void P_ZMovement (AActor *mo, double oldfloorz)
 
 	mo->AddZ(mo->Vel.Z);
 
+	if (mo->Level->i_compatflags2 & COMPATF2_EMULATEMIKOPORTALS && mo->Z() < Z_UNDERFLOW)
+	{
+		mo->SetZ(mo->ceilingz);
+		mo->Prev.Z = mo->Z();
+	}
+
 	mo->CallFallAndSink(grav, oldfloorz);
 
 	// Hexen compatibility handling for floatbobbing. Ugh...
@@ -2623,7 +2999,6 @@ static void P_ZMovement (AActor *mo, double oldfloorz)
 	{
 		mo->SetZ(mo->floorz + mo->specialf1);
 	}
-
 
 //
 // adjust height
@@ -2678,11 +3053,14 @@ static void P_ZMovement (AActor *mo, double oldfloorz)
 		mo->Vel.Z *= friction;
 	}
 
-//
-// clip movement
-//
+	//
+	// clip movement
+	//
+	// [UZDXREMA] + 2 is the VR floor-contact slack; matches the sibling checks
+	// in this file (friction check, NOGRAVITY player branch, AActor::FallAndSink).
 	if (mo->Z() <= mo->floorz + 2)
-	{	// Hit the floor
+	{
+		// Hit the floor
 		if ((!mo->player || !(mo->player->cheats & CF_PREDICTING)) &&
 			mo->Sector->SecActTarget != NULL &&
 			mo->Sector->floorplane.ZatPoint(mo) == mo->floorz)
@@ -2919,6 +3297,31 @@ DEFINE_ACTION_FUNCTION(AActor, CheckFakeFloorTriggers)
 	P_CheckFakeFloorTriggers(self, oldz, oldz_has_viewh);
 	return 0;
 }
+
+//==========================================================================
+//
+// Rumble functions
+//
+//==========================================================================
+
+static void PlayerLandedMakeRumble(AActor* self, AActor *onmobj)
+{
+	IFVIRTUALPTR(self, AActor, PlayerLandedMakeRumble)
+	{
+		VMValue params[2] = { self, onmobj };
+		VMCall(func, params, 2, nullptr, 0);
+	}
+}
+
+static void PlayerDiedMakeRumble(AActor* self, AActor *source)
+{
+	IFVIRTUALPTR(self, AActor, PlayerDiedMakeRumble)
+	{
+		VMValue params[2] = { self, source };
+		VMCall(func, params, 2, nullptr, 0);
+	}
+}
+
 //===========================================================================
 //
 // PlayerLandedOnThing
@@ -2952,6 +3355,7 @@ static void PlayerLandedOnThing (AActor *mo, AActor *onmobj)
 
 	P_FallingDamage (mo);
 
+	PlayerLandedMakeRumble(mo, onmobj);
 	PlayerLandedMakeGruntSound(mo, onmobj);
 
 //	mo->player->centering = true;
@@ -2970,7 +3374,7 @@ void AActor::FallAndSink(double grav, double oldfloorz)
 		double startvelz = Vel.Z;
 
 		if (waterlevel == 0 || (player &&
-			!(player->cmd.ucmd.forwardmove | player->cmd.ucmd.sidemove)))
+			!(player->cmd.forwardmove | player->cmd.sidemove)))
 		{
 			// [RH] Double gravity only if running off a ledge. Coming down from
 			// an upward thrust (e.g. a jump) should not double it.
@@ -3161,7 +3565,6 @@ void P_NightmareRespawn (AActor *mobj)
 	mobj->Destroy ();
 }
 
-
 //
 // P_AddMobjToHash
 //
@@ -3181,7 +3584,7 @@ void AActor::AddToHash ()
 	else
 	{
 		int hash = TIDHASH (tid);
-		auto &slot = Level->TIDHash[hash];
+		auto &slot = IsClientSide() ? Level->ClientSideTIDHash[hash] : Level->TIDHash[hash];
 
 		inext = slot;
 		iprev = &slot;
@@ -3229,7 +3632,6 @@ void AActor::SetTID (int newTID)
 	AddToHash();
 }
 
-
 //==========================================================================
 //
 // P_IsTIDUsed
@@ -3239,9 +3641,9 @@ void AActor::SetTID (int newTID)
 //
 //==========================================================================
 
-bool FLevelLocals::IsTIDUsed(int tid)
+bool FLevelLocals::IsTIDUsed(int tid, bool clientside)
 {
-	AActor *probe = TIDHash[tid & 127];
+	AActor *probe = clientside ? ClientSideTIDHash[tid & 127] : TIDHash[tid & 127];
 	while (probe != NULL)
 	{
 		if (probe->tid == tid)
@@ -3264,7 +3666,7 @@ bool FLevelLocals::IsTIDUsed(int tid)
 //
 //==========================================================================
 
-int FLevelLocals::FindUniqueTID(int start_tid, int limit)
+int FLevelLocals::FindUniqueTID(int start_tid, int limit, bool clientside)
 {
 	int tid;
 
@@ -3280,7 +3682,7 @@ int FLevelLocals::FindUniqueTID(int start_tid, int limit)
 		}
 		for (tid = start_tid; tid <= limit; ++tid)
 		{
-			if (tid != 0 && !IsTIDUsed(tid))
+			if (tid != 0 && !IsTIDUsed(tid, clientside))
 			{
 				return tid;
 			}
@@ -3302,7 +3704,7 @@ int FLevelLocals::FindUniqueTID(int start_tid, int limit)
 	{
 		// Use a positive starting TID.
 		tid = pr_uniquetid.GenRand32() & INT_MAX;
-		tid = FindUniqueTID(tid == 0 ? 1 : tid, 5);
+		tid = FindUniqueTID(tid == 0 ? 1 : tid, 5, clientside);
 		if (tid != 0)
 		{
 			return tid;
@@ -3312,13 +3714,12 @@ int FLevelLocals::FindUniqueTID(int start_tid, int limit)
 	return 0;
 }
 
-
 CCMD(utid)
 {
 	for (auto Level : AllLevels())
 	{
 		Printf("%s, %d\n", Level->MapName.GetChars(), Level->FindUniqueTID(argv.argc() > 1 ? atoi(argv[1]) : 0,
-			(argv.argc() > 2 && atoi(argv[2]) >= 0) ? atoi(argv[2]) : 0));
+			(argv.argc() > 2 && atoi(argv[2]) >= 0) ? atoi(argv[2]) : 0, false));
 	}
 }
 
@@ -3440,8 +3841,6 @@ bool AActor::CallSlam(AActor *thing)
 	else return Slam(thing);
 }
 
-
-
 // This virtual method only exists on the script side.
 int AActor::SpecialMissileHit (AActor *victim)
 {
@@ -3492,9 +3891,9 @@ bool AActor::AdjustReflectionAngle (AActor *thing, DAngle &angle)
 	else if (thing->flags4&MF4_DEFLECT)
 	{
 		// deflect (like the Heresiarch)
-		if(pr_reflect() < 128) 
+		if(pr_reflect() < 128)
 			angle += DAngle::fromDeg(45);
-		else 
+		else
 			angle -= DAngle::fromDeg(45);
 	}
 	else
@@ -3513,11 +3912,11 @@ bool AActor::AdjustReflectionAngle (AActor *thing, DAngle &angle)
 			A_Face(this, thing->target);
 		}
 	}
-	
+
 	return false;
 }
 
-int AActor::AbsorbDamage(int damage, FName dmgtype, AActor *inflictor, AActor *source, int flags)
+int AActor::AbsorbDamage(int damage, FName dmgtype, AActor *inflictor, AActor *source, int flags, DAngle angle)
 {
 	AActor *next;
 	for (AActor *item = Inventory; item != nullptr; item = next)
@@ -3526,8 +3925,8 @@ int AActor::AbsorbDamage(int damage, FName dmgtype, AActor *inflictor, AActor *s
 		next = item->Inventory;
 		IFVIRTUALPTRNAME(item, NAME_Inventory, AbsorbDamage)
 		{
-			VMValue params[7] = { item, damage, dmgtype.GetIndex(), &damage, inflictor, source, flags };
-			VMCall(func, params, 7, nullptr, 0);
+			VMValue params[8] = { item, damage, dmgtype.GetIndex(), &damage, inflictor, source, flags, angle.Degrees() };
+			VMCall(func, params, 8, nullptr, 0);
 		}
 	}
 	return damage;
@@ -3653,9 +4052,9 @@ DEFINE_ACTION_FUNCTION(AActor, SetShade)
 	return 0;
 }
 
-// [MC] Helper function for Set(View)Pitch. 
+// [MC] Helper function for Set(View)Pitch.
 DAngle AActor::ClampPitch(DAngle p)
-{	
+{
 	// clamp the pitch we set
 	DAngle min, max;
 
@@ -3701,7 +4100,7 @@ void AActor::SetPitch(DAngle p, int fflags)
 			Angles.Pitch = p;
 		}
 	}
-	
+
 }
 
 void AActor::SetAngle(DAngle ang, int fflags)
@@ -3731,7 +4130,7 @@ void AActor::SetAngle(DAngle ang, int fflags)
 			resetDoomYaw = true;
 		}
 	}
-	
+
 }
 
 void AActor::SetRoll(DAngle r, int fflags)
@@ -3833,7 +4232,6 @@ PClassActor *AActor::GetBloodType(int type) const
 	return nullptr;
 }
 
-
 DVector3 AActor::GetPortalTransition(double byoffset, sector_t **pSec)
 {
 	bool moved = false;
@@ -3866,8 +4264,6 @@ DVector3 AActor::GetPortalTransition(double byoffset, sector_t **pSec)
 	if (pSec) *pSec = sec;
 	return pos;
 }
-
-
 
 void AActor::CheckPortalTransition(bool islinked)
 {
@@ -3914,6 +4310,230 @@ DEFINE_ACTION_FUNCTION(AActor, CheckPortalTransition)
 	PARAM_BOOL(linked);
 	self->CheckPortalTransition(linked);
 	return 0;
+}
+
+int AActor::GetModelTimer()
+{
+	if(IsClientSide())
+	{
+		return Level->LocalWorldTimer;
+	}
+	else
+	{
+		return Level->totaltime;
+	}
+}
+
+void AActor::CalcBones(bool recalc)
+{
+	if(modelData && (!recalc || (modelData->flags & MODELDATA_GET_BONE_INFO_RECALC)) && modelData->flags & MODELDATA_GET_BONE_INFO)
+	{
+		if(picnum.isValid()) return; // picnum overrides don't render models
+
+		FSpriteModelFrame *smf = FindModelFrame(this, sprite, frame, false); // dropped flag is for voxels
+
+		if(!smf) return;
+
+		bool is_decoupled = flags9 & MF9_DECOUPLEDANIMATIONS;
+		double tic = GetModelTimer() + 1;
+
+		CalcModelFrameInfo frameinfo = CalcModelFrame(Level, smf, state, tics, modelData, this, is_decoupled, tic, 1.0);
+
+		ModelDrawInfo drawinfo;
+
+		int boneStartingPosition = -1;
+		bool evaluatedSingle = false;
+
+		modelData->modelBoneInfo.Resize(frameinfo.modelsamount);
+
+		for (unsigned i = 0; i < frameinfo.modelsamount; i++)
+		{
+			if (CalcModelOverrides(i, smf, modelData, frameinfo, drawinfo, is_decoupled))
+			{
+				if(!evaluatedSingle)
+				{ // [Jay] TODO per-model decoupled animations
+					FModel * mdl = Models[drawinfo.modelid];
+					bool nextFrame = frameinfo.smfNext && drawinfo.modelframe != drawinfo.modelframenext;
+					ProcessModelFrame(mdl, nextFrame, i, smf, modelData, frameinfo, drawinfo, is_decoupled, tic, &modelData->modelBoneInfo[i]);
+
+					if(frameinfo.smf_flags & MDL_MODELSAREATTACHMENTS || is_decoupled)
+					{
+						evaluatedSingle = true;
+						//if(!is_decoupled) break;
+
+						break; // TODO remove this break when per-model decoupled animations are in
+					}
+				}
+			}
+		}
+	}
+}
+
+TRS AActor::GetBoneTRS(int model_index, int bone_index, bool with_override)
+{
+	if(modelData && (modelData->flags & MODELDATA_GET_BONE_INFO) && model_index >= 0 && bone_index >= 0 && modelData->modelBoneInfo.SSize() > model_index && modelData->modelBoneInfo[model_index].bones.SSize() > bone_index)
+	{
+		return with_override ? modelData->modelBoneInfo[model_index].bones_with_override[bone_index] : modelData->modelBoneInfo[model_index].bones[bone_index];
+	}
+	return {};
+}
+
+void AActor::GetBoneMatrix(int model_index, int bone_index, bool with_override, double *outMat)
+{
+	if(modelData && (modelData->flags & MODELDATA_GET_BONE_INFO) && model_index >= 0 && bone_index >= 0 && modelData->modelBoneInfo.SSize() > model_index && modelData->modelBoneInfo[model_index].positions.SSize() > bone_index)
+	{
+		VSMatrix boneMatrix = (with_override ? modelData->modelBoneInfo[model_index].positions_with_override : modelData->modelBoneInfo[model_index].positions)[bone_index];
+
+		for(int i = 0; i < 16; i++)
+		{
+			outMat[i] = boneMatrix.mMatrix[i];
+		}
+	}
+}
+
+DVector3 AActor::GetBoneEulerAngles(FModel * mdl, int model_index, int bone_index, bool with_override)
+{
+	if(modelData && (modelData->flags & MODELDATA_GET_BONE_INFO) && model_index >= 0 && bone_index >= 0 && modelData->modelBoneInfo.SSize() > model_index && modelData->modelBoneInfo[model_index].positions.SSize() > bone_index)
+	{
+		if(picnum.isValid()) return DVector3(0,0,0); // picnum overrides don't render models
+
+		FSpriteModelFrame *smf = FindModelFrame(this, sprite, frame, false); // dropped flag is for voxels
+
+		FVector3 objPos = FVector3(Pos() + WorldOffset);
+
+		VSMatrix boneRotMatrix = (with_override ? modelData->modelBoneInfo[model_index].positions_with_override : modelData->modelBoneInfo[model_index].positions)[bone_index];
+
+		FQuaternion baseRot = mdl->GetJointRotation(bone_index);
+		boneRotMatrix.multQuaternion(baseRot);
+		VSMatrix worldMatrix = smf->ObjectToWorldMatrix(this, objPos.X, objPos.Y, objPos.Z, 1.0);
+
+		FVector4 oldFwd(1.0, 0.0, 0.0, 0.0);
+		FVector4 newFwd;
+		FVector4 oldUp(0.0, 1.0, 0.0, 0.0);
+		FVector4 newUp;
+
+		boneRotMatrix.multMatrixPoint(&oldFwd.X, &newFwd.X);
+		boneRotMatrix.multMatrixPoint(&oldUp.X, &newUp.X);
+
+		oldFwd = FVector4(FVector3(newFwd.X, newFwd.Y, newFwd.Z).Unit(), 0.0);
+		oldUp = FVector4(FVector3(newUp.X, newUp.Y, newUp.Z).Unit(), 0.0);
+
+		worldMatrix.multMatrixPoint(&oldFwd.X, &newFwd.X);
+		worldMatrix.multMatrixPoint(&oldUp.X, &newUp.X);
+
+		//billion thanks to https://www.jldoty.com/code/DirectX/YPRfromUF/YPRfromUF.html for helping figure out all this math
+
+		DVector3 fwd = DVector3(newFwd.X, newFwd.Y, newFwd.Z).Unit();
+		DVector3 up = DVector3(newUp.X, newUp.Y, newUp.Z).Unit();
+
+		DVector3 y(0,1,0);
+
+		DAngle yaw = DAngle::fromRad(atan2(fwd.Z, fwd.X));
+		DAngle pitch = DAngle::fromSin(-fwd.Y);
+		DAngle roll;
+
+		if(fwd == y)
+		{ // gimbal lock
+			yaw = DAngle::fromDeg(0);
+			roll = DAngle::fromSin(-up.X);
+		}
+		else
+		{
+			DVector3 right = (up ^ fwd).Unit(); // fwd and up must be perpendicular, thus right must be a unit vector
+
+			DVector3 x0 = (y ^ fwd).Unit(); // right vector with no roll, y and fwd aren't perpendicular, so it must be normalized into a unit vector
+			DVector3 y0 = (fwd ^ x0).Unit(); // up vector with no roll
+
+			double cos = y0 | up; // cos of roll-less up vector and "rolled" up vector
+
+			double sin;
+
+			double max = std::max(std::abs(x0.Z), std::max(std::abs(x0.X), std::abs(x0.Y)));
+			if(std::abs(x0.X) == max)
+			{
+				assert(x0.X != 0); // at least one of x0.X, x0.Y, x0.Z must be nonzero
+				sin = ((y0.X * cos) - up.X) / x0.X;
+			}
+			else if(std::abs(x0.Y) == max)
+			{
+				assert(x0.Y != 0); // at least one of x0.X, x0.Y, x0.Z must be nonzero
+				sin = ((y0.Y * cos) - up.Y) / x0.Y;
+			}
+			else //if(std::abs(x0.Z) == max)
+			{
+				assert(x0.Z != 0); // at least one of x0.X, x0.Y, x0.Z must be nonzero
+				sin = ((y0.Z * cos) - up.Z) / x0.Z;
+			}
+
+			roll = DAngle::fromSin(sin);
+		}
+
+		return DVector3(yaw.Degrees(), pitch.Degrees(), roll.Degrees());
+	}
+
+	return DVector3(0,0,0);
+}
+
+void AActor::GetBonePosition(FModel * mdl, int model_index, int bone_index, bool with_override, DVector3 &pos, DVector3 &fwd, DVector3 &up)
+{
+	if(modelData && (modelData->flags & MODELDATA_GET_BONE_INFO) && model_index >= 0 && bone_index >= 0 && modelData->modelBoneInfo.SSize() > model_index && modelData->modelBoneInfo[model_index].positions.SSize() > bone_index)
+	{
+		if(picnum.isValid()) return; // picnum overrides don't render models
+
+		FSpriteModelFrame *smf = FindModelFrame(this, sprite, frame, false); // dropped flag is for voxels
+
+		FVector3 objPos = FVector3(Pos() + WorldOffset);
+
+		VSMatrix boneMatrix = (with_override ? modelData->modelBoneInfo[model_index].positions_with_override : modelData->modelBoneInfo[model_index].positions)[bone_index];
+		VSMatrix boneRotMatrix = boneMatrix;
+
+		FQuaternion baseRot = mdl->GetJointRotation(bone_index);
+		boneRotMatrix.multQuaternion(baseRot);
+
+		VSMatrix worldMatrix = smf->ObjectToWorldMatrix(this, objPos.X, objPos.Y, objPos.Z, 1.0);
+
+		FVector4 oldPos(pos.X, pos.Z, pos.Y, 1.0);
+		FVector4 newPos;
+		FVector4 oldFwd(fwd.X, fwd.Z, fwd.Y, 0.0);
+		FVector4 newFwd;
+		FVector4 oldUp(up.X, up.Z, up.Y, 0.0);
+		FVector4 newUp;
+
+		boneMatrix.multMatrixPoint(&oldPos.X, &newPos.X);
+		boneRotMatrix.multMatrixPoint(&oldFwd.X, &newFwd.X);
+		boneRotMatrix.multMatrixPoint(&oldUp.X, &newUp.X);
+
+		oldPos = FVector4(FVector3(newPos.X, newPos.Y, newPos.Z) / newPos.W, 1.0);
+		oldFwd = FVector4(FVector3(newFwd.X, newFwd.Y, newFwd.Z).Unit(), 0.0);
+		oldUp = FVector4(FVector3(newUp.X, newUp.Y, newUp.Z).Unit(), 0.0);
+
+		worldMatrix.multMatrixPoint(&oldPos.X, &newPos.X);
+		worldMatrix.multMatrixPoint(&oldFwd.X, &newFwd.X);
+		worldMatrix.multMatrixPoint(&oldUp.X, &newUp.X);
+
+		pos = DVector3(newPos.X, newPos.Z, newPos.Y);
+		fwd = DVector3(newFwd.X, newFwd.Z, newFwd.Y).Unit();
+		up = DVector3(newUp.X, newUp.Z, newUp.Y).Unit();
+	}
+}
+
+void AActor::GetObjectToWorldMatrix(double *outMat)
+{
+	if(modelData && modelData->flags & MODELDATA_GET_BONE_INFO)
+	{
+		if(picnum.isValid()) return; // picnum overrides don't render models
+
+		FSpriteModelFrame *smf = FindModelFrame(this, sprite, frame, false); // dropped flag is for voxels
+
+		FVector3 pos = FVector3(Pos() + WorldOffset);
+
+		VSMatrix outMatrix = smf->ObjectToWorldMatrix(this, pos.X, pos.Y, pos.Z, 1.0);
+
+		for(int i = 0; i < 16; i++)
+		{
+			outMat[i] = outMatrix.mMatrix[i];
+		}
+	}
 }
 
 //
@@ -3963,6 +4583,11 @@ void AActor::Tick ()
 		return;
 	}
 
+	if(flags9 & MF9_DECOUPLEDANIMATIONS)
+	{
+		CalcBones(false);
+	}
+
 	AActor *onmo;
 
 	//assert (state != NULL);
@@ -3972,6 +4597,11 @@ void AActor::Tick ()
 		Destroy();
 		return;
 	}
+
+	// These should always tick regardless of prediction or not (let the behavior itself
+	// handle this).
+	if (!isFrozen())
+		TickBehaviors();
 
 	if (flags5 & MF5_NOINTERACTION)
 	{
@@ -3989,9 +4619,9 @@ void AActor::Tick ()
 				special2++;
 			}
 
-			if(flags9 & MF9_DECOUPLEDANIMATIONS && modelData && !(modelData->curAnim.flags & MODELANIM_NONE))
+			if(flags9 & MF9_DECOUPLEDANIMATIONS && modelData && !(modelData->anims.curAnim.flags & MODELANIM_NONE))
 			{
-				modelData->curAnim.startTic += 1;
+				modelData->anims.curAnim.startTic += 1;
 			}
 
 			return;
@@ -4017,7 +4647,7 @@ void AActor::Tick ()
 			// Handle powerup effects here so that the order is controlled
 			// by the order in the inventory, not the order in the thinker table
 			AActor *item = Inventory;
-			
+
 			while (item != NULL)
 			{
 				IFVIRTUALPTRNAME(item, NAME_Inventory, DoEffect)
@@ -4042,19 +4672,19 @@ void AActor::Tick ()
 				special2++;
 			}
 
-			if(flags9 & MF9_DECOUPLEDANIMATIONS && modelData && !(modelData->curAnim.flags & MODELANIM_NONE))
+			if(flags9 & MF9_DECOUPLEDANIMATIONS && modelData && !(modelData->anims.curAnim.flags & MODELANIM_NONE))
 			{
-				modelData->curAnim.startTic += 1;
+				modelData->anims.curAnim.startTic += 1;
 			}
 
 			return;
 		}
 
-		if (effects & FX_ROCKET) 
+		if (effects & FX_ROCKET)
 		{
 			if (++smokecounter == 4)
 			{
-				// add some smoke behind the rocket 
+				// add some smoke behind the rocket
 				smokecounter = 0;
 				AActor *th = Spawn(Level, "RocketSmokeTrail", Vec3Offset(-Vel), ALLOW_REPLACE);
 				if (th)
@@ -4065,7 +4695,7 @@ void AActor::Tick ()
 				}
 			}
 		}
-		else if (effects & FX_GRENADE) 
+		else if (effects & FX_GRENADE)
 		{
 			if (++smokecounter == 8)
 			{
@@ -4375,7 +5005,8 @@ void AActor::Tick ()
 			}
 
 		}
-		if (Vel.Z != 0 || BlockingMobj || Z() != floorz)
+
+		if (Vel.Z != 0 || BlockingMobj.ForceGet() || Z() != floorz)
 		{	// Handle Z velocity and gravity
 			if (((flags2 & MF2_PASSMOBJ) || (flags & MF_SPECIAL)) && !(Level->i_compatflags & COMPATF_NO_PASSMOBJ))
 			{
@@ -4404,7 +5035,7 @@ void AActor::Tick ()
 							{
 								player->deltaviewheight = deltaview;
 							}
-						} 
+						}
 						SetZ(onmo->Top());
 					}
 					// Check for MF6_BUMPSPECIAL
@@ -4480,6 +5111,26 @@ void AActor::Tick ()
 		}
 	}
 
+	if (Sector->Flags & SECF_KILLMONSTERS && Z() == floorz && player == nullptr && (flags & MF_SHOOTABLE) &&
+		!(flags & MF_FLOAT))
+	{
+		P_DamageMobj(this, nullptr, nullptr, TELEFRAG_DAMAGE, NAME_InstantDeath);
+		// must have been removed
+		if (ObjectFlags & OF_EuthanizeMe)
+			return;
+	}
+	//[inkoalawetrust] Genericized level damage handling that makes sector, 3D floor, and TERRAIN flat damage affect
+	//monsters and other NPCs too.
+	P_ActorOnSpecial3DFloor(
+		this); // 3D floors must be checked separately to see if their control sector allows non-player damage
+	if (checkForSpecialSector(this, Sector))
+	{
+		P_ActorInSpecialSector(this, Sector);
+		if (!isAbove(Sector->floorplane.ZatPoint(this)) ||
+			waterlevel) // Actor must be touching the floor for TERRAIN flats.
+			P_ActorOnSpecialFlat(this, P_GetThingFloorType(this));
+	}
+
 	assert (state != NULL);
 	if (state == NULL)
 	{
@@ -4490,22 +5141,6 @@ void AActor::Tick ()
 		return; // freed itself
 
 	UpdateRenderSectorList();
-
-	if (Sector->Flags & SECF_KILLMONSTERS && Z() == floorz &&
-		player == nullptr && (flags & MF_SHOOTABLE) && !(flags & MF_FLOAT))
-	{
-		P_DamageMobj(this, nullptr, nullptr, TELEFRAG_DAMAGE, NAME_InstantDeath);
-		// must have been removed
-		if (ObjectFlags & OF_EuthanizeMe) return;
-	}
-	//[inkoalawetrust] Genericized level damage handling that makes sector, 3D floor, and TERRAIN flat damage affect monsters and other NPCs too.
-	P_ActorOnSpecial3DFloor(this); //3D floors must be checked separately to see if their control sector allows non-player damage
-	if (checkForSpecialSector(this,Sector))
-	{
-		P_ActorInSpecialSector(this,Sector);
-		if (!isAbove(Sector->floorplane.ZatPoint(this)) || waterlevel) // Actor must be touching the floor for TERRAIN flats.
-			P_ActorOnSpecialFlat(this, P_GetThingFloorType(this));
-	}
 
 	if (tics != -1)
 	{
@@ -4519,9 +5154,15 @@ void AActor::Tick ()
 		}
 	}
 
+	if(!(flags9 & MF9_DECOUPLEDANIMATIONS) && modelData && !(modelData->flags & MODELDATA_GET_BONE_INFO_RECALC))
+	{
+		CalcBones(false);
+	}
+
 	if (tics == -1 || state->GetCanRaise())
 	{
 		int respawn_monsters = G_SkillProperty(SKILLP_Respawn);
+
 		// check for nightmare respawn
 		if (!(flags5 & MF5_ALWAYSRESPAWN))
 		{
@@ -4533,6 +5174,11 @@ void AActor::Tick ()
 				return;
 		}
 
+		if (MinRespawnTics > 0)
+			respawn_monsters = MinRespawnTics;
+		else if (MinRespawnTics < 0)
+			respawn_monsters = -MinRespawnTics * TICRATE;
+
 		movecount++;
 
 		if (movecount < respawn_monsters)
@@ -4541,7 +5187,7 @@ void AActor::Tick ()
 		if (Level->time & 31)
 			return;
 
-		if (pr_nightmarerespawn() > 4)
+		if (pr_nightmarerespawn() > RespawnDice)
 			return;
 
 		P_NightmareRespawn (this);
@@ -4739,7 +5385,7 @@ void AActor::SplashCheck()
 	double fh = UpdateWaterDepth(this, true);
 
 	// some additional checks to make deep sectors like Boom's splash without setting
-	// the water flags. 
+	// the water flags.
 	if (boomwaterlevel == 0 && waterlevel != 0)
 	{
 		P_HitWater(this, Sector, PosAtZ(fh), true);
@@ -4809,6 +5455,7 @@ DEFINE_ACTION_FUNCTION(AActor, UpdateWaterLevel)
 
 void ConstructActor(AActor *actor, const DVector3 &pos, bool SpawningMapThing)
 {
+	const bool clientside = actor->IsClientSide();
 	auto Level = actor->Level;
 	actor->SpawnTime = Level->totaltime;
 	actor->SpawnOrder = Level->spawnindex++;
@@ -4836,7 +5483,7 @@ void ConstructActor(AActor *actor, const DVector3 &pos, bool SpawningMapThing)
 	// Actors with zero gravity need the NOGRAVITY flag set.
 	if (actor->Gravity == 0) actor->flags |= MF_NOGRAVITY;
 
-	FRandom &rng = Level->BotInfo.m_Thinking ? pr_botspawnmobj : pr_spawnmobj;
+	FRandom &rng = clientside ? pr_spawncsmobj : (Level->BotInfo.m_Thinking ? pr_botspawnmobj : pr_spawnmobj);
 
 	if ((!!G_SkillProperty(SKILLP_InstantReaction) || actor->flags5 & MF5_ALWAYSFAST || !!(dmflags & DF_INSTANT_REACTION))
 		&& actor->flags3 & MF3_ISMONSTER)
@@ -4853,8 +5500,8 @@ void ConstructActor(AActor *actor, const DVector3 &pos, bool SpawningMapThing)
 	// routine, it will not be called.
 	FState *st = actor->SpawnState;
 	actor->state = st;
-	actor->tics = st->GetTics();
-	
+	actor->tics = clientside ? st->GetClientSideTics() : st->GetTics();
+
 	actor->sprite = st->sprite;
 	actor->frame = st->GetFrame();
 	actor->renderflags = (actor->renderflags & ~RF_FULLBRIGHT) | ActorRenderFlags::FromInt (st->GetFullbright());
@@ -4890,7 +5537,7 @@ void ConstructActor(AActor *actor, const DVector3 &pos, bool SpawningMapThing)
 		// Check if there's something solid to stand on between the current position and the
 		// current sector's floor. For map spawns this must be delayed until after setting the
 		// z-coordinate.
-		if (!SpawningMapThing) 
+		if (!SpawningMapThing)
 		{
 			P_FindFloorCeiling(actor, FFCF_ONLYSPAWNPOS);
 		}
@@ -4987,7 +5634,6 @@ void ConstructActor(AActor *actor, const DVector3 &pos, bool SpawningMapThing)
 	actor->flags8 |= MF8_INSCROLLSEC;
 }
 
-
 AActor *AActor::StaticSpawn(FLevelLocals *Level, PClassActor *type, const DVector3 &pos, replace_t allowreplacement, bool SpawningMapThing)
 {
 	if (type == NULL)
@@ -5008,8 +5654,15 @@ AActor *AActor::StaticSpawn(FLevelLocals *Level, PClassActor *type, const DVecto
 
 	AActor *actor;
 
-	actor = static_cast<AActor *>(Level->CreateThinker(type));
-	actor->EnableNetworking(true);
+	if (GetDefaultByType(type)->IsClientSide())
+	{
+		actor = static_cast<AActor*>(Level->CreateClientSideThinker(type));
+	}
+	else
+	{
+		actor = static_cast<AActor*>(Level->CreateThinker(type));
+		actor->EnableNetworking(true);
+	}
 
 	ConstructActor(actor, pos, SpawningMapThing);
 	return actor;
@@ -5024,6 +5677,28 @@ DEFINE_ACTION_FUNCTION(AActor, Spawn)
 	PARAM_FLOAT(z);
 	PARAM_INT(flags);
 	ACTION_RETURN_OBJECT(AActor::StaticSpawn(currentVMLevel, type, DVector3(x, y, z), replace_t(flags)));
+}
+
+static AActor* SpawnClientSide(PClassActor* type, double x, double y, double z, int flags)
+{
+	if (!GetDefaultByType(type)->IsClientSide())
+	{
+		ThrowAbortException(X_OTHER, "Tried to spawn a non-clientside Actor from a clientside spawn function.");
+		return nullptr;
+	}
+
+	return AActor::StaticSpawn(currentVMLevel, type, { x, y, z }, (replace_t)flags);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(AActor, SpawnClientSide, SpawnClientSide)
+{
+	PARAM_PROLOGUE;
+	PARAM_CLASS_NOT_NULL(type, AActor);
+	PARAM_FLOAT(x);
+	PARAM_FLOAT(y);
+	PARAM_FLOAT(z);
+	PARAM_INT(flags);
+	ACTION_RETURN_OBJECT(SpawnClientSide(type, x, y, z, flags));
 }
 
 PClassActor *ClassForSpawn(FName classname)
@@ -5052,6 +5727,7 @@ void AActor::LevelSpawned ()
 	{
 		flags &= ~MF_DROPPED;
 	}
+	SpawnFlags |= MTF_MAPTHING;
 	HandleSpawnFlags ();
 }
 
@@ -5069,15 +5745,20 @@ void AActor::HandleSpawnFlags ()
 	{
 		flags4 |= MF4_STANDSTILL;
 	}
+	if (SpawnFlags & MTF_NOINFIGHTING)
+	{
+		flags5 |= MF5_NOINFIGHTING;
+	}
 	if (SpawnFlags & MTF_FRIENDLY)
 	{
-		flags |= MF_FRIENDLY;
 		// Friendlies don't count as kills!
-		if (flags & MF_COUNTKILL)
+		if(CountsAsKill())
 		{
-			flags &= ~MF_COUNTKILL;
 			Level->total_monsters--;
 		}
+		
+		flags |= MF_FRIENDLY;
+		flags &= ~MF_COUNTKILL;
 	}
 	if (SpawnFlags & MTF_SHADOW)
 	{
@@ -5100,11 +5781,13 @@ void AActor::HandleSpawnFlags ()
 	}
 	if (SpawnFlags & MTF_NOCOUNT)
 	{
-		if (flags & MF_COUNTKILL)
+		if(CountsAsKill())
 		{
-			flags &= ~MF_COUNTKILL;
 			Level->total_monsters--;
 		}
+		
+		flags &= ~MF_COUNTKILL;
+		
 		if (flags & MF_COUNTITEM)
 		{
 			flags &= ~MF_COUNTITEM;
@@ -5149,7 +5832,6 @@ void AActor::CallBeginPlay()
 	else BeginPlay();
 }
 
-
 void AActor::PostBeginPlay ()
 {
 	PrevAngles = Angles;
@@ -5193,7 +5875,7 @@ void AActor::Activate (AActor *activator)
 		{
 			flags2 &= ~MF2_DORMANT;
 			FState *state = FindState(NAME_Active);
-			if (state != NULL) 
+			if (state != NULL)
 			{
 				SetState(state);
 			}
@@ -5224,7 +5906,6 @@ void AActor::CallActivate(AActor *activator)
 	else Activate(activator);
 }
 
-
 //===========================================================================
 //
 // Deactivate
@@ -5239,7 +5920,7 @@ void AActor::Deactivate (AActor *activator)
 		{
 			flags2 |= MF2_DORMANT;
 			FState *state = FindState(NAME_Inactive);
-			if (state != NULL) 
+			if (state != NULL)
 			{
 				SetState(state);
 			}
@@ -5296,6 +5977,9 @@ void AActor::OnDestroy ()
 	{
 		Level->localEventManager->WorldThingDestroyed(this);
 	}
+
+
+	ClearBehaviors();
 
 	DeleteAttachedLights();
 	ClearRenderSectorList();
@@ -5426,7 +6110,7 @@ void PlayerPointerSubstitution(AActor* oldPlayer, AActor* newPlayer, bool remove
 	}
 
 	// Go through player infos.
-	for (int i = 0; i < MAXPLAYERS; ++i)
+	for (unsigned int i = 0; i < MAXPLAYERS; ++i)
 	{
 		if (!oldPlayer->Level->PlayerInGame(i))
 			continue;
@@ -5544,8 +6228,10 @@ int MorphPointerSubstitution(AActor* from, AActor* to)
 		VMCall(func, params, 2, nullptr, 0);
 	}
 
+	to->MoveBehaviors(*from);
+
 	// Go through player infos.
-	for (int i = 0; i < MAXPLAYERS; ++i)
+	for (unsigned int i = 0; i < MAXPLAYERS; ++i)
 	{
 		if (!from->Level->PlayerInGame(i))
 			continue;
@@ -5666,9 +6352,10 @@ AActor *FLevelLocals::SpawnPlayer (FPlayerStart *mthing, int playernum, int flag
 		&& p->mo != nullptr && p->playerstate == PST_REBORN
 		&& gameaction != ga_worlddone
 		&& !(p->mo->Sector->Flags & SECF_NORESPAWN)
-		&& p->LastDamageType != NAME_Suicide)
+		&& p->LastDamageType != NAME_Suicide
+		&& p->LastSafePos.IsSafe(p->mo->tid))
 	{
-		spawn = p->LastSafePos;
+		spawn = p->LastSafePos.Pos;
 		SpawnAngle = p->mo->Angles.Yaw;
 	}
 	else
@@ -5796,7 +6483,7 @@ AActor *FLevelLocals::SpawnPlayer (FPlayerStart *mthing, int playernum, int flag
 		VMCall(func, params, 2, rets, 1);
 	}
 
-	for (int ii = 0; ii < MAXPLAYERS; ++ii)
+	for (unsigned int ii = 0; ii < MAXPLAYERS; ++ii)
 	{
 		if (PlayerInGame(ii) && Players[ii]->camera == oldactor)
 		{
@@ -5809,7 +6496,7 @@ AActor *FLevelLocals::SpawnPlayer (FPlayerStart *mthing, int playernum, int flag
 		p->cheats = CF_CHASECAM;
 
 	// setup gun psprite
-	if (!(flags & SPF_TEMPPLAYER))
+	if (!(flags & SPF_TEMPPLAYER) || oldactor == nullptr)
 	{ // This can also start a script so don't do it for the dummy player.
 		P_SetupPsprites (p, !!(flags & SPF_WEAPONFULLYUP));
 	}
@@ -5825,7 +6512,7 @@ AActor *FLevelLocals::SpawnPlayer (FPlayerStart *mthing, int playernum, int flag
 	else if ((multiplayer || (flags2 & LEVEL2_ALLOWRESPAWN) || sv_singleplayerrespawn ||
 		!!G_SkillProperty(SKILLP_PlayerRespawn)) && state == PST_REBORN && oldactor != NULL)
 	{ // Special inventory handling for respawning in coop
-		IFVM(PlayerPawn, FilterCoopRespawnInventory)
+		IFVIRTUALPTRNAME(p->mo, NAME_PlayerPawn, FilterCoopRespawnInventory)
 		{
 			VMValue params[] = { p->mo, oldactor, ((heldWeap == nullptr || (heldWeap->ObjectFlags & OF_EuthanizeMe)) ? nullptr : heldWeap) };
 			VMCall(func, params, 3, nullptr, 0);
@@ -5835,6 +6522,8 @@ AActor *FLevelLocals::SpawnPlayer (FPlayerStart *mthing, int playernum, int flag
 	{ // Remove any inventory left from the old actor. Coop handles
 	  // it above, but the other modes don't.
 		DestroyAllInventory(oldactor);
+		// Clean these up as well, otherwise pointer substitution will break a lot of things.
+		oldactor->ClearBehaviors();
 	}
 	// [BC] Handle temporary invulnerability when respawned
 	if (state == PST_REBORN || state == PST_ENTER)
@@ -5864,7 +6553,7 @@ AActor *FLevelLocals::SpawnPlayer (FPlayerStart *mthing, int playernum, int flag
 	}
 
 	// [BC] Do script stuff
-	if (!(flags & SPF_TEMPPLAYER))
+	if (!(flags & SPF_TEMPPLAYER) || oldactor == nullptr)
 	{
 		if (state == PST_ENTER || (state == PST_LIVE && !savegamerestore))
 		{
@@ -5937,7 +6626,7 @@ AActor *FLevelLocals::SpawnMapThing (FMapThing *mthing, int position)
 		return NULL;
 	}
 
-	// copy args to mapthing so that we have them in one place for the rest of this function	
+	// copy args to mapthing so that we have them in one place for the rest of this function
 	if (mentry->ArgsDefined > 0)
 	{
 		if (mentry->Type!= NULL) mthing->special = mentry->Special;
@@ -5985,7 +6674,7 @@ AActor *FLevelLocals::SpawnMapThing (FMapThing *mthing, int position)
 	if (pnum == -1 || (flags & LEVEL_FILTERSTARTS))
 	{
 		// check for appropriate game type
-		if (deathmatch) 
+		if (deathmatch)
 		{
 			mask = MTF_DEATHMATCH;
 		}
@@ -6029,14 +6718,14 @@ AActor *FLevelLocals::SpawnMapThing (FMapThing *mthing, int position)
 		else if (!deathmatch)
 		{ // Cooperative
 			mask = 0;
-			for (int i = 0; i < MAXPLAYERS; i++)
+			for (unsigned int i = 0; i < MAXPLAYERS; i++)
 			{
 				if (PlayerInGame(i))
 				{
 					int spawnmask = Players[i]->GetSpawnClass();
 					if (spawnmask != 0)
 						mask |= spawnmask;
-					else 
+					else
 						mask = -1;
 				}
 			}
@@ -6210,7 +6899,7 @@ AActor *FLevelLocals::SpawnMapThing (FMapThing *mthing, int position)
 	if (mthing->FloatbobPhase >= 0 && mthing->FloatbobPhase < 64) mobj->FloatBobPhase = mthing->FloatbobPhase;
 	if (mthing->Gravity < 0) mobj->Gravity = -mthing->Gravity;
 	else if (mthing->Gravity > 0) mobj->Gravity *= mthing->Gravity;
-	else 
+	else
 	{
 		mobj->flags |= MF_NOGRAVITY;
 		mobj->Gravity = 0;
@@ -6318,6 +7007,7 @@ AActor *FLevelLocals::SpawnMapThing (FMapThing *mthing, int position)
 // SpawnMapThing
 //
 //===========================================================================
+
 CVAR(Bool, dumpspawnedthings, false, 0)
 
 AActor *FLevelLocals::SpawnMapThing(int index, FMapThing *mt, int position)
@@ -6333,12 +7023,9 @@ AActor *FLevelLocals::SpawnMapThing(int index, FMapThing *mt, int position)
 	return spawned;
 }
 
-
-
 //
 // GAME SPAWN FUNCTIONS
 //
-
 
 //
 // P_SpawnPuff
@@ -6362,7 +7049,7 @@ AActor *P_SpawnPuff (AActor *source, PClassActor *pufftype, const DVector3 &pos1
 			puff->tics = 1;
 	}
 
-	//Moved puff creation and target/master/tracer setting to here. 
+	//Moved puff creation and target/master/tracer setting to here.
 	if (puff && vict)
 	{
 		if (puff->flags7 & MF7_HITTARGET)	puff->target = vict;
@@ -6372,10 +7059,10 @@ AActor *P_SpawnPuff (AActor *source, PClassActor *pufftype, const DVector3 &pos1
 	// [BB] If the puff came from a player, set the target of the puff to this player.
 	if ( puff && (puff->flags5 & MF5_PUFFGETSOWNER))
 		puff->target = source;
-	
+
 	// [AA] Track the source of the attack unconditionally in a separate field.
 	puff->damagesource = source;
-	
+
 	// Angle is the opposite of the hit direction (i.e. the puff faces the source.)
 	puff->Angles.Yaw = hitdir + DAngle::fromDeg(180);
 
@@ -6413,13 +7100,17 @@ AActor *P_SpawnPuff (AActor *source, PClassActor *pufftype, const DVector3 &pos1
 			if (cl_pufftype == 1) puff->renderflags |= RF_INVISIBLE;
 		}
 
+		bool meleeFromPlayer = (
+			(flags & PF_MELEERANGE) && source->player
+			&& (source->player->mo == players[consoleplayer].mo || source->player->mo == players[consoleplayer].camera));
+
 		if ((flags & PF_HITTHING) && puff->SeeSound.isvalid())
 		{ // Hit thing sound
-			S_Sound (puff, CHAN_BODY, 0, puff->SeeSound, 1, ATTN_NORM);
+			S_Sound (puff, CHAN_BODY, (meleeFromPlayer&&haptics_do_action)?CHANF_RUMBLE:CHANF_NONE, puff->SeeSound, 1, ATTN_NORM);
 		}
 		else if (puff->AttackSound.isvalid())
 		{
-			S_Sound (puff, CHAN_BODY, 0, puff->AttackSound, 1, ATTN_NORM);
+			S_Sound (puff, CHAN_BODY, (meleeFromPlayer&&haptics_do_action)?CHANF_RUMBLE:CHANF_NONE, puff->AttackSound, 1, ATTN_NORM);
 		}
 	}
 
@@ -6444,7 +7135,7 @@ DEFINE_ACTION_FUNCTION(AActor, SpawnPuff)
 //---------------------------------------------------------------------------
 //
 // P_SpawnBlood
-// 
+//
 //---------------------------------------------------------------------------
 
 AActor *P_SpawnBlood (const DVector3 &pos1, DAngle dir, int damage, AActor *originator)
@@ -6455,11 +7146,11 @@ AActor *P_SpawnBlood (const DVector3 &pos1, DAngle dir, int damage, AActor *orig
 	pos.Z += pr_spawnblood.Random2() / 64.;
 
 	int bloodtype = cl_bloodtype;
-	
-	if (bloodcls != NULL && !(GetDefaultByType(bloodcls)->flags4 & MF4_ALLOWPARTICLES))
+
+	if (bloodcls != nullptr && !(GetDefaultByType(bloodcls)->flags4 & MF4_ALLOWPARTICLES))
 		bloodtype = 0;
 
-	if (bloodcls != NULL)
+	if (bloodcls != nullptr)
 	{
 		th = Spawn(originator->Level, bloodcls, pos, NO_REPLACE); // GetBloodType already performed the replacement
 		th->Vel.Z = 2;
@@ -6478,8 +7169,9 @@ AActor *P_SpawnBlood (const DVector3 &pos1, DAngle dir, int damage, AActor *orig
 		{
 			th->Translation = originator->BloodTranslation;
 		}
-		
+
 		// Moved out of the blood actor so that replacing blood is easier
+		bool foundState = false;
 		if (gameinfo.gametype & GAME_DoomStrifeChex)
 		{
 			if (gameinfo.gametype == GAME_Strife)
@@ -6487,48 +7179,53 @@ AActor *P_SpawnBlood (const DVector3 &pos1, DAngle dir, int damage, AActor *orig
 				if (damage > 13)
 				{
 					FState *state = th->FindState(NAME_Spray);
-					if (state != NULL)
+					if (state != nullptr)
 					{
 						th->SetState (state);
-						goto statedone;
+						foundState = true;
 					}
 				}
 				else damage += 2;
 			}
-			int advance = 0;
-			if (damage <= 12 && damage >= 9)
+			if (!foundState)
 			{
-				advance = 1;
-			}
-			else if (damage < 9)
-			{
-				advance = 2;
-			}
-
-			PClassActor *cls = th->GetClass();
-
-			while (cls != RUNTIME_CLASS(AActor))
-			{
-				int checked_advance = advance;
-				if (cls->OwnsState(th->SpawnState))
+				int advance = 0;
+				if (damage <= 12 && damage >= 9)
 				{
-					for (; checked_advance > 0; --checked_advance)
-					{
-						// [RH] Do not set to a state we do not own.
-						if (cls->OwnsState(th->SpawnState + checked_advance))
-						{
-							th->SetState(th->SpawnState + checked_advance);
-							goto statedone;
-						}
-					}
+					advance = 1;
 				}
-				// We can safely assume the ParentClass is of type PClassActor
-				// since we stop when we see the Actor base class.
-				cls = static_cast<PClassActor *>(cls->ParentClass);
+				else if (damage < 9)
+				{
+					advance = 2;
+				}
+
+				PClassActor* cls = th->GetClass();
+				bool good = false;
+				while (cls != RUNTIME_CLASS(AActor))
+				{
+					int checked_advance = advance;
+					if (cls->OwnsState(th->SpawnState))
+					{
+						for (; checked_advance > 0; --checked_advance)
+						{
+							// [RH] Do not set to a state we do not own.
+							if (cls->OwnsState(th->SpawnState + checked_advance))
+							{
+								th->SetState(th->SpawnState + checked_advance);
+								good = true;
+								break;
+							}
+						}
+						if (good)
+							break;
+					}
+					// We can safely assume the ParentClass is of type PClassActor
+					// since we stop when we see the Actor base class.
+					cls = static_cast<PClassActor*>(cls->ParentClass);
+				}
 			}
 		}
 
-	statedone:
 		if (!(bloodtype <= 1)) th->renderflags |= RF_INVISIBLE;
 	}
 
@@ -6549,7 +7246,6 @@ DEFINE_ACTION_FUNCTION(AActor, SpawnBlood)
 	ACTION_RETURN_OBJECT(P_SpawnBlood(DVector3(x, y, z), dir, damage, self));
 }
 
-
 //---------------------------------------------------------------------------
 //
 // PROC P_BloodSplatter
@@ -6558,10 +7254,10 @@ DEFINE_ACTION_FUNCTION(AActor, SpawnBlood)
 
 void P_BloodSplatter (const DVector3 &pos, AActor *originator, DAngle hitangle)
 {
-	PClassActor *bloodcls = originator->GetBloodType(1); 
+	PClassActor *bloodcls = originator->GetBloodType(1);
 
 	int bloodtype = cl_bloodtype;
-	
+
 	if (bloodcls != NULL && !(GetDefaultByType(bloodcls)->flags4 & MF4_ALLOWPARTICLES))
 		bloodtype = 0;
 
@@ -6576,7 +7272,7 @@ void P_BloodSplatter (const DVector3 &pos, AActor *originator, DAngle hitangle)
 		mo->Vel.Z = 3;
 
 		// colorize the blood!
-		if (!(mo->flags2 & MF2_DONTTRANSLATE)) 
+		if (!(mo->flags2 & MF2_DONTTRANSLATE))
 		{
 			mo->Translation = originator->BloodTranslation;
 		}
@@ -6600,7 +7296,7 @@ void P_BloodSplatter2 (const DVector3 &pos, AActor *originator, DAngle hitangle)
 	PClassActor *bloodcls = originator->GetBloodType(2);
 
 	int bloodtype = cl_bloodtype;
-	
+
 	if (bloodcls != NULL && !(GetDefaultByType(bloodcls)->flags4 & MF4_ALLOWPARTICLES))
 		bloodtype = 0;
 
@@ -6611,7 +7307,6 @@ void P_BloodSplatter2 (const DVector3 &pos, AActor *originator, DAngle hitangle)
 	if (bloodcls != NULL)
 	{
 		AActor *mo;
-
 
 		mo = Spawn (originator->Level, bloodcls, pos + add, NO_REPLACE); // GetBloodType already performed the replacement
 		mo->target = originator;
@@ -6643,7 +7338,6 @@ DEFINE_ACTION_FUNCTION(AActor, BloodSplatter)
 	return 0;
 }
 
-
 //---------------------------------------------------------------------------
 //
 // PROC P_RipperBlood
@@ -6660,7 +7354,7 @@ void P_RipperBlood (AActor *mo, AActor *bleeder)
 	DVector3 pos = mo->Vec3Offset(xo, yo, zo);
 
 	int bloodtype = cl_bloodtype;
-	
+
 	if (bloodcls != NULL && !(GetDefaultByType(bloodcls)->flags4 & MF4_ALLOWPARTICLES))
 		bloodtype = 0;
 
@@ -6699,7 +7393,7 @@ void P_RipperBlood (AActor *mo, AActor *bleeder)
 int P_GetThingFloorType (AActor *thing)
 {
 	if (thing->floorterrain >= 0)
-	{		
+	{
 		return thing->floorterrain;
 	}
 	else
@@ -6707,7 +7401,6 @@ int P_GetThingFloorType (AActor *thing)
 		return thing->Sector->GetTerrain(sector_t::floor);
 	}
 }
-
 
 //---------------------------------------------------------------------------
 //
@@ -6731,7 +7424,7 @@ bool P_HitWater (AActor * thing, sector_t * sec, const DVector3 &pos, bool check
 	FSplashDef *splash;
 	int terrainnum;
 	sector_t *hsec = NULL;
-	
+
 	// don't splash above the object
 	if (checkabove)
 	{
@@ -6740,7 +7433,7 @@ bool P_HitWater (AActor * thing, sector_t * sec, const DVector3 &pos, bool check
 		// end up submerged by the move that calls P_HitWater.
 		if (thing->flags & MF_MISSILE)
 			compare_z -= thing->Vel.Z;
-		if (pos.Z > compare_z) 
+		if (pos.Z > compare_z)
 			return false;
 	}
 
@@ -6823,30 +7516,39 @@ foundone:
 	{
 		if (smallsplash && splash->SmallSplash)
 		{
-			mo = Spawn(sec->Level, splash->SmallSplash, pos, ALLOW_REPLACE);
-			mo->target = thing;
-			if (mo) mo->Floorclip += splash->SmallSplashClip;
+			if (!thing->IsClientSide() || GetDefaultByType(splash->SmallSplash)->IsClientSide())
+			{
+				mo = Spawn(sec->Level, splash->SmallSplash, pos, ALLOW_REPLACE);
+				mo->target = thing;
+				if (mo) mo->Floorclip += splash->SmallSplashClip;
+			}
 		}
 		else
 		{
 			if (splash->SplashChunk)
 			{
-				mo = Spawn(sec->Level, splash->SplashChunk, pos, ALLOW_REPLACE);
-				mo->target = thing;
-				if (splash->ChunkXVelShift != 255)
+				if (!thing->IsClientSide() || GetDefaultByType(splash->SplashChunk)->IsClientSide())
 				{
-					mo->Vel.X = (pr_chunk.Random2() << splash->ChunkXVelShift) / 65536.;
+					mo = Spawn(sec->Level, splash->SplashChunk, pos, ALLOW_REPLACE);
+					mo->target = thing;
+					if (splash->ChunkXVelShift != 255)
+					{
+						mo->Vel.X = (pr_chunk.Random2() << splash->ChunkXVelShift) / 65536.;
+					}
+					if (splash->ChunkYVelShift != 255)
+					{
+						mo->Vel.Y = (pr_chunk.Random2() << splash->ChunkYVelShift) / 65536.;
+					}
+					mo->Vel.Z = splash->ChunkBaseZVel + (pr_chunk() << splash->ChunkZVelShift) / 65536.;
 				}
-				if (splash->ChunkYVelShift != 255)
-				{
-					mo->Vel.Y = (pr_chunk.Random2() << splash->ChunkYVelShift) / 65536.;
-				}
-				mo->Vel.Z = splash->ChunkBaseZVel + (pr_chunk() << splash->ChunkZVelShift) / 65536.;
 			}
 			if (splash->SplashBase)
 			{
-				mo = Spawn(sec->Level, splash->SplashBase, pos, ALLOW_REPLACE);
-				mo->target = thing;
+				if (!thing->IsClientSide() || GetDefaultByType(splash->SplashBase)->IsClientSide())
+				{
+					mo = Spawn(sec->Level, splash->SplashBase, pos, ALLOW_REPLACE);
+					mo->target = thing;
+				}
 			}
 			if (thing->player && !splash->NoAlert && alert)
 			{
@@ -6885,7 +7587,6 @@ DEFINE_ACTION_FUNCTION(AActor, HitWater)
 	ACTION_RETURN_BOOL(P_HitWater(self, sec, DVector3(x, y, z), checkabove, alert, force, flags));
 }
 
-
 //---------------------------------------------------------------------------
 //
 // FUNC P_HitFloor
@@ -6895,8 +7596,6 @@ DEFINE_ACTION_FUNCTION(AActor, HitWater)
 
 bool P_HitFloor (AActor *thing)
 {
-	const msecnode_t *m;
-
 	// killough 11/98: touchy objects explode on impact
 	// Allow very short drops to be safe, so that a touchy can be summoned without exploding.
 	if (thing->flags6 & MF6_TOUCHY && ((thing->flags6 & MF6_ARMED) || thing->IsSentient()) && thing->Vel.Z < -5)
@@ -6908,34 +7607,68 @@ bool P_HitFloor (AActor *thing)
 
 	// don't splash if landing on the edge above water/lava/etc....
 	DVector3 pos;
-	for (m = thing->touching_sectorlist; m; m = m->m_tnext)
+	sector_t* sec = nullptr;
+	if (thing->IsClientSide())
 	{
-		pos = thing->PosRelative(m->m_sector);
-		if (thing->Z() == m->m_sector->floorplane.ZatPoint(pos))
+		if (thing->Sector != nullptr)
 		{
-			break;
-		}
-
-		// Check 3D floors
-		for(unsigned int i=0;i<m->m_sector->e->XFloor.ffloors.Size();i++)
-		{		
-			F3DFloor * rover = m->m_sector->e->XFloor.ffloors[i];
-			if (!(rover->flags & FF_EXISTS)) continue;
-			if (rover->flags & (FF_SOLID|FF_SWIMMABLE))
+			sec = thing->Sector;
+			pos = thing->Pos();
+			if (thing->Z() != sec->floorplane.ZatPoint(pos))
 			{
-				if (rover->top.plane->ZatPoint(pos) == thing->Z())
+				// Check 3D floors
+				for (unsigned int i = 0; i < sec->e->XFloor.ffloors.Size(); i++)
 				{
-					return P_HitWater (thing, m->m_sector, pos);
+					F3DFloor* rover = sec->e->XFloor.ffloors[i];
+					if (!(rover->flags & FF_EXISTS)) continue;
+					if (rover->flags & (FF_SOLID | FF_SWIMMABLE))
+					{
+						if (rover->top.plane->ZatPoint(pos) == thing->Z())
+						{
+							return P_HitWater(thing, sec, pos);
+						}
+					}
 				}
+				sec = nullptr;
 			}
 		}
 	}
-	if (m == NULL || m->m_sector->GetHeightSec() != NULL)
-	{ 
+	else
+	{
+		const msecnode_t* m;
+		for (m = thing->touching_sectorlist; m != nullptr; m = m->m_tnext)
+		{
+			sec = m->m_sector;
+			pos = thing->PosRelative(sec);
+			if (thing->Z() == sec->floorplane.ZatPoint(pos))
+			{
+				break;
+			}
+
+			// Check 3D floors
+			for (unsigned int i = 0; i < sec->e->XFloor.ffloors.Size(); i++)
+			{
+				F3DFloor* rover = sec->e->XFloor.ffloors[i];
+				if (!(rover->flags & FF_EXISTS)) continue;
+				if (rover->flags & (FF_SOLID | FF_SWIMMABLE))
+				{
+					if (rover->top.plane->ZatPoint(pos) == thing->Z())
+					{
+						return P_HitWater(thing, sec, pos);
+					}
+				}
+			}
+		}
+		if (m == nullptr)
+			sec = nullptr;
+	}
+
+	if (sec == nullptr || sec->GetHeightSec() != nullptr)
+	{
 		return false;
 	}
 
-	return P_HitWater (thing, m->m_sector, pos);
+	return P_HitWater (thing, sec, pos);
 }
 
 DEFINE_ACTION_FUNCTION(AActor, HitFloor)
@@ -6988,7 +7721,7 @@ bool P_CheckMissileSpawn (AActor* th, double maxdist)
 	FCheckPosition tm(!!(th->flags2 & MF2_RIP));
 
 	// killough 8/12/98: for non-missile objects (e.g. grenades)
-	// 
+	//
 	// [GZ] MBF excludes non-missile objects from the P_TryMove test
 	// and subsequent potential P_ExplodeMissile call. That is because
 	// in MBF, a projectile is not an actor with the MF_MISSILE flag
@@ -7011,7 +7744,8 @@ bool P_CheckMissileSpawn (AActor* th, double maxdist)
 	if (!(P_TryMove (th, newpos.XY(), false, NULL, tm, true)))
 	{
 		// [RH] Don't explode ripping missiles that spawn inside something
-		if (th->BlockingMobj == NULL || !(th->flags2 & MF2_RIP) || (th->BlockingMobj->flags5 & MF5_DONTRIP))
+		auto blocking = th->BlockingMobj.ForceGet();
+		if (blocking == NULL || !(th->flags2 & MF2_RIP) || (blocking->flags5 & MF5_DONTRIP))
 		{
 			// If this is a monster spawned by A_SpawnProjectile subtract it from the counter.
 			th->ClearCounters();
@@ -7026,7 +7760,7 @@ bool P_CheckMissileSpawn (AActor* th, double maxdist)
 			}
 			else
 			{
-				P_ExplodeMissile (th, th->BlockingLine, th->BlockingMobj);
+				P_ExplodeMissile (th, th->BlockingLine, blocking);
 			}
 			return false;
 		}
@@ -7042,7 +7776,6 @@ DEFINE_ACTION_FUNCTION(AActor, CheckMissileSpawn)
 	PARAM_FLOAT(add);
 	ACTION_RETURN_BOOL(P_CheckMissileSpawn(self, add));
 }
-
 
 //---------------------------------------------------------------------------
 //
@@ -7082,8 +7815,6 @@ DEFINE_ACTION_FUNCTION(AActor, PlaySpawnSound)
 	P_PlaySpawnSound(missile, self);
 	return 0;
 }
-
-
 
 double GetDefaultSpeed(PClassActor *type)
 {
@@ -7128,12 +7859,12 @@ AActor *P_SpawnMissileXYZ (DVector3 pos, AActor *source, AActor *dest, PClassAct
 	}
 
 	AActor *th = Spawn (source->Level, type, pos, ALLOW_REPLACE);
-	
-	P_PlaySpawnSound(th, source);
 
 	// record missile's originator
 	if (owner == NULL) owner = source;
 	th->target = owner;
+
+	P_PlaySpawnSound(th, source);
 
 	double speed = th->Speed;
 
@@ -7157,7 +7888,7 @@ AActor *P_SpawnMissileXYZ (DVector3 pos, AActor *source, AActor *dest, PClassAct
 	th->Vel = velocity.Resized(speed);
 
 	P_SpawnMissileXYZ_ShadowHandling(source,dest,th,pos);
-	
+
 	th->AngleFromVel();
 
 	if (th->flags4 & MF4_SPECTRAL)
@@ -7217,8 +7948,6 @@ DEFINE_ACTION_FUNCTION(AActor, SpawnMissileZ)
 	ACTION_RETURN_OBJECT(P_SpawnMissileZ(self, z, dest, type));
 }
 
-
-
 AActor *P_OldSpawnMissile(AActor *source, AActor *owner, AActor *dest, PClassActor *type)
 {
 	if (source == nullptr || type == nullptr)
@@ -7228,12 +7957,13 @@ AActor *P_OldSpawnMissile(AActor *source, AActor *owner, AActor *dest, PClassAct
 	AActor *th = Spawn (source->Level, type, source->PosPlusZ(32.), ALLOW_REPLACE);
 
 	if (th == nullptr) return nullptr;
-	P_PlaySpawnSound(th, source);
+
 	th->target = owner;		// record missile's originator
+
+	P_PlaySpawnSound(th, source);
 
 	th->Angles.Yaw = source->AngleTo(dest);
 	th->VelFromAngle();
-
 
 	double dist = source->DistanceBySpeed(dest, max(1., th->Speed));
 	th->Vel.Z = (dest->Z() - source->Z()) / dist;
@@ -7255,7 +7985,6 @@ DEFINE_ACTION_FUNCTION(AActor, OldSpawnMissile)
 	PARAM_OBJECT(owner, AActor);
 	ACTION_RETURN_OBJECT(P_OldSpawnMissile(self, owner, dest, type));
 }
-
 
 //---------------------------------------------------------------------------
 //
@@ -7314,7 +8043,7 @@ AActor *P_SpawnMissileAngleZSpeed (AActor *source, double z,
 	}
 	AActor *mo;
 
-	if (z != ONFLOORZ && z != ONCEILINGZ) 
+	if (z != ONFLOORZ && z != ONCEILINGZ)
 	{
 		z -= source->Floorclip;
 	}
@@ -7322,9 +8051,12 @@ AActor *P_SpawnMissileAngleZSpeed (AActor *source, double z,
 	mo = Spawn (source->Level, type, source->PosAtZ(z), ALLOW_REPLACE);
 
 	if (mo == nullptr) return nullptr;
-	P_PlaySpawnSound(mo, source);
+
 	if (owner == NULL) owner = source;
 	mo->target = owner;
+
+	P_PlaySpawnSound(mo, source);
+
 	mo->Angles.Yaw = angle;
 	mo->VelFromAngle(speed);
 	mo->Vel.Z = vz;
@@ -7349,7 +8081,6 @@ DEFINE_ACTION_FUNCTION(AActor, SpawnMissileAngleZSpeed)
 	PARAM_BOOL(checkspawn);
 	ACTION_RETURN_OBJECT(P_SpawnMissileAngleZSpeed(self, z, type, angle, vz, speed, owner, checkspawn));
 }
-
 
 AActor *P_SpawnSubMissile(AActor *source, PClassActor *type, AActor *target, DAngle angle, int aimflags)
 {
@@ -7446,6 +8177,9 @@ AActor *P_SpawnPlayerMissile (AActor *source, double x, double y, double z,
 							  PClassActor *type, DAngle angle, DAngle p, FTranslatedLineTarget *pLineTarget, AActor **pMissileActor,
 							  bool nofreeaim, bool noautoaim, int aimflags)
 {
+	if (pMissileActor != nullptr)
+		*pMissileActor = nullptr;
+
 	if (source == nullptr || type == nullptr)
 	{
 		return nullptr;
@@ -7483,7 +8217,7 @@ AActor *P_SpawnPlayerMissile (AActor *source, double x, double y, double z,
 		{
 			an = angle + DAngle::fromDeg(angdiff[i]);
 			pitch = P_AimLineAttack (source, an, linetargetrange, pLineTarget, vrange, aimflags);
-	
+
 			if (source->player != NULL &&
 				!nofreeaim &&
 				source->Level->IsFreelookAllowed() &&
@@ -7578,8 +8312,10 @@ AActor *P_SpawnPlayerMissile (AActor *source, double x, double y, double z,
 
 	if (MissileActor == nullptr) return nullptr;
 	if (pMissileActor) *pMissileActor = MissileActor;
-	P_PlaySpawnSound(MissileActor, source, !!(aimflags & ALF_ISOFFHAND) ? CHAN_OFFWEAPON : CHAN_WEAPON, CHANF_OVERLAP);
 	MissileActor->target = source;
+	// [UZDXREMA] Offhand missiles fire on CHAN_OFFWEAPON with CHANF_OVERLAP so they
+	// don't stomp the mainhand weapon channel.
+	P_PlaySpawnSound(MissileActor, source, !!(aimflags & ALF_ISOFFHAND) ? CHAN_OFFWEAPON : CHAN_WEAPON, CHANF_OVERLAP);
 	MissileActor->Angles.Yaw = an;
 	MissileActor->Angles.Pitch = pitch;
 	if (MissileActor->flags3 & (MF3_FLOORHUGGER | MF3_CEILINGHUGGER))
@@ -7641,7 +8377,6 @@ DEFINE_ACTION_FUNCTION(AActor, SpawnPlayerMissile)
 	if (numret > 1) ret[1].SetObject(missileactor), numret = 2;
 	return numret;
 }
-
 
 int AActor::GetTeam()
 {
@@ -7707,7 +8442,7 @@ FName AActor::GetSpecies()
 		{
 			if (GetDefaultByType(thistype->ParentClass)->flags3 & MF3_ISMONSTER)
 				thistype = static_cast<PClassActor *>(thistype->ParentClass);
-			else 
+			else
 				break;
 		}
 	}
@@ -7799,7 +8534,7 @@ int AActor::DoSpecialDamage (AActor *target, int damage, FName damagetype)
 				damage >>= 1;
 			}
 		}
-	
+
 		return damage;
 	}
 }
@@ -7810,19 +8545,22 @@ DEFINE_ACTION_FUNCTION(AActor, DoSpecialDamage)
 	PARAM_OBJECT_NOT_NULL(target, AActor);
 	PARAM_INT(damage);
 	PARAM_NAME(damagetype);
+	PARAM_INT(flags); //[MC] Only needed for Super.DoSpecialDamage() calls to maintain consistency for all parameters
+	PARAM_ANGLE(angle);
+
 	ACTION_RETURN_INT(self->DoSpecialDamage(target, damage, damagetype));
 }
 
-int AActor::CallDoSpecialDamage(AActor *target, int damage, FName damagetype)
+int AActor::CallDoSpecialDamage(AActor *target, int damage, FName damagetype, int flags, DAngle angle)
 {
 	IFVIRTUAL(AActor, DoSpecialDamage)
 	{
 		// Without the type cast this picks the 'void *' assignment...
-		VMValue params[4] = { (DObject*)this, (DObject*)target, damage, damagetype.GetIndex() };
+		VMValue params[6] = {(DObject *)this, (DObject *)target, damage, damagetype.GetIndex(), flags, angle.Degrees() };
 		VMReturn ret;
 		int retval;
 		ret.IntAt(&retval);
-		VMCall(func, params, 4, &ret, 1);
+		VMCall(func, params, 6, &ret, 1);
 		return retval;
 	}
 	else return DoSpecialDamage(target, damage, damagetype);
@@ -7849,7 +8587,7 @@ int AActor::TakeSpecialDamage (AActor *inflictor, AActor *source, int damage, FN
 	{
 		return damage;
 	}
-	
+
 	if (inflictor && inflictor->DeathType != NAME_None)
 		damagetype = inflictor->DeathType;
 
@@ -7876,19 +8614,21 @@ DEFINE_ACTION_FUNCTION(AActor, TakeSpecialDamage)
 	PARAM_OBJECT(source, AActor);
 	PARAM_INT(damage);
 	PARAM_NAME(damagetype);
+	PARAM_INT(flags); //[MC] Only needed for Super.TakeSpecialDamage() calls to maintain consistency for all parameters
+	PARAM_ANGLE(angle);
+
 	ACTION_RETURN_INT(self->TakeSpecialDamage(inflictor, source, damage, damagetype));
 }
 
-
-int AActor::CallTakeSpecialDamage(AActor *inflictor, AActor *source, int damage, FName damagetype)
+int AActor::CallTakeSpecialDamage(AActor *inflictor, AActor *source, int damage, FName damagetype, int flags, DAngle angle)
 {
 	IFVIRTUAL(AActor, TakeSpecialDamage)
 	{
-		VMValue params[5] = { (DObject*)this, inflictor, source, damage, damagetype.GetIndex() };
+		VMValue params[7] = { (DObject*)this, inflictor, source, damage, damagetype.GetIndex(), flags, angle.Degrees() };
 		VMReturn ret;
 		int retval;
 		ret.IntAt(&retval);
-		VMCall(func, params, 5, &ret, 1);
+		VMCall(func, params, 7, &ret, 1);
 		return retval;
 	}
 	else return TakeSpecialDamage(inflictor, source, damage, damagetype);
@@ -7905,7 +8645,7 @@ void AActor::Crash()
 		!(flags & MF_ICECORPSE))
 	{
 		FState *crashstate = NULL;
-		
+
 		int gibh = GetGibHealth();
 		if (DamageType != NAME_None)
 		{
@@ -7944,7 +8684,6 @@ void AActor::SetIdle(bool nofunction)
 	if (idle == NULL) idle = SpawnState;
 	SetState(idle, nofunction);
 }
-
 
 int AActor::SpawnHealth() const
 {
@@ -8014,7 +8753,7 @@ void AActor::Revive()
 	flags5 = info->flags5;
 	flags6 = info->flags6;
 	flags7 = info->flags7;
-	flags8 = info->flags8; 
+	flags8 = info->flags8;
 	if (SpawnFlags & MTF_FRIENDLY) flags |= MF_FRIENDLY;
 	DamageType = info->DamageType;
 	health = SpawnHealth();
@@ -8040,6 +8779,10 @@ void AActor::Revive()
 		Level->total_monsters++;
 	}
 
+	IFOVERRIDENVIRTUALPTRNAME(this, NAME_Actor, OnRevive)
+	{
+		VMCallVoid<AActor*>(func, this);
+	}
 	// [ZZ] resurrect hook
 	Level->localEventManager->WorldThingRevived(this);
 }
@@ -8057,7 +8800,6 @@ int AActor::GetGibHealth() const
 	return -SpawnHealth();
 }
 
-
 // killough 11/98:
 // Whether an object is "sentient" or not. Used for environmental influences.
 // (left precisely the same as MBF even though it doesn't make much sense.)
@@ -8065,7 +8807,6 @@ bool AActor::IsSentient() const
 {
 	return health > 0 && SeeState != NULL;
 }
-
 
 FSharedStringArena AActor::mStringPropertyData;
 
@@ -8134,7 +8875,7 @@ void AActor::ClearCounters()
 	}
 }
 
-int AActor::GetModifiedDamage(FName damagetype, int damage, bool passive, AActor *inflictor, AActor *source, int flags)
+int AActor::GetModifiedDamage(FName damagetype, int damage, bool passive, AActor *inflictor, AActor *source, int flags, DAngle angle)
 {
 	auto inv = Inventory;
 	while (inv != nullptr && !(inv->ObjectFlags & OF_EuthanizeMe))
@@ -8142,14 +8883,13 @@ int AActor::GetModifiedDamage(FName damagetype, int damage, bool passive, AActor
 		auto nextinv = inv->Inventory;
 		IFVIRTUALPTRNAME(inv, NAME_Inventory, ModifyDamage)
 		{
-			VMValue params[8] = { (DObject*)inv, damage, damagetype.GetIndex(), &damage, passive, inflictor, source, flags };
-			VMCall(func, params, 8, nullptr, 0);
+			VMValue params[9] = { (DObject*)inv, damage, damagetype.GetIndex(), &damage, passive, inflictor, source, flags, angle.Degrees() };
+			VMCall(func, params, 9, nullptr, 0);
 		}
 		inv = nextinv;
 	}
 	return damage;
 }
-
 
 int AActor::ApplyDamageFactor(FName damagetype, int damage) const
 {
@@ -8293,19 +9033,19 @@ void PrintMiscActorInfo(AActor *query)
 		Printf("\n   flags9: %x", query->flags9.GetValue());
 		for (flagi = 0; flagi <= 31; flagi++)
 			if (query->flags9 & ActorFlags9::FromInt(1 << flagi)) Printf(" %s", FLAG_NAME(1 << flagi, flags9));
-		Printf("\nBounce flags: %x\nBounce factors: f:%f, w:%f", 
+		Printf("\nBounce flags: %x\nBounce factors: f:%f, w:%f",
 			query->BounceFlags.GetValue(), query->bouncefactor,
 			query->wallbouncefactor);
 		/*for (flagi = 0; flagi < 31; flagi++)
 			if (query->BounceFlags & 1<<flagi) Printf(" %s", flagnamesb[flagi]);*/
-		Printf("\nRender style = %i:%s, alpha %f\nRender flags: %x", 
+		Printf("\nRender style = %i:%s, alpha %f\nRender flags: %x",
 			querystyle, ((unsigned)querystyle < countof(renderstyles) ? renderstyles[querystyle] : "Custom"),
 			query->Alpha, query->renderflags.GetValue());
 		/*for (flagi = 0; flagi < 31; flagi++)
 			if (query->renderflags & 1<<flagi) Printf(" %s", flagnamesr[flagi]);*/
 		Printf("\nSpecial+args: %s(%i, %i, %i, %i, %i)\nspecial1: %i, special2: %i.",
 			(spec ? spec->name : "None"),
-			query->args[0], query->args[1], query->args[2], query->args[3], 
+			query->args[0], query->args[1], query->args[2], query->args[3],
 			query->args[4],	query->special1, query->special2);
 		Printf("\nTID: %d", query->tid);
 		Printf("\nCoord= x: %f, y: %f, z:%f, floor:%f, ceiling:%f, height= %f",

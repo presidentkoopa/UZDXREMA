@@ -1,33 +1,23 @@
 /*
 ** d_netinfo.cpp
+**
 ** Manages transport of user and "server" cvars across a network
 **
 **---------------------------------------------------------------------------
-** Copyright 1998-2006 Randy Heit
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 1998-2016 Marisa Heit
+** Copyright 2006-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
@@ -253,6 +243,12 @@ DEFINE_ACTION_FUNCTION(_PlayerInfo, GetDisplayColor)
 	ACTION_RETURN_INT(c);
 }
 
+DEFINE_ACTION_FUNCTION(_PlayerInfo, GetAverageLatency)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(player_t);
+	ACTION_RETURN_INT(ClientStates[self - players].AverageLatency);
+}
+
 // Find out which teams are present. If there is only one,
 // then another team should be chosen at random.
 //
@@ -264,9 +260,9 @@ void D_PickRandomTeam (int player)
 {
 	static char teamline[8] = "\\team\\X";
 
-	uint8_t *foo = (uint8_t *)teamline;
+	auto foo = TArrayView((uint8_t *)teamline, sizeof(teamline));
 	teamline[6] = (char)D_PickRandomTeam() + '0';
-	D_ReadUserInfoStrings (player, &foo, teamplay);
+	D_ReadUserInfoStrings (player, foo, teamplay);
 }
 
 int D_PickRandomTeam ()
@@ -280,7 +276,7 @@ int D_PickRandomTeam ()
 	int numTeams = 0;
 	int team;
 
-	for (int i = 0; i < MAXPLAYERS; ++i)
+	for (unsigned int i = 0; i < MAXPLAYERS; ++i)
 	{
 		if (playeringame[i])
 		{
@@ -395,7 +391,7 @@ int D_GetFragCount (player_t *player)
 		// Count total frags for this player's team
 		int count = 0;
 
-		for (int i = 0; i < MAXPLAYERS; ++i)
+		for (unsigned int i = 0; i < MAXPLAYERS; ++i)
 		{
 			if (playeringame[i] && players[i].userinfo.GetTeam() == team)
 			{
@@ -408,7 +404,7 @@ int D_GetFragCount (player_t *player)
 
 void D_SetupUserInfo ()
 {
-	int i;
+	unsigned int i;
 	userinfo_t *coninfo;
 
 	D_AssignDefaultMultiplayerName();
@@ -429,7 +425,7 @@ void D_SetupUserInfo ()
 		if ((cvar->GetFlags() & (CVAR_USERINFO|CVAR_IGNORE)) == CVAR_USERINFO)
 		{
 			FBaseCVar **newcvar;
-			FName cvarname(cvar->GetName());
+			FName cvarname = cvar->GetFName();
 
 			switch (cvarname.GetIndex())
 			{
@@ -470,7 +466,7 @@ void userinfo_t::Reset(int pnum)
 		if ((cvar->GetFlags() & (CVAR_USERINFO|CVAR_IGNORE)) == CVAR_USERINFO)
 		{
 			ECVarType type;
-			FName cvarname(cvar->GetName());
+			FName cvarname = cvar->GetFName();
 			FBaseCVar *newcvar;
 
 			// Some cvars have different types for their shadow copies.
@@ -481,9 +477,9 @@ void userinfo_t::Reset(int pnum)
 			case NAME_PlayerClass:	type = CVAR_Int; break;
 			default:				type = cvar->GetRealType(); break;
 			}
-			
+
 			int flags = cvar->GetFlags();
-			
+
 			newcvar = C_CreateCVar(NULL, type, (flags & CVAR_MOD) | ((flags & CVAR_ZS_CUSTOM) << 1) );
 			newcvar->SetGenericRepDefault(cvar->GetGenericRepDefault(CVAR_String), CVAR_String);
 
@@ -589,7 +585,7 @@ void D_UserInfoChanged (FBaseCVar *cvar)
 
 	val = cvar->GetGenericRep (CVAR_String);
 	escaped_val = D_EscapeUserInfo(val.String);
-	if (4 + strlen(cvar->GetName()) + escaped_val.Len() > 256)
+	if (4 + cvar->GetNameLen() + escaped_val.Len() > 256)
 		I_Error ("User info descriptor too big");
 
 	mysnprintf (foo, countof(foo), "\\%s\\%s", cvar->GetName(), escaped_val.GetChars());
@@ -598,7 +594,7 @@ void D_UserInfoChanged (FBaseCVar *cvar)
 	Net_WriteString (foo);
 }
 
-static const char *SetServerVar (char *name, ECVarType type, uint8_t **stream, bool singlebit)
+static const char *SetServerVar (char *name, ECVarType type, TArrayView<uint8_t>& stream, bool singlebit)
 {
 	FBaseCVar *var = FindCVar (name, NULL);
 	UCVarValue value;
@@ -686,7 +682,7 @@ bool D_SendServerInfoChange (FBaseCVar *cvar, UCVarValue value, ECVarType type)
 		}
 		size_t namelen;
 
-		namelen = strlen(cvar->GetName());
+		namelen = cvar->GetNameLen();
 
 		Net_WriteInt8(DEM_SINFCHANGED);
 		Net_WriteInt8((uint8_t)(namelen | (type << 6)));
@@ -717,7 +713,7 @@ bool D_SendServerFlagChange (FBaseCVar *cvar, int bitnum, bool set, bool silent)
 			return true;
 		}
 
-		int namelen = (int)strlen(cvar->GetName());
+		int namelen = (int)cvar->GetNameLen();
 
 		Net_WriteInt8(DEM_SINFCHANGEDXOR);
 		Net_WriteInt8((uint8_t)namelen);
@@ -728,7 +724,7 @@ bool D_SendServerFlagChange (FBaseCVar *cvar, int bitnum, bool set, bool silent)
 	return false;
 }
 
-void D_DoServerInfoChange (uint8_t **stream, bool singlebit)
+void D_DoServerInfoChange (TArrayView<uint8_t>& stream, bool singlebit)
 {
 	const char *value;
 	char name[64];
@@ -740,8 +736,8 @@ void D_DoServerInfoChange (uint8_t **stream, bool singlebit)
 	len &= 0x3f;
 	if (len == 0)
 		return;
-	memcpy (name, *stream, len);
-	*stream += len;
+	auto dst = TArrayView((uint8_t*)name, len);
+	ReadBytes(dst, stream);
 	name[len] = 0;
 
 	if ( (value = SetServerVar (name, (ECVarType)type, stream, singlebit)) && netgame)
@@ -825,12 +821,12 @@ FString D_GetUserInfoStrings(int pnum, bool compact)
 	return result;
 }
 
-void D_ReadUserInfoStrings (int pnum, uint8_t **stream, bool update)
+void D_ReadUserInfoStrings (int pnum, TArrayView<uint8_t>& stream, bool update)
 {
 	userinfo_t *info = &players[pnum].userinfo;
 	TArray<FName> compact_names(info->CountUsed());
 	FBaseCVar **cvar_ptr;
-	const char *ptr = *((const char **)stream);
+	const char *ptr = (const char *)stream.Data();
 	const char *breakpt;
 	FString value;
 	bool compact;
@@ -891,7 +887,7 @@ void D_ReadUserInfoStrings (int pnum, uint8_t **stream, bool update)
 				}
 				keyname = FName(ptr, valstart - ptr - 1, true);
 			}
-			
+
 			// A few of these need special handling.
 			switch (keyname.GetIndex())
 			{
@@ -961,7 +957,7 @@ void D_ReadUserInfoStrings (int pnum, uint8_t **stream, bool update)
 			}
 		}
 	}
-	*stream += strlen (*((char **)stream)) + 1;
+	AdvanceStream(stream, strlen((char*)stream.Data()) + 1);
 }
 
 void WriteUserInfo(FSerializer &arc, userinfo_t &info)
@@ -1033,50 +1029,75 @@ void ReadUserInfo(FSerializer &arc, userinfo_t &info, FString &skin)
 	}
 }
 
-CCMD (playerinfo)
+CCMD(playerinfo)
 {
-	if (argv.argc() < 2)
+	TArray<int> inGame = {};
+	for (unsigned int i = 0; i < MAXPLAYERS; ++i)
 	{
-		int i;
+		if (playeringame[i])
+			inGame.Push(i);
+	}
 
-		for (i = 0; i < MAXPLAYERS; i++)
+	const bool isMulti = inGame.Size() > 1;
+	if (isMulti && argv.argc() < 2)
+	{
+		for (auto i : inGame)
 		{
-			if (playeringame[i])
+			Printf("%d. %s", i, players[i].userinfo.GetName());
+			if (i == consoleplayer || i == Net_Arbitrator || players[i].Bot != nullptr || players[i].settings_controller)
 			{
-				Printf("%d. %s\n", i, players[i].userinfo.GetName());
+				Printf(" [");
+				if (i == consoleplayer)
+					Printf("*");
+				if (i == Net_Arbitrator)
+					Printf("H");
+				if (players[i].Bot != nullptr)
+					Printf("B");
+				else if (players[i].settings_controller && i != Net_Arbitrator)
+					Printf("C");
+				Printf("]");
 			}
+			Printf("\n");
 		}
+		Printf("Pass a player number for more info\n");
 	}
 	else
 	{
-		int i = atoi(argv[1]);
-
-		if (i < 0 || i >= MAXPLAYERS)
+		int i = -1;
+		if (!isMulti)
 		{
-			Printf("Bad player number\n");
+			i = consoleplayer;
+		}
+		else if (!C_IsValidInt(argv[1], i) || i < 0 || i >= MAXPLAYERS)
+		{
+			Printf("Bad player number %s\n", argv[1]);
 			return;
 		}
-		userinfo_t *ui = &players[i].userinfo;
 
 		if (!playeringame[i])
 		{
-			Printf(TEXTCOLOR_ORANGE "Player %d is not in the game\n", i);
+			Printf("Player %d is not in game\n", i);
 			return;
 		}
 
+		const userinfo_t& info = players[i].userinfo;
+
 		// Print special info
-		Printf("%20s: %s\n",      "Name", ui->GetName());
-		Printf("%20s: %s (%d)\n", "Team", ui->GetTeam() == TEAM_NONE ? "None" : Teams[ui->GetTeam()].GetName(), ui->GetTeam());
-		Printf("%20s: %s (%d)\n", "Skin", Skins[ui->GetSkin()].Name.GetChars(), ui->GetSkin());
-		Printf("%20s: %s (%d)\n", "Gender", GenderNames[ui->GetGender()], ui->GetGender());
+		Printf("%20s: %s\n",	  "Host", i == Net_Arbitrator ? "Yes" : "No");
+		Printf("%20s: %s\n",	  "Console Player", i == consoleplayer ? "Yes" : "No");
+		Printf("%20s: %s\n",	  "Bot", players[i].Bot != nullptr ? "Yes" : "No");
+		Printf("%20s: %s\n",	  "Settings Controller", players[i].settings_controller && players[i].Bot == nullptr ? "Yes" : "No");
+		Printf("%20s: %s\n",      "Name", info.GetName());
+		Printf("%20s: %s (%d)\n", "Team", info.GetTeam() == TEAM_NONE ? "None" : Teams[info.GetTeam()].GetName(), info.GetTeam());
+		Printf("%20s: %s (%d)\n", "Skin", Skins[info.GetSkin()].Name.GetChars(), info.GetSkin());
+		Printf("%20s: %s (%d)\n", "Gender", GenderNames[info.GetGender()], info.GetGender());
 		Printf("%20s: %s (%d)\n", "PlayerClass",
-			ui->GetPlayerClassNum() == -1 ? "Random" : ui->GetPlayerClassType()->GetDisplayName().GetChars(),
-			ui->GetPlayerClassNum());
+			info.GetPlayerClassNum() == -1 ? "Random" : info.GetPlayerClassType()->GetDisplayName().GetChars(),
+			info.GetPlayerClassNum());
 
 		// Print generic info
-		TMapIterator<FName, FBaseCVar *> it(*ui);
-		TMap<FName, FBaseCVar *>::Pair *pair;
-
+		TMap<FName, FBaseCVar*>::ConstIterator it = { info };
+		TMap<FName, FBaseCVar*>::ConstPair* pair = nullptr;
 		while (it.NextPair(pair))
 		{
 			if (pair->Key != NAME_Name && pair->Key != NAME_Team && pair->Key != NAME_Skin &&
@@ -1085,10 +1106,9 @@ CCMD (playerinfo)
 				Printf("%20s: %s\n", pair->Key.GetChars(), pair->Value->GetHumanString());
 			}
 		}
-		if (argv.argc() > 2)
-		{
+
+		if (argv.argc() > 2 || (!isMulti && argv.argc() > 1))
 			PrintMiscActorInfo(players[i].mo);
-		}
 	}
 }
 

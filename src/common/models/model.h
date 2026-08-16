@@ -1,3 +1,20 @@
+/*
+** model.h
+**
+** General model handling code
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 2013-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
+
 #pragma once
 
 #include <stdint.h>
@@ -18,7 +35,9 @@ class FGameTexture;
 class IModelVertexBuffer;
 class FModel;
 class PClass;
+class AActor;
 struct FSpriteModelFrame;
+struct FLevelLocals;
 
 FTextureID LoadSkin(const char* path, const char* fn);
 void FlushModels();
@@ -46,6 +65,7 @@ struct FSpriteModelFrame
 	float xrotate, yrotate, zrotate;
 	float rotationCenterX, rotationCenterY, rotationCenterZ;
 	float rotationSpeed;
+	float viewModelFOV;
 private:
 	unsigned int flags;
 public:
@@ -60,6 +80,9 @@ public:
 	unsigned int getFlags(class DActorModelData * defs) const;
 	friend void InitModels();
 	friend void ParseModelDefLump(int Lump);
+
+	VSMatrix ObjectToWorldMatrix(AActor * actor, float x, float y, float z, double ticFrac);
+	VSMatrix ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic);
 };
 
 
@@ -95,6 +118,21 @@ public:
 
 	virtual int FindFrame(const char * name, bool nodefault = false) = 0;
 
+	virtual int NumJoints() { return 0; }
+	virtual int FindJoint(FName name) { return -1; }
+
+	virtual int GetJointParent(int joint) { return -1; }
+	virtual FName GetJointName(int joint) { return NAME_None; }
+	virtual FQuaternion GetJointRotation(int joint) { return FQuaternion(0.0f,0.0f,0.0f,1.0f); }
+	virtual FVector3 GetJointPosition(int joint) { return FVector3(0.0f,0.0f,0.0f); }
+	virtual TRS GetJointBaseTRS(int joint) { return {}; }
+	virtual TRS GetJointPose(int joint, int frame) { return {}; }
+	virtual int NumFrames() { return -1; }
+
+	virtual void GetJointChildren(int joint, TArray<int> &out) {}
+
+	virtual void GetRootJoints(TArray<int> &out) {}
+
 	// [RL0] these are used for decoupled iqm animations
 	virtual int FindFirstFrame(FName name) { return FErr_NotFound; }
 	virtual int FindLastFrame(FName name) { return FErr_NotFound; }
@@ -108,7 +146,8 @@ public:
 
 	virtual ModelAnimFrame PrecalculateFrame(const ModelAnimFrame &from, const ModelAnimFrameInterp &to, float inter, const TArray<TRS>* animationData) { return nullptr; };
 
-	virtual const TArray<VSMatrix>* CalculateBones(const ModelAnimFrame &from, const ModelAnimFrameInterp &to, float inter, const TArray<TRS>* animationData) { return nullptr; };
+	virtual const TArray<VSMatrix>* CalculateBones(const ModelAnimFrame &from, const ModelAnimFrameInterp &to, float inter, const TArray<TRS>* animationData, TArray<BoneOverride> *in, BoneInfo *out, double time) { return nullptr; };
+	virtual const TArray<VSMatrix>* CalculateBonesOnlyOffsets(TArray<BoneOverride> *in, BoneInfo *out, double time) { return nullptr; };
 
 	virtual const TArray<VSMatrix>* GetBasePose() {return nullptr;}
 
@@ -124,7 +163,7 @@ public:
 
 	FString mFileName;
 	std::pair<FString, FString> mFilePath;
-	
+
 	FSpriteModelFrame *baseFrame;
 private:
 	IModelVertexBuffer *mVBuf[NumModelRendererTypes];
@@ -135,4 +174,3 @@ protected:
 
 int ModelFrameHash(FSpriteModelFrame* smf);
 unsigned FindModel(const char* path, const char* modelfile, bool silent = false);
-

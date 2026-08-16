@@ -1,30 +1,19 @@
-//
-//---------------------------------------------------------------------------
-//
-// Copyright(C) 2005-2016 Christoph Oelckers
-// All rights reserved.
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public License
-// along with this program.  If not, see http://www.gnu.org/licenses/
-//
-//--------------------------------------------------------------------------
-//
 /*
-** gl_models.cpp
+** models.cpp
 **
 ** General model handling code
 **
-**/
+**---------------------------------------------------------------------------
+**
+** Copyright 2005-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 #include "filesystem.h"
 #include "cmdlib.h"
@@ -65,32 +54,47 @@ EXTERN_CVAR(Float, vr_3dweaponOffsetZ);
 extern TDeletingArray<FVoxel *> Voxels;
 extern TDeletingArray<FVoxelDef *> VoxelDefs;
 
-void RenderFrameModels(FModelRenderer* renderer, FLevelLocals* Level, const FSpriteModelFrame *smf, const FState* curState, const int curTics, FTranslationID translation, AActor* actor, const DPSprite* psp = nullptr);
-
+// [RS FORK] Upstream added the 'ticFrac' parameter (the animation clock now comes
+// from AActor::GetModelTimer() + ticFrac instead of Level->totaltime + I_GetTimeFrac()).
+// The fork's trailing 'psp' parameter is kept, defaulted so upstream's psp-less
+// callers (RenderModel here, AActor::CalcBones in p_mobj.cpp) still compile.
+void RenderFrameModels(FModelRenderer* renderer, FLevelLocals* Level, const FSpriteModelFrame *smf, const FState* curState, int curTics, double ticFrac, FTranslationID translation, AActor* actor, const DPSprite* psp = nullptr);
 
 void RenderModel(FModelRenderer *renderer, float x, float y, float z, FSpriteModelFrame *smf, AActor *actor, double ticFrac)
 {
-	// Setup transformation.
-
 	int smf_flags = smf->getFlags(actor->modelData);
-
 	FTranslationID translation = NO_TRANSLATION;
 	if (!(smf_flags & MDL_IGNORETRANSLATION))
 		translation = actor->Translation;
 
-	// y scale for a sprite means height, i.e. z in the world!
-	float scaleFactorX = actor->Scale.X * smf->xscale;
-	float scaleFactorY = actor->Scale.X * smf->yscale;
-	float scaleFactorZ = actor->Scale.Y * smf->zscale;
-	float pitch = 0;
-	float roll = 0;
-	double rotateOffset = 0;
+	VSMatrix objectToWorldMatrix = smf->ObjectToWorldMatrix(actor, x, y, z, ticFrac);
+
+	const DVector2 scale = actor->InterpolatedScale(ticFrac);
+	float scaleFactorX = scale.X * smf->xscale;
+	float scaleFactorY = scale.X * smf->yscale;
+	float scaleFactorZ = scale.Y * smf->zscale;
+	float orientation = scaleFactorX * scaleFactorY * scaleFactorZ;
+
+	renderer->BeginDrawModel(actor->RenderStyle, smf_flags, objectToWorldMatrix, orientation < 0);
+	RenderFrameModels(renderer, actor->Level, smf, actor->state, actor->tics, ticFrac, translation, actor);
+	renderer->EndDrawModel(actor->RenderStyle, smf_flags);
+}
+
+VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(AActor * actor, float x, float y, float z, double ticFrac)
+{
+	int smf_flags = getFlags(actor->modelData);
+
+	// Setup transformation.
 	DRotator angles;
+
 	if (actor->renderflags & RF_INTERPOLATEANGLES) // [Nash] use interpolated angles
 		angles = actor->InterpolatedAngles(ticFrac);
 	else
 		angles = actor->Angles;
+
 	float angle = angles.Yaw.Degrees();
+	float pitch = 0;
+	float roll = 0;
 
 	// [BB] Workaround for the missing pitch information.
 	if ((smf_flags & MDL_PITCHFROMMOMENTUM))
@@ -113,20 +117,6 @@ void RenderModel(FModelRenderer *renderer, float x, float y, float z, FSpriteMod
 		}
 	}
 
-	if (smf_flags & MDL_ROTATING)
-	{
-		if (smf->rotationSpeed > 0.0000000001 || smf->rotationSpeed < -0.0000000001)
-		{
-			double turns = (I_GetTime() + I_GetTimeFrac()) / (200.0 / smf->rotationSpeed);
-			turns -= floor(turns);
-			rotateOffset = turns * 360.0;
-		}
-		else
-		{
-			rotateOffset = 0.0;
-		}
-	}
-
 	// Added MDL_USEACTORPITCH and MDL_USEACTORROLL flags processing.
 	// If both flags MDL_USEACTORPITCH and MDL_PITCHFROMMOMENTUM are set, the pitch sums up the actor pitch and the velocity vector pitch.
 	if (smf_flags & MDL_USEACTORPITCH)
@@ -137,75 +127,131 @@ void RenderModel(FModelRenderer *renderer, float x, float y, float z, FSpriteMod
 	}
 	if (smf_flags & MDL_USEACTORROLL) roll += angles.Roll.Degrees();
 
+	// [Nash] take SpriteRotation into account
+	angle += actor->SpriteRotation.Degrees();
+
+	double tic = actor->GetModelTimer();
+
+	if (!WorldPaused(true) && !actor->isFrozen())
+	{
+		tic += ticFrac;
+	}
+
+	return ObjectToWorldMatrix(actor->Level, DVector3(x, y, z), DRotator(DAngle::fromDeg(pitch), DAngle::fromDeg(angle), DAngle::fromDeg(roll)), actor->InterpolatedScale(ticFrac), smf_flags, tic);
+}
+
+VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic)
+{
+	double rotateOffset = 0;
+
+	if (flags & MDL_ROTATING)
+	{
+		if (rotationSpeed > 0.0000000001 || rotationSpeed < -0.0000000001)
+		{
+			double turns = (tic) / (200.0 / rotationSpeed);
+			turns -= floor(turns);
+			rotateOffset = turns * 360.0;
+		}
+		else
+		{
+			rotateOffset = 0.0;
+		}
+	}
+
+	// y scale for a sprite means height, i.e. z in the world!
+	float scaleFactorX = scaling.X * xscale;
+	float scaleFactorY = scaling.X * yscale;
+	float scaleFactorZ = scaling.Y * zscale;
+
 	VSMatrix objectToWorldMatrix;
 	objectToWorldMatrix.loadIdentity();
 
 	// Model space => World space
-	objectToWorldMatrix.translate(x, z, y);
-
-	// [Nash] take SpriteRotation into account
-	angle += actor->SpriteRotation.Degrees();
+	objectToWorldMatrix.translate(translation.X, translation.Z, translation.Y);
 
 	// consider the pixel stretching. For non-voxels this must be factored out here
 	float stretch = 1.f;
 
 	// [MK] distortions might happen depending on when the pixel stretch is compensated for
 	// so we make the "undistorted" behavior opt-in
-	if ((smf_flags & MDL_CORRECTPIXELSTRETCH) && smf->modelIDs.Size() > 0)
+	if ((flags & MDL_CORRECTPIXELSTRETCH) && modelIDs.Size() > 0)
 	{
-		stretch = (smf->modelIDs[0] >= 0 ? Models[smf->modelIDs[0]]->getAspectFactor(actor->Level->info->pixelstretch) : 1.f) / actor->Level->info->pixelstretch;
+		stretch = (modelIDs[0] >= 0 ? Models[modelIDs[0]]->getAspectFactor(Level->info->pixelstretch) : 1.f) / Level->info->pixelstretch;
 		objectToWorldMatrix.scale(1, stretch, 1);
 	}
 
+	bool rotating_xzy = (flags & MDL_ROTATING) && (flags & MDL_FIXROTATING);
+	bool rotating_xyz = (flags & MDL_ROTATING) && !(flags & MDL_FIXROTATING);
+
 	// Applying model transformations:
 	// 1) Applying actor angle, pitch and roll to the model
-	if (smf_flags & MDL_USEROTATIONCENTER)
+	if (flags & MDL_USEROTATIONCENTER)
 	{
-		objectToWorldMatrix.translate(smf->rotationCenterX, smf->rotationCenterZ/stretch, smf->rotationCenterY);
-	}
-	objectToWorldMatrix.rotate(-angle, 0, 1, 0);
-	objectToWorldMatrix.rotate(pitch, 0, 0, 1);
-	objectToWorldMatrix.rotate(-roll, 1, 0, 0);
-	if (smf_flags & MDL_USEROTATIONCENTER)
-	{
-		objectToWorldMatrix.translate(-smf->rotationCenterX, -smf->rotationCenterZ/stretch, -smf->rotationCenterY);
-	}
+		objectToWorldMatrix.translate(rotationCenterX, rotationCenterZ/stretch, rotationCenterY);
 
-	// 2) Applying Doomsday like rotation of the weapon pickup models
-	// The rotation angle is based on the elapsed time.
+		objectToWorldMatrix.rotate(-rotation.Yaw.Degrees(), 0, 1, 0);
+		objectToWorldMatrix.rotate(rotation.Pitch.Degrees(), 0, 0, 1);
+		objectToWorldMatrix.rotate(-rotation.Roll.Degrees(), 1, 0, 0);
 
-	if (smf_flags & MDL_ROTATING)
+		// 2) Applying Doomsday like rotation of the weapon pickup models
+		// The rotation angle is based on the elapsed time.
+		if(rotating_xzy)
+		{
+			objectToWorldMatrix.rotate(rotateOffset, xrotate, yrotate, zrotate);
+		}
+
+		objectToWorldMatrix.translate(-rotationCenterX, -rotationCenterZ/stretch, -rotationCenterY);
+
+		if(rotating_xyz)
+		{
+			objectToWorldMatrix.translate(rotationCenterX, rotationCenterY/stretch, rotationCenterZ);
+			objectToWorldMatrix.rotate(rotateOffset, xrotate, yrotate, zrotate);
+			objectToWorldMatrix.translate(-rotationCenterX, -rotationCenterY/stretch, -rotationCenterZ);
+		}
+	}
+	else
 	{
-		objectToWorldMatrix.translate(smf->rotationCenterX, smf->rotationCenterY/stretch, smf->rotationCenterZ);
-		objectToWorldMatrix.rotate(rotateOffset, smf->xrotate, smf->yrotate, smf->zrotate);
-		objectToWorldMatrix.translate(-smf->rotationCenterX, -smf->rotationCenterY/stretch, -smf->rotationCenterZ);
+		objectToWorldMatrix.rotate(-rotation.Yaw.Degrees(), 0, 1, 0);
+		objectToWorldMatrix.rotate(rotation.Pitch.Degrees(), 0, 0, 1);
+		objectToWorldMatrix.rotate(-rotation.Roll.Degrees(), 1, 0, 0);
+
+		// 2) Applying Doomsday like rotation of the weapon pickup models
+		// The rotation angle is based on the elapsed time.
+		if(rotating_xzy)
+		{
+			objectToWorldMatrix.translate(rotationCenterX, rotationCenterZ/stretch, rotationCenterY);
+			objectToWorldMatrix.rotate(rotateOffset, xrotate, yrotate, zrotate);
+			objectToWorldMatrix.translate(-rotationCenterX, -rotationCenterZ/stretch, -rotationCenterY);
+		}
+		else if(rotating_xyz)
+		{
+			objectToWorldMatrix.translate(rotationCenterX, rotationCenterY/stretch, rotationCenterZ);
+			objectToWorldMatrix.rotate(rotateOffset, xrotate, yrotate, zrotate);
+			objectToWorldMatrix.translate(-rotationCenterX, -rotationCenterY/stretch, -rotationCenterZ);
+		}
 	}
 
 	// 3) Scaling model.
 	objectToWorldMatrix.scale(scaleFactorX, scaleFactorZ, scaleFactorY);
 
 	// 4) Aplying model offsets (model offsets do not depend on model scalings).
-	objectToWorldMatrix.translate(smf->xoffset / smf->xscale, smf->zoffset / (smf->zscale*stretch), smf->yoffset / smf->yscale);
+	objectToWorldMatrix.translate(xoffset / xscale, zoffset / (zscale*stretch), yoffset / yscale);
 
 	// 5) Applying model rotations.
-	objectToWorldMatrix.rotate(-smf->angleoffset, 0, 1, 0);
-	objectToWorldMatrix.rotate(smf->pitchoffset, 0, 0, 1);
-	objectToWorldMatrix.rotate(-smf->rolloffset, 1, 0, 0);
+	objectToWorldMatrix.rotate(-angleoffset, 0, 1, 0);
+	objectToWorldMatrix.rotate(pitchoffset, 0, 0, 1);
+	objectToWorldMatrix.rotate(-rolloffset, 1, 0, 0);
 
-	if (!(smf_flags & MDL_CORRECTPIXELSTRETCH) && smf->modelIDs.Size() > 0)
+	if (!(flags & MDL_CORRECTPIXELSTRETCH) && modelIDs.Size() > 0)
 	{
-		stretch = (smf->modelIDs[0] >= 0 ? Models[smf->modelIDs[0]]->getAspectFactor(actor->Level->info->pixelstretch) : 1.f) / actor->Level->info->pixelstretch;
+		stretch = (modelIDs[0] >= 0 ? Models[modelIDs[0]]->getAspectFactor(Level->info->pixelstretch) : 1.f) / Level->info->pixelstretch;
 		objectToWorldMatrix.scale(1, stretch, 1);
 	}
 
-	float orientation = scaleFactorX * scaleFactorY * scaleFactorZ;
-
-	renderer->BeginDrawModel(actor->RenderStyle, smf_flags, objectToWorldMatrix, orientation < 0);
-	RenderFrameModels(renderer, actor->Level, smf, actor->state, actor->tics, translation, actor);
-	renderer->EndDrawModel(actor->RenderStyle, smf_flags);
+	return objectToWorldMatrix;
 }
 
-void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translation, FVector3 rotation, FVector3 rotation_pivot, FSpriteModelFrame *smf)
+void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translation, FVector3 rotation, FVector3 rotation_pivot, FSpriteModelFrame *smf, double ticFrac)
 {
 	AActor * playermo = players[consoleplayer].camera;
 
@@ -233,12 +279,23 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 		objectToWorldMatrix.rotate(-playermo->Angles.Yaw.Degrees() - 90, 0, 1, 0);
 	}
 
-	// [Nash] Optional scale weapon FOV
 	float fovscale = 1.0f;
-	if (smf_flags & MDL_SCALEWEAPONFOV)
+	if (smf->viewModelFOV <= 0.0f)
 	{
-		fovscale = tan(players[consoleplayer].DesiredFOV * (0.5f * M_PI / 180.f));
-		fovscale = 1.f + (fovscale - 1.f) * cl_scaleweaponfov;
+		if (smf->viewModelFOV < 0.0f)
+			fovscale = 1.0f / fabs(smf->viewModelFOV);
+
+		// [Nash] Optional scale weapon FOV
+		if (smf_flags & MDL_SCALEWEAPONFOV)
+		{
+			float newScale = tan(players[consoleplayer].DesiredFOV * (0.5f * M_PI / 180.f));
+			newScale = 1.f + (newScale - 1.f) * cl_scaleweaponfov;
+			fovscale *= newScale;
+		}
+	}
+	else if (players[consoleplayer].DesiredFOV != smf->viewModelFOV)
+	{
+		fovscale = tan(players[consoleplayer].DesiredFOV * (0.5f * M_PI / 180.f)) / tan(smf->viewModelFOV * (0.5f * M_PI / 180.f));
 	}
 
 	// [BB] The psprite's own scale reaches the MODEL path, not just the sprite
@@ -269,18 +326,18 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 
 	// [BB] Weapon bob, very similar to the normal Doom weapon bob.
 
-	
+
 
 	objectToWorldMatrix.translate(rotation_pivot.X, rotation_pivot.Y, rotation_pivot.Z);
-	
+
 	objectToWorldMatrix.rotate(rotation.X, 0, 1, 0);
 	objectToWorldMatrix.rotate(rotation.Y, 1, 0, 0);
 	objectToWorldMatrix.rotate(rotation.Z, 0, 0, 1);
 
 	objectToWorldMatrix.translate(-rotation_pivot.X, -rotation_pivot.Y, -rotation_pivot.Z);
-	
+
 	objectToWorldMatrix.translate(translation.X, translation.Y, translation.Z);
-	
+
 
 	// [BB] For some reason the jDoom models need to be rotated.
 	objectToWorldMatrix.rotate(90.f, 0, 1, 0);
@@ -299,7 +356,7 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	auto trans = psp->GetTranslation();
 	if ((psp->Flags & PSPF_PLAYERTRANSLATED)) trans = psp->Owner->mo->Translation;
 
-	RenderFrameModels(renderer, playermo->Level, smf, psp->GetState(), psp->GetTics(), trans, psp->Caller, psp);
+	RenderFrameModels(renderer, playermo->Level, smf, psp->GetState(), psp->GetTics(), ticFrac, trans, psp->Caller, psp);
 	renderer->EndDrawHUDModel(playermo->RenderStyle, smf_flags);
 }
 
@@ -356,7 +413,7 @@ void calcFrames(const ModelAnim &curAnim, double tic, ModelAnimFrameInterp &to, 
 	}
 }
 
-CalcModelFrameInfo CalcModelFrame(FLevelLocals *Level, const FSpriteModelFrame *smf, const FState *curState, const int curTics, DActorModelData* data, AActor* actor, bool is_decoupled, double tic, const DPSprite* psp)
+CalcModelFrameInfo CalcModelFrame(FLevelLocals *Level, const FSpriteModelFrame *smf, const FState *curState, const int curTics, DActorModelData* data, AActor* actor, bool is_decoupled, double tic, double ticFrac, const DPSprite* psp)
 {
 	// [BB] Frame interpolation: Find the FSpriteModelFrame smfNext which follows after smf in the animation
 	// and the scalar value inter ( element of [0,1) ), both necessary to determine the interpolated frame.
@@ -374,11 +431,11 @@ CalcModelFrameInfo CalcModelFrame(FLevelLocals *Level, const FSpriteModelFrame *
 
 	if(is_decoupled)
 	{
-		smfNext = smf = &BaseSpriteModelFrames[actor->GetClass()];
-		if(data && !(data->curAnim.flags & MODELANIM_NONE))
+		smfNext = smf = &BaseSpriteModelFrames[(data != nullptr && data->modelDef != nullptr) ? data->modelDef : actor->GetClass()];
+		if(data && !(data->anims.curAnim.flags & MODELANIM_NONE))
 		{
-			calcFrames(data->curAnim, tic, decoupled_frame, inter);
-			decoupled_frame_prev = &data->prevAnim;
+			calcFrames(data->anims.curAnim, tic, decoupled_frame, inter);
+			decoupled_frame_prev = &data->anims.prevAnim;
 		}
 	}
 	else if (gl_interpolate_model_frames && !(smf_flags & MDL_NOINTERPOLATION))
@@ -389,10 +446,11 @@ CalcModelFrameInfo CalcModelFrame(FLevelLocals *Level, const FSpriteModelFrame *
 			// [BB] To interpolate at more than 35 fps we take tic fractions into account.
 			float ticFraction = 0.;
 			// [BB] In case the tic counter is frozen we have to leave ticFraction at zero.
-			if ((ConsoleState == c_up || ConsoleState == c_rising) && (menuactive == MENU_Off || menuactive == MENU_OnNoPause) && !Level->isFrozen())
+			if (!WorldPaused(true) && !Level->isFrozen())
 			{
-				ticFraction = I_GetTimeFrac();
+				ticFraction = ticFrac;
 			}
+
 			inter = static_cast<double>(curState->Tics - curTics + ticFraction) / static_cast<double>(curState->Tics);
 
 			// [BB] For some actors (e.g. ZPoisonShroom) spr->actor->tics can be bigger than curState->Tics.
@@ -456,10 +514,14 @@ CalcModelFrameInfo CalcModelFrame(FLevelLocals *Level, const FSpriteModelFrame *
 	{
 		if (data->stateRemap.CheckKey(intptr_t(curState)) && curState->Tics > 0)
 		{
+			// [RS FORK] Upstream 5.0.0 hands the render fraction down as 'ticFrac'
+			// and folded the console/menu/freeze test into WorldPaused(), which
+			// already returns false for MENU_OnNoPause -- so the fork's original
+			// "keep animating under a non-pausing menu" semantics are preserved.
 			float ticFraction = 0.f;
-			if ((ConsoleState == c_up || ConsoleState == c_rising) && (menuactive == MENU_Off || menuactive == MENU_OnNoPause) && !Level->isFrozen())
+			if (!WorldPaused(true) && !Level->isFrozen())
 			{
-				ticFraction = I_GetTimeFrac();
+				ticFraction = ticFrac;
 			}
 			float f = (float(curState->Tics - curTics) + ticFraction) / float(curState->Tics);
 			if (f < 0.f) f = 0.f;
@@ -502,11 +564,11 @@ bool CalcModelOverrides(int i, const FSpriteModelFrame *smf, DActorModelData* da
 	if (data)
 	{
 		//modelID
-		if (data->models.Size() > i && data->models[i].modelID >= 0)
+		if (data->models.SSize() > i && data->models[i].modelID >= 0)
 		{
 			out.modelid = data->models[i].modelID;
 		}
-		else if(data->models.Size() > i && data->models[i].modelID == -2)
+		else if(data->models.SSize() > i && data->models[i].modelID == -2)
 		{
 			return false;
 		}
@@ -516,7 +578,7 @@ bool CalcModelOverrides(int i, const FSpriteModelFrame *smf, DActorModelData* da
 		}
 
 		//animationID
-		if (data->animationIDs.Size() > i && data->animationIDs[i] >= 0)
+		if (data->animationIDs.SSize() > i && data->animationIDs[i] >= 0)
 		{
 			out.animationid = data->animationIDs[i];
 		}
@@ -527,13 +589,13 @@ bool CalcModelOverrides(int i, const FSpriteModelFrame *smf, DActorModelData* da
 		if(!is_decoupled)
 		{
 			//modelFrame
-			if (data->modelFrameGenerators.Size() > i
+			if (data->modelFrameGenerators.SSize() > i
 				&& (unsigned)data->modelFrameGenerators[i] < info.modelsamount
 				&& smf->modelframes[data->modelFrameGenerators[i]] >= 0
 				) {
 				out.modelframe = smf->modelframes[data->modelFrameGenerators[i]];
 
-				if (info.smfNext) 
+				if (info.smfNext)
 				{
 					if(info.smfNext->modelframes[data->modelFrameGenerators[i]] >= 0)
 					{
@@ -553,7 +615,7 @@ bool CalcModelOverrides(int i, const FSpriteModelFrame *smf, DActorModelData* da
 		}
 
 		//skinID
-		if (data->skinIDs.Size() > i && data->skinIDs[i].isValid())
+		if (data->skinIDs.SSize() > i && data->skinIDs[i].isValid())
 		{
 			out.skinid = data->skinIDs[i];
 		}
@@ -563,7 +625,7 @@ bool CalcModelOverrides(int i, const FSpriteModelFrame *smf, DActorModelData* da
 		}
 
 		//surfaceSkinIDs
-		if(data->models.Size() > i && data->models[i].surfaceSkinIDs.Size() > 0)
+		if(data->models.SSize() > i && data->models[i].surfaceSkinIDs.SSize() > 0)
 		{
 			unsigned sz1 = smf->surfaceskinIDs.Size();
 			unsigned sz2 = data->models[i].surfaceSkinIDs.Size();
@@ -644,14 +706,14 @@ bool CalcModelOverrides(int i, const FSpriteModelFrame *smf, DActorModelData* da
 		}
 	}
 
-	return (out.modelid >= 0 && out.modelid < Models.size());
+	return (out.modelid >= 0 && out.modelid < Models.SSize());
 }
 
 
-const TArray<VSMatrix> * ProcessModelFrame(FModel * animation, bool nextFrame, int i, const FSpriteModelFrame *smf, DActorModelData* modelData, const CalcModelFrameInfo &frameinfo, ModelDrawInfo &drawinfo, bool is_decoupled, double tic)
+const TArray<VSMatrix> * ProcessModelFrame(FModel * animation, bool nextFrame, int i, const FSpriteModelFrame *smf, DActorModelData* modelData, const CalcModelFrameInfo &frameinfo, ModelDrawInfo &drawinfo, bool is_decoupled, double tic, BoneInfo *out)
 {
 	const TArray<TRS>* animationData = nullptr;
-	
+
 	if (drawinfo.animationid >= 0)
 	{
 		animation = Models[drawinfo.animationid];
@@ -668,7 +730,21 @@ const TArray<VSMatrix> * ProcessModelFrame(FModel * animation, bool nextFrame, i
 				frameinfo.decoupled_frame_prev ? *frameinfo.decoupled_frame_prev : nullptr,
 				frameinfo.decoupled_frame,
 				frameinfo.inter,
-				animationData);
+				animationData,
+				(modelData && modelData->modelBoneOverrides.SSize() > i)
+				? &modelData->modelBoneOverrides[i]
+				: nullptr,
+				out,
+				tic);
+		}
+		else
+		{
+			boneData = animation->CalculateBonesOnlyOffsets(
+				(modelData && modelData->modelBoneOverrides.SSize() > i)
+				? &modelData->modelBoneOverrides[i]
+				: nullptr,
+				out,
+				tic);
 		}
 	}
 	else
@@ -681,7 +757,12 @@ const TArray<VSMatrix> * ProcessModelFrame(FModel * animation, bool nextFrame, i
 				drawinfo.modelframenext
 			},
 			-1.0f,
-			animationData);
+			animationData,
+			(modelData && modelData->modelBoneOverrides.SSize() > i)
+			? &modelData->modelBoneOverrides[i]
+			: nullptr,
+			out,
+			tic);
 	}
 
 	return boneData;
@@ -695,17 +776,26 @@ static inline void RenderModelFrame(FModelRenderer *renderer, int i, const FSpri
 
 	auto ssidp = drawinfo.surfaceskinids.Size() > 0
 		? drawinfo.surfaceskinids.Data()
-		: (((i * MD3_MAX_SURFACES) < smf->surfaceskinIDs.Size()) ? &smf->surfaceskinIDs[i * MD3_MAX_SURFACES] : nullptr);
+		: (((i * MD3_MAX_SURFACES) < smf->surfaceskinIDs.SSize()) ? &smf->surfaceskinIDs[i * MD3_MAX_SURFACES] : nullptr);
 
 	bool nextFrame = frameinfo.smfNext && drawinfo.modelframe != drawinfo.modelframenext;
 
 	// [Jay] while per-model animations aren't done, DECOUPLEDANIMATIONS does the same as MODELSAREATTACHMENTS
 	if(!evaluatedSingle)
 	{  // [Jay] TODO per-model decoupled animations
-		const TArray<VSMatrix> *boneData = ProcessModelFrame(mdl, nextFrame, i, smf, modelData, frameinfo, drawinfo, is_decoupled, tic);
+		const TArray<VSMatrix> *boneData = ProcessModelFrame(mdl, nextFrame, i, smf, modelData, frameinfo, drawinfo, is_decoupled, tic, nullptr);
 
 		if(frameinfo.smf_flags & MDL_MODELSAREATTACHMENTS || is_decoupled)
 		{
+			if(!boneData && is_decoupled)
+			{
+				boneData = mdl->CalculateBonesOnlyOffsets((modelData && modelData->modelBoneOverrides.SSize() > i)? &modelData->modelBoneOverrides[i] : nullptr, nullptr, tic);
+			}
+
+			// [RS FORK] Upstream's new CalculateBonesOnlyOffsets path only covers
+			// the decoupled case. Keep the fork's base-pose fallback so a
+			// MDL_MODELSAREATTACHMENTS model that is NOT decoupled still gets a
+			// bone set uploaded instead of rendering unskinned.
 			if(!boneData)
 			{
 				boneData = mdl->GetBasePose();
@@ -719,19 +809,19 @@ static inline void RenderModelFrame(FModelRenderer *renderer, int i, const FSpri
 	mdl->RenderFrame(renderer, tex, drawinfo.modelframe, nextFrame ? drawinfo.modelframenext : drawinfo.modelframe, nextFrame ? frameinfo.inter : -1.f, translation, ssidp, boneStartingPosition);
 }
 
-void RenderFrameModels(FModelRenderer *renderer, FLevelLocals *Level, const FSpriteModelFrame *smf, const FState *curState, const int curTics, FTranslationID translation, AActor* actor, const DPSprite* psp)
+void RenderFrameModels(FModelRenderer *renderer, FLevelLocals *Level, const FSpriteModelFrame *smf, const FState *curState, int curTics, double ticFrac, FTranslationID translation, AActor* actor, const DPSprite* psp)
 {
-	double tic = actor->Level->totaltime;
-	if ((ConsoleState == c_up || ConsoleState == c_rising) && (menuactive == MENU_Off || menuactive == MENU_OnNoPause) && !actor->isFrozen())
+	double tic = actor->GetModelTimer();
+	if (!WorldPaused(true) && !actor->isFrozen())
 	{
-		tic += I_GetTimeFrac();
+		tic += ticFrac;
 	}
 
 	bool is_decoupled = (actor->flags9 & MF9_DECOUPLEDANIMATIONS);
 
 	DActorModelData* modelData = actor ? actor->modelData.ForceGet() : nullptr;
 
-	CalcModelFrameInfo frameinfo = CalcModelFrame(Level, smf, curState, curTics, modelData, actor, is_decoupled, tic, psp);
+	CalcModelFrameInfo frameinfo = CalcModelFrame(Level, smf, curState, curTics, modelData, actor, is_decoupled, tic, ticFrac, psp);
 	ModelDrawInfo drawinfo;
 
 	int boneStartingPosition = -1;
@@ -775,7 +865,7 @@ void InitModels()
 	{
 		FVoxelModel *md = (FVoxelModel*)Models[VoxelDefs[i]->Voxel->VoxelIndex];
 		FSpriteModelFrame smf;
-		memset(&smf, 0, sizeof(smf));
+		memset((void*)&smf, 0, sizeof(smf));
 		smf.isVoxel = true;
 		smf.modelsAmount = 1;
 		smf.modelframes.Alloc(1);
@@ -853,7 +943,7 @@ void ParseModelDefLump(int Lump)
 			sc.MustGetString();
 
 			FSpriteModelFrame smf;
-			memset(&smf, 0, sizeof(smf));
+			memset((void*)&smf, 0, sizeof(smf));
 			smf.xscale=smf.yscale=smf.zscale=1.f;
 
 			auto type = PClass::FindClass(sc.String);
@@ -1027,6 +1117,13 @@ void ParseModelDefLump(int Lump)
 				{
 					smf.flags |= MDL_MODELSAREATTACHMENTS;
 				}
+				else if (sc.Compare("viewmodelfov"))
+				{
+					sc.MustGetFloat();
+					smf.viewModelFOV = sc.Float;
+					if (smf.viewModelFOV > 0.0f)
+						smf.viewModelFOV = min<float>(smf.viewModelFOV, 175.0f);
+				}
 				else if (sc.Compare("rotating"))
 				{
 					smf.flags |= MDL_ROTATING;
@@ -1037,6 +1134,10 @@ void ParseModelDefLump(int Lump)
 					smf.rotationCenterY = 0.;
 					smf.rotationCenterZ = 0.;
 					smf.rotationSpeed = 1.;
+				}
+				else if (sc.Compare("fix-rotating"))
+				{
+					smf.flags |= MDL_FIXROTATING;
 				}
 				else if (sc.Compare("rotation-speed"))
 				{
@@ -1190,7 +1291,7 @@ void ParseModelDefLump(int Lump)
 						smf.modelframes[index] = sc.Number;
 					}
 
-					for(int i=0; framechars[i]>0; i++)
+					for (int i = 0; i < static_cast<int>(framechars.Len()) && framechars[i] > 0; i++)
 					{
 						char map[29]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 						int c = toupper(framechars[i])-'A';
@@ -1261,7 +1362,7 @@ FSpriteModelFrame * FindModelFrameRaw(const AActor * actorDefaults, const PClass
 	{
 		FSpriteModelFrame smf;
 
-		memset(&smf, 0, sizeof(smf));
+		memset((void*)&smf, 0, sizeof(smf));
 		smf.type = ti;
 		smf.sprite = sprite;
 		smf.frame = frame;

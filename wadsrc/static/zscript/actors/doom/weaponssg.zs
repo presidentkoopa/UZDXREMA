@@ -1,3 +1,22 @@
+/*
+** weaponssg.zs
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2006-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
+
 // --------------------------------------------------------------------------
 //
 // Super Shotgun
@@ -79,14 +98,15 @@ extend class StateProvider
 			alflags |= weap.bOffhandWeapon ? ALF_ISOFFHAND : 0;
 			if (!weap.DepleteAmmo (weap.bAltFire, true))
 				return;
-			
+
 			player.SetPsprite(PSP_FLASH, weap.FindState('Flash'), true, weap);
 		}
 		A_StartSound ("weapons/sshotf", CHAN_WEAPON);
 		player.mo.PlayAttacking2 ();
 
 		double pitch = BulletSlope (aimflags: alflags);
-			
+
+
 		for (int i = 0 ; i < 20 ; i++)
 		{
 			int damage = 5 * random[FireSG2](1, 3);
@@ -103,18 +123,18 @@ extend class StateProvider
 	}
 
 
-	action void A_OpenShotgun2() 
-	{ 
-		A_StartSound("weapons/sshoto", CHAN_WEAPON); 
+	action void A_OpenShotgun2()
+	{
+		A_StartSound("weapons/sshoto", CHAN_WEAPON);
 	}
-	
-	action void A_LoadShotgun2() 
-	{ 
-		A_StartSound("weapons/sshotl", CHAN_WEAPON); 
+
+	action void A_LoadShotgun2()
+	{
+		A_StartSound("weapons/sshotl", CHAN_WEAPON);
 	}
-	
-	action void A_CloseShotgun2() 
-	{ 
+
+	action void A_CloseShotgun2()
+	{
 		A_StartSound("weapons/sshotc", CHAN_WEAPON);
 		A_Refire();
 	}

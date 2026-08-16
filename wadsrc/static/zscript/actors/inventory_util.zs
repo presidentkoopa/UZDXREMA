@@ -1,3 +1,22 @@
+/*
+** inventory_util.zs
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2006-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
+
 extend class Actor
 {
 
@@ -146,11 +165,7 @@ extend class Actor
 
 		if (!fromdecorate)
 		{
-			item.Amount -= amount;
-			if (item.Amount <= 0)
-			{
-				item.DepleteOrDestroy();
-			}
+			item.DepleteBy(amount);
 			// It won't be used in non-decorate context, so return false here
 			return false;
 		}
@@ -169,11 +184,10 @@ extend class Actor
 			// Nothing to do here, except maybe res = false;? Would it make sense?
 			result = false;
 		}
-		else if (!amount || amount >= item.Amount)
+		else
 		{
-			item.DepleteOrDestroy();
+			item.DepleteBy(amount);
 		}
-		else item.Amount -= amount;
 
 		return result;
 	}
@@ -271,10 +285,9 @@ extend class Actor
 		{
 			return true;
 		}
-
-		if (--item.Amount <= 0)
+		else
 		{
-			item.DepleteOrDestroy ();
+			item.DepleteBy(1); //useinventory can only really use one item at a time
 		}
 		return true;
 	}
@@ -404,7 +417,7 @@ extend class Actor
 		{
 			receiver = receiver.GetPointer(setreceiver);
 			if (receiver == NULL)
-			{ 
+			{
 				return false;
 			}
 		}
@@ -757,7 +770,7 @@ extend class Actor
 
 		let you = PlayerPawn(other);
 		let me = PlayerPawn(self);
-		
+
 		if (you)
 		{
 			if (me)
@@ -769,14 +782,14 @@ extend class Actor
 			you.InvSel = NULL;
 		}
 
-		
+
 		for (let item = Inv; item != null; item = item.Inv)
 		{
 			item.Owner = self;
 		}
 	}
 
-	
+
 	//===========================================================================
 	//
 	// A_SelectWeapon
@@ -818,7 +831,7 @@ extend class Actor
 		}
 	}
 
-	
+
 	int GetAmmoCapacity(class<Ammo> type)
 	{
 		if (type != NULL)

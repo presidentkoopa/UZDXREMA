@@ -1,8 +1,27 @@
-/*******************************
-* B_Bot.h                      *
-* Description:                 *
-* Used with all b_*            *
-*******************************/
+/*
+** b_bot.h
+**
+** Used with all b_*
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1999 Martin Colberg
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2005-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 #ifndef __B_BOT_H__
 #define __B_BOT_H__
@@ -120,7 +139,7 @@ public:
 	void Init ();
 	void End();
 	bool SpawnBot (const char *name, int color = NOCOLOR);
-	void TryAddBot (FLevelLocals *Level, uint8_t **stream, int player);
+	void TryAddBot (FLevelLocals *Level, TArrayView<uint8_t>& stream, int player);
 	void RemoveAllBots (FLevelLocals *Level, bool fromlist);
 	bool LoadBots ();
 	void ForgetBots ();
@@ -130,16 +149,16 @@ public:
 	void FinishTravel ();
 	bool IsLeader (player_t *player);
 	void SetBodyAt (FLevelLocals *Level, const DVector3 &pos, int hostnum);
-	double FakeFire (AActor *source, AActor *dest, ticcmd_t *cmd);
+	double FakeFire (AActor *source, AActor *dest, usercmd_t *cmd);
 	bool SafeCheckPosition (AActor *actor, double x, double y, FCheckPosition &tm);
 	void BotTick(AActor *mo);
 
 	//(b_move.cpp)
-	bool CleanAhead (AActor *thing, double x, double y, ticcmd_t *cmd);
+	bool CleanAhead (AActor *thing, double x, double y, usercmd_t *cmd);
 	bool IsDangerous (sector_t *sec);
 
 	TArray<FString> getspawned; //Array of bots (their names) which should be spawned when starting a game.
-	
+
 	//uint8_t freeze;			//Game in freeze mode.
 	//uint8_t changefreeze;	//Game wants to change freeze mode.
 	int botnum;
@@ -154,7 +173,7 @@ public:
 
 private:
 	//(b_game.cpp)
-	bool DoAddBot (FLevelLocals *Level, uint8_t *info, botskill_t skill);
+	bool DoAddBot (FLevelLocals *Level, TArrayView<uint8_t> info, botskill_t skill);
 
 protected:
 	bool	 ctf;
@@ -216,21 +235,21 @@ public:
 private:
 	//(b_think.cpp)
 	void Think ();
-	void ThinkForMove (ticcmd_t *cmd);
+	void ThinkForMove (usercmd_t *cmd);
 	void Set_enemy ();
 
 	//(b_func.cpp)
 	bool Reachable (AActor *target);
-	void Dofire (ticcmd_t *cmd);
+	void Dofire (usercmd_t *cmd);
 	AActor *Choose_Mate ();
 	AActor *Find_enemy ();
-	DAngle FireRox (AActor *enemy, ticcmd_t *cmd);
+	DAngle FireRox (AActor *enemy, usercmd_t *cmd);
 
 	//(b_move.cpp)
-	void Roam (ticcmd_t *cmd);
-	bool Move (ticcmd_t *cmd);
-	bool TryWalk (ticcmd_t *cmd);
-	void NewChaseDir (ticcmd_t *cmd);
+	void Roam (usercmd_t *cmd);
+	bool Move (usercmd_t *cmd);
+	bool TryWalk (usercmd_t *cmd);
+	void NewChaseDir (usercmd_t *cmd);
 	void TurnToAng ();
 	void Pitch (AActor *target);
 };

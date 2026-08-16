@@ -3,7 +3,7 @@
 
 PushButton::PushButton(Widget* parent) : Widget(parent)
 {
-	SetNoncontentSizes(10.0, 5.0, 10.0, 5.0);
+	SetStyleClass("pushbutton");
 }
 
 void PushButton::SetText(const std::string& value)
@@ -20,57 +20,45 @@ const std::string& PushButton::GetText() const
 	return text;
 }
 
-double PushButton::GetPreferredHeight() const
+double PushButton::GetPreferredWidth()
 {
-	return 30.0;
+	Widget* w = Window();
+	if (!w->DispCanvas) return Widget::GetPreferredWidth();
+	Rect box = w->DispCanvas->measureText(text);
+	return box.width + Widget::GetPreferredWidth();
 }
 
-void PushButton::OnPaintFrame(Canvas* canvas)
+double PushButton::GetPreferredHeight()
 {
-	double w = GetFrameGeometry().width;
-	double h = GetFrameGeometry().height;
-	Colorf bordercolor = Colorf::fromRgba8(100, 100, 100);
-	Colorf buttoncolor = Colorf::fromRgba8(68, 68, 68);
-	if (buttonDown)
-		buttoncolor = Colorf::fromRgba8(88, 88, 88);
-	else if (hot)
-		buttoncolor = Colorf::fromRgba8(78, 78, 78);
-	canvas->fillRect(Rect::xywh(0.0, 0.0, w, h), buttoncolor);
-	canvas->fillRect(Rect::xywh(0.0, 0.0, w, 1.0), bordercolor);
-	canvas->fillRect(Rect::xywh(0.0, h - 1.0, w, 1.0), bordercolor);
-	canvas->fillRect(Rect::xywh(0.0, 0.0, 1.0, h - 0.0), bordercolor);
-	canvas->fillRect(Rect::xywh(w - 1.0, 0.0, 1.0, h - 0.0), bordercolor);
+	return 20 + Widget::GetPreferredHeight();
 }
 
 void PushButton::OnPaint(Canvas* canvas)
 {
 	Rect box = canvas->measureText(text);
-	canvas->drawText(Point((GetWidth() - box.width) * 0.5, GetHeight() - 5.0), Colorf::fromRgba8(255, 255, 255), text);
+	canvas->drawText(Point((GetWidth() - box.width) * 0.5, GetHeight() - 5.0), GetStyleColor("color"), text);
 }
 
 void PushButton::OnMouseMove(const Point& pos)
 {
-	if (!hot)
+	if (GetStyleState().empty())
 	{
-		hot = true;
-		Update();
+		SetStyleState("hover");
 	}
 }
 
-bool PushButton::OnMouseDown(const Point& pos, int key)
+bool PushButton::OnMouseDown(const Point& pos, InputKey key)
 {
 	SetFocus();
-	buttonDown = true;
-	Update();
+	SetStyleState("down");
 	return true;
 }
 
-bool PushButton::OnMouseUp(const Point& pos, int key)
+bool PushButton::OnMouseUp(const Point& pos, InputKey key)
 {
-	if (buttonDown)
+	if (GetStyleState() == "down")
 	{
-		buttonDown = false;
-		hot = false;
+		SetStyleState("");
 		Repaint();
 		Click();
 	}
@@ -79,26 +67,23 @@ bool PushButton::OnMouseUp(const Point& pos, int key)
 
 void PushButton::OnMouseLeave()
 {
-	hot = false;
-	buttonDown = false;
-	Update();
+	SetStyleState("");
 }
 
-void PushButton::OnKeyDown(EInputKey key)
+void PushButton::OnKeyDown(InputKey key)
 {
-	if (key == IK_Space || key == IK_Enter)
+	if (key == InputKey::Space || key == InputKey::Enter)
 	{
-		buttonDown = true;
+		SetStyleState("down");
 		Update();
 	}
 }
 
-void PushButton::OnKeyUp(EInputKey key)
+void PushButton::OnKeyUp(InputKey key)
 {
-	if (key == IK_Space || key == IK_Enter)
+	if (key == InputKey::Space || key == InputKey::Enter)
 	{
-		buttonDown = false;
-		hot = false;
+		SetStyleState("");
 		Repaint();
 		Click();
 	}

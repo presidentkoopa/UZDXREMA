@@ -1,34 +1,23 @@
 /*
 ** g_skill.cpp
+**
 ** Skill level handling
 **
 **---------------------------------------------------------------------------
-** Copyright 2008-2009 Christoph Oelckers
-** Copyright 2008-2009 Randy Heit
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 2008-2016 Marisa Heit
+** Copyright 2008-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
@@ -193,6 +182,7 @@ void FMapInfoParser::ParseSkill ()
 				else if (sc.Compare("normal")) skill.SpawnFilter |= 4;
 				else if (sc.Compare("hard")) skill.SpawnFilter |= 8;
 				else if (sc.Compare("nightmare")) skill.SpawnFilter |= 16;
+				else sc.ScriptError("Invalid skill filter name '%s' in skill definition for '%s'\n", sc.String, skill.Name.GetChars());
 			}
 		}
 		else if (sc.Compare ("spawnmulti"))
@@ -249,7 +239,7 @@ void FMapInfoParser::ParseSkill ()
 		else if (sc.Compare("MustConfirm"))
 		{
 			skill.MustConfirm = true;
-			if (format_type == FMT_New) 
+			if (format_type == FMT_New)
 			{
 				if (CheckAssign())
 				{
@@ -281,7 +271,7 @@ void FMapInfoParser::ParseSkill ()
 		{
 			ParseAssign();
 			sc.MustGetFloat();
-			skill.MonsterHealth = sc.Float;	
+			skill.MonsterHealth = sc.Float;
 		}
 		else if (sc.Compare("FriendlyHealth"))
 		{
@@ -375,7 +365,7 @@ int G_SkillProperty(ESkillProperty prop)
 			return AllSkills[gameskill].SlowMonsters;
 
 		case SKILLP_Respawn:
-			if (dmflags & DF_MONSTERS_RESPAWN && AllSkills[gameskill].RespawnCounter==0) 
+			if (dmflags & DF_MONSTERS_RESPAWN && AllSkills[gameskill].RespawnCounter==0)
 				return TICRATE * gameinfo.defaultrespawntime;
 			return AllSkills[gameskill].RespawnCounter;
 
@@ -399,9 +389,9 @@ int G_SkillProperty(ESkillProperty prop)
 
 		case SKILLP_ACSReturn:
 			return AllSkills[gameskill].ACSReturn;
-		
-		case SKILLP_NoPain:			
-			return AllSkills[gameskill].NoPain;	
+
+		case SKILLP_NoPain:
+			return AllSkills[gameskill].NoPain;
 
 		case SKILLP_Infight:
 			if (AllSkills[gameskill].Infighting == LEVEL2_TOTALINFIGHTING) return 1;
@@ -413,7 +403,7 @@ int G_SkillProperty(ESkillProperty prop)
 
 		case SKILLP_SpawnMulti:
 			return AllSkills[gameskill].SpawnMulti;
-			
+
 		case SKILLP_InstantReaction:
 			return AllSkills[gameskill].InstantReaction;
 
@@ -646,4 +636,56 @@ FName FSkillInfo::GetReplacedBy(FName b)
 {
 	if (Replaced.CheckKey(b)) return Replaced[b];
 	else return NAME_None;
+}
+
+DEFINE_GLOBAL(AllSkills)
+
+// Avoid Name type clashing
+DEFINE_FIELD_NAMED(FSkillInfo, Name, SkillName)
+DEFINE_FIELD(FSkillInfo, AmmoFactor)
+DEFINE_FIELD(FSkillInfo, DoubleAmmoFactor)
+DEFINE_FIELD(FSkillInfo, DropAmmoFactor)
+DEFINE_FIELD(FSkillInfo, DamageFactor)
+DEFINE_FIELD(FSkillInfo, ArmorFactor)
+DEFINE_FIELD(FSkillInfo, HealthFactor)
+DEFINE_FIELD(FSkillInfo, KickbackFactor)
+DEFINE_FIELD(FSkillInfo, FastMonsters)
+DEFINE_FIELD(FSkillInfo, SlowMonsters)
+DEFINE_FIELD(FSkillInfo, DisableCheats)
+DEFINE_FIELD(FSkillInfo, AutoUseHealth)
+DEFINE_FIELD(FSkillInfo, EasyBossBrain)
+DEFINE_FIELD(FSkillInfo, EasyKey)
+DEFINE_FIELD(FSkillInfo, NoMenu)
+DEFINE_FIELD(FSkillInfo, RespawnCounter)
+DEFINE_FIELD(FSkillInfo, RespawnLimit)
+DEFINE_FIELD(FSkillInfo, Aggressiveness)
+DEFINE_FIELD(FSkillInfo, SpawnFilter)
+DEFINE_FIELD(FSkillInfo, SpawnMulti)
+DEFINE_FIELD(FSkillInfo, InstantReaction)
+DEFINE_FIELD(FSkillInfo, SpawnMultiCoopOnly)
+DEFINE_FIELD(FSkillInfo, ACSReturn)
+DEFINE_FIELD(FSkillInfo, MenuName)
+DEFINE_FIELD(FSkillInfo, PicName)
+DEFINE_FIELD(FSkillInfo, MenuNamesForPlayerClass)
+DEFINE_FIELD(FSkillInfo, MustConfirm)
+DEFINE_FIELD(FSkillInfo, MustConfirmText)
+DEFINE_FIELD(FSkillInfo, Shortcut)
+DEFINE_FIELD(FSkillInfo, TextColor)
+DEFINE_FIELD(FSkillInfo, Replace)
+DEFINE_FIELD(FSkillInfo, Replaced)
+DEFINE_FIELD(FSkillInfo, MonsterHealth)
+DEFINE_FIELD(FSkillInfo, FriendlyHealth)
+DEFINE_FIELD(FSkillInfo, NoPain)
+DEFINE_FIELD(FSkillInfo, Infighting)
+DEFINE_FIELD(FSkillInfo, PlayerRespawn)
+
+static int GetTextColor(FSkillInfo* self)
+{
+	return self->GetTextColor();
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FSkillInfo, GetTextColor, GetTextColor)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FSkillInfo);
+	ACTION_RETURN_INT(self->GetTextColor());
 }

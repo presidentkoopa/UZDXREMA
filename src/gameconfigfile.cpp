@@ -1,33 +1,23 @@
 /*
 ** gameconfigfile.cpp
+**
 ** An .ini parser specifically for zdoom.ini
 **
 **---------------------------------------------------------------------------
-** Copyright 1998-2008 Randy Heit
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 1998-2016 Marisa Heit
+** Copyright 2007-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OFf
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
@@ -44,7 +34,9 @@
 #include "gi.h"
 #include "i_specialpaths.h"
 #include "m_argv.h"
+#include "m_joy.h"
 #include "m_misc.h"
+#include "printf.h"
 #include "v_font.h"
 #include "v_video.h"
 #include "version.h"
@@ -70,17 +62,37 @@ EXTERN_CVAR (Int, gl_texture_hqresizemult)
 EXTERN_CVAR (Int, vid_preferbackend)
 EXTERN_CVAR (Float, vid_scale_custompixelaspect)
 EXTERN_CVAR (Bool, vid_scale_linear)
-EXTERN_CVAR(Float, m_sensitivity_x)
-EXTERN_CVAR(Float, m_sensitivity_y)
-EXTERN_CVAR(Int, adl_volume_model)
+EXTERN_CVAR (Float, m_sensitivity_x)
+EXTERN_CVAR (Float, m_sensitivity_y)
+EXTERN_CVAR (Int, adl_volume_model)
+EXTERN_CVAR (Int, adl_chan_alloc)
+EXTERN_CVAR (Bool, adl_auto_arpeggio)
+EXTERN_CVAR (Int, opn_volume_model)
+EXTERN_CVAR (Int, opn_chan_alloc)
+EXTERN_CVAR (Bool, opn_auto_arpeggio)
 EXTERN_CVAR (Int, gl_texture_hqresize_targets)
-EXTERN_CVAR(Int, wipetype)
-EXTERN_CVAR(Bool, i_pauseinbackground)
-EXTERN_CVAR(Bool, i_soundinbackground)
+EXTERN_CVAR (Int, wipetype)
+EXTERN_CVAR (Bool, i_pauseinbackground)
+EXTERN_CVAR (Bool, i_soundinbackground)
+EXTERN_CVAR (Bool, i_is_new_release)
+EXTERN_CVAR (String, language)
+#ifdef HAS_UPDATER
+EXTERN_CVAR(Int, updater_update_interval)
+#endif
+
+FARG(config, "Configuration", "Specifies an alternative configuration file to use.", "configfile",
+	"Causes " GAMENAME " to use an alternative configuration file. If configfile does not exist,"
+	" it will be created.");
 
 #ifdef _WIN32
-EXTERN_CVAR(Int, in_mouse)
+EXTERN_CVAR (Int, in_mouse)
 #endif
+
+enum ResetBinds
+{
+	V226GamePad = 1 << 0,
+	V230Gamma = 1 << 1,
+};
 
 static TArray<FString> DefaultSearchPaths;
 
@@ -130,6 +142,7 @@ static void CollectDefaultSearchPaths()
 		"/doom"
 	};
 
+	DefaultSearchPaths.Push("$PROGDIR");
 	for (unsigned int i = 0; i < std::size(GameDirs); i++)
 	{
 		DefaultSearchPaths.Push(dataDir + GameDirs[i]);
@@ -140,11 +153,11 @@ static void CollectDefaultSearchPaths()
 			DefaultSearchPaths.Push(DEFAULT_SHARE_DIR + GameDirs[i]);
 		}
 
-#ifdef __HAIKU__
+#	ifdef __HAIKU__
 		DefaultSearchPaths.Push("$HOME/config/data" + GameDirs[i]);
-#else
+#	else
 		DefaultSearchPaths.Push("/usr/share" + GameDirs[i]);
-#endif
+#	endif
 	}
 #endif
 
@@ -155,11 +168,14 @@ static void CollectDefaultSearchPaths()
 
 FGameConfigFile::FGameConfigFile ()
 {
-
 	FString pathname;
 
-	OkayToWrite = false;	// Do not allow saving of the config before DoKeySetup()
+	OkayToWrite = false;	// Do not allow saving of the config before DoGlobalSetup()
+	QueueWrite = false;
 	bModSetup = false;
+	bGameSetup = false;
+	bKeySetup = false;
+	bResetBindFlags = 0;
 	pathname = GetConfigPath (true);
 	ChangePathName (pathname.GetChars());
 	LoadConfigFile ();
@@ -175,17 +191,18 @@ FGameConfigFile::FGameConfigFile ()
 	// LASTRUN < 227: convert GZDoom ini's by ensuring all
 	// system paths have the corresponding UZDoom version
 	// already present
-	double last = 0;
+	GameLastRunVer = 0;
+	EngineLastRunVer = 0;
 	if (SetSection ("LastRun"))
 	{
 		const char *lastver = GetValueForKey ("Version");
 		if (lastver != NULL)
 		{
-			last = atof(lastver);
+			EngineLastRunVer = atof(lastver);
 		}
 	}
 
-	if (last < 227)
+	if (EngineLastRunVer < 227)
 	{
 		if (SetSection("IWADSearch.Directories"))
 		{
@@ -219,6 +236,7 @@ FGameConfigFile::FGameConfigFile ()
 		SetSection ("IWADSearch.Directories", true);
 		SetValueForKey ("Path", ".", true);
 		SetValueForKey ("Path", "$DOOMWADDIR", true);
+		SetValueForKey ("PathList", "$DOOMWADPATH", true);
 #ifdef __ANDROID__
 		SetValueForKey ("Path", "./wads", true);
 #endif
@@ -234,6 +252,7 @@ FGameConfigFile::FGameConfigFile ()
 	{
 		SetSection ("FileSearch.Directories", true);
 		SetValueForKey ("Path", "$DOOMWADDIR", true);
+		SetValueForKey ("PathList", "$DOOMWADPATH", true);
 #ifdef __ANDROID__
 		SetValueForKey ("Path", "./mods", true);
 #endif
@@ -288,14 +307,7 @@ void FGameConfigFile::DoAutoloadSetup (FIWadManager *iwad_man)
 	// Note that this totem pole is the reverse of the order that
 	// they will appear in the file.
 
-	double last = 0;
-	if (SetSection ("LastRun"))
-	{
-		const char *lastver = GetValueForKey ("Version");
-		if (lastver != NULL) last = atof(lastver);
-	}
-
-	if (last < 211)
+	if (EngineLastRunVer < 211)
 	{
 		RenameSection("Chex3.Autoload", "chex.chex3.Autoload");
 		RenameSection("Chex1.Autoload", "chex.chex1.Autoload");
@@ -313,7 +325,7 @@ void FGameConfigFile::DoAutoloadSetup (FIWadManager *iwad_man)
 		RenameSection("Doom2BFG.Autoload", "doom.id.doom2.bfg.Autoload");
 		RenameSection("Doom2.Autoload", "doom.id.doom2.commercial.Autoload");
 	}
-	else if (last < 218)
+	else if (EngineLastRunVer < 218)
 	{
 		RenameSection("doom.doom1.bfg.Autoload", "doom.id.doom1.bfg.Autoload");
 		RenameSection("doom.doom1.ultimate.Autoload", "doom.id.doom1.ultimate.Autoload");
@@ -366,9 +378,9 @@ void FGameConfigFile::DoAutoloadSetup (FIWadManager *iwad_man)
 		"# playing.  You may have have files that are loaded for all similar IWADs\n"
 		"# (the game) and files that are only loaded for particular IWADs. For example,\n"
 		"# any files listed under 'doom.Autoload' will be loaded for any version of Doom,\n"
-		"# but files listed under 'doom.doom2.Autoload' will only load when you are\n"
-		"# playing a Doom 2 based game (doom2.wad, tnt.wad or plutonia.wad), and files listed under\n"
-		"# 'doom.doom2.commercial.Autoload' only when playing doom2.wad.\n\n");
+		"# but files listed under 'doom.id.doom2.Autoload' will only load when you are\n"
+		"# playing a Doom 2 based game (doom2.wad, tnt.wad or plutonia.wad), and files\n"
+		"# listed under 'doom.id.doom2.commercial.Autoload' only when playing doom2.wad.\n\n");
 }
 
 void FGameConfigFile::DoGlobalSetup ()
@@ -383,383 +395,418 @@ void FGameConfigFile::DoGlobalSetup ()
 	}
 	if (SetSection ("LastRun"))
 	{
-		const char *lastver = GetValueForKey ("Version");
-		if (lastver != NULL)
+		const char *lastRelease = GetValueForKey ("Release");
+		i_is_new_release = !lastRelease || strcmp(VERSIONSTR, lastRelease) != 0;
+
+		FBaseCVar *var;
+		if (EngineLastRunVer < 207)
+		{ // Now that snd_midiprecache works again, you probably don't want it on.
+			var = FindCVar ("snd_midiprecache", NULL);
+			if (var != NULL) var->ResetToDefault();
+		}
+		if (EngineLastRunVer < 208)
+		{ // Weapon sections are no longer used, so tidy up the config by deleting them.
+			const char *name;
+			size_t namelen;
+			bool more;
+
+			more = SetFirstSection();
+			while (more)
+			{
+				name = GetCurrentSection();
+				if (name != NULL &&
+					(namelen = strlen(name)) > 12 &&
+					strcmp(name + namelen - 12, ".WeaponSlots") == 0)
+				{
+					more = DeleteCurrentSection();
+				}
+				else
+				{
+					more = SetNextSection();
+				}
+			}
+		}
+		if (EngineLastRunVer < 209)
 		{
-			double last = atof (lastver);
-			if (last < 207)
-			{ // Now that snd_midiprecache works again, you probably don't want it on.
-				FBaseCVar *precache = FindCVar ("snd_midiprecache", NULL);
-				if (precache != NULL)
-				{
-					precache->ResetToDefault();
-				}
-			}
-			if (last < 208)
-			{ // Weapon sections are no longer used, so tidy up the config by deleting them.
-				const char *name;
-				size_t namelen;
-				bool more;
-
-				more = SetFirstSection();
-				while (more)
-				{
-					name = GetCurrentSection();
-					if (name != NULL &&
-						(namelen = strlen(name)) > 12 &&
-						strcmp(name + namelen - 12, ".WeaponSlots") == 0)
-					{
-						more = DeleteCurrentSection();
-					}
-					else
-					{
-						more = SetNextSection();
-					}
-				}
-			}
-			if (last < 209)
+			// menu dimming is now a gameinfo option so switch user override off
+			var = FindCVar ("dimamount", NULL);
+			if (var != NULL) var->ResetToDefault ();
+		}
+		if (EngineLastRunVer < 210)
+		{
+			if (SetSection ("Hexen.Bindings"))
 			{
-				// menu dimming is now a gameinfo option so switch user override off
-				FBaseCVar *dim = FindCVar ("dimamount", NULL);
-				if (dim != NULL)
+				// These 2 were misnamed in earlier versions
+				SetValueForKey ("6", "use ArtiPork");
+				SetValueForKey ("5", "use ArtiInvulnerability2");
+			}
+		}
+		if (EngineLastRunVer < 213)
+		{
+			var = FindCVar("snd_channels", NULL);
+			if (var != NULL)
+			{
+				// old settings were default 32, minimum 8, new settings are default 128, minimum 8.
+				UCVarValue v = var->GetGenericRep(CVAR_Int);
+				if (v.Int < 8) var->ResetToDefault();
+			}
+		}
+		if (EngineLastRunVer < 214)
+		{
+			var = FindCVar("hud_scale", NULL);
+			if (var != NULL) var->ResetToDefault();
+			var = FindCVar("st_scale", NULL);
+			if (var != NULL) var->ResetToDefault();
+			var = FindCVar("hud_althudscale", NULL);
+			if (var != NULL) var->ResetToDefault();
+			var = FindCVar("con_scale", NULL);
+			if (var != NULL) var->ResetToDefault();
+			var = FindCVar("con_scaletext", NULL);
+			if (var != NULL) var->ResetToDefault();
+			var = FindCVar("uiscale", NULL);
+			if (var != NULL) var->ResetToDefault();
+		}
+		if (EngineLastRunVer < 215)
+		{
+			// Previously a true/false boolean. Now an on/off/auto tri-state with auto as the default.
+			var = FindCVar("snd_hrtf", NULL);
+			if (var != NULL) var->ResetToDefault();
+		}
+		if (EngineLastRunVer < 216)
+		{
+			var = FindCVar("gl_texture_hqresize", NULL);
+			if (var != NULL)
+			{
+				auto v = var->GetGenericRep(CVAR_Int);
+				switch (v.Int)
 				{
-					dim->ResetToDefault ();
+				case 1:
+					gl_texture_hqresizemode = 1; gl_texture_hqresizemult = 2;
+					break;
+				case 2:
+					gl_texture_hqresizemode = 1; gl_texture_hqresizemult = 3;
+					break;
+				case 3:
+					gl_texture_hqresizemode = 1; gl_texture_hqresizemult = 4;
+					break;
+				case 4:
+					gl_texture_hqresizemode = 2; gl_texture_hqresizemult = 2;
+					break;
+				case 5:
+					gl_texture_hqresizemode = 2; gl_texture_hqresizemult = 3;
+					break;
+				case 6:
+					gl_texture_hqresizemode = 2; gl_texture_hqresizemult = 4;
+					break;
+				case 7:
+					gl_texture_hqresizemode = 3; gl_texture_hqresizemult = 2;
+					break;
+				case 8:
+					gl_texture_hqresizemode = 3; gl_texture_hqresizemult = 3;
+					break;
+				case 9:
+					gl_texture_hqresizemode = 3; gl_texture_hqresizemult = 4;
+					break;
+				case 10:
+					gl_texture_hqresizemode = 4; gl_texture_hqresizemult = 2;
+					break;
+				case 11:
+					gl_texture_hqresizemode = 4; gl_texture_hqresizemult = 3;
+					break;
+				case 12:
+					gl_texture_hqresizemode = 4; gl_texture_hqresizemult = 4;
+					break;
+				case 18:
+					gl_texture_hqresizemode = 4; gl_texture_hqresizemult = 5;
+					break;
+				case 19:
+					gl_texture_hqresizemode = 4; gl_texture_hqresizemult = 6;
+					break;
+				case 13:
+					gl_texture_hqresizemode = 5; gl_texture_hqresizemult = 2;
+					break;
+				case 14:
+					gl_texture_hqresizemode = 5; gl_texture_hqresizemult = 3;
+					break;
+				case 15:
+					gl_texture_hqresizemode = 5; gl_texture_hqresizemult = 4;
+					break;
+				case 16:
+					gl_texture_hqresizemode = 5; gl_texture_hqresizemult = 5;
+					break;
+				case 17:
+					gl_texture_hqresizemode = 5; gl_texture_hqresizemult = 6;
+					break;
+				case 20:
+					gl_texture_hqresizemode = 6; gl_texture_hqresizemult = 2;
+					break;
+				case 21:
+					gl_texture_hqresizemode = 6; gl_texture_hqresizemult = 3;
+					break;
+				case 22:
+					gl_texture_hqresizemode = 6; gl_texture_hqresizemult = 4;
+					break;
+				case 23:
+					gl_texture_hqresizemode = 6; gl_texture_hqresizemult = 5;
+					break;
+				case 24:
+					gl_texture_hqresizemode = 6; gl_texture_hqresizemult = 6;
+					break;
+				case 0:
+				default:
+					gl_texture_hqresizemode = 0; gl_texture_hqresizemult = 1;
+					break;
 				}
 			}
-			if (last < 210)
+		}
+		if (EngineLastRunVer < 217)
+		{
+			var = FindCVar("vid_scalemode", NULL);
+			if (var != NULL)
 			{
-				if (SetSection ("Hexen.Bindings"))
+				UCVarValue v = var->GetGenericRep(CVAR_Int), newvalue;
+				if (v.Int == 3) // 640x400
 				{
-					// These 2 were misnamed in earlier versions
-					SetValueForKey ("6", "use ArtiPork");
-					SetValueForKey ("5", "use ArtiInvulnerability2");
+					newvalue.Int = 2;
+					var->SetGenericRep(newvalue, CVAR_Int);
+				}
+				if (v.Int == 2) // 320x200
+				{
+					newvalue.Int = 6;
+					var->SetGenericRep(newvalue, CVAR_Int);
 				}
 			}
-			if (last < 213)
+		}
+		if (EngineLastRunVer < 219)
+		{
+			// 2019-12-06 - polybackend merge
+			// migrate vid_enablevulkan to vid_preferbackend
+			var = FindCVar("vid_enablevulkan", NULL);
+			if (var != NULL)
 			{
-				auto var = FindCVar("snd_channels", NULL);
-				if (var != NULL)
+				UCVarValue v = var->GetGenericRep(CVAR_Int);
+				vid_preferbackend = v.Int;
+			}
+			// 2019-12-31 - r_videoscale.cpp changes
+			var = FindCVar("vid_scale_customstretched", NULL);
+			if (var != NULL)
+			{
+				UCVarValue v = var->GetGenericRep(CVAR_Bool);
+				if (v.Bool)
+					vid_scale_custompixelaspect = 1.2f;
+				else
+					vid_scale_custompixelaspect = 1.0f;
+			}
+			var = FindCVar("vid_scalemode", NULL);
+			if (var != NULL)
+			{
+				UCVarValue v = var->GetGenericRep(CVAR_Int), newvalue;
+				switch (v.Int)
 				{
-					// old settings were default 32, minimum 8, new settings are default 128, minimum 64.
-					UCVarValue v = var->GetGenericRep(CVAR_Int);
-					if (v.Int < 64) var->ResetToDefault();
+				case 1:
+					newvalue.Int = 0;
+					var->SetGenericRep(newvalue, CVAR_Int);
+					[[fallthrough]];
+				case 3:
+				case 4:
+					vid_scale_linear = true;
+					break;
+				default:
+					vid_scale_linear = false;
+					break;
 				}
 			}
-			if (last < 214)
+		}
+		if (EngineLastRunVer < 220)
+		{
+			var = FindCVar("Gamma", NULL);
+			if (var != NULL)
 			{
-				FBaseCVar *var = FindCVar("hud_scale", NULL);
-				if (var != NULL) var->ResetToDefault();
-				var = FindCVar("st_scale", NULL);
-				if (var != NULL) var->ResetToDefault();
-				var = FindCVar("hud_althudscale", NULL);
-				if (var != NULL) var->ResetToDefault();
-				var = FindCVar("con_scale", NULL);
-				if (var != NULL) var->ResetToDefault();
-				var = FindCVar("con_scaletext", NULL);
-				if (var != NULL) var->ResetToDefault();
-				var = FindCVar("uiscale", NULL);
-				if (var != NULL) var->ResetToDefault();
+				UCVarValue v = var->GetGenericRep(CVAR_Float);
+				vid_gamma = v.Float;
 			}
-			if (last < 215)
+			var = FindCVar("fullscreen", NULL);
+			if (var != NULL)
 			{
-				// Previously a true/false boolean. Now an on/off/auto tri-state with auto as the default.
-				FBaseCVar *var = FindCVar("snd_hrtf", NULL);
-				if (var != NULL) var->ResetToDefault();
+				UCVarValue v = var->GetGenericRep(CVAR_Bool);
+				vid_fullscreen = v.Float;
 			}
-			if (last < 216)
-			{
-				FBaseCVar *var = FindCVar("gl_texture_hqresize", NULL);
-				if (var != NULL)
-				{
-					auto v = var->GetGenericRep(CVAR_Int);
-					switch (v.Int)
-					{
-					case 1:
-						gl_texture_hqresizemode = 1; gl_texture_hqresizemult = 2;
-						break;
-					case 2:
-						gl_texture_hqresizemode = 1; gl_texture_hqresizemult = 3;
-						break;
-					case 3:
-						gl_texture_hqresizemode = 1; gl_texture_hqresizemult = 4;
-						break;
-					case 4:
-						gl_texture_hqresizemode = 2; gl_texture_hqresizemult = 2;
-						break;
-					case 5:
-						gl_texture_hqresizemode = 2; gl_texture_hqresizemult = 3;
-						break;
-					case 6:
-						gl_texture_hqresizemode = 2; gl_texture_hqresizemult = 4;
-						break;
-					case 7:
-						gl_texture_hqresizemode = 3; gl_texture_hqresizemult = 2;
-						break;
-					case 8:
-						gl_texture_hqresizemode = 3; gl_texture_hqresizemult = 3;
-						break;
-					case 9:
-						gl_texture_hqresizemode = 3; gl_texture_hqresizemult = 4;
-						break;
-					case 10:
-						gl_texture_hqresizemode = 4; gl_texture_hqresizemult = 2;
-						break;
-					case 11:
-						gl_texture_hqresizemode = 4; gl_texture_hqresizemult = 3;
-						break;
-					case 12:
-						gl_texture_hqresizemode = 4; gl_texture_hqresizemult = 4;
-						break;
-					case 18:
-						gl_texture_hqresizemode = 4; gl_texture_hqresizemult = 5;
-						break;
-					case 19:
-						gl_texture_hqresizemode = 4; gl_texture_hqresizemult = 6;
-						break;
-					case 13:
-						gl_texture_hqresizemode = 5; gl_texture_hqresizemult = 2;
-						break;
-					case 14:
-						gl_texture_hqresizemode = 5; gl_texture_hqresizemult = 3;
-						break;
-					case 15:
-						gl_texture_hqresizemode = 5; gl_texture_hqresizemult = 4;
-						break;
-					case 16:
-						gl_texture_hqresizemode = 5; gl_texture_hqresizemult = 5;
-						break;
-					case 17:
-						gl_texture_hqresizemode = 5; gl_texture_hqresizemult = 6;
-						break;
-					case 20:
-						gl_texture_hqresizemode = 6; gl_texture_hqresizemult = 2;
-						break;
-					case 21:
-						gl_texture_hqresizemode = 6; gl_texture_hqresizemult = 3;
-						break;
-					case 22:
-						gl_texture_hqresizemode = 6; gl_texture_hqresizemult = 4;
-						break;
-					case 23:
-						gl_texture_hqresizemode = 6; gl_texture_hqresizemult = 5;
-						break;
-					case 24:
-						gl_texture_hqresizemode = 6; gl_texture_hqresizemult = 6;
-						break;
-					case 0:
-					default:
-						gl_texture_hqresizemode = 0; gl_texture_hqresizemult = 1;
-						break;
-					}
-				}
-			}
-			if (last < 217)
-			{
-				auto var = FindCVar("vid_scalemode", NULL);
-				UCVarValue newvalue;
-				if (var != NULL)
-				{
-					UCVarValue v = var->GetGenericRep(CVAR_Int);
-					if (v.Int == 3) // 640x400
-					{
-						newvalue.Int = 2;
-						var->SetGenericRep(newvalue, CVAR_Int);
-					}
-					if (v.Int == 2) // 320x200
-					{
-						newvalue.Int = 6;
-						var->SetGenericRep(newvalue, CVAR_Int);
-					}
-				}
-			}
-			if (last < 219)
-			{
-				// 2019-12-06 - polybackend merge
-				// migrate vid_enablevulkan to vid_preferbackend
-				auto var = FindCVar("vid_enablevulkan", NULL);
-				if (var != NULL)
-				{
-					UCVarValue v = var->GetGenericRep(CVAR_Int);
-					vid_preferbackend = v.Int;
-				}
-				// 2019-12-31 - r_videoscale.cpp changes
-				var = FindCVar("vid_scale_customstretched", NULL);
-				if (var != NULL)
-				{
-					UCVarValue v = var->GetGenericRep(CVAR_Bool);
-					if (v.Bool)
-						vid_scale_custompixelaspect = 1.2f;
-					else
-						vid_scale_custompixelaspect = 1.0f;
-				}
-				var = FindCVar("vid_scalemode", NULL);
-				UCVarValue newvalue;
-				if (var != NULL)
-				{
-					UCVarValue v = var->GetGenericRep(CVAR_Int);
-					switch (v.Int)
-					{
-					case 1:
-						newvalue.Int = 0;
-						var->SetGenericRep(newvalue, CVAR_Int);
-						[[fallthrough]];
-					case 3:
-					case 4:
-						vid_scale_linear = true;
-						break;
-					default:
-						vid_scale_linear = false;
-						break;
-					}
-				}
-			}
-			if (last < 220)
-			{
-				auto var = FindCVar("Gamma", NULL);
-				if (var != NULL)
-				{
-					UCVarValue v = var->GetGenericRep(CVAR_Float);
-					vid_gamma = v.Float;
-				}
-				var = FindCVar("fullscreen", NULL);
-				if (var != NULL)
-				{
-					UCVarValue v = var->GetGenericRep(CVAR_Bool);
-					vid_fullscreen = v.Float;
-				}
-			}
-			if (last < 221)
-			{
-				// Transfer the messed up mouse scaling config to something sane and consistent.
+		}
+		if (EngineLastRunVer < 221)
+		{
+			// Transfer the messed up mouse scaling config to something sane and consistent.
 #ifndef _WIN32
-				double xfact = 3, yfact = 2;
+			double xfact = 3, yfact = 2;
 #else
-				double xfact = in_mouse == 1? 1.5 : 4, yfact = 1;
+			double xfact = in_mouse == 1? 1.5 : 4, yfact = 1;
 #endif
-				auto var = FindCVar("m_noprescale", NULL);
-				if (var != NULL)
-				{
-					UCVarValue v = var->GetGenericRep(CVAR_Bool);
-					if (v.Bool) xfact = yfact = 1;
-				}
+			var = FindCVar("m_noprescale", NULL);
+			if (var != NULL)
+			{
+				UCVarValue v = var->GetGenericRep(CVAR_Bool);
+				if (v.Bool) xfact = yfact = 1;
+			}
 
-				var = FindCVar("mouse_sensitivity", NULL);
-				if (var != NULL)
-				{
-					UCVarValue v = var->GetGenericRep(CVAR_Float);
-					xfact *= v.Float;
-					yfact *= v.Float;
-				}
-				m_sensitivity_x = (float)xfact;
-				m_sensitivity_y = (float)yfact;
+			var = FindCVar("mouse_sensitivity", NULL);
+			if (var != NULL)
+			{
+				UCVarValue v = var->GetGenericRep(CVAR_Float);
+				xfact *= v.Float;
+				yfact *= v.Float;
+			}
+			m_sensitivity_x = (float)xfact;
+			m_sensitivity_y = (float)yfact;
 
-				adl_volume_model = 0;
+			adl_volume_model = 0;
+			adl_chan_alloc = -1;
+			adl_auto_arpeggio = false;
 
-				// if user originally wanted the in-game textures resized, set model skins to resize too
-				int old_targets = gl_texture_hqresize_targets;
-				old_targets |= (old_targets & 1) ? 8 : 0;
-				gl_texture_hqresize_targets = old_targets;
-			}
-			if (last < 222)
+			opn_volume_model = 0;
+			opn_chan_alloc = -1;
+			opn_auto_arpeggio = false;
+
+			// if user originally wanted the in-game textures resized, set model skins to resize too
+			int old_targets = gl_texture_hqresize_targets;
+			old_targets |= (old_targets & 1) ? 8 : 0;
+			gl_texture_hqresize_targets = old_targets;
+		}
+		if (EngineLastRunVer < 222)
+		{
+			var = FindCVar("mod_dumb_mastervolume", NULL);
+			if (var != NULL)
 			{
-				auto var = FindCVar("mod_dumb_mastervolume", NULL);
-				if (var != NULL)
-				{
-					UCVarValue v = var->GetGenericRep(CVAR_Float);
-					v.Float /= 4.f;
-					if (v.Float < 1.f) v.Float = 1.f;
+				UCVarValue v = var->GetGenericRep(CVAR_Float);
+				v.Float /= 4.f;
+				if (v.Float < 1.f) v.Float = 1.f;
+			}
+		}
+		if (EngineLastRunVer < 223)
+		{
+			// ooooh boy did i open a can of worms with this one.
+			i_pauseinbackground = !(i_soundinbackground);
+		}
+		if (EngineLastRunVer < 223)
+		{
+			// [UZDXREMA] fork renderer/perf defaults changed in this version
+			var = FindCVar("storesavepic", NULL);
+			if (var != NULL) var->ResetToDefault();
+			var = FindCVar("gl_max_lights", NULL);
+			if (var != NULL) var->ResetToDefault();
+			var = FindCVar("gl_light_shadowmap", NULL);
+			if (var != NULL) var->ResetToDefault();
+			var = FindCVar("gl_sprite_distance_cull", NULL);
+			if (var != NULL) var->ResetToDefault();
+			var = FindCVar("gl_line_distance_cull", NULL);
+			if (var != NULL) var->ResetToDefault();
+			var = FindCVar("r_sprite_distance_cull", NULL);
+			if (var != NULL) var->ResetToDefault();
+		}
+		if (EngineLastRunVer < 224)
+		{
+			var = FindCVar("m_sensitivity_x", NULL);
+			if (var != NULL)
+			{
+				UCVarValue v = var->GetGenericRep(CVAR_Float);
+				v.Float *= 0.5f;
+				var->SetGenericRep(v, CVAR_Float);
+			}
+		}
+		if (EngineLastRunVer < 224)
+		{
+			// [UZDXREMA] VR movement: off-hand relative movement default changed
+			var = FindCVar("vr_move_use_offhand", NULL);
+			if (var != NULL) var->ResetToDefault();
+		}
+		if (EngineLastRunVer < 225)
+		{
+			var = FindCVar("gl_lightmode", NULL);
+			if (var != NULL)
+			{
+				UCVarValue v = var->GetGenericRep(CVAR_Int);
+				v.Int = v.Int == 16 ? 2 : v.Int == 8 ? 1 : 0;
+				var->SetGenericRep(v, CVAR_Int);
+			}
+		}
+		if (EngineLastRunVer < 225)
+		{
+			// [UZDXREMA] the fork ships its own soundfont/MIDI defaults
+			var = FindCVar("fluid_patchset", NULL);
+			if (var != NULL) var->ResetToDefault();
+			var = FindCVar("timidity_config", NULL);
+			if (var != NULL) var->ResetToDefault();
+			var = FindCVar("midi_config", NULL);
+			if (var != NULL) var->ResetToDefault();
+		}
+		if (EngineLastRunVer < 226)
+		{
+			// [UZDXREMA] billboard mode default changed for the VR renderer
+			var = FindCVar("gl_billboard_faces_camera", NULL);
+			if (var != NULL) var->ResetToDefault();
+			var = FindCVar("storesavepic", NULL);
+			if (var != NULL) var->ResetToDefault();
+			var = FindCVar("gl_max_lights", NULL);
+			if (var != NULL) var->ResetToDefault();
+		}
+		if (EngineLastRunVer < 230) // UZDoom 5.0
+		{
+			// Reset brightness related settings, as the values all mean something different now
+			AddCommandString("vid_reset2defaults");
+		}
+		if (EngineLastRunVer < 231) // UZDoom 5.0
+		{
+			language = "auto";
+		}
+#ifdef HAS_UPDATER
+		if (EngineLastRunVer < 232) // UZDoom 5.0
+		{
+			if (updater_update_interval == 2) updater_update_interval = 1;
+		}
+#endif
+		if (EngineLastRunVer < 233) // UZDoom 5.0
+		{
+			var = FindCVar("ui_theme", NULL);
+			if (var != NULL)
+			{
+				if (var->GetGenericRep(CVAR_Int).Int == 2)
+				{ // for a while the engine defaulted to 2 (light), not auto
+					var->ResetToDefault();
 				}
-			}
-			if (last < 223)
-			{
-				// ooooh boy did i open a can of worms with this one.
-				i_pauseinbackground = !(i_soundinbackground);
-			}
-			if (last < 223)
-			{
-				FBaseCVar *var = FindCVar("storesavepic", NULL);
-				if (var != NULL) var->ResetToDefault();
-				var = FindCVar("gl_max_lights", NULL);
-				if (var != NULL) var->ResetToDefault();
-				var = FindCVar("gl_light_shadowmap", NULL);
-				if (var != NULL) var->ResetToDefault();
-				var = FindCVar("gl_sprite_distance_cull", NULL);
-				if (var != NULL) var->ResetToDefault();
-				var = FindCVar("gl_line_distance_cull", NULL);
-				if (var != NULL) var->ResetToDefault();
-				var = FindCVar("r_sprite_distance_cull", NULL);
-				if (var != NULL) var->ResetToDefault();
-				var = FindCVar("r_sprite_distance_cull", NULL);
-				if (var != NULL) var->ResetToDefault();
-			}
-			if (last < 224)
-			{
-				if (const auto var = FindCVar("m_sensitivity_x", NULL))
-				{
-					UCVarValue v = var->GetGenericRep(CVAR_Float);
-					v.Float *= 0.5f;
-					var->SetGenericRep(v, CVAR_Float);
-				}
-			}
-			if (last < 224)
-			{
-				FBaseCVar *var = FindCVar("vr_move_use_offhand", NULL);
-				if (var != NULL) var->ResetToDefault();
-			}
-			if (last < 225)
-			{
-				if (const auto var = FindCVar("gl_lightmode", NULL))
-				{
-					UCVarValue v = var->GetGenericRep(CVAR_Int);
-					v.Int = v.Int == 16 ? 2 : v.Int == 8 ? 1 : 0;
-					var->SetGenericRep(v, CVAR_Int);
-				}
-			}
-			if (last < 225)
-			{
-				FBaseCVar *var = FindCVar("fluid_patchset", NULL);
-				if (var != NULL) var->ResetToDefault();
-				var = FindCVar("timidity_config", NULL);
-				if (var != NULL) var->ResetToDefault();
-				var = FindCVar("midi_config", NULL);
-				if (var != NULL) var->ResetToDefault();
-			}
-			if (last < 226)
-			{
-				FBaseCVar *var = FindCVar("gl_billboard_faces_camera", NULL);
-				if (var != NULL) var->ResetToDefault();
-				var = FindCVar("storesavepic", NULL);
-				if (var != NULL) var->ResetToDefault();
-				var = FindCVar("gl_max_lights", NULL);
-				if (var != NULL) var->ResetToDefault();
 			}
 		}
 	}
+
+	OkayToWrite = true;
+
+	if(QueueWrite)
+	{
+		M_SaveDefaults(NULL);
+		QueueWrite = false;
+	}
 }
 
-void FGameConfigFile::DoGameSetup (const char *gamename)
+void FGameConfigFile::DoGameSetup(FString section)
 {
 	const char *key;
 	const char *value;
 
-	sublen = countof(section) - 1 - mysnprintf (section, countof(section), "%s.", gamename);
-	subsection = section + countof(section) - sublen - 1;
-	section[countof(section) - 1] = '\0';
+	GameLastRunVer = 0;
+	if (SetSection (section + ".LastRun"))
+	{
+		const char *lastver = GetValueForKey ("Version");
+		if (lastver != NULL) GameLastRunVer = atof(lastver);
+	}
 
-	strncpy (subsection, "UnknownConsoleVariables", sublen);
-	if (SetSection (section))
+	if (SetSection (section + ".UnknownConsoleVariables"))
 	{
 		ReadCVars (0);
 	}
 
-	strncpy (subsection, "ConfigOnlyVariables", sublen);
-	if (SetSection (section))
+	if (SetSection (section + ".ConfigOnlyVariables"))
 	{
 		ReadCVars (0);
 	}
 
-	strncpy (subsection, "ConsoleVariables", sublen);
-	if (SetSection (section))
+	if (SetSection (section + ".ConsoleVariables"))
 	{
 		ReadCVars (0);
 	}
@@ -776,20 +823,17 @@ void FGameConfigFile::DoGameSetup (const char *gamename)
 
 	// The NetServerInfo section will be read and override anything loaded
 	// here when it's determined that a netgame is being played.
-	strncpy (subsection, "LocalServerInfo", sublen);
-	if (SetSection (section))
+	if (SetSection (section + ".LocalServerInfo"))
 	{
 		ReadCVars (0);
 	}
 
-	strncpy (subsection, "Player", sublen);
-	if (SetSection (section))
+	if (SetSection (section + ".Player"))
 	{
 		ReadCVars (0);
 	}
 
-	strncpy (subsection, "ConsoleAliases", sublen);
-	if (SetSection (section))
+	if (SetSection (section + ".ConsoleAliases"))
 	{
 		const char *name = NULL;
 		while (NextInSection (key, value))
@@ -805,30 +849,30 @@ void FGameConfigFile::DoGameSetup (const char *gamename)
 			}
 		}
 	}
+
+	bGameSetup = true;
 }
 
 // Moved from DoGameSetup so that it can happen after wads are loaded
-void FGameConfigFile::DoKeySetup(const char *gamename)
+void FGameConfigFile::DoKeySetup(FString section)
 {
-	static const struct { const char *label; FKeyBindings *bindings; } binders[] =
+	assert(bGameSetup);
+
+	constexpr int numbindings = 3;
+
+	static const struct { const char *label; FKeyBindings *bindings; } binders[numbindings] =
 	{
-		{ "Bindings", &Bindings },
-		{ "DoubleBindings", &DoubleBindings },
-		{ "AutomapBindings", &AutomapBindings },
-		{ NULL, NULL }
+		{ ".Bindings", &Bindings },
+		{ ".DoubleBindings", &DoubleBindings },
+		{ ".AutomapBindings", &AutomapBindings }
 	};
 	const char *key, *value;
 
-	sublen = countof(section) - 1 - mysnprintf(section, countof(section), "%s.", gamename);
-	subsection = section + countof(section) - sublen - 1;
-	section[countof(section) - 1] = '\0';
-
 	C_SetDefaultBindings ();
 
-	for (int i = 0; binders[i].label != NULL; ++i)
+	for (int i = 0; i < numbindings; ++i)
 	{
-		strncpy(subsection, binders[i].label, sublen);
-		if (SetSection(section))
+		if (SetSection(section + binders[i].label))
 		{
 			FKeyBindings *bindings = binders[i].bindings;
 			bindings->UnbindAll();
@@ -838,52 +882,70 @@ void FGameConfigFile::DoKeySetup(const char *gamename)
 			}
 		}
 	}
-	OkayToWrite = true;
+
+	if (GameLastRunVer < 1)
+	{
+		// Multiple gamepad reworks were done during
+		// this version. There is not any particularly
+		// good way to transfer older settings, so we
+		// are just going to reset them completely.
+		TArray<IJoystickConfig *> sticks;
+		I_GetJoysticks(sticks);
+
+		// Reset analog stick settings
+		for (int joy = 0; joy < sticks.SSize(); joy++)
+		{
+			sticks[joy]->Reset();
+		}
+
+		// Reset digital binds
+		TArray<int> keys_to_reset;
+		keys_to_reset.Reserve(NUM_AXIS_CODES);
+		for (int i = 0; i < NUM_AXIS_CODES; i++)
+		{
+			keys_to_reset[i] = KeyAxisMapping[i];
+		}
+
+		C_SetDefaultBindings(&keys_to_reset);
+	}
+
+	if (GameLastRunVer < 1)
+	{
+		// swap binds
+		Bindings.UnbindACommand("bumpgamma");
+		Bindings.DefaultBind("F11", "bumplight");
+	}
+
+	bKeySetup = true;
 }
 
 // Like DoGameSetup(), but for mod-specific cvars.
 // Called after CVARINFO has been parsed.
-void FGameConfigFile::DoModSetup(const char *gamename)
+void FGameConfigFile::DoModSetup(FString section)
 {
-	mysnprintf(section, countof(section), "%s.Player.Mod", gamename);
-	if (SetSection(section))
+
+	if(SetSection(section + ".Player.Mod"))
 	{
 		ReadCVars(CVAR_MOD|CVAR_USERINFO|CVAR_IGNORE);
 	}
-	mysnprintf(section, countof(section), "%s.LocalServerInfo.Mod", gamename);
-	if (SetSection (section))
+
+	if(SetSection(section + ".LocalServerInfo.Mod"))
 	{
 		ReadCVars (CVAR_MOD|CVAR_SERVERINFO|CVAR_IGNORE);
 	}
-	mysnprintf(section, countof(section), "%s.ConfigOnlyVariables.Mod", gamename);
-	if (SetSection (section))
+
+	if(SetSection(section + ".ConfigOnlyVariables.Mod"))
 	{
 		ReadCVars (CVAR_MOD|CVAR_CONFIG_ONLY|CVAR_IGNORE);
 	}
+
 	// Signal that these sections should be rewritten when saving the config.
 	bModSetup = true;
 }
 
-void FGameConfigFile::ReadNetVars ()
-{
-	strncpy (subsection, "NetServerInfo", sublen);
-	if (SetSection (section))
-	{
-		ReadCVars (0);
-	}
-	if (bModSetup)
-	{
-		mysnprintf(subsection, sublen, "NetServerInfo.Mod");
-		if (SetSection(section))
-		{
-			ReadCVars(CVAR_MOD|CVAR_SERVERINFO|CVAR_IGNORE);
-		}
-	}
-}
-
 // Read cvars from a cvar section of the ini. Flags are the flags to give
 // to newly-created cvars that were not already defined.
-void FGameConfigFile::ReadCVars (uint32_t flags)
+void FGameConfigFile::ReadCVars(uint32_t flags)
 {
 	const char *key, *value;
 	FBaseCVar *cvar;
@@ -902,28 +964,26 @@ void FGameConfigFile::ReadCVars (uint32_t flags)
 	}
 }
 
-void FGameConfigFile::ArchiveGameData (const char *gamename)
+void FGameConfigFile::ArchiveGameData(FString section)
 {
-	char section[32*3], *subsection;
+	if(!bGameSetup) return;
 
-	sublen = countof(section) - 1 - mysnprintf (section, countof(section), "%s.", gamename);
-	subsection = section + countof(section) - 1 - sublen;
+	SetSection (section + ".LastRun", true);
+	ClearCurrentSection ();
+	SetValueForKey ("Version", GAMELASTRUNVERSION);
 
-	strncpy (subsection, "Player", sublen);
-	SetSection (section, true);
+	SetSection (section + ".Player", true);
 	ClearCurrentSection ();
 	C_ArchiveCVars (this, CVAR_ARCHIVE|CVAR_USERINFO);
 
 	if (bModSetup)
 	{
-		strncpy (subsection + 6, ".Mod", sublen - 6);
-		SetSection (section, true);
+		SetSection (section + ".Player.Mod", true);
 		ClearCurrentSection ();
 		C_ArchiveCVars (this, CVAR_MOD|CVAR_ARCHIVE|CVAR_AUTO|CVAR_USERINFO);
 	}
 
-	strncpy (subsection, "ConsoleVariables", sublen);
-	SetSection (section, true);
+	SetSection (section + ".ConsoleVariables", true);
 	ClearCurrentSection ();
 	C_ArchiveCVars (this, CVAR_ARCHIVE);
 
@@ -931,55 +991,48 @@ void FGameConfigFile::ArchiveGameData (const char *gamename)
 	// this machine was not the initial host.
 	if (!netgame || consoleplayer == 0)
 	{
-		strncpy (subsection, netgame ? "NetServerInfo" : "LocalServerInfo", sublen);
-		SetSection (section, true);
+		SetSection (section + (netgame ? ".NetServerInfo" : ".LocalServerInfo"), true);
 		ClearCurrentSection ();
 		C_ArchiveCVars (this, CVAR_ARCHIVE|CVAR_SERVERINFO);
 
 		if (bModSetup)
 		{
-			strncpy (subsection, netgame ? "NetServerInfo.Mod" : "LocalServerInfo.Mod", sublen);
-			SetSection (section, true);
+			SetSection (section + (netgame ? ".NetServerInfo.Mod" : ".LocalServerInfo.Mod"), true);
 			ClearCurrentSection ();
 			C_ArchiveCVars (this, CVAR_MOD|CVAR_ARCHIVE|CVAR_AUTO|CVAR_SERVERINFO);
 		}
 	}
 
-	strncpy (subsection, "ConfigOnlyVariables", sublen);
-	SetSection (section, true);
+	SetSection (section + ".ConfigOnlyVariables", true);
 	ClearCurrentSection ();
 	C_ArchiveCVars (this, CVAR_ARCHIVE|CVAR_AUTO|CVAR_CONFIG_ONLY);
 
 	if (bModSetup)
 	{
-		strncpy (subsection, "ConfigOnlyVariables.Mod", sublen);
-		SetSection (section, true);
+		SetSection (section + ".ConfigOnlyVariables.Mod", true);
 		ClearCurrentSection ();
 		C_ArchiveCVars (this, CVAR_ARCHIVE|CVAR_AUTO|CVAR_MOD|CVAR_CONFIG_ONLY);
 	}
 
-	strncpy (subsection, "UnknownConsoleVariables", sublen);
-	SetSection (section, true);
+	SetSection (section + ".UnknownConsoleVariables", true);
 	ClearCurrentSection ();
 	C_ArchiveCVars (this, CVAR_ARCHIVE|CVAR_AUTO);
 
-	strncpy (subsection, "ConsoleAliases", sublen);
-	SetSection (section, true);
+	SetSection (section + ".ConsoleAliases", true);
 	ClearCurrentSection ();
 	C_ArchiveAliases (this);
 
-	M_SaveCustomKeys (this, section, subsection, sublen);
+	if(!bKeySetup) return;
 
-	strcpy (subsection, "Bindings");
-	SetSection (section, true);
+	M_SaveCustomKeys (this, section);
+
+	SetSection (section + ".Bindings", true);
 	Bindings.ArchiveBindings (this);
 
-	strncpy (subsection, "DoubleBindings", sublen);
-	SetSection (section, true);
+	SetSection (section + ".DoubleBindings", true);
 	DoubleBindings.ArchiveBindings (this);
 
-	strncpy (subsection, "AutomapBindings", sublen);
-	SetSection (section, true);
+	SetSection (section + ".AutomapBindings", true);
 	AutomapBindings.ArchiveBindings (this);
 }
 
@@ -987,15 +1040,16 @@ void FGameConfigFile::ArchiveGlobalData ()
 {
 	SetSection ("LastRun", true);
 	ClearCurrentSection ();
-	SetValueForKey ("Version", LASTRUNVERSION);
+	SetValueForKey ("Version", ENGINELASTRUNVERSION);
+	SetValueForKey ("Release", VERSIONSTR);
 
 	SetSection ("GlobalSettings", true);
 	ClearCurrentSection ();
-	C_ArchiveCVars (this, CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
+	C_ArchiveCVars (this, CVAR_ARCHIVE|CVAR_GLOBALCONFIG, CVAR_CONFIG_ONLY);
 
 	SetSection ("GlobalSettings.Unknown", true);
 	ClearCurrentSection ();
-	C_ArchiveCVars (this, CVAR_ARCHIVE|CVAR_GLOBALCONFIG|CVAR_AUTO);
+	C_ArchiveCVars (this, CVAR_ARCHIVE|CVAR_GLOBALCONFIG|CVAR_AUTO, CVAR_CONFIG_ONLY);
 }
 
 FString FGameConfigFile::GetConfigPath (bool tryProg)
@@ -1004,7 +1058,7 @@ FString FGameConfigFile::GetConfigPath (bool tryProg)
 
 	if (Args != NULL)
 	{
-		pathval = Args->CheckValue ("-config");
+		pathval = Args->CheckValue (FArg_config);
 		if (pathval != NULL)
 		{
 			return FString(pathval);
@@ -1048,7 +1102,7 @@ void FGameConfigFile::AddAutoexec (FArgs *list, const char *game)
 				FString expanded_path = ExpandEnvVars(value);
 				if (FileExists(expanded_path))
 				{
-					list->AppendArg (ExpandEnvVars(value));
+					list->AppendRawArg(ExpandEnvVars(value));
 				}
 			}
 		}
@@ -1064,9 +1118,8 @@ void FGameConfigFile::SetRavenDefaults (bool isHexen)
 	val.Bool = true;
 	con_centernotify->SetGenericRepDefault (val, CVAR_Bool);
 	snd_pitched->SetGenericRepDefault (val, CVAR_Bool);
-	val.Int = 9;
-	msg0color->SetGenericRepDefault (val, CVAR_Int);
 	val.Int = CR_WHITE;
+	msg0color->SetGenericRepDefault (val, CVAR_Int);
 	msgmidcolor->SetGenericRepDefault (val, CVAR_Int);
 	val.Int = CR_YELLOW;
 	msgmidcolor2->SetGenericRepDefault (val, CVAR_Int);

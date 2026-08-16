@@ -1,61 +1,54 @@
 /*
-** loadsavemenu.cpp
+** savegamemanager.cpp
+**
 ** The load game and save game menus
 **
 **---------------------------------------------------------------------------
-** Copyright 2001-2010 Randy Heit
-** Copyright 2010-2020 Christoph Oelckers
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 2001-2016 Marisa Heit
+** Copyright 2008-2020 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
 
-#include "menu.h"
-#include "version.h"
-#include "m_png.h"
 #include "filesystem.h"
-#include "v_text.h"
 #include "gstrings.h"
-#include "serializer.h"
-#include "vm.h"
-#include "i_system.h"
-#include "v_video.h"
-#include "findfile.h"
-#include "v_draw.h"
-#include "savegamemanager.h"
-#include "m_argv.h"
+#include "i_interface.h"
 #include "i_specialpaths.h"
+#include "i_system.h"
+#include "m_argv.h"
+#include "m_png.h"
+#include "menu.h"
+#include "printf.h"
+#include "savegamemanager.h"
+#include "serializer.h"
+#include "v_draw.h"
+#include "v_video.h"
+#include "version.h"
+#include "vm.h"
 
 CVAR(String, save_dir, "", CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_SYSTEM_ONLY);
 FString SavegameFolder;
 CVAR(Int, save_sort_order, 1, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
+EXTERN_FARG(savedir);
+
+extern bool netgame;
+
 //=============================================================================
 //
-// Save data maintenance 
+// Save data maintenance
 //
 //=============================================================================
 
@@ -76,7 +69,7 @@ FSavegameManagerBase::~FSavegameManagerBase()
 
 //=============================================================================
 //
-// Save data maintenance 
+// Save data maintenance
 //
 //=============================================================================
 
@@ -111,6 +104,11 @@ DEFINE_ACTION_FUNCTION(FSavegameManager, RemoveSaveSlot)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(FSavegameManagerBase);
 	PARAM_INT(sel);
+	if (!DMenu::InMenu)
+	{
+		Printf("Saves can only be deleted from within a menu\n");
+		ACTION_RETURN_INT(-1);
+	}
 	ACTION_RETURN_INT(self->RemoveSaveSlot(sel));
 }
 
@@ -184,6 +182,7 @@ void FSavegameManagerBase::NotifyNewSave(const FString &file, const FString &tit
 		{
 			node->SaveTitle = title;
 			node->CreationTime = myasctime();
+			node->UUID = GameUUID;
 			node->bOldVersion = false;
 			node->bMissingWads = false;
 
@@ -203,6 +202,7 @@ void FSavegameManagerBase::NotifyNewSave(const FString &file, const FString &tit
 	auto node = new FSaveGameNode;
 	node->SaveTitle = title;
 	node->CreationTime = myasctime();
+	node->UUID = GameUUID;
 	node->Filename = file;
 	node->bOldVersion = false;
 	node->bMissingWads = false;
@@ -247,7 +247,7 @@ DEFINE_ACTION_FUNCTION(FSavegameManager, LoadSavegame)
 
 //=============================================================================
 //
-// 
+//
 //
 //=============================================================================
 
@@ -264,12 +264,47 @@ void FSavegameManagerBase::DoSave(int Selected, const char *savegamestring)
 		FString filename;
 		int i;
 
-		for (i = 0;; ++i)
+		if (netgame)
 		{
-			filename = BuildSaveName("save", i);
-			if (!FileExists(filename))
+			// For netgames it's usually a bad idea to use the default savexx names, so instead
+			// sanitize the description to use as a name.
+			filename = savegamestring;
+			FixPathSeperator(filename);
+			bool failed = false;
+			if (filename[0] == '/')
 			{
-				break;
+				Printf("saving to an absolute path is not allowed\n");
+				failed = true;
+			}
+			else if (filename.IndexOf("..") >= 0)
+			{
+				Printf("'..' not allowed in file names\n");
+				failed = true;
+			}
+#ifdef _WIN32
+			// block all invalid characters for Windows file names
+			else if (filename.IndexOfAny(":?*<>|") >= 0)
+			{
+				Printf("file name contains invalid characters\n");
+				failed = true;
+			}
+#endif
+			if (failed)
+			{
+				M_ClearMenus();
+				return;
+			}
+			filename = G_BuildSaveName(filename.GetChars());
+		}
+		else
+		{
+			for (i = 0;; ++i)
+			{
+				filename = BuildSaveName("save", i);
+				if (!FileExists(filename))
+				{
+					break;
+				}
 			}
 		}
 		PerformSaveGame(filename.GetChars(), savegamestring);
@@ -518,6 +553,27 @@ bool FSavegameManagerBase::RemoveNewSaveNode()
 	return false;
 }
 
+int FSavegameManagerBase::RemoveUUIDSaveSlots()
+{
+	if (GameUUID.IsEmpty())
+		return -1;
+
+	// Make sure there's any saves in the list first.
+	if (!SaveGames.Size())
+		ReadSaveStrings();
+
+	int index = -1;
+	for (int i = SaveGames.Size() - 1; i >= 0; --i)
+	{
+		auto& save = SaveGames[i];
+		if (save == &NewSaveNode || save->UUID.Compare(GameUUID))
+			continue;
+
+		index = RemoveSaveSlot(i);
+	}
+	return index;
+}
+
 DEFINE_ACTION_FUNCTION(FSavegameManager, RemoveNewSaveNode)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(FSavegameManagerBase);
@@ -539,9 +595,15 @@ DEFINE_ACTION_FUNCTION(FSavegameManager, ExtractSaveData)
 	ACTION_RETURN_INT(self->ExtractSaveData(sel));
 }
 
+DEFINE_ACTION_FUNCTION(FSavegameManager, RemoveUUIDSaveSlots)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FSavegameManagerBase);
+	ACTION_RETURN_INT(self->RemoveUUIDSaveSlots());
+}
 
 DEFINE_FIELD(FSaveGameNode, SaveTitle);
 DEFINE_FIELD(FSaveGameNode, Filename);
+DEFINE_FIELD(FSaveGameNode, UUID);
 DEFINE_FIELD(FSaveGameNode, bOldVersion);
 DEFINE_FIELD(FSaveGameNode, bMissingWads);
 DEFINE_FIELD(FSaveGameNode, bNoDelete);
@@ -561,7 +623,15 @@ FString G_GetSavegamesFolder()
 	FString name;
 	bool usefilter;
 
-	if (const char* const dir = Args->CheckValue("-savedir"))
+	// Always use the netgame folder for multiplayer games to prevent any singleplayer saves
+	// from being overridden by someone else. Also makes it easier for everyone to load from
+	// it.
+	if (netgame)
+	{
+		name = M_GetSavegamesPath();
+		usefilter = true;
+	}
+	else if (const char* const dir = Args->CheckValue(FArg_savedir))
 	{
 		name = dir;
 		usefilter = false; //-savedir specifies an absolute save directory path.
@@ -602,4 +672,3 @@ FString G_BuildSaveName(const char* prefix)
 	name.Substitute("\\", "/");
 	return name;
 }
-

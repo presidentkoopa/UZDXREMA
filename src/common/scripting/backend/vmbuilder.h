@@ -1,11 +1,38 @@
+/*
+** vmbuilder.h
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 2009-2016 Marisa Heit
+** Copyright 2016-2017 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
+**---------------------------------------------------------------------------
+**
+*/
+
 #ifndef VMUTIL_H
 #define VMUTIL_H
 
 #include "dobject.h"
+#include "m_argv.h"
 #include "vmintern.h"
 #include <vector>
 #include <functional>
 
+
+class FxCompoundStatement;
 class VMFunctionBuilder;
 class FxExpression;
 class FxLocalVariableDeclaration;
@@ -52,6 +79,8 @@ public:
 		friend class VMFunctionBuilder;
 	};
 
+	using BlockMap = TArray<std::pair<std::pair<size_t, size_t>, TArray<VMLocalVariable>>>;
+
 	VMFunctionBuilder(int numimplicits);
 	~VMFunctionBuilder();
 
@@ -97,6 +126,8 @@ public:
 	void FillAddressConstants(FVoidObj *konst);
 	void FillStringConstants(FString *strings);
 
+	void AddBlock(const TArray<VMLocalVariable> &vars, size_t start, size_t end);
+
 	// PARAM increases ActiveParam; CALL decreases it.
 	void ParamChange(int delta);
 
@@ -128,7 +159,7 @@ private:
 	int ActiveParam;
 
 	TArray<VMOP> Code;
-
+	BlockMap Blocks;
 };
 
 void DumpFunction(FILE *dump, VMScriptFunction *sfunc, const char *label, int labellen);

@@ -10,6 +10,7 @@ OptionMenu "OptionsMenuSimple" protected
 	Submenu "$VRPREFMNU_TITLE",			"VROptionsMenu"
 	Submenu "$MODOPT_TITLE",			"ModOptionsMenu"
 	Submenu "$VRPERFMNU_TITLE",			"VRPerfTweakMenu"
+	Submenu "$OS_TITLE",				"os_Menu"
 	StaticText " "
 	Submenu "$OPTMNU_CONTROLS",			"CustomizeControls"
 	Submenu "$OPTMNU_MOUSE",			"MouseOptionsSimple"
@@ -19,12 +20,11 @@ OptionMenu "OptionsMenuSimple" protected
 	Submenu "$OPTMNU_MULTIPLAYER",		"MultiplayerMenu"
 	StaticText " "
 	Submenu "$OPTMNU_SOUND",			"SoundOptionsSimple"
+	Submenu "$OPTMNU_ACCESSIBILITY",	"AccessibilityOptions" // This should always have the full menu for this.
 	Submenu "$OPTMNU_DISPLAY",			"VideoOptionsSimple"
 	Submenu "$HUDMNU_SCALEOPT",			"ScalingOptionsSimple"
 	StaticText " "
-	Submenu "$OPTMNU_MISCELLANEOUS",	"MiscOptionsSimple"	
-	StaticText " "
-	Submenu "$OS_TITLE", "os_Menu"
+	Submenu "$OPTMNU_MISCELLANEOUS",	"MiscOptionsSimple"
 	StaticText " "
 	Submenu "$OPTMNU_FULLOPTIONS", "OptionsMenuFull"
 	StaticText " "
@@ -60,6 +60,7 @@ OptionMenu VideoOptionsSimple protected
 		Option "$VIDMNU_RENDERMODE",		"vid_rendermode", "RenderMode"
 	}
 	Option "$VIDMNU_FULLSCREEN",		"vid_fullscreen", "YesNo"
+	Submenu "$DSPLYMNU_IMAGEADJUST",	"ImageAdjustMenu"
 	IfOption(Mac)
 	{
 		Option "$VIDMNU_HIDPI",			"vid_hidpi", "YesNo"
@@ -75,11 +76,6 @@ OptionMenu VideoOptionsSimple protected
 	StaticText " "
 	Option "$DSPLYMNU_VSYNC",					"vid_vsync", "OnOff"
 	Slider "$VIDMNU_MAXFPS",					"vid_maxfps", 35, 500, 1
-	StaticText " "
-	Slider "$DSPLYMNU_GAMMA",					"vid_gamma",					0.75, 3.0, 0.05, 2
-	Slider "$DSPLYMNU_BRIGHTNESS",				"vid_brightness",				-0.8,0.8, 0.05,2
-	Slider "$DSPLYMNU_CONTRAST",				"vid_contrast",	   				0.1, 3.0, 0.1
-	Slider "$DSPLYMNU_SATURATION",				"vid_saturation",  				-3.0, 3.0, 0.25, 2
 	StaticText " "
 	Slider "$DSPLYMNU_FOV",						"fov",							75.0, 120.0, 0.1, 1
 	// commenting this out for now, this menu is so general purpose I am not sure it makes sense, but I'm leaving it here just in case
@@ -112,6 +108,8 @@ OptionMenu MiscOptionsSimple protected
 	Option "$MISCMNU_ENABLESCRIPTSCREENSHOTS",	"enablescriptscreenshot", "OnOff"
 	Option "$OPTMNU_LANGUAGE",					"language", "LanguageOptions"
 	Option "$MSGMNU_LONGSAVEMESSAGES",			"longsavemessages",	"OnOff"
+	//StaticText " "
+	//Option "$MISCMNU_DISCORDRPC",				"i_discordrpc",	"OnOff"
 }
 
 OptionMenu "MouseOptionsSimple" protected

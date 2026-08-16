@@ -53,15 +53,15 @@ public:
 	std::function<void()> FuncEnterPressed;
 
 protected:
-	void OnPaintFrame(Canvas* canvas) override;
 	void OnPaint(Canvas* canvas) override;
 	void OnMouseMove(const Point& pos) override;
-	bool OnMouseDown(const Point& pos, int key) override;
-	bool OnMouseDoubleclick(const Point& pos, int key) override;
-	bool OnMouseUp(const Point& pos, int key) override;
+	bool OnMouseDown(const Point& pos, InputKey key) override;
+	bool OnMouseDoubleclick(const Point& pos, InputKey key) override;
+	bool OnMouseUp(const Point& pos, InputKey key) override;
 	void OnKeyChar(std::string chars) override;
-	void OnKeyDown(EInputKey key) override;
-	void OnKeyUp(EInputKey key) override;
+	void OnKeyDown(InputKey key) override;
+	void OnKeyUp(InputKey key) override;
+	bool OnMouseWheel(const Point& pos, InputKey key) override;
 	void OnGeometryChanged() override;
 	void OnEnableChanged() override;
 	void OnSetFocus() override;
@@ -84,6 +84,11 @@ private:
 		SpanLayout layout;
 		Rect box;
 		bool invalidated = true;
+
+		Line(const TextEdit *self)
+		{
+			layout.SetSelectionColors(self->selectionFG, self->selectionBG);
+		}
 	};
 
 	struct ivec2
@@ -97,9 +102,10 @@ private:
 		bool operator!=(const ivec2& b) const { return x != b.x || y != b.y; }
 	};
 
+	Colorf selectionBG, selectionFG;
 	Scrollbar* vert_scrollbar;
 	Timer* timer = nullptr;
-	std::vector<Line> lines = { Line() };
+	std::vector<Line> lines = { Line{this} };
 	ivec2 cursor_pos = { 0, 0 };
 	int max_length = -1;
 	bool mouse_selecting = false;
@@ -129,9 +135,7 @@ private:
 
 	bool mouse_moves_left = false;
 	bool cursor_blink_visible = true;
-	unsigned int blink_timer = 0;
 	int clip_start_offset = 0;
-	int clip_end_offset = 0;
 	bool ignore_mouse_events = false;
 
 	struct UndoInfo

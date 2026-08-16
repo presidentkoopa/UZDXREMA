@@ -4,19 +4,25 @@
 #include "core/utf8reader.h"
 #include "core/colorf.h"
 
+#include <algorithm>
+#include <cmath>
+
 #ifdef _MSC_VER
 #pragma warning(disable: 4267) // warning C4267: 'initializing': conversion from 'size_t' to 'int', possible loss of data
 #endif
 
 TextEdit::TextEdit(Widget* parent) : Widget(parent)
 {
-	SetNoncontentSizes(8.0, 8.0, 8.0, 8.0);
+	SetStyleClass("textedit");
+
+	selectionBG = GetStyleColor("selection-color");
+	selectionFG = GetStyleColor("selection-text");
 
 	timer = new Timer(this);
-	timer->FuncExpired = [=]() { OnTimerExpired(); };
+	timer->FuncExpired = [this]() { OnTimerExpired(); };
 
 	scroll_timer = new Timer(this);
-	scroll_timer->FuncExpired = [=]() { OnScrollTimerExpired(); };
+	scroll_timer->FuncExpired = [this]() { OnScrollTimerExpired(); };
 
 	SetCursor(StandardCursor::ibeam);
 
@@ -174,13 +180,13 @@ void TextEdit::SetText(const std::string& text)
 	std::string::size_type end = text.find('\n');
 	while (end != std::string::npos)
 	{
-		TextEdit::Line line;
+		TextEdit::Line line{this};
 		line.text = text.substr(start, end - start);
 		lines.push_back(line);
 		start = end + 1;
 		end = text.find('\n', start);
 	}
-	TextEdit::Line line;
+	TextEdit::Line line{this};
 	line.text = text.substr(start);
 	lines.push_back(line);
 
@@ -196,13 +202,13 @@ void TextEdit::AddText(const std::string& text)
 	std::string::size_type end = text.find('\n');
 	while (end != std::string::npos)
 	{
-		TextEdit::Line line;
+		TextEdit::Line line{this};
 		line.text = text.substr(start, end - start);
 		lines.push_back(line);
 		start = end + 1;
 		end = text.find('\n', start);
 	}
-	TextEdit::Line line;
+	TextEdit::Line line{this};
 	line.text = text.substr(start);
 	lines.push_back(line);
 
@@ -286,11 +292,11 @@ void TextEdit::OnMouseMove(const Point& pos)
 	}
 }
 
-bool TextEdit::OnMouseDown(const Point& pos, int key)
+bool TextEdit::OnMouseDown(const Point& pos, InputKey key)
 {
-	if (key == IK_LeftMouse)
+	if (key == InputKey::LeftMouse)
 	{
-		CaptureMouse();
+		SetPointerCapture();
 		mouse_selecting = true;
 		cursor_pos = GetCharacterIndex(pos);
 		selection_start = cursor_pos;
@@ -301,25 +307,25 @@ bool TextEdit::OnMouseDown(const Point& pos, int key)
 	return true;
 }
 
-bool TextEdit::OnMouseDoubleclick(const Point& pos, int key)
+bool TextEdit::OnMouseDoubleclick(const Point& pos, InputKey key)
 {
 	return true;
 }
 
-bool TextEdit::OnMouseUp(const Point& pos, int key)
+bool TextEdit::OnMouseUp(const Point& pos, InputKey key)
 {
-	if (mouse_selecting && key == IK_LeftMouse)
+	if (mouse_selecting && key == InputKey::LeftMouse)
 	{
 		if (ignore_mouse_events) // This prevents text selection from changing from what was set when focus was gained.
 		{
-			ReleaseMouseCapture();
+			ReleasePointerCapture();
 			ignore_mouse_events = false;
 			mouse_selecting = false;
 		}
 		else
 		{
 			scroll_timer->Stop();
-			ReleaseMouseCapture();
+			ReleasePointerCapture();
 			mouse_selecting = false;
 			ivec2 sel_end = GetCharacterIndex(pos);
 			selection_length = ToOffset(sel_end) - ToOffset(selection_start);
@@ -333,7 +339,7 @@ bool TextEdit::OnMouseUp(const Point& pos, int key)
 
 void TextEdit::OnKeyChar(std::string chars)
 {
-	if (!chars.empty() && !(chars[0] >= 0 && chars[0] < 32))
+	if (!readonly && !chars.empty() && !(chars[0] >= 0 && chars[0] < 32))
 	{
 		if (FuncBeforeEditChanged)
 			FuncBeforeEditChanged();
@@ -360,9 +366,9 @@ void TextEdit::OnKeyChar(std::string chars)
 	}
 }
 
-void TextEdit::OnKeyDown(EInputKey key)
+void TextEdit::OnKeyDown(InputKey key)
 {
-	if (!readonly && key == IK_Enter)
+	if (!readonly && key == InputKey::Enter)
 	{
 		if (FuncEnterPressed)
 		{
@@ -383,17 +389,17 @@ void TextEdit::OnKeyDown(EInputKey key)
 		timer->Start(500); // don't blink cursor when moving or typing.
 	}
 
-	if (key == IK_Enter || key == IK_Escape || key == IK_Tab)
+	if (key == InputKey::Enter || key == InputKey::Escape || key == InputKey::Tab)
 	{
 		// Do not consume these.
 		return;
 	}
-	else if (key == IK_A && GetKeyState(IK_Ctrl))
+	else if (key == InputKey::A && GetKeyState(InputKey::Ctrl))
 	{
 		// select all
 		SelectAll();
 	}
-	else if (key == IK_C && GetKeyState(IK_Ctrl))
+	else if (key == InputKey::C && GetKeyState(InputKey::Ctrl))
 	{
 		std::string str = GetSelection();
 		SetClipboardText(str);
@@ -403,9 +409,9 @@ void TextEdit::OnKeyDown(EInputKey key)
 		// Do not consume messages on read only component (only allow CTRL-A and CTRL-C)
 		return;
 	}
-	else if (key == IK_Up)
+	else if (key == InputKey::Up)
 	{
-		if (GetKeyState(IK_Shift) && selection_length == 0)
+		if (GetKeyState(InputKey::Shift) && selection_length == 0)
 			selection_start = cursor_pos;
 
 		if (cursor_pos.y > 0)
@@ -414,7 +420,7 @@ void TextEdit::OnKeyDown(EInputKey key)
 			cursor_pos.x = std::min(lines[cursor_pos.y].text.size(), (size_t)cursor_pos.x);
 		}
 
-		if (GetKeyState(IK_Shift))
+		if (GetKeyState(InputKey::Shift))
 		{
 			selection_length = ToOffset(cursor_pos) - ToOffset(selection_start);
 		}
@@ -428,18 +434,18 @@ void TextEdit::OnKeyDown(EInputKey key)
 		Update();
 		undo_info.first_text_insert = true;
 	}
-	else if (key == IK_Down)
+	else if (key == InputKey::Down)
 	{
-		if (GetKeyState(IK_Shift) && selection_length == 0)
+		if (GetKeyState(InputKey::Shift) && selection_length == 0)
 			selection_start = cursor_pos;
 
-		if (cursor_pos.y < lines.size() - 1)
+		if (cursor_pos.y < (int)lines.size() - 1)
 		{
 			cursor_pos.y++;
 			cursor_pos.x = std::min(lines[cursor_pos.y].text.size(), (size_t)cursor_pos.x);
 		}
 
-		if (GetKeyState(IK_Shift))
+		if (GetKeyState(InputKey::Shift))
 		{
 			selection_length = ToOffset(cursor_pos) - ToOffset(selection_start);
 		}
@@ -454,55 +460,55 @@ void TextEdit::OnKeyDown(EInputKey key)
 		Update();
 		undo_info.first_text_insert = true;
 	}
-	else if (key == IK_Left)
+	else if (key == InputKey::Left)
 	{
-		Move(-1, GetKeyState(IK_Shift), GetKeyState(IK_Ctrl));
+		Move(-1, GetKeyState(InputKey::Shift), GetKeyState(InputKey::Ctrl));
 	}
-	else if (key == IK_Right)
+	else if (key == InputKey::Right)
 	{
-		Move(1, GetKeyState(IK_Shift), GetKeyState(IK_Ctrl));
+		Move(1, GetKeyState(InputKey::Shift), GetKeyState(InputKey::Ctrl));
 	}
-	else if (key == IK_Backspace)
+	else if (key == InputKey::Backspace)
 	{
 		Backspace();
 	}
-	else if (key == IK_Delete)
+	else if (key == InputKey::Delete)
 	{
 		Del();
 	}
-	else if (key == IK_Home)
+	else if (key == InputKey::Home)
 	{
-		if (GetKeyState(IK_Ctrl))
+		if (GetKeyState(InputKey::Ctrl))
 			cursor_pos = ivec2(0, 0);
 		else
 			cursor_pos.x = 0;
-		if (GetKeyState(IK_Shift))
+		if (GetKeyState(InputKey::Shift))
 			selection_length = ToOffset(cursor_pos) - ToOffset(selection_start);
 		else
 			ClearSelection();
 		Update();
 		MoveVerticalScroll();
 	}
-	else if (key == IK_End)
+	else if (key == InputKey::End)
 	{
-		if (GetKeyState(IK_Ctrl))
+		if (GetKeyState(InputKey::Ctrl))
 			cursor_pos = ivec2(lines.back().text.length(), lines.size() - 1);
 		else
 			cursor_pos.x = lines[cursor_pos.y].text.size();
 
-		if (GetKeyState(IK_Shift))
+		if (GetKeyState(InputKey::Shift))
 			selection_length = ToOffset(cursor_pos) - ToOffset(selection_start);
 		else
 			ClearSelection();
 		Update();
 	}
-	else if (key == IK_X && GetKeyState(IK_Ctrl))
+	else if (key == InputKey::X && GetKeyState(InputKey::Ctrl))
 	{
 		std::string str = GetSelection();
 		DeleteSelectedText();
 		SetClipboardText(str);
 	}
-	else if (key == IK_V && GetKeyState(IK_Ctrl))
+	else if (key == InputKey::V && GetKeyState(InputKey::Ctrl))
 	{
 		std::string str = GetClipboardText();
 		std::string::const_iterator end_str = std::remove(str.begin(), str.end(), '\r');
@@ -524,7 +530,7 @@ void TextEdit::OnKeyDown(EInputKey key)
 		}
 		MoveVerticalScroll();
 	}
-	else if (GetKeyState(IK_Ctrl) && key == IK_Z)
+	else if (GetKeyState(InputKey::Ctrl) && key == InputKey::Z)
 	{
 		if (!readonly)
 		{
@@ -533,7 +539,7 @@ void TextEdit::OnKeyDown(EInputKey key)
 			SetText(tmp);
 		}
 	}
-	else if (key == IK_Shift)
+	else if (key == InputKey::Shift)
 	{
 		if (selection_length == 0)
 			selection_start = cursor_pos;
@@ -543,8 +549,21 @@ void TextEdit::OnKeyDown(EInputKey key)
 		FuncAfterEditChanged();
 }
 
-void TextEdit::OnKeyUp(EInputKey key)
+void TextEdit::OnKeyUp(InputKey key)
 {
+}
+
+bool TextEdit::OnMouseWheel(const Point& pos, InputKey key)
+{
+	if (key == InputKey::MouseWheelUp)
+	{
+		vert_scrollbar->SetPosition(vert_scrollbar->GetPosition() - 1);
+	}
+	else if (key == InputKey::MouseWheelDown)
+	{
+		vert_scrollbar->SetPosition(vert_scrollbar->GetPosition() + 1);
+	}
+	return true;
 }
 
 void TextEdit::OnSetFocus()
@@ -577,7 +596,7 @@ void TextEdit::OnLostFocus()
 void TextEdit::CreateComponents()
 {
 	vert_scrollbar = new Scrollbar(this);
-	vert_scrollbar->FuncScroll = [=]() { OnVerticalScroll(); };
+	vert_scrollbar->FuncScroll = [this]() { OnVerticalScroll(); };
 	vert_scrollbar->SetVisible(false);
 	vert_scrollbar->SetVertical();
 }
@@ -589,9 +608,9 @@ void TextEdit::OnVerticalScroll()
 void TextEdit::UpdateVerticalScroll()
 {
 	Rect rect(
-		GetWidth() - 16.0/*vert_scrollbar->GetWidth()*/,
+		GetWidth() - vert_scrollbar->GetPreferredWidth(),
 		0.0,
-		16.0/*vert_scrollbar->GetWidth()*/,
+		vert_scrollbar->GetPreferredWidth(),
 		GetHeight());
 
 	vert_scrollbar->SetFrameGeometry(rect);
@@ -713,10 +732,10 @@ TextEdit::ivec2 TextEdit::FindNextBreakCharacter(ivec2 search_start)
 	if (search_start.x >= int(lines[search_start.y].text.size()) - 1)
 		return ivec2(lines[search_start.y].text.size(), search_start.y);
 
-	int pos = lines[search_start.y].text.find_first_of(break_characters, search_start.x);
+	size_t pos = lines[search_start.y].text.find_first_of(break_characters, search_start.x);
 	if (pos == std::string::npos)
 		return ivec2(lines[search_start.y].text.size(), search_start.y);
-	return ivec2(pos, search_start.y);
+	return ivec2((int)pos, search_start.y);
 }
 
 TextEdit::ivec2 TextEdit::FindPreviousBreakCharacter(ivec2 search_start)
@@ -724,10 +743,10 @@ TextEdit::ivec2 TextEdit::FindPreviousBreakCharacter(ivec2 search_start)
 	search_start.x--;
 	if (search_start.x <= 0)
 		return ivec2(0, search_start.y);
-	int pos = lines[search_start.y].text.find_last_of(break_characters, search_start.x);
+	size_t pos = lines[search_start.y].text.find_last_of(break_characters, search_start.x);
 	if (pos == std::string::npos)
 		return ivec2(0, search_start.y);
-	return ivec2(pos, search_start.y);
+	return ivec2((int)pos, search_start.y);
 }
 
 void TextEdit::InsertText(ivec2 pos, const std::string& str)
@@ -740,7 +759,7 @@ void TextEdit::InsertText(ivec2 pos, const std::string& str)
 	}
 
 	// checking if insert exceeds max length
-	if (ToOffset(ivec2(lines[lines.size() - 1].text.size(), lines.size() - 1)) + str.length() > max_length)
+	if (ToOffset(ivec2((int)lines[lines.size() - 1].text.size(), (int)lines.size() - 1)) + str.length() > (size_t)max_length)
 	{
 		return;
 	}
@@ -758,7 +777,7 @@ void TextEdit::InsertText(ivec2 pos, const std::string& str)
 
 		pos.x += next_newline - start;
 
-		Line line;
+		Line line{this};
 		line.text = lines[pos.y].text.substr(pos.x);
 		lines.insert(lines.begin() + pos.y + 1, line);
 		lines[pos.y].text = lines[pos.y].text.substr(0, pos.x);
@@ -835,9 +854,9 @@ void TextEdit::Del()
 			lines[cursor_pos.y].invalidated = true;
 			Update();
 		}
-		else if (cursor_pos.y + 1 < lines.size())
+		else if (cursor_pos.y + 1 < (int)lines.size())
 		{
-			selection_start = ivec2(lines[cursor_pos.y].text.length(), cursor_pos.y);
+			selection_start = ivec2((int)lines[cursor_pos.y].text.length(), cursor_pos.y);
 			selection_length = 1;
 			DeleteSelectedText();
 		}
@@ -865,6 +884,11 @@ void TextEdit::OnTimerExpired()
 void TextEdit::OnGeometryChanged()
 {
 	Canvas* canvas = GetCanvas();
+
+	for (auto& line : lines)
+	{
+		line.invalidated = true;
+	}
 
 	vertical_text_align = canvas->verticalTextAlign();
 
@@ -898,7 +922,7 @@ bool TextEdit::InputMaskAcceptsInput(ivec2 cursor_pos, const std::string& str)
 
 std::string::size_type TextEdit::ToOffset(ivec2 pos) const
 {
-	if (pos.y < lines.size())
+	if (pos.y < (int)lines.size())
 	{
 		std::string::size_type offset = 0;
 		for (int line = 0; line < pos.y; line++)
@@ -921,7 +945,7 @@ std::string::size_type TextEdit::ToOffset(ivec2 pos) const
 TextEdit::ivec2 TextEdit::FromOffset(std::string::size_type offset) const
 {
 	int line_offset = 0;
-	for (int line = 0; line < lines.size(); line++)
+	for (int line = 0; line < (int)lines.size(); line++)
 	{
 		if (offset <= line_offset + lines[line].text.size())
 		{
@@ -961,25 +985,26 @@ void TextEdit::LayoutLines(Canvas* canvas)
 		sel_end = selection_start;
 	}
 
+	Colorf textColor = GetStyleColor("color");
 	Point draw_pos;
-	for (size_t i = vert_scrollbar->GetPosition(); i < lines.size(); i++)
+	for (size_t i = (size_t)vert_scrollbar->GetPosition(); i < lines.size(); i++)
 	{
 		Line& line = lines[i];
 		if (line.invalidated)
 		{
 			line.layout.Clear();
 			if (!line.text.empty())
-				line.layout.AddText(line.text, font, Colorf::fromRgba8(255, 255, 255));
+				line.layout.AddText(line.text, font, textColor);
 			else
-				line.layout.AddText(" ", font, Colorf::fromRgba8(255, 255, 255)); // Draw one space character to get the correct height
-			line.layout.Layout(canvas, GetWidth());
+				line.layout.AddText(" ", font, textColor); // Draw one space character to get the correct height
+			line.layout.Layout(canvas, GetWidth() - vert_scrollbar->GetPreferredWidth());
 			line.box = Rect(draw_pos, line.layout.GetSize());
 			line.invalidated = false;
 		}
 
-		if (sel_start != sel_end && sel_start.y <= i && sel_end.y >= i)
+		if (sel_start != sel_end && sel_start.y <= (int)i && sel_end.y >= (int)i)
 		{
-			line.layout.SetSelectionRange(sel_start.y < i ? 0 : sel_start.x, sel_end.y > i ? line.text.size() : sel_end.x);
+			line.layout.SetSelectionRange(sel_start.y < (int)i ? 0 : sel_start.x, sel_end.y > (int)i ? line.text.size() : sel_end.x);
 		}
 		else
 		{
@@ -989,10 +1014,10 @@ void TextEdit::LayoutLines(Canvas* canvas)
 		line.layout.HideCursor();
 		if (HasFocus())
 		{
-			if (cursor_blink_visible && cursor_pos.y == i)
+			if (cursor_blink_visible && cursor_pos.y == (int)i)
 			{
 				line.layout.SetCursorPos(cursor_pos.x);
-				line.layout.SetCursorColor(Colorf::fromRgba8(255, 255, 255));
+				line.layout.SetCursorColor(textColor);
 				line.layout.ShowCursor();
 			}
 		}
@@ -1006,22 +1031,10 @@ void TextEdit::LayoutLines(Canvas* canvas)
 	UpdateVerticalScroll();
 }
 
-void TextEdit::OnPaintFrame(Canvas* canvas)
-{
-	double w = GetFrameGeometry().width;
-	double h = GetFrameGeometry().height;
-	Colorf bordercolor = Colorf::fromRgba8(100, 100, 100);
-	canvas->fillRect(Rect::xywh(0.0, 0.0, w, h), Colorf::fromRgba8(38, 38, 38));
-	canvas->fillRect(Rect::xywh(0.0, 0.0, w, 1.0), bordercolor);
-	canvas->fillRect(Rect::xywh(0.0, h - 1.0, w, 1.0), bordercolor);
-	canvas->fillRect(Rect::xywh(0.0, 0.0, 1.0, h - 0.0), bordercolor);
-	canvas->fillRect(Rect::xywh(w - 1.0, 0.0, 1.0, h - 0.0), bordercolor);
-}
-
 void TextEdit::OnPaint(Canvas* canvas)
 {
 	LayoutLines(canvas);
-	for (size_t i = vert_scrollbar->GetPosition(); i < lines.size(); i++)
+	for (size_t i = (size_t)vert_scrollbar->GetPosition(); i < lines.size(); i++)
 		lines[i].layout.DrawLayout(canvas);
 }
 
@@ -1040,6 +1053,7 @@ TextEdit::ivec2 TextEdit::GetCharacterIndex(Point mouse_wincoords)
 				return ivec2(clamp(result.offset, (size_t)0, line.text.size()), i);
 			case SpanLayout::HitTestResult::outside_left:
 				return ivec2(0, i);
+			default:
 			case SpanLayout::HitTestResult::outside_right:
 				return ivec2(line.text.size(), i);
 			}

@@ -1,3 +1,26 @@
+/*
+** i_mainwindow.h
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1998-2016 Marisa Heit
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
+**---------------------------------------------------------------------------
+**
+*/
+
 #pragma once
 
 #include "zstring.h"
@@ -24,12 +47,6 @@ public:
 
 	void PrintStr(const char* cp);
 	void GetLog(std::function<bool(const void* data, uint32_t size, uint32_t& written)> writeFile);
-
-	void ShowNetStartPane(const char* message, int maxpos);
-	void SetNetStartProgress(int pos);
-	bool RunMessageLoop(bool (*timer_callback)(void*), void* userdata);
-	void HideNetStartPane();
-	void CloseNetStartPane();
 
 	void SetWindowTitle(const char* caption);
 

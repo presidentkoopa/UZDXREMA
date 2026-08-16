@@ -1,3 +1,19 @@
+/*
+** i_interface.h
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 2020-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
+
 #pragma once
 
 #include "zstring.h"
@@ -10,7 +26,11 @@ class FGameTexture;
 class FTextureID;
 enum EUpscaleFlags : int;
 class FConfigFile;
+class FArgs;
 struct FTranslationID;
+
+extern FString GameUUID;
+FString GenerateUUID();
 
 struct SystemCallbacks
 {
@@ -57,6 +77,69 @@ struct WadStuff
 {
 	FString Path;
 	FString Name;
+};
+
+struct FStartupSelectionInfo
+{
+	const TArray<WadStuff>* Wads = nullptr;
+	FArgs* Args = nullptr;
+
+	// Launcher settings
+	bool notifyNewRelease = true;
+	FName prideColors = {};
+	float prideMix = 0;
+	unsigned LauncherWidth = 0;
+	unsigned LauncherHeight = 0;
+
+	// Local game info
+	int DefaultIWAD = 0;
+	FString DefaultArgs = {};
+	bool bSaveArgs = true;
+	int displayRelease = 1;
+
+	// Settings
+	int DefaultStartFlags = 0;
+	bool DefaultQueryIWAD = true;
+	FString DefaultLanguage = "auto";
+	int DefaultBackend = 1;
+	bool DefaultFullscreen = true;
+	bool DefaultVsync = false;
+	int DefaultFileLoadBehaviour = 0;
+	bool DefaultDynLights = true;
+	bool DefaultShadowmaps = false;
+	int DefaultPreferredTheme = 0;
+
+	// Net game info
+	int DefaultNetIWAD = 0;
+	bool bNetStart = false;
+	bool bHosting = false;
+	bool bSaveNetFile = false;
+	bool bSaveNetArgs = true;
+	int DefaultNetPage = 0;
+	FString DefaultNetArgs = {};
+	FString AdditionalNetArgs = {}; // These ones shouldn't be saved.
+	FString DefaultNetSaveFile = {};
+	int DefaultNetHostTeam = 255;
+	int DefaultNetPlayers = 8;
+	int DefaultNetHostPort = 0;
+	int DefaultNetTicDup = 0;
+	bool DefaultNetExtraTic = false;
+	int DefaultNetGameMode = 0;
+	bool DefaultNetAltDM = false;
+
+	FString DefaultNetAddress = {};
+	int DefaultNetJoinPort = 0;
+	int DefaultNetJoinTeam = 255;
+
+#ifdef HAS_UPDATER
+	int DefaultUpdateInterval = 7;
+	bool bAutoUpdate = false;
+	bool bCheckUpdate = false;
+#endif
+
+	FStartupSelectionInfo() = delete;
+	FStartupSelectionInfo(const TArray<WadStuff>& wads, FArgs& args, int startFlags);
+	int SaveInfo();
 };
 
 

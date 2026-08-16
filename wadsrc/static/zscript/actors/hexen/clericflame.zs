@@ -1,3 +1,22 @@
+/*
+** clericflame.zs
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1994-1996 Raven Software
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2006-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 // The Cleric's Flame Strike ------------------------------------------------
 
@@ -14,6 +33,7 @@ class CWeapFlame : ClericWeapon
 		Weapon.AmmoType1 "Mana2";
 		Inventory.PickupMessage "$TXT_WEAPON_C3";
 		Tag "$TAG_CWEAPFLAME";
+		+WEAPON.EXPLOSIVE
 	}
 
 	States
@@ -41,7 +61,7 @@ class CWeapFlame : ClericWeapon
 		CFLM G 2;
 		Goto Ready;
 	}
-	
+
 	//============================================================================
 	//
 	// A_CFlameAttack
@@ -152,7 +172,7 @@ class CircleFlame : Actor
 {
 	const FLAMESPEED = 0.45;
 	const FLAMEROTSPEED = 2.;
-	
+
 	Default
 	{
 		Radius 6;
@@ -191,7 +211,7 @@ class CircleFlame : Actor
 		CFCF TUVWXYZ 3 Bright;
 		Stop;
 	}
-	
+
 	//============================================================================
 	//
 	// A_CFlameRotate
@@ -245,7 +265,7 @@ class CFlameMissile : FastProjectile
 		CFFX M 3 Bright;
 		Stop;
 	}
-	
+
 	override void BeginPlay ()
 	{
 		special1 = 2;
@@ -268,7 +288,7 @@ class CFlameMissile : FastProjectile
 			}
 		}
 	}
-	
+
 	//============================================================================
 	//
 	// A_CFlamePuff

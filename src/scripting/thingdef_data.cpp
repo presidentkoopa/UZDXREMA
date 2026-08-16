@@ -4,36 +4,20 @@
 ** DECORATE data tables
 **
 **---------------------------------------------------------------------------
-** Copyright 2002-2008 Christoph Oelckers
-** Copyright 2004-2008 Randy Heit
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 2002-2016 Christoph Oelckers
+** Copyright 2004-2016 Marisa Heit
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-** 4. When not used as part of ZDoom or a ZDoom derivative, this code will be
-**    covered by the terms of the GNU General Public License as published by
-**    the Free Software Foundation; either version 2 of the License, or (at
-**    your option) any later version.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: LicenseRef-ZDoom-Conditional
+**
 **---------------------------------------------------------------------------
 **
 */
@@ -76,6 +60,7 @@ extern float			BackbuttonAlpha;
 #define DEFINE_FLAG(prefix, name, type, variable) { (unsigned int)prefix##_##name, #name, (int)(size_t)&((type*)1)->variable - 1, sizeof(((type *)0)->variable), VARF_Native }
 #define DEFINE_PROTECTED_FLAG(prefix, name, type, variable) { (unsigned int)prefix##_##name, #name, (int)(size_t)&((type*)1)->variable - 1, sizeof(((type *)0)->variable), VARF_Native|VARF_ReadOnly|VARF_InternalAccess }
 #define DEFINE_FLAG2(symbol, name, type, variable) { (unsigned int)symbol, #name, (int)(size_t)&((type*)1)->variable - 1, sizeof(((type *)0)->variable), VARF_Native }
+#define DEFINE_PROTECTED_FLAG2(symbol, name, type, variable) { (unsigned int)symbol, #name, (int)(size_t)&((type*)1)->variable - 1, sizeof(((type *)0)->variable), VARF_Native|VARF_ReadOnly|VARF_InternalAccess }
 #define DEFINE_FLAG2_DEPRECATED(symbol, name, type, variable, version) { (unsigned int)symbol, #name, (int)(size_t)&((type*)1)->variable - 1, sizeof(((type *)0)->variable), VARF_Native|VARF_Deprecated }
 #define DEFINE_DEPRECATED_FLAG(name, version) { DEPF_##name, #name, -1, 0, VARF_Deprecated, version }
 #define DEFINE_DUMMY_FLAG(name, deprec) { DEPF_UNUSED, #name, -1, 0, deprec? VARF_Deprecated:0 }
@@ -391,6 +376,10 @@ static FFlagDef ActorFlagDefs[]=
 	DEFINE_FLAG(RF2, SQUAREPIXELS, AActor, renderflags2),
 	DEFINE_FLAG(RF2, STRETCHPIXELS, AActor, renderflags2),
 	DEFINE_FLAG(RF2, LIGHTMULTALPHA, AActor, renderflags2),
+	DEFINE_FLAG(RF2, ANGLEDROLL, AActor, renderflags2),
+	DEFINE_FLAG(RF2, INTERPOLATESCALE, AActor, renderflags2),
+	DEFINE_FLAG(RF2, INTERPOLATEALPHA, AActor, renderflags2),
+	DEFINE_FLAG(RF2, NODYNAMICLIGHTING, AActor, renderflags2),
 
 	// Bounce flags
 	DEFINE_FLAG2(BOUNCE_Walls, BOUNCEONWALLS, AActor, BounceFlags),
@@ -412,8 +401,9 @@ static FFlagDef ActorFlagDefs[]=
 	DEFINE_FLAG2(BOUNCE_NotOnSky, DONTBOUNCEONSKY, AActor, BounceFlags),
 	DEFINE_FLAG2(BOUNCE_KeepAngle, KEEPBOUNCEANGLE, AActor, BounceFlags),
 	DEFINE_FLAG2(BOUNCE_ModifyPitch, BOUNCEMODIFIESPITCH, AActor, BounceFlags),
-	
+
 	DEFINE_FLAG2(OF_Transient, NOSAVEGAME, AActor, ObjectFlags),
+	DEFINE_PROTECTED_FLAG2(OF_ClientSide, CLIENTSIDE, AActor, ObjectFlags),
 
 	// Deprecated flags which need a ZScript workaround.
 	DEFINE_DEPRECATED_FLAG(MISSILEMORE, MakeVersion(4, 13, 0)),
@@ -670,7 +660,7 @@ void InitImports();
 struct UserInfoCVarNamePlayer
 {
 	FBaseCVar** addr;
-	FString name;
+	FName name;
 	int pnum;
 };
 
@@ -767,6 +757,15 @@ void InitThingdef()
 	terraindefstruct->Size = sizeof(FTerrainDef);
 	terraindefstruct->Align = alignof(FTerrainDef);
 
+	auto episodestruct = NewStruct("EpisodeInfo", nullptr, true);
+	episodestruct->Size = sizeof(FEpisode);
+	episodestruct->Align = alignof(FEpisode);
+
+	auto skillstruct = NewStruct("SkillInfo", nullptr, true);
+	skillstruct->Size = sizeof(FSkillInfo);
+	skillstruct->Align = alignof(FSkillInfo);
+
+
 	auto decalbasestruct = NewStruct("DecalBase", nullptr, true);
 	decalbasestruct->Size = sizeof(FDecalBase);
 	decalbasestruct->Align = alignof(FDecalBase);
@@ -806,7 +805,7 @@ void InitThingdef()
 		if (typeInfo->InitNatives)
 			typeInfo->InitNatives();
 	});
-	
+
 	// Sort the flag lists
 	for (size_t i = 0; i < NUM_FLAG_LISTS; ++i)
 	{
@@ -858,7 +857,7 @@ void InitThingdef()
 		[](FSerializer &arc, const char *key, const void *addr)
 		{
 			const FBaseCVar * self = *(const FBaseCVar**)addr;
-			
+
 			if(self)
 			{
 				arc.BeginObject(key);
@@ -873,7 +872,7 @@ void InitThingdef()
 				}
 				else
 				{
-					FString name = self->GetName();
+					FName name = self->GetFName();
 					arc("name", name);
 				}
 
@@ -884,7 +883,7 @@ void InitThingdef()
 		{
 			FBaseCVar ** self = (FBaseCVar**)addr;
 
-			FString name;
+			FName name;
 			arc.BeginObject(key);
 
 			arc("name", name);
@@ -898,13 +897,22 @@ void InitThingdef()
 			{
 				if(int pnum; arc.ReadOptionalInt("player", pnum))
 				{
-					*self = nullptr;
-					LoadGameUserInfoCVars.Push({self, name, pnum}); // this needs to be done later, since userinfo isn't loaded yet
-					arc.EndObject();
-					return true;
+					if(arc.IsRollback())
+					{
+						*self = GetCVar(pnum, name.GetChars());
+						arc.EndObject();
+						return true;
+					}
+					else
+					{
+						*self = nullptr;
+						LoadGameUserInfoCVars.Push({self, name, pnum}); // this needs to be done later, since userinfo isn't loaded yet
+						arc.EndObject();
+						return true;
+					}
 				}
 			}
-			
+
 			*self = backing;
 
 			arc.EndObject();
@@ -964,4 +972,3 @@ DEFINE_ACTION_FUNCTION(DObject, BAM)
 	PARAM_ANGLE(ang);
 	ACTION_RETURN_INT(ang.BAMs());
 }
-

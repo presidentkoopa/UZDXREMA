@@ -1,43 +1,54 @@
-//-----------------------------------------------------------------------------
-//
-// Copyright 1993-1996 id Software
-// Copyright 1999-2016 Randy Heit
-// Copyright 2002-2016 Christoph Oelckers
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see http://www.gnu.org/licenses/
-//
-//-----------------------------------------------------------------------------
-//
-// DESCRIPTION:
-//		System specific interface stuff.
-//
-//-----------------------------------------------------------------------------
-
+/*
+** d_main.h
+**
+** System specific interface stuff.
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2002-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 #ifndef __D_MAIN__
 #define __D_MAIN__
 
 #include "doomtype.h"
 #include "gametype.h"
+#include "m_argv.h"
 #include "startupinfo.h"
 #include "c_cvars.h"
 #include "v_video.h"
+#include "fs_filesystem.h"
 #include <csignal>
 
 extern bool		advancedemo;
+extern volatile sig_atomic_t gameloop_abort;
 EXTERN_CVAR(Bool, hud_toggled);
 void D_ToggleHud();
+
+EXTERN_FARG(version);
+EXTERN_FARG(v);
+EXTERN_FARG(help);
+EXTERN_FARG(h);
+EXTERN_FARG(doshelp);
+EXTERN_FARG(help_all);
+EXTERN_FARG(devparm);
+EXTERN_FARG(dumpjit);
+EXTERN_FARG(norun);
+EXTERN_FARG(loadgame);
+EXTERN_FARG(iwad);
+EXTERN_FARG(xlat);
+EXTERN_FARG(savedir);
+EXTERN_FARG(file);
+EXTERN_FARG(showlauncher);
 
 struct event_t;
 
@@ -102,7 +113,7 @@ struct FIWADInfo
 	int LoadWidescreen = -1;
 	int LoadBrightmaps = -1;
 	int LoadLights = -1;
-	FString DiscordAppId = nullptr;
+	//FString DiscordAppId = nullptr;
 	FString SteamAppId = nullptr;
 };
 
@@ -130,6 +141,7 @@ class FIWadManager
 	TArray<FIWADInfo> mIWadInfos;
 	TArray<FString> mIWadNames;
 	TArray<FString> mSearchPaths;
+	TArray<FString> mRecursiveSearchPaths;
 	TArray<FString> mOrderNames;
 	TArray<FFoundWadInfo> mFoundWads;
 	TArray<int> mLumpsFound;
@@ -137,15 +149,15 @@ class FIWadManager
 	void ParseIWadInfo(const char *fn, const char *data, int datasize, FIWADInfo *result = nullptr);
 	int ScanIWAD (const char *iwad);
 	int CheckIWADInfo(const char *iwad);
-	int IdentifyVersion (std::vector<std::string>& wadfiles, const char *iwad, const char *zdoom_wad, const char *optional_wad);
+	int IdentifyVersion (std::vector<FileSys::ResourceName>& wadfiles, const char *iwad, const char *zdoom_wad, const char *optional_wad);
 	void CollectSearchPaths();
-	void AddIWADCandidates(const char *dir);
+	void AddIWADCandidates(const char *dir, bool nosubdir = true);
 	void ValidateIWADs();
 	FString IWADPathFileSearch(const FString &file);
 public:
 
 	FIWadManager(const char *fn, const char *fnopt);
-	const FIWADInfo *FindIWAD(std::vector<std::string>& wadfiles, const char *iwad, const char *basewad, const char *optionalwad);
+	const FIWADInfo *FindIWAD(std::vector<FileSys::ResourceName>& wadfiles, const char *iwad, const char *basewad, const char *optionalwad);
 	const FString *GetAutoname(unsigned int num) const
 	{
 		if (num < mIWadInfos.Size()) return &mIWadInfos[num].Autoname;

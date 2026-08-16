@@ -1,7 +1,7 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
-#include <cmath>
 
 class Colorf
 {
@@ -15,6 +15,21 @@ public:
 	{
 		float s = 1.0f / 255.0f;
 		return { r * s, g * s, b * s, a * s };
+	}
+
+	static Colorf fromRgba(uint32_t rgba)
+	{
+		return fromRgba8(
+			0xff & rgba>>24,
+			0xff & rgba>>16,
+			0xff & rgba>>8,
+			0xff & rgba
+		);
+	}
+
+	static Colorf fromRgb(uint32_t rgb)
+	{
+		return fromRgba(rgb<<8 | 0xff);
 	}
 
 	uint32_t toBgra8() const

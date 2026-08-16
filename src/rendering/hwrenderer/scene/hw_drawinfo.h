@@ -1,3 +1,20 @@
+/*
+** hw_drawinfo.h
+**
+** Basic scene draw info management class
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 2000-2018 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
+
 #pragma once
 
 #include <atomic>
@@ -63,15 +80,15 @@ enum area_t : int;
 
 enum SectorRenderFlags
 {
-    // This is used to merge several subsectors into a single draw item
-    SSRF_RENDERFLOOR = 1,
-    SSRF_RENDERCEILING = 2,
-    SSRF_RENDER3DPLANES = 4,
-    SSRF_RENDERALL = 7,
-    SSRF_PROCESSED = 8,
-    SSRF_SEEN = 16,
-    SSRF_PLANEHACK = 32,
-    SSRF_FLOODHACK = 64
+	// This is used to merge several subsectors into a single draw item
+	SSRF_RENDERFLOOR = 1,
+	SSRF_RENDERCEILING = 2,
+	SSRF_RENDER3DPLANES = 4,
+	SSRF_RENDERALL = 7,
+	SSRF_PROCESSED = 8,
+	SSRF_SEEN = 16,
+	SSRF_PLANEHACK = 32,
+	SSRF_FLOODHACK = 64
 };
 
 enum EPortalClip
@@ -134,7 +151,7 @@ struct HWDrawInfo
 	bool isFullbrightScene() const { return !!(FullbrightFlags & Fullbright); }
 	bool isNightvision() const { return !!(FullbrightFlags & Nightvision); }
 	bool isStealthVision() const { return !!(FullbrightFlags & StealthVision); }
-    
+
 	HWDrawList drawlists[GLDL_TYPES];
 	int vpIndex;
 	ELightMode lightmode;
@@ -170,10 +187,10 @@ struct HWDrawInfo
 
 	TArray<SubsectorHackInfo> SubsectorHacks;
 
-    TMap<int, gl_subsectorrendernode*> otherFloorPlanes;
-    TMap<int, gl_subsectorrendernode*> otherCeilingPlanes;
-    TMap<int, gl_floodrendernode*> floodFloorSegs;
-    TMap<int, gl_floodrendernode*> floodCeilingSegs;
+	TMap<int, gl_subsectorrendernode*> otherFloorPlanes;
+	TMap<int, gl_subsectorrendernode*> otherCeilingPlanes;
+	TMap<int, gl_floodrendernode*> floodFloorSegs;
+	TMap<int, gl_floodrendernode*> floodCeilingSegs;
 
 	//TArray<sector_t *> CeilingStacks;
 	//TArray<sector_t *> FloorStacks;
@@ -193,10 +210,10 @@ struct HWDrawInfo
 	bool experimentalMultiWallWorkers = false;
 
 private:
-    // For ProcessLowerMiniseg
-    bool inview;
-    subsector_t * viewsubsector;
-    TArray<seg_t *> lowersegs;
+	// For ProcessLowerMiniseg
+	bool inview;
+	subsector_t * viewsubsector;
+	TArray<seg_t *> lowersegs;
 
 	subsector_t *currentsubsector;	// used by the line processing code.
 	sector_t *currentsector;
@@ -205,7 +222,7 @@ private:
 	void StartWallWorkersIfNeeded();
 
 	void UnclipSubsector(subsector_t *sub);
-	
+
 	void AddLine(seg_t *seg, bool portalclip);
 	void PolySubsector(subsector_t * sub);
 	void RenderPolyBSPNode(void *node);
@@ -222,7 +239,7 @@ private:
 	void DrawPSprite(HUDSprite *huds, FRenderState &state);
 	void DrawHudQuad(FRenderState &state, FGameTexture* texture, float width, float height, float xoffset = 0.f, float yoffset = 0.f, bool flipX = false, bool depthMask = false);
 	void DrawVRHudBorder(FRenderState& state, float width, float height, PalEntry color, float xoffset = 0.f, float yoffset = 0.f);
-	WeaponLighting GetWeaponLighting(sector_t *viewsector, const DVector3 &pos, int cm, area_t in_area, const DVector3 &playerpos);
+	WeaponLighting GetWeaponLighting(sector_t *viewsector, const DVector3 &pos, int cm, area_t in_area, const DVector3 &playerpos, bool weaponPureLightLevel);
 
 	void PreparePlayerSprites2D(sector_t * viewsector, area_t in_area);
 	void PreparePlayerSprites3D(sector_t * viewsector, area_t in_area);
@@ -244,6 +261,7 @@ public:
 	{
 		VPUniforms.mClipLine = { (float)line->v1->fX(), (float)line->v1->fY(), (float)line->Delta().X, (float)line->Delta().Y };
 		VPUniforms.mClipHeight = 0;
+		VPUniforms.mClipHeightDirection = 0.f;
 	}
 
 	HWPortal * FindPortal(const void * src);
@@ -309,7 +327,7 @@ public:
 	void AddOtherFloorPlane(int sector, gl_subsectorrendernode * node);
 	void AddOtherCeilingPlane(int sector, gl_subsectorrendernode * node);
 
-	void GetDynSpriteLight(AActor *self, float x, float y, float z, FLightNode *node, int portalgroup, float *out);
+	void GetDynSpriteLight(AActor *self, float x, float y, float z, FSection *sec, int portalgroup, float *out);
 	void GetDynSpriteLight(AActor *thing, particle_t *particle, float *out);
 
 	void PreparePlayerSprites(sector_t * viewsector, area_t in_area);
@@ -328,15 +346,15 @@ public:
 	void SetDitherTransFlags(AActor* actor);
 
 	void ProcessLowerMinisegs(TArray<seg_t *> &lowersegs);
-    void AddSubsectorToPortal(FSectorPortalGroup *portal, subsector_t *sub);
-    
-    void AddWall(HWWall *w);
-    void AddMirrorSurface(HWWall *w);
+	void AddSubsectorToPortal(FSectorPortalGroup *portal, subsector_t *sub);
+
+	void AddWall(HWWall *w);
+	void AddMirrorSurface(HWWall *w);
 	void AddFlat(HWFlat *flat, bool fog);
 	void AddSprite(HWSprite *sprite, bool translucent);
 
 
-    HWDecal *AddDecal(bool onmirror);
+	HWDecal *AddDecal(bool onmirror);
 
 	void SetFallbackLightMode()
 	{
@@ -371,7 +389,7 @@ inline bool isDarkLightMode(ELightMode lightmode)
 	return lightmode == ELightMode::Doom || lightmode == ELightMode::DoomDark;
 }
 
-int CalcLightLevel(ELightMode lightmode, int lightlevel, int rellight, bool weapon, int blendfactor);
+int CalcLightLevel(ELightMode lightmode, int lightlevel, int rellight, bool weapon, int blendfactor, bool weaponPureLightLevel = false);
 PalEntry CalcLightColor(ELightMode lightmode, int light, PalEntry pe, int blendfactor);
 float GetFogDensity(FLevelLocals* Level, ELightMode lightmode, int lightlevel, PalEntry fogcolor, int sectorfogdensity, int blendfactor);
 bool CheckFog(FLevelLocals* Level, sector_t* frontsector, sector_t* backsector, ELightMode lightmode);

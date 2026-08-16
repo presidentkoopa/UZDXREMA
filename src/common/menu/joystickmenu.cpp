@@ -1,39 +1,29 @@
 /*
 ** joystickmenu.cpp
+**
 ** The joystick configuration menus
 **
 **---------------------------------------------------------------------------
-** Copyright 2010 Christoph Oelckers
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 2009-2016 Marisa Heit
+** Copyright 2010-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
 
-#include "menu.h"
 #include "m_joy.h"
+#include "menu.h"
 #include "vm.h"
 
 static TArray<IJoystickConfig *> Joysticks;
@@ -70,6 +60,26 @@ DEFINE_ACTION_FUNCTION(IJoystickConfig, SetSensitivity)
 	return 0;
 }
 
+DEFINE_ACTION_FUNCTION(IJoystickConfig, HasHaptics)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(IJoystickConfig);
+	ACTION_RETURN_BOOL(self->HasHaptics());
+}
+
+DEFINE_ACTION_FUNCTION(IJoystickConfig, GetHapticsStrength)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(IJoystickConfig);
+	ACTION_RETURN_FLOAT(self->GetHapticsStrength());
+}
+
+DEFINE_ACTION_FUNCTION(IJoystickConfig, SetHapticsStrength)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(IJoystickConfig);
+	PARAM_FLOAT(strength);
+	self->SetHapticsStrength((float)strength);
+	return 0;
+}
+
 DEFINE_ACTION_FUNCTION(IJoystickConfig, GetAxisScale)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(IJoystickConfig);
@@ -102,19 +112,53 @@ DEFINE_ACTION_FUNCTION(IJoystickConfig, SetAxisDeadZone)
 	return 0;
 }
 
-DEFINE_ACTION_FUNCTION(IJoystickConfig, GetAxisMap)
+DEFINE_ACTION_FUNCTION(IJoystickConfig, GetAxisDigitalThreshold)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(IJoystickConfig);
 	PARAM_INT(axis);
-	ACTION_RETURN_INT(self->GetAxisMap(axis));
+	ACTION_RETURN_FLOAT(self->GetAxisDigitalThreshold(axis));
 }
 
-DEFINE_ACTION_FUNCTION(IJoystickConfig, SetAxisMap)
+DEFINE_ACTION_FUNCTION(IJoystickConfig, SetAxisDigitalThreshold)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(IJoystickConfig);
 	PARAM_INT(axis);
-	PARAM_INT(map);
-	self->SetAxisMap(axis, (EJoyAxis)map);
+	PARAM_FLOAT(dt);
+	self->SetAxisDigitalThreshold(axis, (float)dt);
+	return 0;
+}
+
+DEFINE_ACTION_FUNCTION(IJoystickConfig, GetAxisResponseCurve)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(IJoystickConfig);
+	PARAM_INT(axis);
+	ACTION_RETURN_INT(self->GetAxisResponseCurve(axis));
+}
+
+DEFINE_ACTION_FUNCTION(IJoystickConfig, SetAxisResponseCurve)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(IJoystickConfig);
+	PARAM_INT(axis);
+	PARAM_INT(curve);
+	self->SetAxisResponseCurve(axis, (EJoyCurve)curve);
+	return 0;
+}
+
+DEFINE_ACTION_FUNCTION(IJoystickConfig, GetAxisResponseCurvePoint)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(IJoystickConfig);
+	PARAM_INT(axis);
+	PARAM_INT(point);
+	ACTION_RETURN_FLOAT(self->GetAxisResponseCurvePoint(axis, point));
+}
+
+DEFINE_ACTION_FUNCTION(IJoystickConfig, SetAxisResponseCurvePoint)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(IJoystickConfig);
+	PARAM_INT(axis);
+	PARAM_INT(point);
+	PARAM_FLOAT(value);
+	self->SetAxisResponseCurvePoint(axis, point, value);
 	return 0;
 }
 
@@ -171,6 +215,12 @@ DEFINE_ACTION_FUNCTION(IJoystickConfig, SetEnabledInBackground)
 	return 0;
 }
 
+DEFINE_ACTION_FUNCTION(IJoystickConfig, Reset)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(IJoystickConfig);
+	self->Reset();
+	return 0;
+}
 
 void UpdateJoystickMenu(IJoystickConfig *selected)
 {
@@ -252,7 +302,7 @@ void UpdateJoystickMenu(IJoystickConfig *selected)
 
 static void UpdateControllerOptionsVisibility()
 {
-	DMenuDescriptor** desc = MenuDescriptors.CheckKey(NAME_Optionsmenu);
+	DMenuDescriptor** desc = MenuDescriptors.CheckKey(NAME_OptionsMenu);
 	if (desc == nullptr || !(*desc)->IsKindOf(RUNTIME_CLASS(DOptionMenuDescriptor)))
 	{
 		return;
@@ -282,4 +332,3 @@ static void UpdateControllerOptionsVisibility()
 		}
 	}
 }
-

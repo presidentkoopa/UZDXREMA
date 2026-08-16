@@ -1,3 +1,22 @@
+/*
+** visualthinker.zs
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2006-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
+
 Class VisualThinker : Thinker native
 {
 	native Vector3			Pos,
@@ -11,16 +30,16 @@ Class VisualThinker : Thinker native
 	native TextureID		Texture;
 	native TranslationID	Translation;
 	native int16			LightLevel;
-	
-	native uint16			Flags;
+
+	native uint				Flags;
 	native int				VisualThinkerFlags;
-    
-    FlagDef                 FlipOffsetX :       VisualThinkerFlags, 0;
-    FlagDef                 FlipOffsetY :       VisualThinkerFlags, 1;
-    FlagDef                 XFlip :             VisualThinkerFlags, 2;
-    FlagDef                 YFlip :             VisualThinkerFlags, 3;
-    FlagDef                 DontInterpolate :   VisualThinkerFlags, 4;
-    FlagDef                 AddLightLevel :     VisualThinkerFlags, 5;
+
+	FlagDef                 FlipOffsetX :       VisualThinkerFlags, 0;
+	FlagDef                 FlipOffsetY :       VisualThinkerFlags, 1;
+	FlagDef                 XFlip :             VisualThinkerFlags, 2;
+	FlagDef                 YFlip :             VisualThinkerFlags, 3;
+	FlagDef                 DontInterpolate :   VisualThinkerFlags, 4;
+	FlagDef                 AddLightLevel :     VisualThinkerFlags, 5;
 
 	native Color			scolor;
 
@@ -54,7 +73,7 @@ Class VisualThinker : Thinker native
 			p.SetRenderStyle(style);
 			p.Translation = trans;
 			p.Flags = flags;
-            p.VisualThinkerFlags = VisualThinkerFlags;
+			p.VisualThinkerFlags = VisualThinkerFlags;
 			p.UpdateSector();
 			p.UpdateSpriteInfo();
 		}

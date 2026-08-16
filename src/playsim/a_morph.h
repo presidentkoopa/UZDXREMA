@@ -1,5 +1,24 @@
+/*
+** a_morph.h
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 2018 Christoph Oelckers
+** Copyright 2018-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
+
 #ifndef __A_MORPH__
 #define __A_MORPH__
+
+#include "info.h"
 
 #define MORPHTICS (40*TICRATE)
 #define MAXMORPHHEALTH 30

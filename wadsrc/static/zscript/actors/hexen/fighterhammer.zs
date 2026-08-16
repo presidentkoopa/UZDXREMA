@@ -1,3 +1,22 @@
+/*
+** fighterhammer.zs
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1994-1996 Raven Software
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2006-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 // The Fighter's Hammer -----------------------------------------------------
 
@@ -10,6 +29,7 @@ class FWeapHammer : FighterWeapon
 		+BLOODSPLATTER
 		Weapon.SelectionOrder 900;
 		+WEAPON.AMMO_OPTIONAL
+		+WEAPON.EXPLOSIVE
 		Weapon.AmmoUse1 3;
 		Weapon.AmmoGive1 25;
 		Weapon.KickBack 150;
@@ -105,7 +125,7 @@ class FWeapHammer : FighterWeapon
 		if (weapon == null ||
 			!weapon.CheckAmmo (weapon.bAltFire ?
 				Weapon.AltFire : Weapon.PrimaryFire, false, true))
-		{ 
+		{
 			weaponspecial = false;
 		}
 	}
@@ -135,7 +155,7 @@ class FWeapHammer : FighterWeapon
 			if (!weapon.DepleteAmmo (weapon.bAltFire, false))
 				return;
 		}
-		Actor mo = SpawnPlayerMissile ("HammerMissile", aimflags: alflags); 
+		Actor mo = SpawnPlayerMissile ("HammerMissile", aimflags: alflags);
 		if (mo)
 		{
 			mo.special1 = 0;

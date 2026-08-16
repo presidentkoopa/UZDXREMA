@@ -1,3 +1,27 @@
+/*
+** types.h
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 2008-2016 Marisa Heit
+** Copyright 2016-2017 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
+**---------------------------------------------------------------------------
+**
+*/
+
 #pragma once
 
 #include "dobject.h"
@@ -37,6 +61,8 @@ enum
 	VARF_VirtualScope	= (1<<22),  // [ZZ] virtualscope: object should use the scope of the particular class it's being used with (methods only)
 	VARF_ClearScope		= (1<<23),  // [ZZ] clearscope: this method ignores the member access chain that leads to it and is always plain data.
 	VARF_Abstract		= (1<<24),  // [Player701] Function does not have a body and must be overridden in subclasses
+	VARF_SafeConst		= (1<<25),  // [Jay] properly-working const function/unsafe clearscope field
+	VARF_NoRollback		= (1<<26),	// Field cannot be backed up while predicting.
 };
 
 // Basic information shared by all types ------------------------------------
@@ -110,6 +136,8 @@ public:
 	bool            SizeKnown = true;
 
 	bool			VMInternalStruct = false;
+	bool			TypeDeprecated = false; // mVersion is deprecation version, not minimum version
+	FString			mDeprecationMessage;
 
 	PType * LocalType = nullptr;
 
@@ -775,4 +803,3 @@ struct FTypeTable
 
 
 extern FTypeTable TypeTable;
-

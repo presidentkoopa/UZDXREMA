@@ -1,75 +1,66 @@
 /*
-** doomspund.cpp
+** s_doomsound.cpp
 **
 ** Game dependent part of the sound engine.
 **
 **---------------------------------------------------------------------------
 **
-** Copyright 1999-2016 Randy Heit
+** Copyright 1999-2016 Marisa Heit
 ** Copyright 2002-2019 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 **---------------------------------------------------------------------------
 **
-*/ 
-
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 #include <stdio.h>
 #include <stdlib.h>
+
 #ifdef _WIN32
 #include <io.h>
 #endif
 
-#include "i_system.h"
-#include "i_sound.h"
-#include "i_music.h"
-#include "s_sound.h"
-#include "s_sndseq.h"
-#include "s_playlist.h"
-#include "c_dispatch.h"
-#include "m_random.h"
-#include "filesystem.h"
-#include "p_local.h"
-#include "doomstat.h"
-#include "cmdlib.h"
-#include "v_video.h"
-#include "v_text.h"
 #include "a_sharedglobal.h"
-#include "gstrings.h"
-#include "gi.h"
-#include "po_man.h"
-#include "serializer_doom.h"
+#include "c_cvars.h"
+#include "c_dispatch.h"
+#include "cmdlib.h"
 #include "d_player.h"
-#include "g_levellocals.h"
-#include "vm.h"
+#include "doomstat.h"
+#include "filesystem.h"
 #include "g_game.h"
-#include "s_music.h"
-#include "v_draw.h"
+#include "g_levellocals.h"
+#include "gi.h"
+#include "gstrings.h"
+#include "i_music.h"
+#include "i_sound.h"
+#include "i_soundinternal.h"
 #include "m_argv.h"
+#include "m_random.h"
+#include "p_local.h"
+#include "po_man.h"
+#include "printf.h"
+#include "s_music.h"
+#include "s_sndseq.h"
+#include "s_sound.h"
+#include "serializer_doom.h"
+#include "v_draw.h"
+#include "v_font.h"
+#include "vm.h"
+
+// EXTERNAL DATA DEFINITIONS -------------------------------------------------
+
+EXTERN_CVAR(Bool, haptics_do_action);
 
 // PUBLIC DATA DEFINITIONS -------------------------------------------------
-
 
 static FString LastLocalSndInfo;
 static FString LastLocalSndSeq;
@@ -99,13 +90,11 @@ class DoomSoundEngine : public SoundEngine
 		return SoundEngine::CheckSoundLimit(sfx, pos, near_limit, limit_range, sourcetype, actor, channel, attenuation);
 	}
 
-
 public:
 	DoomSoundEngine() = default;
 	void NoiseDebug(void);
 	void PrintSoundList();
 };
-
 
 //==========================================================================
 //
@@ -211,7 +200,7 @@ void S_Init()
 	}
 
 	I_InitSound();
-	I_InitMusic(Args->CheckParm("-nomusic") || Args->CheckParm("-nosound"));
+	I_InitMusic(Args->CheckParm(FArg_nomusic) || Args->CheckParm(FArg_nosound));
 	snd_mastervolume->Callback();
 
 	// Heretic and Hexen have sound curve lookup tables. Doom does not.
@@ -254,7 +243,6 @@ void S_Shutdown()
 		I_CloseSound();
 	}
 }
-
 
 //==========================================================================
 //
@@ -357,7 +345,6 @@ void S_PrecacheLevel(FLevelLocals* Level)
 	}
 }
 
-
 //==========================================================================
 //
 // S_InitData
@@ -370,7 +357,6 @@ void S_InitData()
 	S_ParseSndInfo(false);
 	S_ParseSndSeq(-1);
 }
-
 
 //==========================================================================
 //
@@ -438,7 +424,6 @@ DEFINE_ACTION_FUNCTION_NATIVE(DObject, S_StartSoundAt, S_StartSoundAt)
 	return 0;
 }
 
-
 //==========================================================================
 //
 //
@@ -477,7 +462,7 @@ FSoundID DoomSoundEngine::ResolveSound(const void * ent, int type, FSoundID soun
 
 static bool VerifyActorSound(AActor* ent, FSoundID& sound_id, int& channel, EChanFlags flags)
 {
-	if (ent == nullptr || ent->ObjectFlags & OF_EuthanizeMe || ent->Sector->Flags & SECF_SILENT || 
+	if (ent == nullptr || ent->ObjectFlags & OF_EuthanizeMe || ent->Sector->Flags & SECF_SILENT ||
 		ent->Level != primaryLevel)
 		return false;
 
@@ -511,7 +496,6 @@ void DoomSoundEngine::StopChannel(FSoundChan* chan)
 	SoundEngine::StopChannel(chan);
 }
 
-
 //==========================================================================
 //
 // S_Sound - An actor is source
@@ -520,6 +504,32 @@ void DoomSoundEngine::StopChannel(FSoundChan* chan)
 
 void S_SoundPitchActor(AActor *ent, int channel, EChanFlags flags, FSoundID sound_id, float volume, float attenuation, float pitch, float startTime)
 {
+#if 0
+	// sound source debug printout
+	Printf("sound '%s' from '%s'\n", soundEngine->GetSoundName(sound_id), ent->GetClass()->TypeName.GetChars());
+#endif
+
+	if (flags & CHANF_NORUMBLE)
+	{
+		// remove conflicting flag
+		if (flags & CHANF_RUMBLE)
+		{
+			flags = (EChanFlag)(flags - CHANF_RUMBLE);
+		}
+	}
+	else if (!(flags & CHANF_RUMBLE))
+	{
+		// add flag if needed
+		if (haptics_do_action && (
+			// sound from self
+			(ent->player && (ent->player->mo == players[consoleplayer].mo || ent->player->mo == players[consoleplayer].camera)) ||
+			// sound from self missile
+			((ent->flags & MF_MISSILE)
+				&& ent->target && ent->target->player
+				&& (ent->target->player->mo == players[consoleplayer].mo || ent->target->player->mo == players[consoleplayer].camera))
+		)) flags |= CHANF_RUMBLE;
+	}
+
 	if (VerifyActorSound(ent, sound_id, channel, flags))
 		soundEngine->StartSound (SOURCE_Actor, ent, nullptr, channel, flags, sound_id, volume, attenuation, 0, pitch, startTime);
 }
@@ -636,7 +646,6 @@ void A_PlaySound(AActor* self, int soundid, int channel, double volume, int loop
 	if (local) channel |= CHANF_LOCAL;
 	A_StartSound(self, soundid, channel & 7, channel & ~7, volume, attenuation, pitch, 0.0f);
 }
-
 
 //==========================================================================
 //
@@ -808,17 +817,19 @@ static void S_SetListener(AActor *listenactor)
 // Updates music & sounds
 //==========================================================================
 
-void S_UpdateSounds (AActor *listenactor)
+void S_UpdateSounds (AActor *listenactor, int tics)
 {
-	// should never happen
 	S_SetListener(listenactor);
-	
-	for (auto Level : AllLevels())
+
+	for (int i = 0; i < tics; ++i)
 	{
-		SN_UpdateActiveSequences(Level);
+		for (auto Level : AllLevels())
+		{
+			SN_UpdateActiveSequences(Level);
+		}
 	}
 
-	soundEngine->UpdateSounds(primaryLevel->time);
+	soundEngine->UpdateSounds(primaryLevel->LocalWorldTimer);
 }
 
 //==========================================================================
@@ -920,7 +931,7 @@ void S_SerializeSounds(FSerializer &arc)
 		// playing before the wipe, and depending on the synchronization
 		// between the main thread and the mixer thread at the time, the
 		// sounds might be heard briefly before pausing for the wipe.
-		soundEngine->SetRestartTime(primaryLevel->time + 2);
+		soundEngine->SetRestartTime(primaryLevel->LocalWorldTimer + 2);
 	}
 	GSnd->Sync(false);
 	GSnd->UpdateSounds();
@@ -1168,7 +1179,7 @@ bool DoomSoundEngine::ValidatePosVel(int sourcetype, const void* source, const F
 //==========================================================================
 //
 // This is to avoid hardscoding the dependency on the file system into the sound engine
-// 
+//
 //==========================================================================
 
 TArray<uint8_t> DoomSoundEngine::ReadSound(int lumpnum)
@@ -1185,8 +1196,9 @@ TArray<uint8_t> DoomSoundEngine::ReadSound(int lumpnum)
 // S_PickReplacement
 //
 // This is overridden to use a synchronized RNG.
-// 
+//
 //==========================================================================
+
 static FCRandom pr_randsound("RandSound");
 
 FSoundID DoomSoundEngine::PickReplacement(FSoundID refid)
@@ -1234,7 +1246,6 @@ void DoomSoundEngine::NoiseDebug()
 	{
 		return;
 	}
-
 
 	listener = players[consoleplayer].camera->SoundPos();
 
@@ -1319,7 +1330,6 @@ void DoomSoundEngine::NoiseDebug()
 		mysnprintf(temp, countof(temp), "%u", GSnd->GetPosition(chan));
 		DrawText(twod, NewConsoleFont, color, 520, y, temp, TAG_DONE);
 
-
 		y += NewConsoleFont->GetHeight();
 		if (chan->PrevChan == &Channels)
 		{
@@ -1334,7 +1344,6 @@ ADD_STAT(sounddebug)
 	static_cast<DoomSoundEngine*>(soundEngine)->NoiseDebug();
 	return "";
 }
-
 
 //==========================================================================
 //
@@ -1436,4 +1445,3 @@ CCMD(snd_reset)
 {
 	S_SoundReset();
 }
-

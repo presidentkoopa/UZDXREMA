@@ -1,6 +1,6 @@
 /*
 ** zipdir.c
-** Copyright (C) 2008-2009 Randy Heit
+** Copyright (C) 2008-2009 Marisa Heit
 **
 ** This program is free software; you can redistribute it and/or modify
 ** it under the terms of the GNU General Public License as published by
@@ -36,9 +36,7 @@
 #define stat _stat
 #else
 #include <dirent.h>
-#if !defined(__sun)
 #include <fts.h>
-#endif
 #endif
 #include <stdio.h>
 #include <string.h>
@@ -499,103 +497,12 @@ dir_tree_t *add_dirs(char **argv)
 	return trees;
 }
 
-#elif defined(__sun)
-
-//==========================================================================
-//
-// add_dirs
-// Solaris version
-//
-// Given NULL-terminated array of directory paths, create trees for them.
-//
-//==========================================================================
-
-void add_dir(dir_tree_t *tree, char* dirpath)
-{
-	DIR *directory = opendir(dirpath);
-	if(directory == NULL)
-		return;
-
-	struct dirent *file;
-	while((file = readdir(directory)) != NULL)
-	{
-		if(file->d_name[0] == '.') //File is hidden or ./.. directory so ignore it.
-			continue;
-
-		int isDirectory = 0;
-		int time = 0;
-
-		char* fullFileName = malloc(strlen(dirpath) + strlen(file->d_name) + 1);
-		strcpy(fullFileName, dirpath);
-		strcat(fullFileName, file->d_name);
-
-		struct stat *fileStat;
-		fileStat = malloc(sizeof(struct stat));
-		stat(fullFileName, fileStat);
-		isDirectory = S_ISDIR(fileStat->st_mode);
-		time = fileStat->st_mtime;
-		free(stat);
-
-		free(fullFileName);
-
-		if(isDirectory)
-		{
-			char* newdir;
-			newdir = malloc(strlen(dirpath) + strlen(file->d_name) + 2);
-			strcpy(newdir, dirpath);
-			strcat(newdir, file->d_name);
-			strcat(newdir, "/");
-			add_dir(tree, newdir);
-			free(newdir);
-			continue;
-		}
-
-		file_entry_t *entry;
-		entry = alloc_file_entry(dirpath, file->d_name, time);
-		if (entry == NULL)
-		{
-			//no_mem = 1;
-			break;
-		}
-		entry->next = tree->files;
-		tree->files = entry;
-	}
-
-	closedir(directory);
-}
-
-dir_tree_t *add_dirs(char **argv)
-{
-	dir_tree_t *tree, *trees = NULL;
-
-	int i = 0;
-	while(argv[i] != NULL)
-	{
-		tree = alloc_dir_tree(argv[i]);
-		tree->next = trees;
-		trees = tree;
-
-		if(tree != NULL)
-		{
-			char* dirpath = malloc(sizeof(argv[i]) + 2);
-			strcpy(dirpath, argv[i]);
-			if(dirpath[strlen(dirpath)] != '/')
-				strcat(dirpath, "/");
-			add_dir(tree, dirpath);
-			free(dirpath);
-		}
-
-		i++;
-	}
-	return trees;
-}
-
 #else
 
 //==========================================================================
 //
 // add_dirs
-// 4.4BSD version
+// Misc POSIX vesion (eg 4.4BSD, Solaris)
 //
 // Given NULL-terminated array of directory paths, create trees for them.
 //
@@ -870,10 +777,10 @@ void write_zip(const char *zipname, dir_tree_t *trees, int update)
 // append_to_zip
 //
 // Write a given file to the zipFile.
-// 
+//
 // zipfile: zip object to be written to
 //    file: file to read data from
-// 
+//
 // returns: 0 = success, 1 = error
 //
 //==========================================================================
@@ -926,7 +833,7 @@ int append_to_zip(FILE *zip_file, file_sorted_t *filep, FILE *ozip, BYTE *odir)
 	readlen = (unsigned int)fread(readbuf, 1, len, lumpfile);
 	fclose(lumpfile);
 
-	// if read less bytes than expected, 
+	// if read less bytes than expected,
 	if (readlen != len)
 	{
 		// diagnose and return error
@@ -1334,28 +1241,28 @@ int compress_ppmd(Byte *out, unsigned int *outlen, const Byte *in, unsigned int 
 
 int compress_deflate(Byte *out, unsigned int *outlen, const Byte *in, unsigned int inlen)
 {
-    z_stream stream;
-    int err;
+	z_stream stream;
+	int err;
 
-    stream.next_in = (Bytef *)in;
-    stream.avail_in = inlen;
-    stream.next_out = out;
-    stream.avail_out = *outlen;
-    stream.zalloc = (alloc_func)0;
-    stream.zfree = (free_func)0;
-    stream.opaque = (voidpf)0;
+	stream.next_in = (Bytef *)in;
+	stream.avail_in = inlen;
+	stream.next_out = out;
+	stream.avail_out = *outlen;
+	stream.zalloc = (alloc_func)0;
+	stream.zfree = (free_func)0;
+	stream.opaque = (voidpf)0;
 
-    err = deflateInit2(&stream, 9, Z_DEFLATED, -15, 9, Z_DEFAULT_STRATEGY);
-    if (err != Z_OK) return -1;
+	err = deflateInit2(&stream, 9, Z_DEFLATED, -15, 9, Z_DEFAULT_STRATEGY);
+	if (err != Z_OK) return -1;
 
-    err = deflate(&stream, Z_FINISH);
-    if (err != Z_STREAM_END) {
-        deflateEnd(&stream);
-        return -1;
-    }
-    *outlen = stream.total_out;
+	err = deflate(&stream, Z_FINISH);
+	if (err != Z_STREAM_END) {
+		deflateEnd(&stream);
+		return -1;
+	}
+	*outlen = stream.total_out;
 
-    err = deflateEnd(&stream);
+	err = deflateEnd(&stream);
 	return err == Z_OK ? 0 : -1;
 }
 
@@ -1388,7 +1295,7 @@ BYTE *find_central_dir(FILE *fin)
 	{
 		UINT32 read_size, read_pos;
 		int i;
-		if (back_read + BUFREADCOMMENT > max_back) 
+		if (back_read + BUFREADCOMMENT > max_back)
 			back_read = max_back;
 		else
 			back_read += BUFREADCOMMENT;

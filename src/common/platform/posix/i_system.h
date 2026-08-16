@@ -1,3 +1,26 @@
+/*
+** i_system.h
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1998-2016 Marisa Heit
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
+**---------------------------------------------------------------------------
+**
+*/
+
 #ifndef __I_SYSTEM__
 #define __I_SYSTEM__
 
@@ -13,14 +36,14 @@
 #include "tarray.h"
 #include "zstring.h"
 
-struct ticcmd_t;
 struct WadStuff;
+struct FStartupSelectionInfo;
 
 #ifndef SHARE_DIR
 #ifdef __HAIKU__
 #define SHARE_DIR "/boot/system/data"
 #else
-#define SHARE_DIR "/usr/local/share"
+#define SHARE_DIR "/usr/share"
 #endif
 #endif
 
@@ -42,11 +65,12 @@ void I_PrintStr (const char *str);
 void I_SetIWADInfo ();
 
 // Pick from multiple IWADs to use
-int I_PickIWad (WadStuff *wads, int numwads, bool queryiwad, int defaultiwad, int&, FString &);
+bool HoldingQueryKey(const char* key);
+bool I_PickIWad (bool showwin, FStartupSelectionInfo& info);
 
 // [RH] Checks the registry for Steam's install path, so we can scan its
 // directories for IWADs if the user purchased any through Steam.
-TArray<FString> I_GetSteamPath();
+FString I_GetSteamPath();
 
 TArray<FString> I_GetGogPaths();
 

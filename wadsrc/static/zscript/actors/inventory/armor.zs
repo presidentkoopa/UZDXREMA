@@ -1,34 +1,23 @@
 /*
-** armor.txt
+** armor.zs
+**
 ** Implements all variations of armor objects
 **
 **---------------------------------------------------------------------------
-** Copyright 2002-2016 Randy Heit
+**
+** Copyright 2002-2016 Marisa Heit
 ** Copyright 2006-2017 Christoph Oelckers
-** All rights reserved.
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+**---------------------------------------------------------------------------
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
@@ -56,15 +45,19 @@ class Armor : Inventory
 
 class BasicArmor : Armor
 {
-	
+
 	int AbsorbCount;
 	double SavePercent;
 	int MaxAbsorb;
 	int MaxFullAbsorb;
 	int BonusCount;
+	int MaxAllowedAmount;
 	Name ArmorType;
 	int ActualSaveAmount;
-	
+	private uint ArmorFlags;
+
+	flagdef AltSemantics: ArmorFlags, 0; // Zandronum behaviour.
+
 	Default
 	{
 		Inventory.Amount 0;
@@ -114,6 +107,8 @@ class BasicArmor : Armor
 		copy.BonusCount = BonusCount;
 		copy.ArmorType = ArmorType;
 		copy.ActualSaveAmount = ActualSaveAmount;
+		copy.bAltSemantics = bAltSemantics;
+		copy.MaxAllowedAmount = MaxAllowedAmount;
 		GoAwayAndDie ();
 		return copy;
 	}
@@ -134,21 +129,21 @@ class BasicArmor : Armor
 		}
 		return false;
 	}
-	
+
 	//===========================================================================
 	//
 	// ABasicArmor :: AbsorbDamage
 	//
 	//===========================================================================
 
-	override void AbsorbDamage (int damage, Name damageType, out int newdamage, Actor inflictor, Actor source, int flags)
+	override void AbsorbDamage (int damage, Name damageType, out int newdamage, Actor inflictor, Actor source, int flags, double angle)
 	{
 		int saved;
 
 		if (!DamageTypeDefinition.IgnoreArmor(damageType))
 		{
 			int full = MAX(0, MaxFullAbsorb - AbsorbCount);
-			
+
 			if (damage < full)
 			{
 				saved = damage;
@@ -156,7 +151,7 @@ class BasicArmor : Armor
 			else
 			{
 				saved = full + int((damage - full) * SavePercent);
-				if (MaxAbsorb > 0 && saved + AbsorbCount > MaxAbsorb) 
+				if (MaxAbsorb > 0 && saved + AbsorbCount > MaxAbsorb)
 				{
 					saved = MAX(0,  MaxAbsorb - AbsorbCount);
 				}
@@ -214,7 +209,7 @@ class BasicArmor : Armor
 //
 //===========================================================================
 
-class BasicArmorBonus : Armor 
+class BasicArmorBonus : Armor
 {
 	double SavePercent;	// The default, for when you don't already have armor
 	int MaxSaveAmount;
@@ -223,7 +218,7 @@ class BasicArmorBonus : Armor
 	int SaveAmount;
 	int BonusCount;
 	int BonusMax;
-	
+
 	property prefix: Armor;
 	property MaxSaveAmount: MaxSaveAmount;
 	property SaveAmount : SaveAmount;
@@ -240,7 +235,7 @@ class BasicArmorBonus : Armor
 		Inventory.MaxAmount 0;
 		Armor.SavePercent 33.335;
 	}
-	
+
 	//===========================================================================
 	//
 	// ABasicArmorBonus :: CreateCopy
@@ -297,9 +292,15 @@ class BasicArmorBonus : Armor
 			return BonusCount > 0 ? result : true;
 		}
 
+		let maximumAllowedAmount = MaxSaveAmount + armor.BonusCount;
+		if (armor.MaxAllowedAmount)
+		{
+			maximumAllowedAmount = armor.MaxAllowedAmount;
+		}
+
 		// If you already have more armor than this item can give you, you can't
 		// use it.
-		if (armor.Amount >= MaxSaveAmount + armor.BonusCount)
+		if (armor.Amount >= maximumAllowedAmount)
 		{
 			return result;
 		}
@@ -315,12 +316,12 @@ class BasicArmorBonus : Armor
 			armor.ActualSaveAmount = MaxSaveAmount;
 		}
 
-		armor.Amount = min(armor.Amount + saveAmount, MaxSaveAmount + armor.BonusCount);
+		armor.Amount = min(armor.Amount + saveAmount, maximumAllowedAmount);
 		armor.MaxAmount = max(armor.MaxAmount, MaxSaveAmount);
 		return true;
 	}
 
-	
+
 	override void SetGiveAmount(Actor receiver, int amount, bool bycheat)
 	{
 		SaveAmount *= amount;
@@ -359,7 +360,7 @@ class BasicArmorPickup : Armor
 		+Inventory.AUTOACTIVATE;
 		Inventory.MaxAmount 0;
 	}
-	
+
 	//===========================================================================
 	//
 	// ABasicArmorPickup :: CreateCopy
@@ -376,7 +377,7 @@ class BasicArmorPickup : Armor
 
 		return copy;
 	}
-	
+
 	//===========================================================================
 	//
 	// ABasicArmorPickup :: Use
@@ -392,6 +393,8 @@ class BasicArmorPickup : Armor
 	{
 		int SaveAmount = GetSaveAmount();
 		let armor = BasicArmor(Owner.FindInventory("BasicArmor", true));
+		let lBonusCount = (armor == null) ? 0 : armor.BonusCount;
+		let lMaxAmount = SaveAmount + (armor == null ? 0 : lBonusCount);
 
 		// This should really never happen but let's be prepared for a broken inventory.
 		if (armor == null)
@@ -402,9 +405,19 @@ class BasicArmorPickup : Armor
 		}
 		else
 		{
+			if (armor.MaxAllowedAmount)
+			{
+				lMaxAmount = armor.MaxAllowedAmount;
+			}
 			// If you already have more armor than this item gives you, you can't
 			// use it.
-			if (armor.Amount >= SaveAmount + armor.BonusCount)
+			if (armor.bAltSemantics ? (armor.Amount > lMaxAmount) : (armor.Amount >= lMaxAmount))
+			{
+				return false;
+			}
+			// If we have the same amount of the armor we're trying to use, but our armor offers
+			// better protection, don't pick it up.
+			if (armor.bAltSemantics && armor.Amount == lMaxAmount && armor.SavePercent >= (clamp(SavePercent, 0, 100) / 100))
 			{
 				return false;
 			}
@@ -414,9 +427,9 @@ class BasicArmorPickup : Armor
 				return false;
 			}
 		}
-		
+
 		armor.SavePercent = clamp(SavePercent, 0, 100) / 100;
-		armor.Amount = SaveAmount + armor.BonusCount;
+		armor.Amount = armor.bAltSemantics ? (min(SaveAmount + armor.Amount, lMaxAmount)) : (SaveAmount + armor.BonusCount);
 		armor.MaxAmount = SaveAmount;
 		armor.Icon = Icon;
 		armor.MaxAbsorb = MaxAbsorb;
@@ -425,12 +438,12 @@ class BasicArmorPickup : Armor
 		armor.ActualSaveAmount = SaveAmount;
 		return true;
 	}
-	
+
 	override void SetGiveAmount(Actor receiver, int amount, bool bycheat)
 	{
 		SaveAmount *= amount;
 	}
-	
+
 	int GetSaveAmount ()
 	{
 		return !bIgnoreSkill ? int(SaveAmount * G_SkillPropertyFloat(SKILLP_ArmorFactor)) : SaveAmount;
@@ -450,16 +463,16 @@ class BasicArmorPickup : Armor
 
 class HexenArmor : Armor
 {
-	
+
 	double Slots[5];
 	double SlotsIncrement[4];
-	
+
 	Default
 	{
 		+Inventory.KEEPDEPLETED
 		+Inventory.UNTOSSABLE
 	}
-	
+
 	//===========================================================================
 	//
 	// AHexenArmor :: CreateCopy
@@ -553,7 +566,7 @@ class HexenArmor : Armor
 	//
 	//===========================================================================
 
-	override void AbsorbDamage (int damage, Name damageType, out int newdamage, Actor inflictor, Actor source, int flags)
+	override void AbsorbDamage (int damage, Name damageType, out int newdamage, Actor inflictor, Actor source, int flags, double angle)
 	{
 		if (!DamageTypeDefinition.IgnoreArmor(damageType))
 		{
@@ -587,7 +600,7 @@ class HexenArmor : Armor
 				}
 				int saved = int(damage * savedPercent / 100.);
 				if (saved > savedPercent*2)
-				{	
+				{
 					saved = int(savedPercent*2);
 				}
 				newdamage -= saved;
@@ -608,6 +621,5 @@ class HexenArmor : Armor
 		{
 			Slots[i] = 0;
 		}
-	}	
+	}
 }
-

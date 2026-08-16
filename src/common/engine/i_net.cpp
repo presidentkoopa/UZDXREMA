@@ -1,81 +1,66 @@
-// Emacs style mode select	 -*- C++ -*- 
-//-----------------------------------------------------------------------------
-//
-// $Id: i_net.c,v 1.2 1997/12/29 19:50:54 pekangas Exp $
-//
-// Copyright (C) 1993-1996 by id Software, Inc.
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 2 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see http://www.gnu.org/licenses/
-//
-//
-//
-// Alternatively the following applies:
-//
-// This source is available for distribution and/or modification
-// only under the terms of the DOOM Source Code License as
-// published by id Software. All rights reserved.
-//
-// The source is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// FITNESS FOR A PARTICULAR PURPOSE. See the DOOM Source Code License
-// for more details.
-//
-//
-// DESCRIPTION:
-//		Low-level networking code. Uses BSD sockets for UDP networking.
-//
-//-----------------------------------------------------------------------------
-
-
-/* [Petteri] Check if compiling for Win32:	*/
-#if defined(__WINDOWS__) || defined(__NT__) || defined(_MSC_VER) || defined(_WIN32)
-#ifndef __WIN32__
-#	define __WIN32__
-#endif
-#endif
-/* Follow #ifdef __WIN32__ marks */
+/*
+** i_net.cpp
+**
+** Low-level networking code. Uses BSD sockets for UDP networking.
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 by id Software, Inc.
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2009-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: LicenseRef-Doom-Source-License
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 #include <stdlib.h>
 #include <string.h>
 #include <algorithm>
 
-/* [Petteri] Use Winsock for Win32: */
-#ifdef __WIN32__
+/* [Petteri] Use Winsock if compiling for Win32: */
+#ifdef _WIN32
 #	define WIN32_LEAN_AND_MEAN
+#	define NOMINMAX
 #	include <windows.h>
 #	include <winsock.h>
 #else
-#	include <sys/socket.h>
-#	include <netinet/in.h>
 #	include <arpa/inet.h>
 #	include <errno.h>
-#	include <unistd.h>
 #	include <netdb.h>
+#	include <netinet/in.h>
 #	include <sys/ioctl.h>
+#	include <sys/socket.h>
+#	include <unistd.h>
 #	ifdef __sun
 #		include <fcntl.h>
 #	endif
 #endif
 
-#include "i_system.h"
+#include "c_cvars.h"
+#include "cmdlib.h"
+#include "engineerrors.h"
+#include "i_interface.h"
+#include "i_net.h"
 #include "m_argv.h"
 #include "m_crc32.h"
-#include "st_start.h"
-#include "engineerrors.h"
-#include "cmdlib.h"
+#include "m_random.h"
 #include "printf.h"
-#include "i_interface.h"
+#include "version.h"
+#include "widgets/netstartwindow.h"
+#include "filesystem.h"
+
+// Fork: support for the VR net-wait shell and the "cancel lobby -> single player"
+// fallback (see the net-wait session block further down).
 #include "i_time.h"
 #include "hw_vrmodes.h"
 #include "doomstat.h"
@@ -83,15 +68,8 @@
 #include "menu.h"
 #include "c_console.h"
 
-
-#include "i_net.h"
-
-// As per http://support.microsoft.com/kb/q192599/ the standard
-// size for network buffers is 8k.
-#define TRANSMIT_SIZE		8000
-
 /* [Petteri] Get more portable: */
-#ifndef __WIN32__
+#ifndef _WIN32
 typedef int SOCKET;
 #define SOCKET_ERROR		-1
 #define INVALID_SOCKET		-1
@@ -107,22 +85,22 @@ typedef int SOCKET;
 #define IPPORT_USERRESERVED 5000
 #endif
 
-#ifdef __WIN32__
+#ifdef _WIN32
+# include "common/scripting/dap/GameEventEmit.h"
 typedef int socklen_t;
+const char* neterror(void);
+#else
+#define neterror() strerror(errno)
 #endif
 
-bool netgame, multiplayer;
-int consoleplayer; // i.e. myconnectindex in Build. 
-doomcom_t doomcom;
-
 //
-// NETWORKING
+// VR net-wait session state (fork)
+//
+// The fork mirrors the whole lobby "waiting for players" state into a small session
+// object so the OpenXR/OpenVR shell can render it inside the headset instead of the
+// desktop NetStartWindow widget. The widget remains the fallback backend.
 //
 
-static u_short DOOMPORT = (IPPORT_USERRESERVED + 29);
-static SOCKET mysocket = INVALID_SOCKET;
-static sockaddr_in sendaddress[MAXNETNODES];
-static uint8_t sendplayer[MAXNETNODES];
 static FString gLocalAddressString;
 static uint64_t gLocalAddressLookupTime = 0;
 
@@ -287,7 +265,7 @@ static void PromoteNetWaitSessionToVRShellIfAvailable()
 		return;
 	}
 
-	StartWindow->NetClose();
+	NetStartWindow::NetClose();
 	gNetWaitSession.backend = NETWAITBACKEND_VRShell;
 }
 
@@ -301,6 +279,276 @@ static void MarkNetWaitCancelledByUser()
 	gNetWaitCancelledByUser = true;
 }
 
+// RestoreSinglePlayerBootStateAfterNetCancel() and I_ConsumeCancelledNetWaitBoot() are
+// defined further down, next to the upstream lobby state (NetworkClients / Connected /
+// TicDup / MaxClients) that they now have to reset.
+
+// TODO: Remove noverification after optfile allows properly handling unverified files.
+FARG(noverification, "Multiplayer", "Allows files over netgames to be mismatched; use with caution. Can only be set by the host.", "", "");
+FARG(host, "Multiplayer", "Designates the machine as the host for a multiplayer game.", "x",
+	"This machine will function as a host for a multiplayer game with x players (including this"
+	" machine). It will wait for other machines to connect using the -join. parameter and then"
+	" start the game when everyone is connected.");
+FARG(join, "Multiplayer", "Connects to a multiplayer host.", "host's IP address[:host's port]",
+	 "Connect to a host for a multiplayer game.");
+FARG(dup, "Multiplayer", "Send less player movement commands over the network.", "x",
+	"Causes " GAMENAME " to transmit fewer player movement commands across the network. Valid"
+	" values range from 1–9. For example, -dup 2 would cause " GAMENAME " to send half as many"
+	" movements as normal.");
+FARG(port, "Multiplayer", "Specifies an alternative IP port for a network game.", "x",
+	"Specifies an alternate IP port for this machine to use during a network game. By default,"
+	" port 5029 is used.");
+FARG(password, "Multiplayer", "Sets a password to be able to join the lobby. Can be up to 255 characters long.", "Password123!@#",
+	"");
+
+// As per http://support.microsoft.com/kb/q192599/ the standard
+// size for network buffers is 8k.
+constexpr size_t MaxTransmitSize = 8000u;
+constexpr size_t MinCompressionSize = 10u;
+constexpr size_t MaxPasswordSize = 256u;
+
+enum ENetConnectType : uint8_t
+{
+	PRE_HEARTBEAT,			// Clients are keeping each other's connections alive
+	PRE_CONNECT,			// Sent from guest to host for initial connection
+	PRE_CONNECT_ACK,		// Sent from host to guest to confirm they've been connected
+	PRE_DISCONNECT,			// Sent from host to guest when another guest leaves
+	PRE_USER_INFO,			// Clients are sending each other user infos
+	PRE_USER_INFO_ACK,		// Clients are confirming sent user infos
+	PRE_GAME_INFO,			// Sent from host to guest containing general game info
+	PRE_GAME_INFO_ACK,		// Sent from guest to host confirming game info was gotten
+	PRE_GO,					// Sent from host to guest telling them to start the game
+
+	PRE_FULL,				// Sent from host to guest if the lobby is full
+	PRE_IN_PROGRESS,		// Sent from host to guest if the game has already started
+	PRE_WRONG_PASSWORD,		// Sent from host to guest if their provided password was wrong
+	PRE_VERIFICATION_ERROR,	// Sent from host to guest if something failed during the verification step.
+	PRE_KICKED,				// Sent from host to guest if the host kicked them from the game
+	PRE_BANNED,				// Sent from host to guest if the host banned them from the game
+};
+
+enum EConnectionStatus
+{
+	CSTAT_NONE,			// Guest isn't connected
+	CSTAT_CONNECTING,	// Guest is trying to connect
+	CSTAT_WAITING,		// Guest is waiting for game info
+	CSTAT_READY,		// Guest is ready to start the game
+};
+
+// These need to be synced with the window backends so information about each
+// client can be properly displayed.
+enum EConnectionFlags : unsigned int
+{
+	CFL_NONE			= 0,
+	CFL_CONSOLEPLAYER	= 1,
+	CFL_HOST			= 1 << 1,
+};
+
+struct FConnection
+{
+	EConnectionStatus Status = CSTAT_NONE;
+	sockaddr_in Address = {};
+	uint64_t InfoAck = 0u;
+	bool bHasGameInfo = false;
+
+	void Clear()
+	{
+		Status = CSTAT_NONE;
+		Address = {};
+		InfoAck = 0u;
+		bHasGameInfo = false;
+	}
+};
+
+bool netgame = false;
+bool multiplayer = false;
+int consoleplayer = 0;
+int Net_Arbitrator = 0;
+FClientStack NetworkClients = {};
+
+uint8_t	TicDup = 1u;
+int	MaxClients = 1;
+int RemoteClient = -1;
+size_t NetBufferLength = 0u;
+uint8_t NetBuffer[MAX_MSGLEN] = {};
+
+static FRandom		GameIDGen = {};
+static uint8_t		GameID[8] = {};
+static u_short		GamePort = (IPPORT_USERRESERVED + 29);
+static SOCKET		MySocket = INVALID_SOCKET;
+static FConnection	Connected[MAXPLAYERS] = {};
+static uint8_t		TransmitBuffer[MaxTransmitSize] = {};
+static TArray<sockaddr_in> BannedConnections = {};
+static bool bGameStarted = false;
+
+CUSTOM_CVAR(String, net_password, "", CVAR_IGNORE)
+{
+	if (strlen(self) + 1 > MaxPasswordSize)
+	{
+		self = "";
+		Printf(TEXTCOLOR_RED "Password cannot be greater than 255 characters\n");
+	}
+}
+
+// Game-specific API
+size_t Net_SetEngineInfo(uint8_t*& stream);
+FVerificationError Net_VerifyEngine(uint8_t*& stream, size_t& offset);
+void Net_SetupUserInfo();
+const char* Net_GetClientName(int client, unsigned int charLimit);
+void Net_SetUserInfo(int client, TArrayView<uint8_t>& stream);
+void Net_ReadUserInfo(int client, TArrayView<uint8_t>& stream);
+void Net_ReadGameInfo(TArrayView<uint8_t>& stream);
+void Net_SetGameInfo(TArrayView<uint8_t>& stream);
+
+static SOCKET CreateUDPSocket()
+{
+	SOCKET s = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (s == INVALID_SOCKET)
+		I_FatalError("Couldn't create socket: %s", neterror());
+
+	return s;
+}
+
+static void BindToLocalPort(SOCKET s, u_short port)
+{
+	sockaddr_in address = {};
+	address.sin_family = AF_INET;
+	address.sin_addr.s_addr = INADDR_ANY;
+	address.sin_port = htons(port);
+
+	int v = bind(s, (sockaddr *)&address, sizeof(address));
+	if (v == SOCKET_ERROR)
+		I_FatalError("Couldn't bind to port: %s", neterror());
+}
+
+static void BuildAddress(sockaddr_in& address, const char* addrName)
+{
+	FString target = {};
+	u_short port = GamePort;
+	const char* portName = strchr(addrName, ':');
+	if (portName != nullptr)
+	{
+		target = FString(addrName, portName - addrName);
+		u_short portConversion = atoi(portName + 1);
+		if (!portConversion)
+			Printf("Malformed port: %s (using %d)\n", portName + 1, GamePort);
+		else
+			port = portConversion;
+	}
+	else
+	{
+		target = addrName;
+	}
+
+	bool isNamed = false;
+	for (size_t curChar = 0u; curChar < target.Len(); ++curChar)
+	{
+		char c = target[curChar];
+		if ((c < '0' || c > '9') && c != '.')
+		{
+			isNamed = true;
+			break;
+		}
+	}
+
+	address.sin_family = AF_INET;
+	address.sin_port = htons(port);
+	if (!isNamed)
+	{
+		address.sin_addr.s_addr = inet_addr(target.GetChars());
+	}
+	else
+	{
+		hostent* hostEntry = gethostbyname(target.GetChars());
+		if (hostEntry == nullptr)
+			I_FatalError("gethostbyname: Couldn't find %s\n%s", target.GetChars(), neterror());
+
+		address.sin_addr.s_addr = *(int*)hostEntry->h_addr_list[0];
+	}
+}
+
+int netInitCount = 0;
+
+void StartNetworkLean()
+{
+	#ifdef _WIN32
+	if (!DebugServer::RuntimeEvents::IsDebugServerRunning())
+	{
+		netInitCount++;
+		if(netInitCount == 1)
+		{
+			WSADATA data;
+			if (WSAStartup(MAKEWORD(2, 2), &data))
+				I_FatalError("Couldn't initialize Windows sockets");
+		}
+	}
+	#else
+	netInitCount++;
+	#endif
+}
+
+static void CloseNetworkLean()
+{
+	if(netInitCount == 0) return;
+	netInitCount--;
+	#ifdef _WIN32
+	if(netInitCount == 0)
+	{
+		if (!DebugServer::RuntimeEvents::IsDebugServerRunning())
+		{
+			WSACleanup();
+		}
+	}
+	#endif
+}
+
+bool IsNetworkStartedLean()
+{
+	#ifdef _WIN32
+	return netInitCount > 0 || DebugServer::RuntimeEvents::IsDebugServerRunning();
+	#else
+	return netInitCount > 0;
+	#endif
+}
+
+static void StartNetwork(bool autoPort)
+{
+	if(!IsNetworkStartedLean()) StartNetworkLean();
+
+	netgame = true;
+	multiplayer = true;
+	MySocket = CreateUDPSocket();
+	BindToLocalPort(MySocket, autoPort ? 0 : GamePort);
+
+	u_long trueVal = 1u;
+#ifndef __sun
+	ioctlsocket(MySocket, FIONBIO, &trueVal);
+#else
+	fcntl(MySocket, F_SETFL, trueVal | O_NONBLOCK);
+#endif
+}
+
+void CloseNetwork()
+{
+	if (MySocket != INVALID_SOCKET)
+	{
+		closesocket(MySocket);
+		MySocket = INVALID_SOCKET;
+		netgame = false;
+	}
+
+	CloseNetworkLean();
+}
+
+static void GenerateGameID()
+{
+	const uint64_t val = GameIDGen.GenRand64();
+	memcpy(GameID, &val, sizeof(val));
+}
+
+// Restore a single player boot after the user cancelled the VR net-wait lobby.
+// This mirrors the single player branch of I_InitNetwork() further down; the fork
+// originally reset doomcom here, which upstream replaced with the client stack.
 static void RestoreSinglePlayerBootStateAfterNetCancel()
 {
 	CloseNetwork();
@@ -311,10 +559,17 @@ static void RestoreSinglePlayerBootStateAfterNetCancel()
 	StoredWarp = "";
 	netgame = false;
 	multiplayer = false;
-	doomcom.id = DOOMCOM_ID;
-	doomcom.numplayers = doomcom.numnodes = 1;
-	doomcom.consoleplayer = 0;
+	GenerateGameID();
+	NetworkClients.Clear();
+	NetworkClients += 0;
+	for (auto& client : Connected)
+		client.Clear();
+	Connected[0].Status = CSTAT_READY;
+	TicDup = 1u;
+	MaxClients = 1;
 	consoleplayer = 0;
+	Net_Arbitrator = 0;
+	Net_SetupUserInfo();
 }
 
 bool I_ConsumeCancelledNetWaitBoot()
@@ -329,946 +584,9 @@ bool I_ConsumeCancelledNetWaitBoot()
 	return true;
 }
 
-#ifdef __WIN32__
-const char *neterror (void);
-#else
-#define neterror() strerror(errno)
-#endif
-
-enum
-{
-	PRE_CONNECT,			// Sent from guest to host for initial connection
-	PRE_KEEPALIVE,
-	PRE_DISCONNECT,			// Sent from guest that aborts the game
-	PRE_ALLHERE,			// Sent from host to guest when everybody has connected
-	PRE_CONACK,				// Sent from host to guest to acknowledge PRE_CONNECT receipt
-	PRE_ALLFULL,			// Sent from host to an unwanted guest
-	PRE_ALLHEREACK,			// Sent from guest to host to acknowledge PRE_ALLHEREACK receipt
-	PRE_GO,					// Sent from host to guest to continue game startup
-	PRE_IN_PROGRESS,		// Sent from host to guest if the game has already started
-};
-
-// Set PreGamePacket.fake to this so that the game rejects any pregame packets
-// after it starts. This translates to NCMD_SETUP|NCMD_MULTI.
-#define PRE_FAKE 0x30
-
-struct PreGamePacket
-{
-	uint8_t Fake;
-	uint8_t Message;
-	uint8_t NumNodes;
-	union
-	{
-		uint8_t ConsoleNum;
-		uint8_t NumPresent;
-	};
-	struct
-	{
-		uint32_t address;
-		uint16_t port;
-		uint8_t	player;
-		uint8_t	pad;
-	} machines[MAXNETNODES];
-};
-
-uint8_t TransmitBuffer[TRANSMIT_SIZE];
-
-FString GetPlayerName(int num)
-{
-	if (sysCallbacks.GetPlayerName) return sysCallbacks.GetPlayerName(sendplayer[num]);
-	else return FStringf("Player %d", sendplayer[num] + 1);
-}
-
-//
-// UDPsocket
-//
-SOCKET UDPsocket (void)
-{
-	SOCKET s;
-
-	// allocate a socket
-	s = socket (PF_INET, SOCK_DGRAM, IPPROTO_UDP);
-	if (s == INVALID_SOCKET)
-		I_FatalError ("can't create socket: %s", neterror ());
-
-	return s;
-}
-
-//
-// BindToLocalPort
-//
-void BindToLocalPort (SOCKET s, u_short port)
-{
-	int v;
-	sockaddr_in address;
-
-	memset (&address, 0, sizeof(address));
-	address.sin_family = AF_INET;
-	address.sin_addr.s_addr = INADDR_ANY;
-	address.sin_port = htons(port);
-
-	v = bind (s, (sockaddr *)&address, sizeof(address));
-	if (v == SOCKET_ERROR)
-		I_FatalError ("BindToPort: %s", neterror ());
-}
-
-int FindNode (const sockaddr_in *address)
-{
-	int i;
-
-	// find remote node number
-	for (i = 0; i<doomcom.numnodes; i++)
-		if (address->sin_addr.s_addr == sendaddress[i].sin_addr.s_addr
-			&& address->sin_port == sendaddress[i].sin_port)
-			break;
-
-	if (i == doomcom.numnodes)
-	{
-		// packet is not from one of the players (new game broadcast?)
-		i = -1;
-	}
-	return i;
-}
-
-//
-// PacketSend
-//
-void PacketSend (void)
-{
-	int c;
-
-	// FIXME: Catch this before we've overflown the buffer. With long chat
-	// text and lots of backup tics, it could conceivably happen. (Though
-	// apparently it hasn't yet, which is good.)
-	if (doomcom.datalength > MAX_MSGLEN)
-	{
-		I_FatalError("Netbuffer overflow!");
-	}
-	assert(!(doomcom.data[0] & NCMD_COMPRESSED));
-
-	uLong size = TRANSMIT_SIZE - 1;
-	if (doomcom.datalength >= 10)
-	{
-		TransmitBuffer[0] = doomcom.data[0] | NCMD_COMPRESSED;
-		c = compress2(TransmitBuffer + 1, &size, doomcom.data + 1, doomcom.datalength - 1, 9);
-		size += 1;
-	}
-	else
-	{
-		c = -1;	// Just some random error code to avoid sending the compressed buffer.
-	}
-	if (c == Z_OK && size < (uLong)doomcom.datalength)
-	{
-//		Printf("send %lu/%d\n", size, doomcom.datalength);
-		c = sendto(mysocket, (char *)TransmitBuffer, size,
-			0, (sockaddr *)&sendaddress[doomcom.remotenode],
-			sizeof(sendaddress[doomcom.remotenode]));
-	}
-	else
-	{
-		if (doomcom.datalength > TRANSMIT_SIZE)
-		{
-			I_Error("Net compression failed (zlib error %d)", c);
-		}
-		else
-		{
-//			Printf("send %d\n", doomcom.datalength);
-			c = sendto(mysocket, (char *)doomcom.data, doomcom.datalength,
-				0, (sockaddr *)&sendaddress[doomcom.remotenode],
-				sizeof(sendaddress[doomcom.remotenode]));
-		}
-	}
-	//	if (c == -1)
-	//			I_Error ("SendPacket error: %s",strerror(errno));
-}
-
-void PreSend(const void* buffer, int bufferlen, const sockaddr_in* to);
-void SendConAck(int num_connected, int num_needed);
-
-//
-// PacketGet
-//
-void PacketGet (void)
-{
-	int c;
-	socklen_t fromlen;
-	sockaddr_in fromaddress;
-	int node;
-
-	fromlen = sizeof(fromaddress);
-	c = recvfrom (mysocket, (char*)TransmitBuffer, TRANSMIT_SIZE, 0,
-				  (sockaddr *)&fromaddress, &fromlen);
-	node = FindNode (&fromaddress);
-
-	if (node >= 0 && c == SOCKET_ERROR)
-	{
-		int err = WSAGetLastError();
-
-		if (err == WSAECONNRESET)
-		{ // The remote node aborted unexpectedly, so pretend it sent an exit packet
-
-			if (StartWindow != NULL)
-			{
-				I_NetMessage ("The connection from %s was dropped.\n",
-					GetPlayerName(node).GetChars());
-			}
-			else
-			{
-				Printf("The connection from %s was dropped.\n",
-					GetPlayerName(node).GetChars());
-			}
-
-			doomcom.data[0] = NCMD_EXIT;
-			c = 1;
-		}
-		else if (err != WSAEWOULDBLOCK)
-		{
-			I_Error ("GetPacket: %s", neterror ());
-		}
-		else
-		{
-			doomcom.remotenode = -1;		// no packet
-			return;
-		}
-	}
-	else if (node >= 0 && c > 0)
-	{
-		doomcom.data[0] = TransmitBuffer[0] & ~NCMD_COMPRESSED;
-		if (TransmitBuffer[0] & NCMD_COMPRESSED)
-		{
-			uLongf msgsize = MAX_MSGLEN - 1;
-			int err = uncompress(doomcom.data + 1, &msgsize, TransmitBuffer + 1, c - 1);
-//			Printf("recv %d/%lu\n", c, msgsize + 1);
-			if (err != Z_OK)
-			{
-				Printf("Net decompression failed (zlib error %s)\n", M_ZLibError(err).GetChars());
-				// Pretend no packet
-				doomcom.remotenode = -1;
-				return;
-			}
-			c = msgsize + 1;
-		}
-		else
-		{
-//			Printf("recv %d\n", c);
-			memcpy(doomcom.data + 1, TransmitBuffer + 1, c - 1);
-		}
-	}
-	else if (c > 0)
-	{	//The packet is not from any in-game node, so we might as well discard it.
-		if (TransmitBuffer[0] == PRE_FAKE)
-		{
-			// If it's someone waiting in the lobby, let them know the game already started
-			uint8_t msg[] = { PRE_FAKE, PRE_IN_PROGRESS };
-			PreSend(msg, 2, &fromaddress);
-		}
-		doomcom.remotenode = -1;
-		return;
-	}
-
-	doomcom.remotenode = node;
-	doomcom.datalength = (short)c;
-}
-
-sockaddr_in *PreGet (void *buffer, int bufferlen, bool noabort)
-{
-	static sockaddr_in fromaddress;
-	socklen_t fromlen;
-	int c;
-
-	fromlen = sizeof(fromaddress);
-	c = recvfrom (mysocket, (char *)buffer, bufferlen, 0,
-		(sockaddr *)&fromaddress, &fromlen);
-
-	if (c == SOCKET_ERROR)
-	{
-		int err = WSAGetLastError();
-		if (err == WSAEWOULDBLOCK || (noabort && err == WSAECONNRESET))
-			return NULL;	// no packet
-
-		if (doomcom.consoleplayer == 0)
-		{
-			int node = FindNode(&fromaddress);
-			I_NetMessage("Got unexpected disconnect.");
-			doomcom.numnodes--;
-			for (; node < doomcom.numnodes; ++node)
-				sendaddress[node] = sendaddress[node + 1];
-
-			// Let remaining guests know that somebody left.
-			SendConAck(doomcom.numnodes, doomcom.numplayers);
-		}
-		else
-		{
-			I_NetError("The host disbanded the game unexpectedly");
-		}
-	}
-	return &fromaddress;
-}
-
-void PreSend (const void *buffer, int bufferlen, const sockaddr_in *to)
-{
-	sendto (mysocket, (const char *)buffer, bufferlen, 0, (const sockaddr *)to, sizeof(*to));
-}
-
-void BuildAddress (sockaddr_in *address, const char *name)
-{
-	hostent *hostentry;		// host information entry
-	u_short port;
-	const char *portpart;
-	bool isnamed = false;
-	int curchar;
-	char c;
-	FString target;
-
-	address->sin_family = AF_INET;
-
-	if ( (portpart = strchr (name, ':')) )
-	{
-		target = FString(name, portpart - name);
-		port = atoi (portpart + 1);
-		if (!port)
-		{
-			Printf ("Weird port: %s (using %d)\n", portpart + 1, DOOMPORT);
-			port = DOOMPORT;
-		}
-	}
-	else
-	{
-		target = name;
-		port = DOOMPORT;
-	}
-	address->sin_port = htons(port);
-
-	for (curchar = 0; (c = target[curchar]) ; curchar++)
-	{
-		if ((c < '0' || c > '9') && c != '.')
-		{
-			isnamed = true;
-			break;
-		}
-	}
-
-	if (!isnamed)
-	{
-		address->sin_addr.s_addr = inet_addr (target.GetChars());
-		Printf ("Node number %d, address %s\n", doomcom.numnodes, target.GetChars());
-	}
-	else
-	{
-		hostentry = gethostbyname (target.GetChars());
-		if (!hostentry)
-			I_FatalError ("gethostbyname: couldn't find %s\n%s", target.GetChars(), neterror());
-		address->sin_addr.s_addr = *(int *)hostentry->h_addr_list[0];
-		Printf ("Node number %d, hostname %s\n",
-			doomcom.numnodes, hostentry->h_name);
-	}
-}
-
-void CloseNetwork (void)
-{
-	if (mysocket != INVALID_SOCKET)
-	{
-		closesocket (mysocket);
-		mysocket = INVALID_SOCKET;
-	}
-#ifdef __WIN32__
-	WSACleanup ();
-#endif
-}
-
-void StartNetwork (bool autoPort)
-{
-	u_long trueval = 1;
-#ifdef __WIN32__
-	WSADATA wsad;
-
-	if (WSAStartup (0x0101, &wsad))
-	{
-		I_FatalError ("Could not initialize Windows Sockets");
-	}
-#endif
-
-	netgame = true;
-	multiplayer = true;
-
-	// create communication socket
-	mysocket = UDPsocket ();
-	BindToLocalPort (mysocket, autoPort ? 0 : DOOMPORT);
-#ifndef __sun
-	ioctlsocket (mysocket, FIONBIO, &trueval);
-#else
-	fcntl(mysocket, F_SETFL, trueval | O_NONBLOCK);
-#endif
-}
-
-void SendAbort (void)
-{
-	uint8_t dis[2] = { PRE_FAKE, PRE_DISCONNECT };
-	int i, j;
-
-	if (doomcom.numnodes > 1)
-	{
-		if (consoleplayer == 0)
-		{
-			// The host needs to let everyone know
-			for (i = 1; i < doomcom.numnodes; ++i)
-			{
-				for (j = 4; j > 0; --j)
-				{
-					PreSend (dis, 2, &sendaddress[i]);
-				}
-			}
-		}
-		else
-		{
-			// Guests only need to let the host know.
-			for (i = 4; i > 0; --i)
-			{
-				PreSend (dis, 2, &sendaddress[1]);
-			}
-		}
-	}
-}
-
-void SendConAck (int num_connected, int num_needed)
-{
-	PreGamePacket packet;
-
-	packet.Fake = PRE_FAKE;
-	packet.Message = PRE_CONACK;
-	packet.NumNodes = num_needed;
-	packet.NumPresent = num_connected;
-	for (int node = 1; node < doomcom.numnodes; ++node)
-	{
-		PreSend (&packet, 4, &sendaddress[node]);
-	}
-	I_NetProgress (doomcom.numnodes);
-}
-
-bool Host_CheckForConnects (void *userdata)
-{
-	PreGamePacket packet;
-	int numplayers = (int)(intptr_t)userdata;
-	sockaddr_in *from;
-	int node;
-
-	while ( (from = PreGet (&packet, sizeof(packet), false)) )
-	{
-		if (packet.Fake != PRE_FAKE)
-		{
-			continue;
-		}
-		switch (packet.Message)
-		{
-		case PRE_CONNECT:
-			node = FindNode (from);
-			if (doomcom.numnodes == numplayers)
-			{
-				if (node == -1)
-				{
-					const uint8_t *s_addr_bytes = (const uint8_t *)&from->sin_addr;
-					I_NetMessage ("Got extra connect from %d.%d.%d.%d:%d",
-						s_addr_bytes[0], s_addr_bytes[1], s_addr_bytes[2], s_addr_bytes[3],
-						from->sin_port);
-					packet.Message = PRE_ALLFULL;
-					PreSend (&packet, 2, from);
-				}
-			}
-			else
-			{
-				if (node == -1)
-				{
-					node = doomcom.numnodes++;
-					sendaddress[node] = *from;
-					I_NetMessage ("Got connect from node %d.", node);
-				}
-
-				// Let the new guest (and everyone else) know we got their message.
-				SendConAck (doomcom.numnodes, numplayers);
-			}
-			break;
-
-		case PRE_DISCONNECT:
-			node = FindNode (from);
-			if (node >= 0)
-			{
-				I_NetMessage ("Got disconnect from node %d.", node);
-				doomcom.numnodes--;
-				while (node < doomcom.numnodes)
-				{
-					sendaddress[node] = sendaddress[node+1];
-					node++;
-				}
-
-				// Let remaining guests know that somebody left.
-				SendConAck (doomcom.numnodes, numplayers);
-			}
-			break;
-
-		case PRE_KEEPALIVE:
-			break;
-		}
-	}
-	if (doomcom.numnodes < numplayers)
-	{
-		// Send message to everyone as a keepalive
-		SendConAck(doomcom.numnodes, numplayers);
-		return false;
-	}
-
-	// It's possible somebody bailed out after all players were found.
-	// Unfortunately, this isn't guaranteed to catch all of them.
-	// Oh well. Better than nothing.
-	while ( (from = PreGet (&packet, sizeof(packet), false)) )
-	{
-		if (packet.Fake == PRE_FAKE && packet.Message == PRE_DISCONNECT)
-		{
-			node = FindNode (from);
-			if (node >= 0)
-			{
-				doomcom.numnodes--;
-				while (node < doomcom.numnodes)
-				{
-					sendaddress[node] = sendaddress[node+1];
-					node++;
-				}
-				// Let remaining guests know that somebody left.
-				SendConAck (doomcom.numnodes, numplayers);
-			}
-			break;
-		}
-	}
-	return doomcom.numnodes >= numplayers;
-}
-
-bool Host_SendAllHere (void *userdata)
-{
-	int *gotack = (int *)userdata;	// ackcount is at gotack[MAXNETNODES]
-	PreGamePacket packet;
-	int node;
-	sockaddr_in *from;
-
-	// Send out address information to all guests. Guests that have already
-	// acknowledged receipt effectively get just a heartbeat packet.
-	packet.Fake = PRE_FAKE;
-	packet.Message = PRE_ALLHERE;
-	for (node = 1; node < doomcom.numnodes; node++)
-	{
-		int machine, spot = 0;
-
-		packet.ConsoleNum = node;
-		if (!gotack[node])
-		{
-			for (spot = 0, machine = 1; machine < doomcom.numnodes; machine++)
-			{
-				if (node != machine)
-				{
-					packet.machines[spot].address = sendaddress[machine].sin_addr.s_addr;
-					packet.machines[spot].port = sendaddress[machine].sin_port;
-					packet.machines[spot].player = node;
-
-					spot++;	// fixes problem of new address replacing existing address in
-							// array; it's supposed to increment the index before getting
-							// and storing in the packet the next address.
-				}
-			}
-			packet.NumNodes = doomcom.numnodes - 2;
-		}
-		else
-		{
-			packet.NumNodes = 0;
-		}
-		PreSend (&packet, 4 + spot*8, &sendaddress[node]);
-	}
-
-	// Check for replies.
-	while ( (from = PreGet (&packet, sizeof(packet), false)) )
-	{
-		if (packet.Fake == PRE_FAKE && packet.Message == PRE_ALLHEREACK)
-		{
-			node = FindNode (from);
-			if (node >= 0)
-			{
-				if (!gotack[node])
-				{
-					gotack[node] = true;
-					gotack[MAXNETNODES]++;
-				}
-			}
-			PreSend (&packet, 2, from);
-		}
-	}
-
-	// If everybody has replied, then this loop can end.
-	return gotack[MAXNETNODES] == doomcom.numnodes - 1;
-}
-
-bool HostGame (int i)
-{
-	PreGamePacket packet;
-	int numplayers;
-	int node;
-	int gotack[MAXNETNODES+1];
-
-	if ((i == Args->NumArgs() - 1) || !(numplayers = atoi (Args->GetArg(i+1))))
-	{	// No player count specified, assume 2
-		numplayers = 2;
-	}
-
-	if (numplayers > MAXNETNODES)
-	{
-		I_FatalError("You cannot host a game with %d players. The limit is currently %d.", numplayers, MAXNETNODES);
-	}
-
-	if (numplayers == 1)
-	{ // Special case: Only 1 player, so don't bother starting the network
-		netgame = false;
-		multiplayer = true;
-		doomcom.id = DOOMCOM_ID;
-		doomcom.numplayers = doomcom.numnodes = 1;
-		doomcom.consoleplayer = 0;
-		return true;
-	}
-
-	StartNetwork (false);
-
-	// [JC] - this computer is starting the game, therefore it should
-	// be the Net Arbitrator.
-	doomcom.consoleplayer = 0;
-	Printf ("Console player number: %d\n", doomcom.consoleplayer);
-
-	doomcom.numnodes = 1;
-
-	I_NetInit ("Hosting game", numplayers);
-
-	// Wait for numplayers-1 different connections
-	if (!I_NetLoop (Host_CheckForConnects, (void *)(intptr_t)numplayers))
-	{
-		SendAbort();
-		return false;
-	}
-
-	// Now inform everyone of all machines involved in the game
-	memset (gotack, 0, sizeof(gotack));
-	I_NetMessage ("Sending all here.");
-	I_NetInit ("Done waiting", 1);
-
-	if (!I_NetLoop (Host_SendAllHere, (void *)gotack))
-	{
-		SendAbort();
-		return false;
-	}
-
-	// Now go
-	I_NetMessage ("Go");
-	packet.Fake = PRE_FAKE;
-	packet.Message = PRE_GO;
-	for (node = 1; node < doomcom.numnodes; node++)
-	{
-		// If we send the packets eight times to each guest,
-		// hopefully at least one of them will get through.
-		for (int ii = 8; ii != 0; --ii)
-		{
-			PreSend (&packet, 2, &sendaddress[node]);
-		}
-	}
-
-	I_NetMessage ("Total players: %d", doomcom.numnodes);
-
-	doomcom.id = DOOMCOM_ID;
-	doomcom.numplayers = doomcom.numnodes;
-
-	// On the host, each player's number is the same as its node number
-	for (i = 0; i < doomcom.numnodes; ++i)
-	{
-		sendplayer[i] = i;
-	}
-	return true;
-}
-
-// This routine is used by a guest to notify the host of its presence.
-// Once that host acknowledges receipt of the notification, this routine
-// is never called again.
-
-bool Guest_ContactHost (void *userdata)
-{
-	sockaddr_in *from;
-	PreGamePacket packet;
-
-	// Let the host know we are here.
-	packet.Fake = PRE_FAKE;
-	packet.Message = PRE_CONNECT;
-	PreSend (&packet, 2, &sendaddress[1]);
-
-	// Listen for a reply.
-	while ( (from = PreGet (&packet, sizeof(packet), true)) )
-	{
-		if (packet.Fake == PRE_FAKE && FindNode(from) == 1)
-		{
-			if (packet.Message == PRE_CONACK)
-			{
-				I_NetMessage ("Total players: %d", packet.NumNodes);
-				I_NetInit ("Waiting for other players", packet.NumNodes);
-				I_NetProgress (packet.NumPresent);
-				return true;
-			}
-			else if (packet.Message == PRE_DISCONNECT)
-			{
-				I_NetError("The host cancelled the game.");
-			}
-			else if (packet.Message == PRE_ALLFULL)
-			{
-				I_NetError("The game is full.");
-			}
-			else if (packet.Message == PRE_IN_PROGRESS)
-			{
-				I_NetError("The game was already started.");
-			}
-		}
-	}
-
-	// In case the progress bar could not be marqueed, bump it.
-	I_NetProgress (0);
-
-	return false;
-}
-
-bool Guest_WaitForOthers (void *userdata)
-{
-	sockaddr_in *from;
-	PreGamePacket packet;
-
-	while ( (from = PreGet (&packet, sizeof(packet), false)) )
-	{
-		if (packet.Fake != PRE_FAKE || FindNode(from) != 1)
-		{
-			continue;
-		}
-		switch (packet.Message)
-		{
-		case PRE_CONACK:
-			I_NetProgress (packet.NumPresent);
-			break;
-
-		case PRE_ALLHERE:
-			if (doomcom.numnodes == 2)
-			{
-				int node;
-
-				doomcom.numnodes = packet.NumNodes + 2;
-				sendplayer[0] = packet.ConsoleNum;	// My player number
-				doomcom.consoleplayer = packet.ConsoleNum;
-				I_NetMessage ("Console player number: %d", doomcom.consoleplayer);
-				for (node = 0; node < packet.NumNodes; node++)
-				{
-					sendaddress[node+2].sin_addr.s_addr = packet.machines[node].address;
-					sendaddress[node+2].sin_port = packet.machines[node].port;
-					sendplayer[node+2] = packet.machines[node].player;
-
-					// [JC] - fixes problem of games not starting due to
-					// no address family being assigned to nodes stored in
-					// sendaddress[] from the All Here packet.
-					sendaddress[node+2].sin_family = AF_INET;
-				}
-			}
-
-			I_NetMessage ("Received All Here, sending ACK.");
-			packet.Fake = PRE_FAKE;
-			packet.Message = PRE_ALLHEREACK;
-			PreSend (&packet, 2, &sendaddress[1]);
-			break;
-
-		case PRE_GO:
-			I_NetMessage ("Received \"Go.\"");
-			return true;
-
-		case PRE_DISCONNECT:
-			I_NetError("The host cancelled the game.");
-			break;
-		}
-	}
-
-	packet.Fake = PRE_FAKE;
-	packet.Message = PRE_KEEPALIVE;
-	PreSend(&packet, 2, &sendaddress[1]);
-
-	return false;
-}
-
-bool JoinGame (int i)
-{
-	if ((i == Args->NumArgs() - 1) ||
-		(Args->GetArg(i+1)[0] == '-') ||
-		(Args->GetArg(i+1)[0] == '+'))
-		I_FatalError ("You need to specify the host machine's address");
-
-	StartNetwork (true);
-
-	// Host is always node 1
-	BuildAddress (&sendaddress[1], Args->GetArg(i+1));
-	sendplayer[1] = 0;
-	doomcom.numnodes = 2;
-	doomcom.consoleplayer = -1;
-
-
-	// Let host know we are here
-	I_NetInit ("Contacting host", 0);
-
-	if (!I_NetLoop (Guest_ContactHost, NULL))
-	{
-		SendAbort();
-		return false;
-	}
-
-	// Wait for everyone else to connect
-	if (!I_NetLoop (Guest_WaitForOthers, 0))
-	{
-		SendAbort();
-		return false;
-	}
-
-	I_NetMessage ("Total players: %d", doomcom.numnodes);
-
-	doomcom.id = DOOMCOM_ID;
-	doomcom.numplayers = doomcom.numnodes;
-	return true;
-}
-
-static int PrivateNetOf(in_addr in)
-{
-	int addr = ntohl(in.s_addr);
-	if ((addr & 0xFFFF0000) == 0xC0A80000)		// 192.168.0.0
-	{
-		return 0xC0A80000;
-	}
-	else if ((addr & 0xFFFF0000) >= 0xAC100000 && (addr & 0xFFFF0000) <= 0xAC1F0000)	// 172.16.0.0 - 172.31.0.0
-	{
-		return 0xAC100000;
-	}
-	else if ((addr & 0xFF000000) == 0x0A000000)		// 10.0.0.0
-	{
-		return 0x0A000000;
-	}
-	else if ((addr & 0xFF000000) == 0x7F000000)		// 127.0.0.0 (localhost)
-	{
-		return 0x7F000000;
-	}
-	// Not a private IP
-	return 0;
-}
-
-//
-// NodesOnSameNetwork
-//
-// The best I can really do here is check if the others are on the same
-// private network, since that means we (probably) are too.
-//
-
-static bool NodesOnSameNetwork()
-{
-	int net1;
-
-	net1 = PrivateNetOf(sendaddress[1].sin_addr);
-//	Printf("net1 = %08x\n", net1);
-	if (net1 == 0)
-	{
-		return false;
-	}
-	for (int i = 2; i < doomcom.numnodes; ++i)
-	{
-		int net = PrivateNetOf(sendaddress[i].sin_addr);
-//		Printf("Net[%d] = %08x\n", i, net);
-		if (net != net1)
-		{
-			return false;
-		}
-	}
-	return true;
-}
-
-//
-// I_InitNetwork
-//
-// Returns true if packet server mode might be a good idea.
-//
-int I_InitNetwork (void)
-{
-	int i;
-	const char *v;
-
-	memset (&doomcom, 0, sizeof(doomcom));
-
-	// set up for network
-	v = Args->CheckValue ("-dup");
-	if (v)
-	{
-		doomcom.ticdup = clamp<int> (atoi (v), 1, MAXTICDUP);
-	}
-	else
-	{
-		doomcom.ticdup = 1;
-	}
-
-	v = Args->CheckValue ("-port");
-	if (v)
-	{
-		DOOMPORT = atoi (v);
-		Printf ("using alternate port %i\n", DOOMPORT);
-	}
-
-	// parse network game options,
-	//		player 1: -host <numplayers>
-	//		player x: -join <player 1's address>
-	if ( (i = Args->CheckParm ("-host")) )
-	{
-		if (!HostGame (i))
-		{
-			if (I_ConsumeCancelledNetWaitBoot()) return false;
-			return -1;
-		}
-	}
-	else if ( (i = Args->CheckParm ("-join")) )
-	{
-		if (!JoinGame (i))
-		{
-			if (I_ConsumeCancelledNetWaitBoot()) return false;
-			return -1;
-		}
-	}
-	else
-	{
-		// single player game
-		netgame = false;
-		multiplayer = false;
-		doomcom.id = DOOMCOM_ID;
-		doomcom.numplayers = doomcom.numnodes = 1;
-		doomcom.consoleplayer = 0;
-		return false;
-	}
-	if (doomcom.numnodes < 3)
-	{ // Packet server mode with only two players is effectively the same as
-	  // peer-to-peer but with some slightly larger packets.
-		return false;
-	}
-	return doomcom.numnodes > 3 || !NodesOnSameNetwork();
-}
-
-
-void I_NetCmd (void)
-{
-	if (doomcom.command == CMD_SEND)
-	{
-		PacketSend ();
-	}
-	else if (doomcom.command == CMD_GET)
-	{
-		PacketGet ();
-	}
-	else
-		I_Error ("Bad net cmd: %i\n",doomcom.command);
-}
-
-void I_NetMessage(const char* text, ...)
+// Print a network-related message to the console. This doesn't print to the window so should
+// not be used for that and is mainly for logging.
+static void I_NetLog(const char* text, ...)
 {
 	// todo: use better abstraction once everything is migrated to in-game start screens.
 #if defined _WIN32 || defined __APPLE__
@@ -1309,7 +627,9 @@ void I_BeginNetWaitSession(ENetWaitRole role, ENetWaitPhase phase, const char* m
 
 	if (gNetWaitSession.backend == NETWAITBACKEND_Widget)
 	{
-		StartWindow->NetInit(gNetWaitSession.message.GetChars(), gNetWaitSession.totalPlayers);
+		// Upstream replaced FStartupScreen::NetInit(msg, numplayers) with the static
+		// NetStartWindow::NetInit(msg, host).
+		NetStartWindow::NetInit(gNetWaitSession.message.GetChars(), gNetWaitSession.role == NETWAITROLE_Host);
 	}
 }
 
@@ -1339,13 +659,9 @@ void I_UpdateNetWaitSession(ENetWaitPhase phase, const char* msg, int foundPlaye
 	gNetWaitSession.foundPlayers = std::max(0, gNetWaitSession.foundPlayers);
 	gNetWaitSession.totalPlayers = std::max(0, gNetWaitSession.totalPlayers);
 
-	if (gNetWaitSession.backend == NETWAITBACKEND_Widget)
-	{
-		if (msg != nullptr)
-		{
-			StartWindow->NetInit(gNetWaitSession.message.GetChars(), gNetWaitSession.totalPlayers);
-		}
-	}
+	// The widget backend is driven directly by upstream's I_NetMessage /
+	// I_NetUpdatePlayers, so only the session mirror is refreshed here. Re-calling
+	// NetStartWindow::NetInit() would recreate the lobby window.
 }
 
 void I_FinishNetWaitSession()
@@ -1357,7 +673,7 @@ void I_FinishNetWaitSession()
 
 	if (gNetWaitSession.backend == NETWAITBACKEND_Widget)
 	{
-		StartWindow->NetDone();
+		NetStartWindow::NetDone();
 	}
 	ResetNetWaitSession();
 }
@@ -1371,17 +687,17 @@ void I_CancelNetWaitSession()
 
 	if (gNetWaitSession.backend == NETWAITBACKEND_Widget)
 	{
-		StartWindow->NetClose();
+		NetStartWindow::NetClose();
 	}
 	ResetNetWaitSession();
 }
 
 void I_FailNetWaitSession(const char* error)
 {
-	if (!gNetWaitSession.active || gNetWaitSession.backend == NETWAITBACKEND_Widget)
-	{
-		StartWindow->NetClose();
-	}
+	gNetWaitSession.phase = NETWAITPHASE_Error;
+	// NetStartWindow::NetClose() is a no-op when the widget was never opened, so it is
+	// safe to call unconditionally (the VR shell backend has no window to close).
+	NetStartWindow::NetClose();
 	ResetNetWaitSession();
 	I_FatalError("%s", error);
 }
@@ -1431,100 +747,58 @@ int I_GetNetWaitTotalPlayers()
 	return gNetWaitSession.totalPlayers;
 }
 
-void I_NetError(const char* error)
+// Gracefully closes the net window so that any error messaging can be properly displayed.
+// The fork routes this through the net-wait session so the VR shell tears down too.
+static void I_NetError(const char* error)
 {
-	doomcom.numnodes = 0;
+	NetworkClients.Clear();
 	I_FailNetWaitSession(error);
 }
 
+static void I_NetInit(const char* msg, bool host)
+{
+	Printf("NetLobby:: %s\n", msg);
+
+	// Fork: open the net-wait session here. The fork used to sniff the message string to
+	// work out the role/phase because the old FStartupScreen::NetInit only got a player
+	// count; upstream's `host` flag gives that directly. I_BeginNetWaitSession picks the
+	// backend and opens NetStartWindow itself when the widget backend is selected.
+	I_BeginNetWaitSession(
+		host ? NETWAITROLE_Host : NETWAITROLE_Client,
+		host ? NETWAITPHASE_WaitingForPlayers : NETWAITPHASE_Contacting,
+		msg,
+		host ? 1 : 0,
+		MaxClients,
+		NETWAITSOURCE_Boot);
+}
+
 // todo: later these must be dispatched by the main menu, not the start screen.
-void I_NetProgress(int val)
+// Updates the general status of the lobby.
+static void I_NetMessage(const char* msg)
 {
-	if (gNetWaitSession.active)
-	{
-		int foundPlayers = gNetWaitSession.foundPlayers;
-		if (val == 0)
-		{
-			foundPlayers++;
-		}
-		else if (val > 0)
-		{
-			foundPlayers = val;
-		}
-		I_UpdateNetWaitSession(gNetWaitSession.phase, nullptr, foundPlayers, gNetWaitSession.totalPlayers);
-		if (gNetWaitSession.backend == NETWAITBACKEND_Widget)
-		{
-			StartWindow->NetProgress(val);
-		}
-	}
+	Printf("NetLobby:: %s\n", msg);
+	// Keep the VR shell's status line in sync with the widget's.
+	I_UpdateNetWaitSession(gNetWaitSession.phase, msg, -1, -1);
+	NetStartWindow::NetMessage(msg);
 }
-void I_NetInit(const char* msg, int num)
+
+// Listen for incoming connections while the lobby is active. The main thread needs to be locked up
+// here to prevent the engine from continuing to start the game until everyone is ready.
+static bool I_NetLoop(bool (*loopCallback)(void*), void* data)
 {
-	ENetWaitRole role = gNetWaitSession.role;
-	ENetWaitPhase phase = gNetWaitSession.phase;
-	int foundPlayers = gNetWaitSession.active ? gNetWaitSession.foundPlayers : 0;
-	int totalPlayers = num;
-
-	if (msg != nullptr && strcmp(msg, "Contacting host") == 0)
-	{
-		role = NETWAITROLE_Client;
-		phase = NETWAITPHASE_Contacting;
-		foundPlayers = 0;
-		totalPlayers = 0;
-	}
-	else if (msg != nullptr && strcmp(msg, "Waiting for other players") == 0)
-	{
-		role = NETWAITROLE_Client;
-		phase = NETWAITPHASE_WaitingForPlayers;
-	}
-	else if (msg != nullptr && strcmp(msg, "Hosting game") == 0)
-	{
-		role = NETWAITROLE_Host;
-		phase = NETWAITPHASE_WaitingForPlayers;
-		foundPlayers = 1;
-	}
-	else if (msg != nullptr && strcmp(msg, "Done waiting") == 0)
-	{
-		phase = NETWAITPHASE_Ready;
-		if (gNetWaitSession.totalPlayers > 1)
-		{
-			totalPlayers = gNetWaitSession.totalPlayers;
-		}
-	}
-	else
-	{
-		if (role == NETWAITROLE_None)
-		{
-			role = (num > 0) ? NETWAITROLE_Host : NETWAITROLE_Client;
-		}
-		if (phase == NETWAITPHASE_Inactive)
-		{
-			phase = (num > 0) ? NETWAITPHASE_WaitingForPlayers : NETWAITPHASE_Contacting;
-		}
-		if (foundPlayers <= 0 && num > 0)
-		{
-			foundPlayers = 1;
-		}
-	}
-
-	if (gNetWaitSession.active && totalPlayers <= 1 && gNetWaitSession.totalPlayers > 1)
-	{
-		totalPlayers = gNetWaitSession.totalPlayers;
-	}
-
-	I_BeginNetWaitSession(role, phase, msg, foundPlayers, totalPlayers, NETWAITSOURCE_Boot);
-}
-bool I_NetLoop(bool (*timer_callback)(void*), void* userdata)
-{
+	// Fork: the VR shell renders the lobby in the headset and runs its own pump; the
+	// desktop widget loop is used otherwise. A false return means the user aborted, which
+	// the fork turns into a single player fallback instead of a hard boot abort.
 	PromoteNetWaitSessionToVRShellIfAvailable();
+
 	bool completed = false;
 	if (I_IsUsingVRNetWaitShell())
 	{
-		completed = VR_NetWaitLoop(timer_callback, userdata);
+		completed = VR_NetWaitLoop(loopCallback, data);
 	}
 	else
 	{
-		completed = StartWindow->NetLoop(timer_callback, userdata);
+		completed = NetStartWindow::NetLoop(loopCallback, data);
 	}
 
 	if (!completed)
@@ -1534,17 +808,1038 @@ bool I_NetLoop(bool (*timer_callback)(void*), void* userdata)
 	}
 	return completed;
 }
+
+// A new client has just entered the game, so add them to the player list.
+static void I_NetClientConnected(int client, unsigned int charLimit = 0u)
+{
+	Printf("NetLobby:: Client '%s' connected.\n", Net_GetClientName(client, 0u));
+
+	const char* name = Net_GetClientName(client, charLimit);
+	unsigned int flags = CFL_NONE;
+	if (client == 0)
+		flags |= CFL_HOST;
+	if (client == consoleplayer)
+		flags |= CFL_CONSOLEPLAYER;
+
+	NetStartWindow::NetConnect(client, name, flags, Connected[client].Status);
+
+	// Fork: keep the VR shell's player counter in sync with the new lobby.
+	I_UpdateNetWaitSession(gNetWaitSession.phase, nullptr, (int)NetworkClients.Size(), MaxClients);
+}
+
+// A client changed ready state.
+static void I_NetClientUpdated(int client)
+{
+	NetStartWindow::NetUpdate(client, Connected[client].Status);
+}
+
+static void I_NetClientDisconnected(int client)
+{
+	Printf("NetLobby:: Client '%s' disconnected.\n", Net_GetClientName(client, 0u));
+	NetStartWindow::NetDisconnect(client);
+}
+
+static void I_NetUpdatePlayers(int current, int limit)
+{
+	// Fork: this is where the old I_NetProgress(val) hook lived. Upstream now passes an
+	// absolute (current, limit) pair, so the "val == 0 means one more player showed up"
+	// special case is no longer needed - just mirror the counts into the session.
+	I_UpdateNetWaitSession(gNetWaitSession.phase, nullptr, current, limit);
+
+	NetStartWindow::NetProgress(current, limit);
+}
+
+static bool I_ShouldStartNetGame()
+{
+	return NetStartWindow::ShouldStartNet();
+}
+
+static void I_GetKickClients(TArray<int>& clients)
+{
+	clients.Clear();
+
+	int c = -1;
+	while ((c = NetStartWindow::GetNetKickClient()) != -1)
+		clients.Push(c);
+}
+
+static void I_GetBanClients(TArray<int>& clients)
+{
+	clients.Clear();
+
+	int c = -1;
+	while ((c = NetStartWindow::GetNetBanClient()) != -1)
+		clients.Push(c);
+}
+
 void I_NetDone()
 {
+	NetStartWindow::NetDone();
 	I_FinishNetWaitSession();
 }
-#ifdef __WIN32__
-const char *neterror (void)
+
+void I_ClearClient(size_t client)
+{
+	Connected[client].Clear();
+}
+
+static int FindClient(const sockaddr_in& address)
+{
+	int i = 0;
+	for (; i < MaxClients; ++i)
+	{
+		if (Connected[i].Status == CSTAT_NONE)
+			continue;
+
+		if (address.sin_addr.s_addr == Connected[i].Address.sin_addr.s_addr
+			&& address.sin_port == Connected[i].Address.sin_port)
+		{
+			break;
+		}
+	}
+
+	return i >= MaxClients ? -1 : i;
+}
+
+static void SendPacket(const sockaddr_in& to)
+{
+	// Huge packets should be sent out as sequences, not as one big packet, otherwise it's prone
+	// to high amounts of congestion and reordering needed.
+	if (NetBufferLength > MAX_MSGLEN)
+		I_FatalError("Netbuffer overflow: Tried to send %lu bytes of data", NetBufferLength);
+
+	assert(!(NetBuffer[0] & NCMD_COMPRESSED));
+
+	uint8_t* dataStart = &TransmitBuffer[4];
+	uLong size = MaxTransmitSize - 5u;
+	if (NetBufferLength >= MinCompressionSize)
+	{
+		*dataStart = NetBuffer[0] | NCMD_COMPRESSED;
+		const int res = compress2(dataStart + 1, &size, NetBuffer + 1, NetBufferLength - 1u, 9);
+		if (res != Z_OK)
+			I_Error("Net compression failed (zlib error %d)", res);
+
+		++size;
+	}
+	else
+	{
+		memcpy(dataStart, NetBuffer, NetBufferLength);
+		size = NetBufferLength;
+	}
+
+	if (size + 4 > MaxTransmitSize)
+		I_Error("Failed to compress data down to acceptable transmission size");
+
+	// If a connection packet, don't check the game id since they might not have it yet.
+	const uint32_t crc = (NetBuffer[0] & NCMD_SETUP) ? CalcCRC32(dataStart, size) : AddCRC32(CalcCRC32(dataStart, size), GameID, std::extent_v<decltype(GameID)>);
+	TransmitBuffer[0] = crc >> 24;
+	TransmitBuffer[1] = crc >> 16;
+	TransmitBuffer[2] = crc >> 8;
+	TransmitBuffer[3] = crc;
+
+	sendto(MySocket, (const char*)TransmitBuffer, size + 4, 0, (const sockaddr*)&to, sizeof(to));
+}
+
+static void GetPacket(sockaddr_in* const from = nullptr)
+{
+	sockaddr_in fromAddress;
+	socklen_t fromSize = sizeof(fromAddress);
+
+	int msgSize = recvfrom(MySocket, (char *)TransmitBuffer, MaxTransmitSize, 0,
+				  (sockaddr *)&fromAddress, &fromSize);
+
+	int client = FindClient(fromAddress);
+	if (client >= 0 && msgSize == SOCKET_ERROR)
+	{
+		int err = WSAGetLastError();
+		if (err == WSAECONNRESET)
+		{
+			if (consoleplayer == -1)
+			{
+				client = -1;
+				msgSize = 0;
+			}
+			else
+			{
+				// The remote node aborted unexpectedly, so pretend it sent an exit packet. If it was the host,
+				// just consider the game too bricked to continue since the host has to determine the new host properly.
+				if (client == Net_Arbitrator)
+					I_NetError("Host unexpectedly disconnected");
+
+				NetBuffer[0] = NCMD_EXIT;
+				msgSize = 1;
+			}
+		}
+		else if (err != WSAEWOULDBLOCK)
+		{
+			I_Error("Failed to get packet: %s", neterror());
+		}
+		else
+		{
+			client = -1;
+			msgSize = 0;
+		}
+	}
+	else if (msgSize > 0)
+	{
+		const uint8_t* dataStart = &TransmitBuffer[4];
+		if (client == -1 && !(*dataStart & NCMD_SETUP))
+		{
+			msgSize = 0;
+		}
+		else if (client == -1 && bGameStarted)
+		{
+			NetBuffer[0] = NCMD_SETUP;
+			NetBuffer[1] = PRE_IN_PROGRESS;
+			NetBufferLength = 2u;
+			SendPacket(fromAddress);
+			msgSize = 0;
+		}
+		else
+		{
+			const uint32_t check = (*dataStart & NCMD_SETUP) ? CalcCRC32(dataStart, msgSize - 4) : AddCRC32(CalcCRC32(dataStart, msgSize - 4), GameID, std::extent_v<decltype(GameID)>);
+			const uint32_t crc = (TransmitBuffer[0] << 24) | (TransmitBuffer[1] << 16) | (TransmitBuffer[2] << 8) | TransmitBuffer[3];
+			if (check != crc)
+			{
+				DPrintf(DMSG_NOTIFY, "Checksum on packet failed: expected %u, got %u", check, crc);
+				client = -1;
+				msgSize = 0;
+			}
+			else
+			{
+				NetBuffer[0] = (*dataStart & ~NCMD_COMPRESSED);
+				if (*dataStart & NCMD_COMPRESSED)
+				{
+					uLongf size = MAX_MSGLEN - 1;
+					int err = uncompress(NetBuffer + 1, &size, dataStart + 1, msgSize - 5);
+					if (err != Z_OK)
+					{
+						Printf("Net decompression failed (zlib error %s)\n", M_ZLibError(err).GetChars());
+						client = -1;
+						msgSize = 0;
+					}
+					else
+					{
+						msgSize = size + 1;
+					}
+				}
+				else
+				{
+					msgSize -= 4;
+					memcpy(NetBuffer + 1, dataStart + 1, msgSize - 1);
+				}
+			}
+		}
+	}
+	else
+	{
+		client = -1;
+	}
+
+	RemoteClient = client;
+	NetBufferLength = max<int>(msgSize, 0);
+	if (from != nullptr)
+		*from = fromAddress;
+}
+
+void I_NetCmd(ENetCommand cmd)
+{
+	if (cmd == CMD_SEND)
+	{
+		if (RemoteClient >= 0)
+			SendPacket(Connected[RemoteClient].Address);
+	}
+	else if (cmd == CMD_GET)
+	{
+		GetPacket();
+	}
+}
+
+static void SetClientAck(size_t client, size_t from, bool add)
+{
+	const uint64_t bit = (uint64_t)1u << from;
+	if (add)
+		Connected[client].InfoAck |= bit;
+	else
+		Connected[client].InfoAck &= ~bit;
+}
+
+static bool ClientGotAck(size_t client, size_t from)
+{
+	return (Connected[client].InfoAck & ((uint64_t)1u << from));
+}
+
+static bool GetConnection(sockaddr_in& from)
+{
+	GetPacket(&from);
+	return NetBufferLength > 0;
+}
+
+static void RejectConnection(const sockaddr_in& to, ENetConnectType reason)
+{
+	NetBuffer[0] = NCMD_SETUP;
+	NetBuffer[1] = reason;
+	NetBufferLength = 2u;
+
+	SendPacket(to);
+}
+
+static void SendVerificationError(const sockaddr_in& to, const FVerificationError& error)
+{
+	NetBuffer[0] = NCMD_SETUP;
+	NetBuffer[1] = PRE_VERIFICATION_ERROR;
+	NetBuffer[2] = error.Error;
+	if (error.Error == FVerificationError::VE_ENGINE)
+	{
+		NetBuffer[3] = error.Major;
+		NetBuffer[4] = error.Minor;
+		NetBuffer[5] = error.Revision;
+		NetBuffer[6] = error.NetMajor;
+		NetBuffer[7] = error.NetMinor;
+		NetBuffer[8] = error.NetRevision;
+		NetBufferLength = 9u;
+	}
+	else
+	{
+		const TArray<FString>* ar = nullptr;
+		if (error.Error == FVerificationError::VE_FILE_UNKNOWN)
+			ar = &error.UnknownFiles;
+		else if (error.Error == FVerificationError::VE_FILE_ORDER)
+			ar = &error.ExpectedOrder;
+		else if (error.Error == FVerificationError::VE_FILE_MISSING)
+			ar = &error.MissingFiles;
+
+		NetBuffer[3] = (ar->Size() >> 24);
+		NetBuffer[4] = (ar->Size() >> 16);
+		NetBuffer[5] = (ar->Size() >> 8);
+		NetBuffer[6] = ar->Size();
+		size_t i = 7u;
+		for (auto& file : *ar)
+		{
+			memcpy(&NetBuffer[i], file.GetChars(), file.Len() + 1u);
+			i += file.Len() + 1u;
+		}
+		NetBufferLength = i;
+	}
+
+	SendPacket(to);
+}
+
+static void AddClientConnection(const sockaddr_in& from, int client)
+{
+	Connected[client].Status = CSTAT_CONNECTING;
+	Connected[client].Address = from;
+	NetworkClients += client;
+	I_NetLog("Client %u joined the lobby", client);
+	I_NetClientUpdated(client);
+
+	// Make sure any ready clients are marked as needing the new client's info.
+	for (int i = 1; i < MaxClients; ++i)
+	{
+		if (Connected[i].Status == CSTAT_READY)
+		{
+			Connected[i].Status = CSTAT_WAITING;
+			I_NetClientUpdated(i);
+		}
+	}
+}
+
+static void RemoveClientConnection(int client)
+{
+	I_NetClientDisconnected(client);
+	I_ClearClient(client);
+	NetworkClients -= client;
+	I_NetLog("Client %u left the lobby", client);
+
+	// Let everyone else know the user left as well.
+	NetBuffer[0] = NCMD_SETUP;
+	NetBuffer[1] = PRE_DISCONNECT;
+	NetBuffer[2] = client;
+	NetBufferLength = 3u;
+
+	for (int i = 1; i < MaxClients; ++i)
+	{
+		if (Connected[i].Status == CSTAT_NONE)
+			continue;
+
+		SetClientAck(i, client, false);
+		for (int i = 0; i < 4; ++i)
+			SendPacket(Connected[i].Address);
+	}
+}
+
+void HandleIncomingConnection()
+{
+	if (consoleplayer != Net_Arbitrator || RemoteClient == -1)
+		return;
+
+	if (Connected[RemoteClient].Status == CSTAT_READY)
+	{
+		NetBuffer[0] = NCMD_SETUP;
+		NetBuffer[1] = PRE_GO;
+		NetBufferLength = 2u;
+		SendPacket(Connected[RemoteClient].Address);
+	}
+}
+
+static bool SkipFileVerification = false;
+static bool Host_CheckForConnections(void* connected)
+{
+	const bool forceStarting = I_ShouldStartNetGame();
+	const bool hasPassword = strlen(net_password) > 0;
+	int* connectedPlayers = (int*)connected;
+
+	TArray<int> toBoot = {};
+	I_GetKickClients(toBoot);
+	for (auto client : toBoot)
+	{
+		if (client <= 0 || Connected[client].Status == CSTAT_NONE)
+			continue;
+
+		sockaddr_in booted = Connected[client].Address;
+
+		RemoveClientConnection(client);
+		--*connectedPlayers;
+		I_NetUpdatePlayers(*connectedPlayers, MaxClients);
+
+		RejectConnection(booted, PRE_KICKED);
+	}
+
+	I_GetBanClients(toBoot);
+	for (auto client : toBoot)
+	{
+		if (client <= 0 || Connected[client].Status == CSTAT_NONE)
+			continue;
+
+		sockaddr_in booted = Connected[client].Address;
+		BannedConnections.Push(booted);
+
+		RemoveClientConnection(client);
+		--*connectedPlayers;
+		I_NetUpdatePlayers(*connectedPlayers, MaxClients);
+
+		RejectConnection(booted, PRE_BANNED);
+	}
+
+	sockaddr_in from;
+	while (GetConnection(from))
+	{
+		if (NetBuffer[0] == NCMD_EXIT)
+		{
+			if (RemoteClient >= 0)
+			{
+				RemoveClientConnection(RemoteClient);
+				--*connectedPlayers;
+				I_NetUpdatePlayers(*connectedPlayers, MaxClients);
+			}
+
+			continue;
+		}
+
+		if (NetBuffer[0] != NCMD_SETUP)
+			continue;
+
+		if (NetBuffer[1] == PRE_CONNECT)
+		{
+			if (RemoteClient >= 0)
+				continue;
+
+			uint8_t* engineInfo = &NetBuffer[2];
+			size_t passwordOffset = 0u;
+			size_t banned = 0u;
+			FVerificationError error = {};
+			for (; banned < BannedConnections.Size(); ++banned)
+			{
+				if (BannedConnections[banned].sin_addr.s_addr == from.sin_addr.s_addr)
+					break;
+			}
+
+			if (banned < BannedConnections.Size())
+			{
+				RejectConnection(from, PRE_BANNED);
+			}
+			else if ((error = Net_VerifyEngine(engineInfo, passwordOffset)).Error != FVerificationError::VE_NONE
+					&& (error.Error == FVerificationError::VE_ENGINE || !SkipFileVerification))
+			{
+				SendVerificationError(from, error);
+			}
+			else if (*connectedPlayers >= MaxClients)
+			{
+				RejectConnection(from, PRE_FULL);
+			}
+			else if (forceStarting)
+			{
+				RejectConnection(from, PRE_IN_PROGRESS);
+			}
+			else if (hasPassword && strcmp(net_password, (const char*)&NetBuffer[2u + passwordOffset]))
+			{
+				RejectConnection(from, PRE_WRONG_PASSWORD);
+			}
+			else
+			{
+				int free = 1;
+				for (; free < MaxClients; ++free)
+				{
+					if (Connected[free].Status == CSTAT_NONE)
+						break;
+				}
+
+				AddClientConnection(from, free);
+				++*connectedPlayers;
+				I_NetUpdatePlayers(*connectedPlayers, MaxClients);
+			}
+		}
+		else if (NetBuffer[1] == PRE_USER_INFO)
+		{
+			if (Connected[RemoteClient].Status == CSTAT_CONNECTING)
+			{
+				TArrayView<uint8_t> stream = TArrayView(&NetBuffer[2], MAX_MSGLEN-2);
+				Net_ReadUserInfo(RemoteClient, stream);
+				Connected[RemoteClient].Status = CSTAT_WAITING;
+				I_NetClientConnected(RemoteClient, 16u);
+			}
+		}
+		else if (NetBuffer[1] == PRE_USER_INFO_ACK)
+		{
+			SetClientAck(RemoteClient, NetBuffer[2], true);
+		}
+		else if (NetBuffer[1] == PRE_GAME_INFO_ACK)
+		{
+			Connected[RemoteClient].bHasGameInfo = true;
+		}
+	}
+
+	const size_t addrSize = sizeof(sockaddr_in);
+	bool ready = true;
+	NetBuffer[0] = NCMD_SETUP;
+	for (int client = 1; client < MaxClients; ++client)
+	{
+		auto& con = Connected[client];
+		// If we're starting before the lobby is full, only check against connected clients.
+		if (con.Status != CSTAT_READY && (!forceStarting || con.Status != CSTAT_NONE))
+			ready = false;
+
+		if (con.Status == CSTAT_CONNECTING)
+		{
+			NetBuffer[1] = PRE_CONNECT_ACK;
+			NetBuffer[2] = client;
+			NetBuffer[3] = *connectedPlayers;
+			NetBuffer[4] = MaxClients;
+			NetBufferLength = 5u;
+			SendPacket(con.Address);
+		}
+		else if (con.Status == CSTAT_WAITING)
+		{
+			bool clientReady = true;
+			if (!ClientGotAck(client, client))
+			{
+				NetBuffer[1] = PRE_USER_INFO_ACK;
+				NetBufferLength = 2u;
+				SendPacket(con.Address);
+				clientReady = false;
+			}
+
+			if (!con.bHasGameInfo)
+			{
+				NetBuffer[1] = PRE_GAME_INFO;
+				NetBuffer[2] = TicDup;
+				memcpy(&NetBuffer[3], GameID, 8);
+				NetBufferLength = 11u;
+
+				TArrayView<uint8_t> stream = TArrayView(&NetBuffer[NetBufferLength], MAX_MSGLEN - NetBufferLength);
+				Net_SetGameInfo(stream);
+				NetBufferLength += stream.Data() - &NetBuffer[NetBufferLength];
+				SendPacket(con.Address);
+				clientReady = false;
+			}
+
+			NetBuffer[1] = PRE_USER_INFO;
+			for (int i = 0; i < MaxClients; ++i)
+			{
+				if (i == client || Connected[i].Status == CSTAT_NONE)
+					continue;
+
+				if (!ClientGotAck(client, i))
+				{
+					if (Connected[i].Status >= CSTAT_WAITING)
+					{
+						NetBuffer[2] = uint8_t(i);
+						NetBufferLength = 3u;
+						// Client will already have the host connection information.
+						if (i > 0)
+						{
+							memcpy(&NetBuffer[NetBufferLength], &Connected[i].Address, addrSize);
+							NetBufferLength += addrSize;
+						}
+
+						TArrayView<uint8_t> stream = TArrayView(&NetBuffer[NetBufferLength], MAX_MSGLEN - NetBufferLength);
+						Net_SetUserInfo(i, stream);
+						NetBufferLength += stream.Data() - &NetBuffer[NetBufferLength];
+						SendPacket(con.Address);
+					}
+					clientReady = false;
+				}
+			}
+
+			if (clientReady)
+			{
+				con.Status = CSTAT_READY;
+				I_NetClientUpdated(client);
+			}
+		}
+		else if (con.Status == CSTAT_READY)
+		{
+			NetBuffer[1] = PRE_HEARTBEAT;
+			NetBuffer[2] = *connectedPlayers;
+			NetBuffer[3] = MaxClients;
+			NetBufferLength = 4u;
+			SendPacket(con.Address);
+		}
+	}
+
+	return ready && (*connectedPlayers >= MaxClients || forceStarting);
+}
+
+static void SendAbort()
+{
+	NetBuffer[0] = NCMD_EXIT;
+	NetBufferLength = 1u;
+
+	if (consoleplayer == 0)
+	{
+		for (int client = 1; client < MaxClients; ++client)
+		{
+			if (Connected[client].Status != CSTAT_NONE)
+				SendPacket(Connected[client].Address);
+		}
+	}
+	else
+	{
+		SendPacket(Connected[0].Address);
+	}
+}
+
+static bool HostGame(int arg)
+{
+	if (arg >= Args->NumArgs() || !(MaxClients = atoi(Args->GetArg(arg))))
+	{	// No player count specified, assume 2
+		MaxClients = 2u;
+	}
+
+	if ((unsigned)MaxClients > MAXPLAYERS)
+		I_FatalError("Cannot host a game with %u players. The limit is currently %lu", MaxClients, MAXPLAYERS);
+
+	GenerateGameID();
+	NetworkClients += 0;
+	Connected[consoleplayer].Status = CSTAT_READY;
+	Net_SetupUserInfo();
+
+	// If only 1 player, don't bother starting the network
+	if (MaxClients == 1)
+	{
+		TicDup = 1u;
+		multiplayer = true;
+		return true;
+	}
+
+	StartNetwork(false);
+	I_NetInit("Waiting for other players...", true);
+	I_NetUpdatePlayers(1, MaxClients);
+	I_NetClientConnected(0u, 16u);
+
+	// Wait for the lobby to be full.
+	int connectedPlayers = 1;
+	// TODO: This is a really bad solution, but this will be getting removed after -optfile
+	// can properly handle unverified files, so it will do for now.
+	SkipFileVerification = Args->CheckParm(FArg_noverification);
+	if (!I_NetLoop(Host_CheckForConnections, (void*)&connectedPlayers))
+	{
+		SendAbort();
+		// Fork: cancelling the VR net-wait shell drops back to a single player game
+		// instead of aborting the boot. I_InitNetwork() consumes the flag.
+		if (gNetWaitCancelledByUser)
+			return false;
+		throw CExitEvent(0);
+	}
+
+	// Now go
+	I_NetMessage("Starting game");
+	I_NetDone();
+
+	// If the player force started with only themselves in the lobby, start the game
+	// immediately.
+	if (connectedPlayers == 1)
+	{
+		CloseNetwork();
+		MaxClients = 1;
+		TicDup = 1u;
+		return true;
+	}
+
+	I_NetLog("Go");
+
+	NetBuffer[0] = NCMD_SETUP;
+	NetBuffer[1] = PRE_GO;
+	NetBufferLength = 2u;
+	for (size_t client = 1u; client < (size_t)MaxClients; ++client)
+	{
+		if (Connected[client].Status != CSTAT_NONE)
+			SendPacket(Connected[client].Address);
+	}
+
+	I_NetLog("Total players: %d", connectedPlayers);
+
+	return true;
+}
+
+static FString ReadVerificationError(TArrayView<uint8_t> stream)
+{
+	if (stream[0] == FVerificationError::VE_ENGINE)
+	{
+		return FStringf("Engine mismatch: host expected %d.%d.%d, got %d.%d.%d",
+						stream[1], stream[2], stream[3], stream[4], stream[5], stream[6]);
+	}
+
+	TMap<FString, FString> files = {};
+	for (size_t i = 0u; i < fileSystem.GetNumWads(); ++i)
+	{
+		if (!fileSystem.IsOptionalResource(i))
+		{
+			const FString crc = fileSystem.GetResourceHash(i);
+			FString name = fileSystem.GetResourceFileName(i);
+			FixPathSeperator(name);
+			auto a = name.Split('/', FString::TOK_SKIPEMPTY);
+			files[crc] = a.Last();
+		}
+	}
+
+	const size_t size = (stream[1] << 24) | (stream[2] << 16) | (stream[3] << 8) | stream[4];
+	size_t offset = 5;
+	if (stream[0] == FVerificationError::VE_FILE_UNKNOWN)
+	{
+		FString er = "Host found unknown files:";
+		for (size_t i = 0; i < size; ++i)
+		{
+			const FString crc = (const char *)&stream[offset];
+			offset += crc.Len() + 1u;
+			auto file = files.CheckKey(crc);
+			if (file != nullptr)
+				er.AppendFormat("\n* %s", file->GetChars());
+			else
+				er.AppendFormat("\n* <? Unknown file ?>");
+		}
+		return er;
+	}
+	else if (stream[0] == FVerificationError::VE_FILE_ORDER)
+	{
+		FString er = "Wrong file order. Expected:";
+		for (size_t i = 0; i < size; ++i)
+		{
+			const FString crc = (const char *)&stream[offset];
+			offset += crc.Len() + 1u;
+			auto file = files.CheckKey(crc);
+			if (file != nullptr)
+				er.AppendFormat("\n* %s", file->GetChars());
+			else
+				er.AppendFormat("\n* <? Unknown file ?>");
+		}
+		return er;
+	}
+	else if (stream[0] == FVerificationError::VE_FILE_MISSING)
+	{
+		FString er = "Host was expecting missing files:";
+		for (size_t i = 0; i < size; ++i)
+		{
+			const FString file = (const char *)&stream[offset];
+			er.AppendFormat("\n* %s", file.GetChars());
+			offset += file.Len() + 1u;
+		}
+		return er;
+	}
+
+	return "Unknown error";
+}
+
+static bool Guest_ContactHost(void* unused)
+{
+	// Listen for a reply.
+	const size_t addrSize = sizeof(sockaddr_in);
+	sockaddr_in from;
+	while (GetConnection(from))
+	{
+		if (RemoteClient != 0)
+			continue;
+
+		if (NetBuffer[0] == NCMD_EXIT)
+			I_NetError("The host cancelled the game");
+
+		if (NetBuffer[0] != NCMD_SETUP)
+			continue;
+
+		if (NetBuffer[1] == PRE_HEARTBEAT)
+		{
+			MaxClients = NetBuffer[3];
+			I_NetUpdatePlayers(NetBuffer[2], MaxClients);
+		}
+		else if (NetBuffer[1] == PRE_DISCONNECT)
+		{
+			I_ClearClient(NetBuffer[2]);
+			NetworkClients -= NetBuffer[2];
+			SetClientAck(consoleplayer, NetBuffer[2], false);
+			I_NetClientDisconnected(NetBuffer[2]);
+		}
+		else if (NetBuffer[1] == PRE_FULL)
+		{
+			I_NetError("The game is full");
+		}
+		else if (NetBuffer[1] == PRE_IN_PROGRESS)
+		{
+			I_NetError("The game has already started");
+		}
+		else if (NetBuffer[1] == PRE_WRONG_PASSWORD)
+		{
+			I_NetError("Invalid password");
+		}
+		else if (NetBuffer[1] == PRE_VERIFICATION_ERROR)
+		{
+			I_NetError(ReadVerificationError(TArrayView{ &NetBuffer[2], (unsigned)(NetBufferLength - 2u) }).GetChars());
+		}
+		else if (NetBuffer[1] == PRE_KICKED)
+		{
+			I_NetError("You have been kicked from the game");
+		}
+		else if (NetBuffer[1] == PRE_BANNED)
+		{
+			I_NetError("You have been banned from the game");
+		}
+		else if (NetBuffer[1] == PRE_CONNECT_ACK)
+		{
+			if (consoleplayer == -1)
+			{
+				NetworkClients += 0;
+				Connected[0].Status = CSTAT_WAITING;
+				I_NetClientUpdated(0);
+
+				consoleplayer = NetBuffer[2];
+				NetworkClients += consoleplayer;
+				Connected[consoleplayer].Status = CSTAT_CONNECTING;
+				Net_SetupUserInfo();
+
+				MaxClients = NetBuffer[4];
+				I_NetMessage("Sending game information");
+				I_NetUpdatePlayers(NetBuffer[3], MaxClients);
+				I_NetClientConnected(consoleplayer, 16u);
+			}
+		}
+		else if (NetBuffer[1] == PRE_USER_INFO_ACK)
+		{
+			// The host will only ever send us this to confirm they've gotten our data.
+			SetClientAck(consoleplayer, consoleplayer, true);
+			if (Connected[consoleplayer].Status == CSTAT_CONNECTING)
+			{
+				Connected[consoleplayer].Status = CSTAT_WAITING;
+				I_NetClientUpdated(consoleplayer);
+				I_NetMessage("Waiting for game to start");
+			}
+
+			NetBuffer[0] = NCMD_SETUP;
+			NetBuffer[1] = PRE_USER_INFO_ACK;
+			NetBuffer[2] = consoleplayer;
+			NetBufferLength = 3u;
+			SendPacket(from);
+		}
+		else if (NetBuffer[1] == PRE_GAME_INFO)
+		{
+			if (!Connected[consoleplayer].bHasGameInfo)
+			{
+				TicDup = clamp<int>(NetBuffer[2], 1, MAXTICDUP);
+				memcpy(GameID, &NetBuffer[3], 8);
+				TArrayView<uint8_t> stream = TArrayView(&NetBuffer[11], MAX_MSGLEN - 11);
+				Net_ReadGameInfo(stream);
+				Connected[consoleplayer].bHasGameInfo = true;
+			}
+
+			NetBuffer[0] = NCMD_SETUP;
+			NetBuffer[1] = PRE_GAME_INFO_ACK;
+			NetBufferLength = 2u;
+			SendPacket(from);
+		}
+		else if (NetBuffer[1] == PRE_USER_INFO)
+		{
+			const int c = NetBuffer[2];
+			if (!ClientGotAck(consoleplayer, c))
+			{
+				NetworkClients += c;
+				size_t byte = 3u;
+				if (c > 0)
+				{
+					Connected[c].Status = CSTAT_WAITING;
+					memcpy(&Connected[c].Address, &NetBuffer[byte], addrSize);
+					byte += addrSize;
+				}
+				else
+				{
+					Connected[c].Status = CSTAT_READY;
+				}
+				TArrayView<uint8_t> stream = TArrayView(&NetBuffer[byte], MAX_MSGLEN - byte);
+				Net_ReadUserInfo(c, stream);
+				SetClientAck(consoleplayer, c, true);
+
+				I_NetClientConnected(c, 16u);
+			}
+
+			NetBuffer[0] = NCMD_SETUP;
+			NetBuffer[1] = PRE_USER_INFO_ACK;
+			NetBuffer[2] = c;
+			NetBufferLength = 3u;
+			SendPacket(from);
+		}
+		else if (NetBuffer[1] == PRE_GO)
+		{
+			I_NetMessage("Starting game");
+			I_NetLog("Received GO");
+			return true;
+		}
+	}
+
+	NetBuffer[0] = NCMD_SETUP;
+	if (consoleplayer == -1)
+	{
+		NetBuffer[1] = PRE_CONNECT;
+		uint8_t* engineInfo = &NetBuffer[2];
+		const size_t end = 2u + Net_SetEngineInfo(engineInfo);
+		const size_t passSize = strlen(net_password) + 1;
+		memcpy(&NetBuffer[end], net_password, passSize);
+		NetBufferLength = end + passSize;
+		SendPacket(Connected[0].Address);
+	}
+	else
+	{
+		auto& con = Connected[consoleplayer];
+		if (con.Status == CSTAT_CONNECTING)
+		{
+			NetBuffer[1] = PRE_USER_INFO;
+			NetBufferLength = 2u;
+
+			TArrayView<uint8_t> stream = TArrayView(&NetBuffer[NetBufferLength], MAX_MSGLEN - NetBufferLength);
+			Net_SetUserInfo(consoleplayer, stream);
+			NetBufferLength += stream.Data() - &NetBuffer[NetBufferLength];
+			SendPacket(Connected[0].Address);
+		}
+		else if (con.Status == CSTAT_WAITING)
+		{
+			NetBuffer[1] = PRE_HEARTBEAT;
+			NetBufferLength = 2u;
+			SendPacket(Connected[0].Address);
+		}
+	}
+
+	return false;
+}
+
+static bool JoinGame(int arg)
+{
+	if (arg >= Args->NumArgs()
+		|| Args->GetArg(arg)[0] == '-' || Args->GetArg(arg)[0] == '+')
+	{
+		I_FatalError("You need to specify the host machine's address");
+	}
+
+	consoleplayer = -1;
+	StartNetwork(true);
+
+	// Host is always client 0.
+	BuildAddress(Connected[0].Address, Args->GetArg(arg));
+	Connected[0].Status = CSTAT_CONNECTING;
+
+	I_NetInit("Contacting host...", false);
+	I_NetUpdatePlayers(0u, MaxClients);
+	I_NetClientUpdated(0);
+
+	if (!I_NetLoop(Guest_ContactHost, nullptr))
+	{
+		SendAbort();
+		// Fork: cancelling the VR net-wait shell drops back to a single player game
+		// instead of aborting the boot. I_InitNetwork() consumes the flag.
+		if (gNetWaitCancelledByUser)
+			return false;
+		throw CExitEvent(0);
+	}
+
+	for (int i = 1u; i < MaxClients; ++i)
+	{
+		if (Connected[i].Status != CSTAT_NONE)
+			Connected[i].Status = CSTAT_READY;
+	}
+
+	I_NetLog("Total players: %u", MaxClients);
+	I_NetDone();
+
+	return true;
+}
+
+//
+// I_InitNetwork
+//
+bool I_InitNetwork()
+{
+	// set up for network
+	const char* v = Args->CheckValue(FArg_dup);
+	if (v != nullptr)
+		TicDup = clamp<int>(atoi(v), 1, MAXTICDUP);
+
+	v = Args->CheckValue(FArg_port);
+	if (v != nullptr)
+	{
+		GamePort = atoi(v);
+		Printf("Using alternate port %d\n", GamePort);
+	}
+
+	net_password = Args->CheckValue(FArg_password);
+
+	// parse network game options,
+	//		player 1: -host <numplayers>
+	//		player x: -join <player 1's address>
+	int arg = -1;
+	if ((arg = Args->CheckParm(FArg_host)))
+	{
+		if (!HostGame(arg + 1))
+		{
+			// Fork: if the user cancelled the VR net-wait lobby, the single player boot
+			// state has already been restored, so keep booting instead of bailing out.
+			if (!I_ConsumeCancelledNetWaitBoot())
+				return false;
+		}
+	}
+	else if ((arg = Args->CheckParm(FArg_join)))
+	{
+		if (!JoinGame(arg + 1))
+		{
+			if (!I_ConsumeCancelledNetWaitBoot())
+				return false;
+		}
+	}
+	else
+	{
+		// single player game
+		GenerateGameID();
+		TicDup = 1;
+		NetworkClients += 0;
+		Connected[0].Status = CSTAT_READY;
+		Net_SetupUserInfo();
+	}
+
+	bGameStarted = true;
+	return true;
+}
+
+#ifdef _WIN32
+const char* neterror()
 {
 	static char neterr[16];
 	int			code;
 
-	switch (code = WSAGetLastError ()) {
+	switch (code = WSAGetLastError()) {
 		case WSAEACCES:				return "EACCES";
 		case WSAEADDRINUSE:			return "EADDRINUSE";
 		case WSAEADDRNOTAVAIL:		return "EADDRNOTAVAIL";
@@ -1589,7 +1884,7 @@ const char *neterror (void)
 		case WSAEDISCON:			return "EDISCON";
 
 		default:
-			mysnprintf (neterr, countof(neterr), "%d", code);
+			mysnprintf(neterr, countof(neterr), "%d", code);
 			return neterr;
 	}
 }

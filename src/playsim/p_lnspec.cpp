@@ -1,76 +1,63 @@
 /*
 ** p_lnspec.cpp
+**
 ** Handles line specials
 **
 **---------------------------------------------------------------------------
-** Copyright 1998-2007 Randy Heit
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 1998-2016 Marisa Heit
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 ** Each function returns true if it caused something to happen
 ** or false if it could not perform the desired action.
 */
 
-#include "doomstat.h"
-#include "p_local.h"
-#include "p_lnspec.h"
-#include "p_enemy.h"
-#include "g_level.h"
-#include "v_palette.h"
-#include "a_sharedglobal.h"
-#include "a_lightning.h"
 #include "a_keys.h"
-#include "gi.h"
-#include "p_conversation.h"
-#include "p_3dmidtex.h"
-#include "d_net.h"
+#include "a_sharedglobal.h"
 #include "d_event.h"
-#include "gstrings.h"
-#include "po_man.h"
+#include "d_net.h"
 #include "d_player.h"
-#include "r_utility.h"
+#include "doomstat.h"
 #include "fragglescript/t_fs.h"
-#include "p_spec.h"
+#include "g_level.h"
 #include "g_levellocals.h"
-#include "vm.h"
+#include "gi.h"
+#include "gstrings.h"
+#include "p_3dmidtex.h"
+#include "p_conversation.h"
 #include "p_destructible.h"
+#include "p_enemy.h"
+#include "p_lnspec.h"
+#include "p_local.h"
+#include "p_spec.h"
+#include "po_man.h"
+#include "r_utility.h"
 #include "s_sndseq.h"
+#include "v_palette.h"
+#include "vm.h"
 
 // Remaps EE sector change types to Generic_Floor values. According to the Eternity Wiki:
 /*
-    0 : No texture or type change. ( = 0)
-    1 : Copy texture, zero type; trigger model. ( = 1)
-    2 : Copy texture, zero type; numeric model. ( = 1+4)
-    3 : Copy texture, preserve type; trigger model. ( = 3)
-    4 : Copy texture, preserve type; numeric model. ( = 3+4)
-    5 : Copy texture and type; trigger model.  ( = 2)
-    6 : Copy texture and type; numeric model.  ( = 2+4)
+	0 : No texture or type change. ( = 0)
+	1 : Copy texture, zero type; trigger model. ( = 1)
+	2 : Copy texture, zero type; numeric model. ( = 1+4)
+	3 : Copy texture, preserve type; trigger model. ( = 3)
+	4 : Copy texture, preserve type; numeric model. ( = 3+4)
+	5 : Copy texture and type; trigger model.  ( = 2)
+	6 : Copy texture and type; numeric model.  ( = 2+4)
 */
 static const uint8_t ChangeMap[8] = { 0, 1, 5, 3, 7, 2, 6, 0 };
-
 
 #define FUNC(a) static int a (FLevelLocals *Level, line_t *ln, AActor *it, bool backSide, \
 	int arg0, int arg1, int arg2, int arg3, int arg4)
@@ -133,6 +120,8 @@ FName MODtoDamageType (int mod)
 	case 1000:	return NAME_Massacre;		break;
 	}
 }
+
+int NativeStartConversation(AActor* self, AActor* player, bool faceTalker, bool saveAngle, bool rumble);
 
 FUNC(LS_NOP)
 {
@@ -574,7 +563,7 @@ FUNC(LS_Generic_Floor)
 
 	return Level->EV_DoFloor (type, ln, arg0, SPEED(arg1), arg2,
 					   (arg4 & 16) ? 20 : -1, arg4 & 7, true);
-					   
+
 }
 
 FUNC(LS_Floor_Stop)
@@ -582,7 +571,6 @@ FUNC(LS_Floor_Stop)
 {
 	return Level->EV_StopFloor(arg0, ln);
 }
-
 
 FUNC(LS_Stairs_BuildDown)
 // Stair_BuildDown (tag, speed, height, delay, reset)
@@ -646,7 +634,6 @@ FUNC(LS_Stairs_BuildUpDoomSync)
 	return Level->EV_BuildStairs (arg0, DFloor::buildUp, ln,
 						   arg2, SPEED(arg1), 0, arg3, 0, DFloor::stairSync);
 }
-
 
 FUNC(LS_Generic_Stairs)
 // Generic_Stairs (tag, speed, step, dir/igntxt, reset)
@@ -894,7 +881,6 @@ FUNC(LS_Ceiling_Stop)
 	return Level->EV_StopCeiling(arg0, ln);
 }
 
-
 FUNC(LS_Generic_Ceiling)
 // Generic_Ceiling (tag, speed, height, target, change/model/direct/crush)
 {
@@ -1035,7 +1021,6 @@ FUNC(LS_Plat_RaiseAndStayTx0)
 			type = gameinfo.gametype == GAME_Heretic? DPlat::platRaiseAndStayLockout : DPlat::platRaiseAndStay;
 			break;
 	}
-
 
 	return Level->EV_DoPlat (arg0, ln, type, 0, SPEED(arg1), 0, 0, 1);
 }
@@ -1413,7 +1398,7 @@ FUNC(LS_HealThing)
 	return it ? true : false;
 }
 
-// So that things activated/deactivated by ACS or DECORATE *and* by 
+// So that things activated/deactivated by ACS or DECORATE *and* by
 // the BUMPSPECIAL or USESPECIAL flags work correctly both ways.
 void DoActivateThing(AActor * thing, AActor * activator)
 {
@@ -1475,7 +1460,7 @@ FUNC(LS_Thing_Deactivate)
 		AActor *actor;
 		auto iterator = Level->GetActorIterator(arg0);
 		int count = 0;
-	
+
 		actor = iterator.Next ();
 		while (actor)
 		{
@@ -1486,7 +1471,7 @@ FUNC(LS_Thing_Deactivate)
 			actor = temp;
 			count++;
 		}
-	
+
 		return count != 0;
 	}
 	else if (it != NULL)
@@ -1534,7 +1519,7 @@ FUNC(LS_Thing_Destroy)
 	else if (arg0 == 0)
 	{
 		auto iterator = Level->GetThinkerIterator<AActor>();
-		
+
 		actor = iterator.Next ();
 		while (actor)
 		{
@@ -1710,7 +1695,7 @@ FUNC(LS_Thing_Hate)
 						hatee == hater ||					// can't hate self
 						!(hatee->flags & MF_SHOOTABLE) ||	// can't hate nonshootable things
 						hatee->health <= 0 ||				// can't hate dead things
-						(hatee->flags2 & MF2_DORMANT));	
+						(hatee->flags2 & MF2_DORMANT));
 			}
 
 			if (hatee != NULL && hatee != hater && (arg2 == 0 || (hater->goal != NULL && hater->target != hater->goal)))
@@ -1825,7 +1810,6 @@ FUNC(LS_Thing_Stop)
 	}
 	return ok;
 }
-
 
 FUNC(LS_Thing_SetGoal)
 // Thing_SetGoal (tid, goal, delay, chasegoal)
@@ -2038,8 +2022,6 @@ FUNC(LS_FS_Execute)
 	return T_RunScript(Level, arg0, it);
 }
 
-
-
 FUNC(LS_FloorAndCeiling_LowerByValue)
 // FloorAndCeiling_LowerByValue (tag, speed, height)
 {
@@ -2058,7 +2040,7 @@ FUNC(LS_FloorAndCeiling_LowerRaise)
 	bool res = Level->EV_DoCeiling (DCeiling::ceilRaiseToHighest, ln, arg0, SPEED(arg2), 0, 0, 0, 0, 0);
 	// The switch based Boom equivalents of FloorandCeiling_LowerRaise do incorrect checks
 	// which cause the floor only to move when the ceiling fails to do so.
-	// To avoid problems with maps that have incorrect args this only uses a 
+	// To avoid problems with maps that have incorrect args this only uses a
 	// more or less unintuitive value for the fourth arg to trigger Boom's broken behavior
 	if (arg3 != 1998 || !res)	// (1998 for the year in which Boom was released... :P)
 	{
@@ -2244,9 +2226,6 @@ FUNC(LS_Sector_ChangeFlags)
 	return rtn;
 }
 
-
-
-
 FUNC(LS_Sector_SetWind)
 // Sector_SetWind (tag, amount, angle)
 {
@@ -2307,7 +2286,6 @@ FUNC(LS_Sector_SetLink)
 
 void SetWallScroller(FLevelLocals *Level, int id, int sidechoice, double dx, double dy, EScrollPos Where);
 void SetScroller(FLevelLocals *Level, int tag, EScroll type, double dx, double dy);
-
 
 FUNC(LS_Scroll_Texture_Both)
 // Scroll_Texture_Both (id, left, right, up, down)
@@ -2747,47 +2725,47 @@ FUNC(LS_Line_SetTextureScale)
 FUNC(LS_Line_SetBlocking)
 // Line_SetBlocking (id, setflags, clearflags)
 {
-    struct FlagTransEntry
-    {
-        int fieldIndex, bitmask;
-    };
+	struct FlagTransEntry
+	{
+		int fieldIndex, bitmask;
+	};
 
-    static const FlagTransEntry flagtrans[] =
-    {
-        {0, ML_BLOCKING},
-        {0, ML_BLOCKMONSTERS},
-        {0, ML_BLOCK_PLAYERS},
-        {0, ML_BLOCK_FLOATERS},
-        {0, ML_BLOCKPROJECTILE},
-        {0, ML_BLOCKEVERYTHING},
-        {0, ML_RAILING},
-        {0, ML_BLOCKUSE},
-        {0, ML_BLOCKSIGHT},
-        {0, ML_BLOCKHITSCAN},
-        {0, ML_SOUNDBLOCK},
-        {1, ML2_BLOCKLANDMONSTERS},
-        {-1, -1},
-    };
+	static const FlagTransEntry flagtrans[] =
+	{
+		{0, ML_BLOCKING},
+		{0, ML_BLOCKMONSTERS},
+		{0, ML_BLOCK_PLAYERS},
+		{0, ML_BLOCK_FLOATERS},
+		{0, ML_BLOCKPROJECTILE},
+		{0, ML_BLOCKEVERYTHING},
+		{0, ML_RAILING},
+		{0, ML_BLOCKUSE},
+		{0, ML_BLOCKSIGHT},
+		{0, ML_BLOCKHITSCAN},
+		{0, ML_SOUNDBLOCK},
+		{1, ML2_BLOCKLANDMONSTERS},
+		{-1, -1},
+	};
 
-    if (arg0 == 0) return false;
+	if (arg0 == 0) return false;
 
-    int setflags[2] = {};
-    int clearflags[2] = {};
+	int setflags[2] = {};
+	int clearflags[2] = {};
 
-    for (int i = 0; flagtrans[i].bitmask != -1; i++, arg1 >>= 1, arg2 >>= 1)
-    {
-        if (arg1 & 1) setflags[flagtrans[i].fieldIndex] |= flagtrans[i].bitmask;
-        if (arg2 & 1) clearflags[flagtrans[i].fieldIndex] |= flagtrans[i].bitmask;
-    }
+	for (int i = 0; flagtrans[i].bitmask != -1; i++, arg1 >>= 1, arg2 >>= 1)
+	{
+		if (arg1 & 1) setflags[flagtrans[i].fieldIndex] |= flagtrans[i].bitmask;
+		if (arg2 & 1) clearflags[flagtrans[i].fieldIndex] |= flagtrans[i].bitmask;
+	}
 
-    auto itr = Level->GetLineIdIterator(arg0);
-    int line;
-    while ((line = itr.Next()) >= 0)
-    {
-        Level->lines[line].flags = (Level->lines[line].flags & ~clearflags[0]) | setflags[0];
-        Level->lines[line].flags2 = (Level->lines[line].flags2 & ~clearflags[1]) | setflags[1];
-    }
-    return true;
+	auto itr = Level->GetLineIdIterator(arg0);
+	int line;
+	while ((line = itr.Next()) >= 0)
+	{
+		Level->lines[line].flags = (Level->lines[line].flags & ~clearflags[0]) | setflags[0];
+		Level->lines[line].flags2 = (Level->lines[line].flags2 & ~clearflags[1]) | setflags[1];
+	}
+	return true;
 }
 
 FUNC(LS_Line_SetAutomapFlags)
@@ -2839,7 +2817,6 @@ FUNC(LS_Line_SetAutomapStyle)
 	}
 	return false;
 }
-
 
 FUNC(LS_ChangeCamera)
 // ChangeCamera (tid, who, revert?)
@@ -2979,7 +2956,7 @@ FUNC(LS_SetPlayerProperty)
 				if (power != 4)
 				{
 					auto item = it->GiveInventoryType(PClass::FindActor(powers[power]));
-					if (item != NULL && power == 0 && arg1 == 1) 
+					if (item != NULL && power == 0 && arg1 == 1)
 					{
 						item->ColorVar(NAME_BlendColor) = MakeSpecialColormap(INVERSECOLORMAP);
 					}
@@ -3020,7 +2997,7 @@ FUNC(LS_SetPlayerProperty)
 					if (power != 4)
 					{
 						auto item = p->mo->GiveInventoryType ((PClass::FindActor(powers[power])));
-						if (item != NULL && power == 0 && arg1 == 1) 
+						if (item != NULL && power == 0 && arg1 == 1)
 						{
 							item->ColorVar(NAME_BlendColor) = MakeSpecialColormap(INVERSECOLORMAP);
 						}
@@ -3244,7 +3221,7 @@ FUNC(LS_SendToCommunicator)
 
 	if (it != NULL && it->player != NULL && it->FindInventory(NAME_Communicator))
 	{
-		char name[32];									   
+		char name[32];
 		mysnprintf (name, countof(name), "svox/voc%d", arg0);
 
 		if (!arg3)
@@ -3398,31 +3375,14 @@ FUNC(LS_StartConversation)
 	{
 		return false;
 	}
-	
+
 	// Only living players are allowed to start conversations
 	if (it == NULL || it->player == NULL || it->player->mo != it || it->health<=0)
 	{
 		return false;
 	}
 
-	// Dead things can't talk.
-	if (target->health <= 0)
-	{
-		return false;
-	}
-	// Fighting things don't talk either.
-	if (target->flags4 & MF4_INCOMBAT)
-	{
-		return false;
-	}
-	if (target->Conversation != NULL)
-	{
-		// Give the NPC a chance to play a brief animation
-		target->ConversationAnimation (0);
-		P_StartConversation (target, it, !!arg1, true);
-		return true;
-	}
-	return false;
+	return NativeStartConversation(target, it, !!arg1, true, false); // TODO: expose rumble?
 }
 
 FUNC(LS_Thing_SetConversation)
@@ -3476,7 +3436,6 @@ FUNC(LS_Sector_SetPlaneReflection)
 
 	return true;
 }
-
 
 FUNC(LS_SetGlobalFogParameter)
 // SetGlobalFogParameter (type, value)
@@ -3981,7 +3940,6 @@ int P_FindLineSpecial (const char *string, int *min_args, int *max_args)
 	return 0;
 }
 
-
 //==========================================================================
 //
 // P_ExecuteSpecial
@@ -4010,6 +3968,7 @@ int P_ExecuteSpecial(FLevelLocals *Level, int			num,
 // Execute a line special / script
 //
 //==========================================================================
+
 DEFINE_ACTION_FUNCTION(FLevelLocals, ExecuteSpecial)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);

@@ -1,9 +1,43 @@
+/*
+** basics.h
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 2008-2016 Marisa Heit
+** Copyright 2008-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
+**---------------------------------------------------------------------------
+**
+*/
+
 #pragma once
 
+// IWYU pragma: begin_exports
+
 #include <algorithm>
-#include <stddef.h>
-#include <stdint.h>
+#include <cassert>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <limits>
 #include <type_traits>
+
+#include "m_round.h"
+
+// IWYU pragma: end_exports
 
 #if defined(_M_X64) || defined(__x86_64__) || defined(__amd64__) || defined(__amd64) || defined(__x86_64__) || defined(__x86_64)
 #include <xmmintrin.h>
@@ -52,6 +86,28 @@ typedef uint32_t			angle_t;
 #define GCCNOWARN
 #endif
 
+#if defined(__GNUC__)
+#define ALLOW_DEPRECATED(expression, reason) \
+	_Pragma("GCC diagnostic push") \
+	_Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"") \
+	expression; \
+	_Pragma("GCC diagnostic pop")
+#elif defined(_MSC_VER)
+#define ALLOW_DEPRECATED(expression, reason) \
+	__pragma(warning(push)) \
+	__pragma(warning(disable : 4996)) \
+	expression; \
+	__pragma(warning(pop))
+#else
+#define ALLOW_DEPRECATED(expression, reason) expression;
+#endif
+
+#if defined __GNUC__
+# define ATTRIBUTE(attrlist) __attribute__(attrlist)
+#else
+# define ATTRIBUTE(attrlist)
+#endif
+
 #ifndef MAKE_ID
 #ifndef __BIG_ENDIAN__
 #define MAKE_ID(a,b,c,d)	((uint32_t)((a)|((b)<<8)|((c)<<16)|((d)<<24)))
@@ -63,27 +119,25 @@ typedef uint32_t			angle_t;
 using INTBOOL = int;
 using BITFIELD = uint32_t;
 
-
 // always use our own definition for consistency.
 #ifdef M_PI
 #undef M_PI
 #endif
 
-const double M_PI = 3.14159265358979323846;	// matches value in gcc v2 math.h
+constexpr double M_PI = 3.14159265358979323846;	// matches value in gcc v2 math.h
 
 using std::min;
 using std::max;
-//using std::clamp;
 
 template<typename T>
 T clamp(T val, T minval, T maxval)
 {
-    return std::max<T>(std::min<T>(val, maxval), minval);
+	return std::max<T>(std::min<T>(val, maxval), minval);
 }
 
 static inline void PrefetchL3(const void* Address)
 {
 #if defined(_M_X64) || defined(__x86_64__) || defined(__amd64__) || defined(__amd64) || defined(__x86_64__) || defined(__x86_64)
-    _mm_prefetch(static_cast<const char*>(Address), _MM_HINT_T1);
+	_mm_prefetch(static_cast<const char*>(Address), _MM_HINT_T1);
 #endif
 }

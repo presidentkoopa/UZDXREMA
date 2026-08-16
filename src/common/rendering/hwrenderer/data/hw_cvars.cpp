@@ -4,37 +4,22 @@
 ** most of the hardware renderer's CVARs.
 **
 **---------------------------------------------------------------------------
+**
 ** Copyright 2005-2020 Christoph Oelckers
-** All rights reserved.
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 **---------------------------------------------------------------------------
 **
+** Code written prior to 2026 is also licensed under:
 **
-*/ 
-
-
+** SPDX-License-Identifier: BSD-3-Clause
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 #include "c_cvars.h"
 #include "c_dispatch.h"
@@ -43,6 +28,7 @@
 #include "menu.h"
 #include "printf.h"
 #include "version.h"
+#include <algorithm>
 
 CUSTOM_CVAR(Int, gl_fogmode, 2, CVAR_ARCHIVE | CVAR_NOINITCALL)
 {
@@ -85,21 +71,36 @@ CVAR(Bool, gl_mirror_player, true, CVAR_GLOBALCONFIG|CVAR_ARCHIVE)
 CVAR(Bool,gl_mirror_envmap, true, CVAR_GLOBALCONFIG|CVAR_ARCHIVE)
 CVAR(Bool, gl_seamless, true, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 
-CUSTOM_CVAR(Int, r_mirror_recursions,2,CVAR_GLOBALCONFIG|CVAR_ARCHIVE)
+// Upstream renamed r_mirror_recursions -> r_portal_recursions (and swrenderer's
+// r_portal.cpp now only EXTERN_CVARs it, so this is the single definition).
+// The fork's tuned default of 2 (instead of 4) and CVAR_GLOBALCONFIG are kept.
+CUSTOM_CVAR(Int, r_portal_recursions, 2, CVAR_GLOBALCONFIG|CVAR_ARCHIVE)
 {
-	if (self<0) self=0;
-	if (self>10) self=10;
+	if (self > 16) self = 16;
+	if (self < 0) self = 0;
 }
+
 bool gl_plane_reflection_i;	// This is needed in a header that cannot include the CVAR stuff...
 CUSTOM_CVAR(Bool, gl_plane_reflection, false, CVAR_GLOBALCONFIG|CVAR_ARCHIVE)
 {
 	gl_plane_reflection_i = self;
 }
 
-CUSTOM_CVARD(Float, vid_gamma, 1.2f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "adjusts gamma component of gamma ramp")
+constexpr float GAMMA_DEFAULT = 2.2;
+constexpr float GAMMA_HIGH = 3.0;
+constexpr float GAMMA_LOW = 0.1;
+
+constexpr float GAMMA_LOW_FIX = (GAMMA_LOW-GAMMA_DEFAULT) / (GAMMA_HIGH-GAMMA_DEFAULT);
+
+CUSTOM_CVARD(Float, vid_gamma, GAMMA_DEFAULT, 0, "(internal) target output gamma")
 {
-	if (self < 0) self = 1;
-	else if (self > 4) self = 4;
+	if (self < GAMMA_LOW) self = GAMMA_LOW;
+}
+
+CUSTOM_CVARD(Float, vid_fixgamma, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "adjusts gamma component of gamma ramp")
+{
+	if (self < GAMMA_LOW_FIX) self = GAMMA_LOW_FIX;
+	else vid_gamma = self*(GAMMA_HIGH-GAMMA_DEFAULT) + GAMMA_DEFAULT;
 }
 
 CUSTOM_CVARD(Float, vid_contrast, 1.1f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "adjusts contrast component of gamma ramp")
@@ -108,6 +109,9 @@ CUSTOM_CVARD(Float, vid_contrast, 1.1f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "adjus
 	else if (self > 5) self = 5;
 }
 
+// Fork: vid_brightness is deleted upstream but is still consumed by the VR present
+// path (vk_postprocess.cpp PresentUniforms::Brightness) and the DSPLYMNU_BRIGHTNESS
+// slider. Keep it.
 CUSTOM_CVARD(Float, vid_brightness, 0.05f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "adjusts brightness component of gamma ramp")
 {
 	if (self < -2) self = -2;
@@ -120,22 +124,41 @@ CUSTOM_CVARD(Float, vid_saturation, 1.2f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "adj
 	else if (self > 3) self = 3;
 }
 
-CCMD (bumpgamma)
+#ifndef BW_GAP
+#define BW_GAP 0.2
+#endif
+
+CVAR(Float, vid_i_blackpoint, 1.f, CVAR_VIRTUAL | CVAR_NOINITCALL | CVAR_SYSTEM_ONLY);
+CVAR(Float, vid_i_whitepoint, 1.f, CVAR_VIRTUAL | CVAR_NOINITCALL | CVAR_SYSTEM_ONLY);
+
+CUSTOM_CVARD(Float, vid_blackpoint, 0.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "adjusts what the engine outputs as black")
 {
-	// [RH] Gamma correction tables are now generated on the fly for *any* gamma level
-	// Q: What are reasonable limits to use here?
+	if (self < 0) self = 0;
+	if (self > 1) self = 1;
 
-	float newgamma = vid_gamma + 0.1f;
+	float value = self*self;
+	float bound = 1 - BW_GAP;
+	float buffer = vid_i_whitepoint - BW_GAP;
 
-	if (newgamma > 4.0)
-		newgamma = 1.0;
-
-	vid_gamma = newgamma;
-	Printf ("Gamma correction level %g\n", newgamma);
+	vid_i_blackpoint = min(min(buffer, value), bound);
 }
 
+CUSTOM_CVARD(Float, vid_whitepoint, 0.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "adjusts what the engine outputs as white")
+{
+	if (self < -1) self = -1;
+	if (self > 2) self = 2;
 
-CVAR(Int, gl_satformula, 1, CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
+	float value = self + 1;
+	float bound = 0 + BW_GAP;
+	float buffer = vid_i_blackpoint + BW_GAP;
+	value = (value*value*value+1)/2;
+
+	vid_i_whitepoint = max(max(buffer, value), bound);
+}
+
+#undef BW_GAP
+
+CVAR(Int, gl_satformula, 2, CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
 
 //==========================================================================
 //
@@ -191,3 +214,5 @@ CVARD(Bool, gl_no_persistent_buffer, false, 0, "Disable persistent buffer storag
 CVARD(Bool, gl_no_clip_planes, false, 0, "Disable clip planes support")
 CVARD(Bool, gl_no_ssbo, false, 0, "Disable SSBO support")
 CVARD(Bool, vr_scene_multithread, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "Allow VR BSP scene-build jobs on a worker thread")
+
+CVAR(Bool, gl_strict_gldefs_errors, false, CVAR_GLOBALCONFIG | CVAR_ARCHIVE)

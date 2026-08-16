@@ -1,3 +1,23 @@
+/*
+** r_utility.h
+**
+** Rendering main loop and setup/utility functions
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1994-1996 Raven Software
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2002-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
+
 #ifndef __R_UTIL_H
 #define __R_UTIL_H
 
@@ -49,10 +69,12 @@ struct FRenderViewpoint
 
 	double			TicFrac;		// fraction of tic for interpolation
 	uint32_t		FrameTime;		// current frame's time in tics.
-	
+
 	int				extralight;		// extralight to be added to this viewpoint
 	bool			showviewer;		// show the camera actor?
 	bool			bForceNoViewer; // Never show the camera Actor.
+	bool			bDoOob;
+	bool			bDoOrtho;
 	void SetViewAngle(const FViewWindow& viewWindow);
 	bool IsAllowedOoB();				// Checks if camera actor exists, has viewpos, and viewpos has VPSF_ALLOWOUTOFBOUNDS flag set
 	bool IsOrtho();					// Checks if camera actor exists, has viewpos, and viewpos has VPSF_ORTHOGRAPHIC flag set
@@ -151,5 +173,7 @@ extern void R_FreePastViewers ();
 extern void R_ClearPastViewer (AActor *actor);
 
 bool R_ShouldDrawSpriteShadow(AActor *thing);
+
+int WorldPaused(bool checkLag);
 
 #endif

@@ -1,30 +1,23 @@
-//-----------------------------------------------------------------------------
-//
-// Copyright 1993-1996 id Software
-// Copyright 1994-1996 Raven Software
-// Copyright 1998-1998 Chi Hoang, Lee Killough, Jim Flynn, Rand Phares, Ty Halderman
-// Copyright 1999-2016 Randy Heit
-// Copyright 2002-2016 Christoph Oelckers
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see http://www.gnu.org/licenses/
-//
-//-----------------------------------------------------------------------------
-//
-// DESCRIPTION:
-//		Plats (i.e. elevator platforms) code, raising/lowering.
-//
-//-----------------------------------------------------------------------------
+/*
+** a_plats.cpp
+**
+** Plats (i.e. elevator platforms) code, raising/lowering.
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1994-1996 Raven Software
+** Copyright 1998-1998 Chi Hoang, Lee Killough, Jim Flynn, Rand Phares, Ty Halderman
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2002-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 #include "i_system.h"
 #include "m_random.h"
@@ -112,12 +105,12 @@ const char *DPlat::GetSoundByType () const
 void DPlat::Tick ()
 {
 	EMoveResult res;
-		
+
 	switch (m_Status)
 	{
 	case up:
 		res = m_Sector->MoveFloor (m_Speed, m_High, m_Crush, 1, false);
-										
+
 		if (res == EMoveResult::crushed && (m_Crush == -1))
 		{
 			m_Count = m_Wait;
@@ -135,10 +128,10 @@ void DPlat::Tick ()
 				switch (m_Type)
 				{
 					case platRaiseAndStayLockout:
-						// Instead of keeping the dead thinker like Heretic did let's 
+						// Instead of keeping the dead thinker like Heretic did let's
 						// better use a flag to avoid problems elsewhere. For example,
 						// keeping the thinker would make tagwait wait indefinitely.
-						m_Sector->planes[sector_t::floor].Flags |= PLANEF_BLOCKED; 
+						m_Sector->planes[sector_t::floor].Flags |= PLANEF_BLOCKED;
 						[[fallthrough]];
 					case platRaiseAndStay:
 					case platDownByValue:
@@ -155,12 +148,12 @@ void DPlat::Tick ()
 			}
 			else
 			{
-				m_OldStatus = m_Status;		//jff 3/14/98 after action wait  
+				m_OldStatus = m_Status;		//jff 3/14/98 after action wait
 				m_Status = in_stasis;		//for reactivation of toggle
 			}
 		}
 		break;
-		
+
 	case down:
 		res = m_Sector->MoveFloor (m_Speed, m_Low, -1, -1, false);
 
@@ -186,7 +179,7 @@ void DPlat::Tick ()
 			}
 			else
 			{	// instant toggles go into stasis awaiting next activation
-				m_OldStatus = m_Status;		//jff 3/14/98 after action wait  
+				m_OldStatus = m_Status;		//jff 3/14/98 after action wait
 				m_Status = in_stasis;		//for reactivation of toggle
 			}
 		}
@@ -212,7 +205,7 @@ void DPlat::Tick ()
 		}
 
 		break;
-		
+
 	case waiting:
 		if (m_Count > 0 && !--m_Count)
 		{
@@ -359,7 +352,7 @@ bool FLevelLocals::EV_DoPlat (int tag, line_t *line, DPlat::EPlatType type, doub
 			plat->m_Status = DPlat::up;
 			plat->PlayPlatSound ("Floor");
 			break;
-		
+
 		case DPlat::platDownByValue:
 			newheight = sec->floorplane.ZatPoint (sec->centerspot) - height;
 			plat->m_Low = sec->floorplane.PointToDist (sec->centerspot, newheight);
@@ -380,7 +373,7 @@ bool FLevelLocals::EV_DoPlat (int tag, line_t *line, DPlat::EPlatType type, doub
 			plat->m_Status = DPlat::down;
 			plat->PlayPlatSound (plat->GetSoundByType ());
 			break;
-		
+
 		case DPlat::platUpNearestWaitDownStay:
 			newheight = FindNextHighestFloor (sec, &spot);
 			// Intentional fall-through
@@ -497,4 +490,3 @@ void FLevelLocals::EV_StopPlat (int tag, bool remove)
 		scan = next;
 	}
 }
-

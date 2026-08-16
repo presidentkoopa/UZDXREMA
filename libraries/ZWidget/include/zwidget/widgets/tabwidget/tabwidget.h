@@ -2,12 +2,13 @@
 #pragma once
 
 #include "../../core/widget.h"
-#include <vector>
 #include <functional>
 #include <string>
+#include <vector>
 
 class TabBar;
 class TabBarTab;
+class TabBarSpacer;
 class TabWidgetStack;
 class TextLabel;
 class ImageBox;
@@ -37,7 +38,6 @@ public:
 	std::function<void()> OnCurrentChanged;
 
 protected:
-	void OnPaintFrame(Canvas* canvas) override;
 	void OnGeometryChanged() override;
 
 private:
@@ -62,12 +62,11 @@ public:
 	int GetCurrentIndex() const;
 	void SetCurrentIndex(int pageIndex);
 
-	double GetPreferredHeight() const { return 30.0; }
+	double GetPreferredHeight() override { return 30.0; }
 
 	std::function<void()> OnCurrentChanged;
 
 protected:
-	void OnPaintFrame(Canvas* canvas) override;
 	void OnGeometryChanged() override;
 
 private:
@@ -76,6 +75,14 @@ private:
 
 	int CurrentIndex = -1;
 	std::vector<TabBarTab*> Tabs;
+	TabBarSpacer* leftSpacer = nullptr;
+	TabBarSpacer* rightSpacer = nullptr;
+};
+
+class TabBarSpacer : public Widget
+{
+public:
+	TabBarSpacer(Widget* parent);
 };
 
 class TabBarTab : public Widget
@@ -87,15 +94,14 @@ public:
 	void SetIcon(const std::shared_ptr<Image>& icon);
 	void SetCurrent(bool value);
 
-	double GetPreferredWidth() const;
+	double GetPreferredWidth() override;
 
 	std::function<void()> OnClick;
 
 protected:
-	void OnPaintFrame(Canvas* canvas) override;
 	void OnGeometryChanged() override;
-	bool OnMouseDown(const Point& pos, int key) override;
-	bool OnMouseUp(const Point& pos, int key) override;
+	bool OnMouseDown(const Point& pos, InputKey key) override;
+	bool OnMouseUp(const Point& pos, InputKey key) override;
 	void OnMouseMove(const Point& pos) override;
 	void OnMouseLeave() override;
 
@@ -104,7 +110,6 @@ private:
 
 	ImageBox* Icon = nullptr;
 	TextLabel* Label = nullptr;
-	bool hot = false;
 };
 
 class TabWidgetStack : public Widget
@@ -116,7 +121,6 @@ public:
 	Widget* GetCurrentWidget() const { return CurrentWidget; }
 
 protected:
-	void OnPaintFrame(Canvas* canvas) override;
 	void OnGeometryChanged() override;
 
 private:

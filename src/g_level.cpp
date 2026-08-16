@@ -1,33 +1,23 @@
 /*
 ** g_level.cpp
+**
 ** controls movement between levels
 **
 **---------------------------------------------------------------------------
-** Copyright 1998-2006 Randy Heit
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 1998-2016 Marisa Heit
+** Copyright 2006-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
@@ -462,10 +452,10 @@ UNSAFE_CCMD (open)
 
 void G_NewInit ()
 {
-	int i;
+	unsigned int i;
 
 	// Destory all old player refrences that may still exist
-	TThinkerIterator<AActor> it(primaryLevel, NAME_PlayerPawn, STAT_TRAVELLING);
+	TThinkerIterator<AActor> it(primaryLevel, NAME_PlayerPawn, STAT_TRAVELLING, false);
 	AActor *pawn, *next;
 
 	next = it.Next();
@@ -481,6 +471,7 @@ void G_NewInit ()
 	// Destroy thinkers that may remain after change level failure
 	// Usually, the list contains just a sentinel when such error occurred
 	primaryLevel->Thinkers.DestroyThinkersInList(STAT_TRAVELLING);
+	primaryLevel->ClientSideThinkers.DestroyThinkersInList(STAT_TRAVELLING);
 
 	G_ClearSnapshots ();
 	netgame = false;
@@ -544,7 +535,7 @@ static void InitPlayerClasses ()
 {
 	if (!savegamerestore)
 	{
-		for (int i = 0; i < MAXPLAYERS; ++i)
+		for (unsigned int i = 0; i < MAXPLAYERS; ++i)
 		{
 			SinglePlayerClass[i] = players[i].userinfo.GetPlayerClassNum();
 			if (SinglePlayerClass[i] < 0 || !playeringame[i])
@@ -557,6 +548,19 @@ static void InitPlayerClasses ()
 	}
 }
 
+// Account for additional players joining from a save file.
+static void UpdatePlayerClass(int i)
+{
+	if (!savegamerestore || !playeringame[i])
+		return;
+
+	SinglePlayerClass[i] = players[i].userinfo.GetPlayerClassNum();
+	if (SinglePlayerClass[i] < 0)
+		SinglePlayerClass[i] = (pr_classchoice()) % PlayerClasses.Size();
+	players[i].cls = nullptr;
+	players[i].CurrentPlayerClass = SinglePlayerClass[i];
+}
+
 //==========================================================================
 //
 //
@@ -565,7 +569,10 @@ static void InitPlayerClasses ()
 void G_InitNew (const char *mapname, bool bTitleLevel)
 {
 	bool wantFast;
-	int i;
+	unsigned int i;
+
+	primaryLevel->lightlists.wall_dlist.Clear();
+	primaryLevel->lightlists.flat_dlist.Clear();
 
 	// did we have any level before?
 	if (primaryLevel->info != nullptr)
@@ -599,6 +606,7 @@ void G_InitNew (const char *mapname, bool bTitleLevel)
 	for (auto Level : AllLevels())
 	{
 		Level->Thinkers.DestroyThinkersInList(STAT_STATIC);
+		Level->ClientSideThinkers.DestroyThinkersInList(STAT_STATIC);
 	}
 
 	if (paused)
@@ -645,6 +653,7 @@ void G_InitNew (const char *mapname, bool bTitleLevel)
 			players[i].playerstate = PST_ENTER;	// [BC]
 
 		STAT_StartNewGame(mapname);
+		GameUUID = GenerateUUID();
 	}
 
 	usergame = !bTitleLevel;		// will be set false if a demo
@@ -667,7 +676,7 @@ void G_InitNew (const char *mapname, bool bTitleLevel)
 	{
 		gamestate = GS_LEVEL;
 	}
-	
+
 	if (!savegamerestore)
 		startpos = laststartpos = 0;
 	G_DoLoadLevel (mapname, startpos, false, !savegamerestore);
@@ -746,7 +755,7 @@ void FLevelLocals::ChangeLevel(const char *levelname, int position, int inflags,
 		{
 			nextlevel = NextMap;	// If there is already an end sequence please leave it alone!
 		}
-		else 
+		else
 		{
 			nextlevel.Format("enDSeQ%04x", gameinfo.DefaultEndSequence.GetIndex());
 		}
@@ -788,8 +797,8 @@ void FLevelLocals::ChangeLevel(const char *levelname, int position, int inflags,
 
 	startpos = position;
 	SetMusicVolume(1.0);
-		
-	if (nextinfo != NULL) 
+
+	if (nextinfo != NULL)
 	{
 		if (thiscluster != nextcluster || (thiscluster && !(thiscluster->flags & CLUSTER_HUB)))
 		{
@@ -830,7 +839,7 @@ void FLevelLocals::ChangeLevel(const char *levelname, int position, int inflags,
 		D_DrawIcon = "TELEICON";
 	}
 
-	for(int i = 0; i < MAXPLAYERS; i++)
+	for(unsigned int i = 0; i < MAXPLAYERS; i++)
 	{
 		if (PlayerInGame(i))
 		{
@@ -998,7 +1007,7 @@ DIntermissionController* FLevelLocals::CreateIntermission()
 	else if (!deathmatch)
 	{
 		FExitText *ext = nullptr;
-		
+
 		if (flags3 & LEVEL3_EXITSECRETUSED) ext = info->ExitMapTexts.CheckKey(NAME_Secret);
 		else if (flags3 & LEVEL3_EXITNORMALUSED) ext = info->ExitMapTexts.CheckKey(NAME_Normal);
 		if (ext == nullptr) ext = info->ExitMapTexts.CheckKey(nextlevel);
@@ -1057,12 +1066,13 @@ DIntermissionController* FLevelLocals::CreateIntermission()
 //
 //=============================================================================
 
-void RunIntermission(level_info_t* fromMap, level_info_t* toMap, DIntermissionController* intermissionScreen, DObject* statusScreen, std::function<void(bool)> completionf)
+void RunIntermission(level_info_t* fromMap, level_info_t* toMap, DIntermissionController* intermissionScreen, DObject* statusScreen, bool ending, std::function<void(bool)> completionf)
 {
-	cutscene.runner = CreateRunner(false);
+	// Make sure the finale can't be skipped, otherwise the intermission always needs to be skippable.
+	cutscene.runner = CreateRunner(false, ending ? ST_UNSKIPPABLE : ST_MUST_BE_SKIPPABLE);
 	GC::WriteBarrier(cutscene.runner);
 	cutscene.completion = std::move(completionf);
-	
+
 	// retrieve cluster relations for cluster-based cutscenes.
 	cluster_info_t* fromcluster = nullptr, *tocluster = nullptr;
 	if (fromMap) fromcluster = FindClusterInfo(fromMap->cluster);
@@ -1107,21 +1117,21 @@ void G_DoCompleted (void)
 {
 	gameaction = ga_nothing;
 	C_HideConsole();
-	
+
 	if (   gamestate == GS_DEMOSCREEN
 		|| gamestate == GS_FULLCONSOLE
 		|| gamestate == GS_STARTUP)
 	{
 		return;
 	}
-	
+
 	if (gamestate == GS_TITLELEVEL)
 	{
 		G_DoLoadLevel (nextlevel, startpos, false, false);
 		viewactive = true;
 		return;
 	}
-	
+
 	if (automapactive)
 		AM_Stop ();
 
@@ -1143,13 +1153,13 @@ void G_DoCompleted (void)
 		// [RH] If you ever get a statistics driver operational, adapt this.
 		//	if (statcopy)
 		//		memcpy (statcopy, &wminfo, sizeof(wminfo));
-		
+
 		statusScreen = WI_Start (&staticWmInfo);
 	}
 	bool endgame = strncmp(nextlevel.GetChars(), "enDSeQ", 6) == 0;
 	intermissionScreen = primaryLevel->CreateIntermission();
 	auto nextinfo = !playinter || endgame? nullptr : FindLevelInfo(nextlevel.GetChars(), false);
-	RunIntermission(primaryLevel->info, nextinfo, intermissionScreen, statusScreen, [=](bool)
+	RunIntermission(primaryLevel->info, nextinfo, intermissionScreen, statusScreen, endgame, [=](bool)
 	{
 		if (!endgame) primaryLevel->WorldDone();
 		else D_StartTitle();
@@ -1165,12 +1175,12 @@ void G_DoCompleted (void)
 
 bool FLevelLocals::DoCompleted (FString nextlevel, wbstartstruct_t &wminfo)
 {
-	int i;
+	unsigned int i;
 
 	// [RH] Mark this level as having been visited
 	if (!(flags & LEVEL_CHANGEMAPCHEAT))
 		info->flags |= LEVEL_VISITED;
-	
+
 	uint32_t langtable[2] = {};
 	wminfo.finished_ep = cluster - 1;
 	wminfo.LName0 = TexMan.CheckForTexture(info->PName.GetChars(), ETextureType::MiscPatch);
@@ -1287,6 +1297,7 @@ bool FLevelLocals::DoCompleted (FString nextlevel, wbstartstruct_t &wminfo)
 			G_PlayerFinishLevel (i, mode, changeflags);
 		}
 	}
+	StartTravel();
 	soundEngine->BlockNewSounds(false);
 
 	if (mode == FINISH_SameHub)
@@ -1344,12 +1355,12 @@ void DAutosaver::Tick ()
 
 //==========================================================================
 //
-// G_DoLoadLevel 
+// G_DoLoadLevel
 //
 //==========================================================================
 
-extern gamestate_t 	wipegamestate; 
- 
+extern gamestate_t 	wipegamestate;
+
 void G_DoLoadLevel(const FString &nextmapname, int position, bool autosave, bool newGame)
 {
 	gamestate_t oldgs = gamestate;
@@ -1371,6 +1382,8 @@ void G_DoLoadLevel(const FString &nextmapname, int position, bool autosave, bool
 	// clear cmd building stuff
 	buttonMap.ResetButtonStates();
 
+	WantsFlechetteItem = false;
+	SendWeaponSlot = WST_NONE;
 	SendItemUse = nullptr;
 	SendItemDrop = nullptr;
 	mousex = mousey = 0;
@@ -1378,6 +1391,7 @@ void G_DoLoadLevel(const FString &nextmapname, int position, bool autosave, bool
 	LocalViewAngle = 0;
 	LocalViewPitch = 0;
 	paused = 0;
+	ClearPrevTime(); // Avoid jumpy behaviors after a load barrier in the UI.
 
 	if (demoplayback || oldgs == GS_STARTUP || oldgs == GS_TITLELEVEL)
 		C_HideConsole();
@@ -1390,7 +1404,7 @@ void G_DoLoadLevel(const FString &nextmapname, int position, bool autosave, bool
 void FLevelLocals::DoLoadLevel(const FString &nextmapname, int position, bool autosave, bool newGame)
 {
 	MapName = nextmapname;
-	int i;
+	unsigned int i;
 
 	if (NextSkill >= 0)
 	{
@@ -1406,6 +1420,7 @@ void FLevelLocals::DoLoadLevel(const FString &nextmapname, int position, bool au
 		laststartpos = position;
 
 	Init();
+	bScoreboardToggled = false;
 	StatusBar->DetachAllMessages ();
 
 	// Force 'teamplay' to 'true' if need be.
@@ -1420,7 +1435,7 @@ void FLevelLocals::DoLoadLevel(const FString &nextmapname, int position, bool au
 	{
 		FString mapname = nextmapname;
 		mapname.ToUpper();
-		Printf(PRINT_HIGH | PRINT_NONOTIFY, "\n" TEXTCOLOR_NORMAL "%s\n\n" TEXTCOLOR_BOLD "%s - %s\n\n", console_bar, mapname.GetChars(), LevelName.GetChars());
+		Printf(PRINT_NONOTIFY, "\n" TEXTCOLOR_NORMAL "%s\n\n" TEXTCOLOR_BOLD "%s - %s\n\n", console_bar, mapname.GetChars(), LevelName.GetChars());
 	}
 
 	// Set the sky map.
@@ -1434,7 +1449,7 @@ void FLevelLocals::DoLoadLevel(const FString &nextmapname, int position, bool au
 	InitSkyMap (this);
 
 	for (i = 0; i < MAXPLAYERS; i++)
-	{ 
+	{
 		if (PlayerInGame(i) && (deathmatch || Players[i]->playerstate == PST_DEAD))
 			Players[i]->playerstate = PST_ENTER;	// [BC]
 		memset (Players[i]->frags,0,sizeof(Players[i]->frags));
@@ -1486,12 +1501,12 @@ void FLevelLocals::DoLoadLevel(const FString &nextmapname, int position, bool au
 
 	starttime = gametic;
 
-	UnSnapshotLevel (!savegamerestore);	// [RH] Restore the state of the 
+	UnSnapshotLevel (!savegamerestore);	// [RH] Restore the state of the
 	int pnumerr = FinishTravel ();
 
 	if (!FromSnapshot)
 	{
-		for (int i = 0; i<MAXPLAYERS; i++)
+		for (unsigned int i = 0; i < MAXPLAYERS; i++)
 		{
 			if (PlayerInGame(i) && Players[i]->mo != nullptr)
 				P_PlayerStartStomp(Players[i]->mo, !deathmatch);
@@ -1499,7 +1514,7 @@ void FLevelLocals::DoLoadLevel(const FString &nextmapname, int position, bool au
 	}
 
 	// For each player, if they are viewing through a player, make sure it is themselves.
-	for (int ii = 0; ii < MAXPLAYERS; ++ii)
+	for (unsigned int ii = 0; ii < MAXPLAYERS; ++ii)
 	{
 		if (PlayerInGame(ii))
 		{
@@ -1537,9 +1552,9 @@ void FLevelLocals::DoLoadLevel(const FString &nextmapname, int position, bool au
 	localEventManager->WorldLoaded();
 	DoDeferedScripts ();	// [RH] Do script actions that were triggered on another map.
 	RelinkDynamicLightsForLevel(this);
-	
 
-	// [RH] Always save the game when entering a new 
+
+	// [RH] Always save the game when entering a new
 	if (autosave && !savegamerestore && disableautosave < 1)
 	{
 		CreateThinker<DAutosaver>();
@@ -1548,18 +1563,22 @@ void FLevelLocals::DoLoadLevel(const FString &nextmapname, int position, bool au
 	{
 		I_Error("no start for player %d found.", pnumerr);
 	}
+
+	// If loading in from existing data, allow things to reinitialize if needed.
+	if (FromSnapshot || savegamerestore)
+		Thinkers.OnLoad();
 }
 
 
 //==========================================================================
 //
-// G_WorldDone 
+// G_WorldDone
 //
 //==========================================================================
 
-void FLevelLocals::WorldDone (void) 
+void FLevelLocals::WorldDone (void)
 {
-	gameaction = ga_worlddone; 
+	gameaction = ga_worlddone;
 
 
 	//Added by mc
@@ -1569,7 +1588,7 @@ void FLevelLocals::WorldDone (void)
 	}
 
 }
- 
+
 DEFINE_ACTION_FUNCTION(FLevelLocals, WorldDone)
 {
 	// This is just a dummy to make old status screens happy.
@@ -1578,11 +1597,26 @@ DEFINE_ACTION_FUNCTION(FLevelLocals, WorldDone)
 
 //==========================================================================
 //
+// Started the game loaded into a map from the console. Run at least one tic
+// so it can properly render out in net games.
 //
 //==========================================================================
 
-void G_DoWorldDone (void) 
-{		 
+void G_DoMapWarp()
+{
+	gameaction = ga_nothing;
+	Net_ResetCommands(true);
+	Net_SetWaiting();
+}
+
+//==========================================================================
+//
+//
+//==========================================================================
+
+void G_DoWorldDone (void)
+{
+	Net_ResetCommands(true);
 	gamestate = GS_LEVEL;
 	C_HideConsole();
 	if (nextlevel.IsEmpty())
@@ -1591,59 +1625,118 @@ void G_DoWorldDone (void)
 		Printf ("No next map specified.\n");
 		nextlevel = primaryLevel->MapName;
 	}
-	primaryLevel->StartTravel ();
+	primaryLevel->MoveTravellers();
 	G_DoLoadLevel (nextlevel, startpos, true, false);
 	gameaction = ga_nothing;
-	viewactive = true; 
+	viewactive = true;
+	Net_SetWaiting();
 }
 
 //==========================================================================
 //
 // G_StartTravel
 //
-// Moves players (and eventually their inventory) to a different statnum,
+// Moves players (and eventually their owned Actors) to a different statnum,
 // so they will not be destroyed when switching levels. This only applies
 // to real players, not voodoo dolls.
 //
 //==========================================================================
 
-void FLevelLocals::StartTravel ()
+void FLevelLocals::UnlinkActorFromLevel(AActor& mo)
 {
-	if (deathmatch)
+	mo.UnlinkFromWorld(nullptr);
+	mo.UnlinkBehaviorsFromLevel();
+	const int tid = mo.tid;
+	mo.SetTID(0);
+	mo.tid = tid; // Restore the TID for later relinking.
+	mo.DeleteAttachedLights();
+}
+
+void FLevelLocals::AddToTravellingList(DThinker* th)
+{
+	if (th == nullptr || (th->ObjectFlags & (OF_EuthanizeMe | OF_Travelling)))
 		return;
 
-	for (int i = 0; i < MAXPLAYERS; ++i)
+	auto mo = dyn_cast<AActor>(th);
+	// No voodoo dolls allowed.
+	if (mo != nullptr && mo->player != nullptr && mo->player->mo != mo)
+		return;
+
+	th->ObjectFlags |= OF_Travelling;
+	TravellingThinkers.Push(th);
+	if (mo != nullptr)
 	{
-		if (playeringame[i])
+		if (mo->player != nullptr)
+			AddToTravellingList(mo->player->Bot);
+
+		if (!(mo->flags & MF_UNMORPHED))
+			AddToTravellingList(mo->alternative);
+
+		if (!mo->IsKindOf(NAME_Inventory) || mo->PointerVar<AActor>(NAME_Owner) == nullptr)
 		{
-			AActor *pawn = Players[i]->mo;
-			AActor *inv;
-			Players[i]->camera = nullptr;
+			for (AActor* inv = mo->Inventory; inv != nullptr; inv = inv->Inventory)
+				AddToTravellingList(inv);
+		}
+	}
+}
 
-			// Only living players travel. Dead ones get a new body on the new level.
-			if (Players[i]->health > 0)
-			{
-				pawn->UnlinkFromWorld (nullptr);
-				int tid = pawn->tid;	// Save TID
-				pawn->SetTID(0);
-				pawn->tid = tid;		// Restore TID (but no longer linked into the hash chain)
-				pawn->ChangeStatNum (STAT_TRAVELLING);
-				pawn->DeleteAttachedLights();
+void FLevelLocals::StartTravel()
+{
+	bTravelling = true;
 
-				for (inv = pawn->Inventory; inv != NULL; inv = inv->Inventory)
-				{
-					inv->ChangeStatNum (STAT_TRAVELLING);
-					inv->UnlinkFromWorld (nullptr);
-					inv->DeleteAttachedLights();
-					tid = inv->tid;
-					inv->SetTID(0);
-					inv->tid = tid;
-				}
-			}
+	if (!deathmatch)
+	{
+		for (size_t i = 0u; i < MAXPLAYERS; ++i)
+		{
+			if (PlayerInGame(i) && Players[i]->health > 0)
+				AddToTravellingList(Players[i]->mo);
 		}
 	}
 
-	BotInfo.StartTravel ();
+	// Start building the list of everything that needs to travel. This will keep growing
+	// as we add more things so don't use the C++ iterators.
+	for (size_t i = 0u; i < TravellingThinkers.Size(); ++i)
+	{
+		auto th = TravellingThinkers[i];
+		if (!(th->ObjectFlags & OF_EuthanizeMe))
+		{
+			IFOVERRIDENVIRTUALPTRNAME(th, NAME_Thinker, PreTravelled)
+				VMCallVoid<DThinker*>(func, th);
+		}
+	}
+
+	bTravelling = false;
+}
+
+// We do this after snapshotting so the flag can be saved out but it won't be saved into
+// the actual STAT_TRAVELLING list when snapshotting.
+void FLevelLocals::MoveTravellers()
+{
+	for (size_t i = 0u; i < MAXPLAYERS; ++i)
+	{
+		if (PlayerInGame(i))
+			Players[i]->camera = nullptr;
+	}
+
+	for (auto th : TravellingThinkers)
+	{
+		if (th->ObjectFlags & OF_EuthanizeMe)
+			continue;
+
+		th->ChangeStatNum(STAT_TRAVELLING);
+		auto mo = dyn_cast<AActor>(th);
+		if (mo == nullptr)
+			continue;
+
+		UnlinkActorFromLevel(*mo);
+		mo->BlockingMobj = nullptr;
+		mo->BlockingLine = mo->MovementBlockingLine = nullptr;
+		mo->BlockingFloor = mo->BlockingCeiling = mo->Blocking3DFloor = nullptr;
+		mo->Sector = nullptr;
+		mo->subsector = nullptr;
+		mo->section = nullptr;
+		mo->floorsector = mo->ceilingsector = nullptr;
+	}
 }
 
 //==========================================================================
@@ -1657,136 +1750,171 @@ void FLevelLocals::StartTravel ()
 //
 //==========================================================================
 
-int FLevelLocals::FinishTravel ()
+void FLevelLocals::LinkActorToLevel(AActor& mo)
 {
-	auto it = GetThinkerIterator<AActor>(NAME_PlayerPawn, STAT_TRAVELLING);
-	AActor *pawn, *pawndup, *oldpawn, *next;
-	AActor *inv;
-	FPlayerStart *start;
-	int pnum;
-	int failnum = 0;
+	mo.LinkToWorld(nullptr);
+	mo.LinkBehaviorsToLevel();
+	const int tid = mo.tid;
+	mo.tid = 0;	// Allow the Actor to be linked back into the hashmap.
+	mo.SetTID(tid);
+	mo.SetDynamicLights();
+}
 
-	// 
-	AActor* pawns[MAXPLAYERS];
-	int pawnsnum = 0;
-
-	next = it.Next ();
-	while ( (pawn = next) != NULL)
+static int RemoveTravellingObjects(FLevelLocals& level, TArray<DThinker*>& toCallBack, bool clientSide)
+{
+	int failNum = 0;
+	auto it = clientSide ? level.GetClientSideThinkerIterator<DThinker>(NAME_None, STAT_TRAVELLING) : level.GetThinkerIterator<DThinker>(NAME_None, STAT_TRAVELLING);
+	DThinker* th = nullptr;
+	while ((th = it.Next()) != nullptr)
 	{
-		next = it.Next ();
-		pnum = int(pawn->player - players);
-		pawn->ChangeStatNum (STAT_PLAYER);
-		pawndup = pawn->player->mo;
-		assert (pawn != pawndup);
+		assert(th->ObjectFlags & OF_Travelling);
 
-		start = PickPlayerStart(pnum, 0);
-		if (start == NULL)
+		toCallBack.Push(th);
+
+		th->ObjectFlags &= ~OF_Travelling;
+		th->ChangeStatNum(th->GetStatNum());
+
+		auto mo = dyn_cast<AActor>(th);
+		if (mo == nullptr)
+			continue;
+
+		mo->flags2 &= ~MF2_BLASTED;
+		mo->ClearFOVInterpolation();
+		level.LinkActorToLevel(*mo);
+
+		if (mo->player == nullptr || !mo->IsKindOf(NAME_PlayerPawn))
 		{
-			if (pawndup != nullptr)
+			// Do some basic relinking. Modders will figure out what to do with it
+			// in the callback.
+			if (mo->flags & MF_UNMORPHED)
 			{
-				Printf(TEXTCOLOR_RED "No player %d start to travel to!\n", pnum + 1);
-				// Move to the coordinates this player had when they left the level.
-				pawn->SetXYZ(pawndup->Pos());
+				mo->Angles = mo->alternative->Angles;
+				mo->SetOrigin(mo->alternative->Pos(), true);
 			}
 			else
 			{
-				// Could not find a start for this player at all. This really should never happen but if it does, let's better abort.
-				if (failnum == 0) failnum = pnum + 1;
+				P_FindFloorCeiling(mo);
+			}
+
+			mo->Vel.Zero();
+			mo->ClearInterpolation();
+			mo->UpdateWaterLevel(false);
+			continue;
+		}
+
+		const int pNum = level.PlayerNum(mo->player);
+		// This will be whatever previous pawn was in the level for this player, be it from a snapshot
+		// or a map spawn.
+		auto mapDoll = mo->player->mo;
+		assert(mo != mapDoll);
+
+		auto start = level.PickPlayerStart(pNum, 0);
+		if (start == nullptr)
+		{
+			if (mapDoll != nullptr)
+			{
+				Printf(TEXTCOLOR_RED "No player %d start to travel to\n", pNum + 1);
+				mo->SetOrigin(mapDoll->Pos(), true);
+			}
+			else if (failNum <= 0)
+			{
+				// Couldn't find a start for this player at all. This should never happen but if it does, let's abort.
+				failNum = pNum + 1;
 			}
 		}
-		oldpawn = pawndup;
 
-		// The player being spawned here is a short lived dummy and
-		// must not start any ENTER script or big problems will happen.
-		pawndup = SpawnPlayer(start, pnum, SPF_TEMPPLAYER);
-		if (pawndup != NULL)
+		// Find the actual spawn location taking hub entrances into account. This player
+		// is only meant to be short-lived so don't fire off any events unless there truly
+		// was no other player spawned beforehand (can happen in co-op).
+		auto doll = level.SpawnPlayer(start, pNum, SPF_TEMPPLAYER);
+		if (doll != nullptr)
 		{
 			if (!(changeflags & CHANGELEVEL_KEEPFACING))
-			{
-				pawn->Angles = pawndup->Angles;
-			}
-			pawn->SetXYZ(pawndup->Pos());
-			pawn->Vel = pawndup->Vel;
-			pawn->Sector = pawndup->Sector;
-			pawn->floorz = pawndup->floorz;
-			pawn->ceilingz = pawndup->ceilingz;
-			pawn->dropoffz = pawndup->dropoffz;
-			pawn->floorsector = pawndup->floorsector;
-			pawn->floorpic = pawndup->floorpic;
-			pawn->floorterrain = pawndup->floorterrain;
-			pawn->ceilingsector = pawndup->ceilingsector;
-			pawn->ceilingpic = pawndup->ceilingpic;
-			pawn->Floorclip = pawndup->Floorclip;
-			pawn->waterlevel = pawndup->waterlevel;
-			pawn->waterdepth = pawndup->waterdepth;
-		}
-		else if (failnum == 0)	// In the failure case this may run into some undefined data.
-		{
-			P_FindFloorCeiling(pawn);
-		}
-		pawn->target = nullptr;
-		pawn->lastenemy = nullptr;
-		pawn->player->mo = pawn;
-		pawn->player->camera = pawn;
-		pawn->player->viewheight = pawn->player->DefaultViewHeight();
-		pawn->flags2 &= ~MF2_BLASTED;
-		if (oldpawn != nullptr)
-		{
-			PlayerPointerSubstitution (oldpawn, pawn, true);
-			oldpawn->Destroy();
-		}
-		if (pawndup != NULL)
-		{
-			pawndup->Destroy();
-		}
-		pawn->LinkToWorld (nullptr);
-		pawn->ClearInterpolation();
-		pawn->ClearFOVInterpolation();
-		int tid = pawn->tid;	// Save TID (actor isn't linked into the hash chain yet)
-		pawn->tid = 0;				// Reset TID
-		pawn->SetTID(tid);			// Set TID (and link actor into the hash chain)
-		pawn->SetState(pawn->SpawnState);
-		pawn->player->SendPitchLimits();
+				mo->Angles = doll->Angles;
 
-		for (inv = pawn->Inventory; inv != NULL; inv = inv->Inventory)
-		{
-			inv->ChangeStatNum (STAT_INVENTORY);
-			inv->LinkToWorld (nullptr);
-			P_FindFloorCeiling(inv, FFCF_ONLYSPAWNPOS);
-			
-			tid = inv->tid;
-			inv->tid = 0;
-			inv->SetTID(tid);
-
-			IFVIRTUALPTRNAME(inv, NAME_Inventory, Travelled)
-			{
-				VMValue params[1] = { inv };
-				VMCall(func, params, 1, nullptr, 0);
-			}
+			mo->SetOrigin(doll->Pos(), true);
+			mo->Vel = doll->Vel;
 		}
-		if (ib_compatflags & BCOMPATF_RESETPLAYERSPEED)
+		else
 		{
-			pawn->Speed = pawn->GetDefault()->Speed;
+			P_FindFloorCeiling(mo);
 		}
 
-		IFVIRTUALPTRNAME(pawn, NAME_PlayerPawn, Travelled)
+		mo->ClearInterpolation();
+		mo->UpdateWaterLevel(false);
+
+		mo->target = nullptr;
+		mo->lastenemy = nullptr;
+		mo->player->mo = mo;
+		mo->player->camera = mo;
+		mo->player->viewheight = mo->player->DefaultViewHeight();
+
+		if (mapDoll != nullptr)
 		{
-			VMValue params[1] = { pawn };
-			VMCall(func, params, 1, nullptr, 0);
+			// Make sure anything targetting the previous pawn gets pointed back to the real one.
+			PlayerPointerSubstitution(mapDoll, mo, true);
+			mapDoll->Destroy();
 		}
-		// [ZZ] we probably don't want to fire any scripts before all players are in, especially with runNow = true.
-		pawns[pawnsnum++] = pawn;
+		// Don't propagate back any changes this might've made from ZScript since it's meant
+		// to be temporary only.
+		if (doll != nullptr)
+			doll->Destroy();
+
+		mo->player->SendPitchLimits();
+		if (level.ib_compatflags & BCOMPATF_RESETPLAYERSPEED)
+			mo->Speed = mo->GetDefault()->Speed;
 	}
 
-	BotInfo.FinishTravel ();
-
-	// make sure that, after travelling has completed, no travelling thinkers are left.
-	// Since this list is excluded from regular thinker cleaning, anything that may survive through here
-	// will endlessly multiply and severely break the following savegames or just simply crash on broken pointers.
-	Thinkers.DestroyThinkersInList(STAT_TRAVELLING);
-	return failnum;
+	return failNum;
 }
- 
+
+int FLevelLocals::FinishTravel()
+{
+	TArray<DThinker*> toCallBack = {};
+	const int failNum = RemoveTravellingObjects(*this, toCallBack, false);
+	RemoveTravellingObjects(*this, toCallBack, true);
+
+	// Clean up anything that wasn't linked back to avoid memory leaks. We also need to wipe any
+	// remaining thinkers that were set to travel when they left if recovering from a snapshot,
+	// otherwise they'll pile up infinitely.
+	Thinkers.CleanUpTravellers(savegamerestore);
+	ClientSideThinkers.CleanUpTravellers(savegamerestore);
+
+	// Some ZScript will be called here so we have to do this last.
+	for (size_t i = 0u; i < MAXPLAYERS; ++i)
+	{
+		if (PlayerInGame(i) && Players[i]->mo != nullptr && !(Players[i]->mo->ObjectFlags & OF_EuthanizeMe) && toCallBack.Find(Players[i]->mo) < toCallBack.Size())
+		{
+			Players[i]->LastSafePos.Update(*Players[i]->mo, true);
+			Players[i]->mo->SetState(Players[i]->mo->SpawnState);
+		}
+	}
+
+	for (auto th : toCallBack)
+	{
+		if (!(th->ObjectFlags & OF_EuthanizeMe))
+		{
+			IFOVERRIDENVIRTUALPTRNAME(th, NAME_Thinker, Travelled)
+				VMCallVoid<DThinker*>(func, th);
+		}
+	}
+
+	for (auto th : toCallBack)
+	{
+		if (th->ObjectFlags & OF_EuthanizeMe)
+			continue;
+
+		auto mo = dyn_cast<AActor>(th);
+		if (mo != nullptr)
+		{
+			mo->ClearFOVInterpolation();
+			mo->ClearInterpolation();
+		}
+	}
+
+	return failNum;
+}
+
 //==========================================================================
 //
 //
@@ -1796,7 +1924,7 @@ FLevelLocals::FLevelLocals() : Behaviors(this), tagManager(this)
 {
 	// Make sure that these point to the right data all the time.
 	// This will be needed for as long as it takes to completely separate global UI state from per-level play state.
-	for (int i = 0; i < MAXPLAYERS; i++)
+	for (unsigned int i = 0; i < MAXPLAYERS; i++)
 	{
 		Players[i] = &players[i];
 	}
@@ -1818,7 +1946,7 @@ void FLevelLocals::Init()
 {
 	P_InitParticles(this);
 	P_ClearParticles(this);
-	
+
 	gravity = sv_gravity * 35/TICRATE;
 	aircontrol = sv_aircontrol;
 	AirControlChanged();
@@ -1833,8 +1961,11 @@ void FLevelLocals::Init()
 
 	skyspeed1 = info->skyspeed1;
 	skyspeed2 = info->skyspeed2;
+	skymistspeed = info->skymistspeed;
+	skymistyscale = info->skymistyscale;
 	skytexture1 = TexMan.GetTextureID(info->SkyPic1.GetChars(), ETextureType::Wall, FTextureManager::TEXMAN_Overridable | FTextureManager::TEXMAN_ReturnFirst);
 	skytexture2 = TexMan.GetTextureID(info->SkyPic2.GetChars(), ETextureType::Wall, FTextureManager::TEXMAN_Overridable | FTextureManager::TEXMAN_ReturnFirst);
+	skymisttexture = TexMan.GetTextureID(info->SkyMistPic.GetChars(), ETextureType::Wall, FTextureManager::TEXMAN_Overridable | FTextureManager::TEXMAN_ReturnFirst);
 	fadeto = info->fadeto;
 	cdtrack = info->cdtrack;
 	cdid = info->cdid;
@@ -1892,12 +2023,15 @@ void FLevelLocals::Init()
 	AuthorName = info->AuthorName;
 	hazardcolor = info->hazardcolor;
 	hazardflash = info->hazardflash;
-	
+
 	// GL fog stuff modifiable by SetGlobalFogParameter.
 	fogdensity = info->fogdensity;
 	outsidefogdensity = info->outsidefogdensity;
 	skyfog = info->skyfog;
 	deathsequence = info->deathsequence;
+
+	thickfogdistance = info->thickfogdistance;
+	thickfogmultiplier = info->thickfogmultiplier;
 
 	pixelstretch = info->pixelstretch;
 
@@ -1999,14 +2133,14 @@ void G_WriteVisited(FSerializer &arc)
 	}
 
 	// Store player classes to be used when spawning a random class
-	if (multiplayer)
+	if (!multiplayer || !deathmatch)
 	{
 		arc.Array("randomclasses", SinglePlayerClass, MAXPLAYERS);
 	}
 
 	if (arc.BeginObject("playerclasses"))
 	{
-		for (int i = 0; i < MAXPLAYERS; ++i)
+		for (unsigned int i = 0; i < MAXPLAYERS; ++i)
 		{
 			if (playeringame[i])
 			{
@@ -2030,7 +2164,7 @@ void G_ReadSnapshots(FResourceFile *resf)
 
 	G_ClearSnapshots();
 
-	for (unsigned j = 0; j < resf->EntryCount(); j++)
+	for (unsigned j = 0; j < resf->EntryCountU(); j++)
 	{
 		auto name = resf->getName(j);
 		auto ptr = strstr(name, ".map.json");
@@ -2082,10 +2216,13 @@ void G_ReadVisited(FSerializer &arc)
 
 	if (arc.BeginObject("playerclasses"))
 	{
-		for (int i = 0; i < MAXPLAYERS; ++i)
+		for (unsigned int i = 0; i < MAXPLAYERS; ++i)
 		{
 			FStringf key("%d", i);
-			arc(key.GetChars(), players[i].cls);
+			if (!arc.HasKey(key.GetChars()))
+				UpdatePlayerClass(i);
+			else
+				arc(key.GetChars(), players[i].cls);
 		}
 		arc.EndObject();
 	}
@@ -2133,7 +2270,7 @@ void P_WriteACSDefereds (FSerializer &arc)
 void P_ReadACSDefereds (FSerializer &arc)
 {
 	FString MapName;
-	
+
 	P_RemoveDefereds ();
 
 	if (arc.BeginObject("deferred"))
@@ -2197,7 +2334,7 @@ size_t DSectorMarker::PropagateMark()
 	int marked = 0;
 	bool moretodo = false;
 	int numsectors = Level->sectors.Size();
-	
+
 	for (i = 0; i < SECTORSTEPSIZE && SecNum + i < numsectors; ++i)
 	{
 		sector_t *sec = &Level->sectors[SecNum + i];
@@ -2214,7 +2351,7 @@ size_t DSectorMarker::PropagateMark()
 		SecNum += i;
 		moretodo = true;
 	}
-	
+
 	if (!moretodo && Level->Polyobjects.Size() > 0)
 	{
 		for (i = 0; i < POLYSTEPSIZE && PolyNum + i < (int)Level->Polyobjects.Size(); ++i)
@@ -2290,6 +2427,7 @@ void FLevelLocals::Mark()
 	GC::Mark(SpotState);
 	GC::Mark(FraggleScriptThinker);
 	GC::Mark(ACSThinker);
+	GC::Mark(ClientSideACSThinker);
 	GC::Mark(automap);
 	GC::Mark(interpolator.Head);
 	GC::Mark(SequenceListHead);
@@ -2302,6 +2440,7 @@ void FLevelLocals::Mark()
 		GC::Mark(localEventManager->LastEventHandler);
 	}
 	Thinkers.MarkRoots();
+	ClientSideThinkers.MarkRoots();
 	canvasTextureInfo.Mark();
 	for (auto &c : CorpseQueue)
 	{
@@ -2399,13 +2538,13 @@ void FLevelLocals::SetCompatLineOnSide(bool state)
 	else for (auto &l : lines) l.flags &= ~ML_COMPATSIDE;
 }
 
-int FLevelLocals::GetCompatibility(int mask)
+ELevelCompatFlags FLevelLocals::GetCompatibility(ELevelCompatFlags mask)
 {
 	if (info == nullptr) return mask;
 	else return (mask & ~info->compatmask) | (info->compatflags & info->compatmask);
 }
 
-int FLevelLocals::GetCompatibility2(int mask)
+ELevelCompatFlags2 FLevelLocals::GetCompatibility2(ELevelCompatFlags2 mask)
 {
 	return (info == nullptr) ? mask
 		: (mask & ~info->compatmask2) | (info->compatflags2 & info->compatmask2);
@@ -2414,7 +2553,7 @@ int FLevelLocals::GetCompatibility2(int mask)
 void FLevelLocals::ApplyCompatibility()
 {
 	int old = i_compatflags;
-	i_compatflags = GetCompatibility(compatflags) | ii_compatflags;
+	i_compatflags = GetCompatibility(ELevelCompatFlags::FromInt(compatflags)) | (ii_compatflags);
 	if ((old ^ i_compatflags) & COMPATF_POLYOBJ)
 	{
 		ClearAllSubsectorLinks();
@@ -2423,17 +2562,17 @@ void FLevelLocals::ApplyCompatibility()
 
 void FLevelLocals::ApplyCompatibility2()
 {
-	i_compatflags2 = GetCompatibility2(compatflags2) | ii_compatflags2;
+	i_compatflags2 = GetCompatibility2(ELevelCompatFlags2::FromInt(compatflags2)) | ii_compatflags2;
 }
 
-AActor* FLevelLocals::SelectActorFromTID(int tid, size_t index, AActor* defactor)
+AActor* FLevelLocals::SelectActorFromTID(int tid, size_t index, bool clientSide, AActor* defactor)
 {
 	if (tid == 0)
 		return defactor;
 
 	AActor* actor = nullptr;
 	size_t cur = 0u;
-	auto it = GetActorIterator(tid);
+	auto it = clientSide ? GetClientSideActorIterator(tid) : GetActorIterator(tid);
 	while ((actor = it.Next()) != nullptr)
 	{
 		if (cur == index)

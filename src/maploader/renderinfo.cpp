@@ -1,30 +1,31 @@
-// 
-//---------------------------------------------------------------------------
-//
-// Copyright(C) 2005-2016 Christoph Oelckers
-// All rights reserved.
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public License
-// along with this program.  If not, see http://www.gnu.org/licenses/
-//
-//--------------------------------------------------------------------------
-//
 /*
-** gl_setup.cpp
+** renderinfo.cpp
+**
 ** Initializes the data structures required by the hardware renderer to handle
 ** render hacks and optimization.
 **
-**/
+**---------------------------------------------------------------------------
+**
+** Copyright 2005-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** This program is free software: you can redistribute it and/or modify
+** it under the terms of the GNU Lesser General Public License as published by
+** the Free Software Foundation, either version 3 of the License, or
+** (at your option) any later version.
+**
+** This program is distributed in the hope that it will be useful,
+** but WITHOUT ANY WARRANTY; without even the implied warranty of
+** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+** GNU Lesser General Public License for more details.
+**
+** You should have received a copy of the GNU Lesser General Public License
+** along with this program.  If not, see <https://www.gnu.org/licenses/>.
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 #include "doomtype.h"
 #include "p_local.h"
@@ -36,6 +37,7 @@
 #include "g_levellocals.h"
 #include "maploader.h"
 #include "r_utility.h"
+#include "m_round.h"
 
 //==========================================================================
 //
@@ -52,11 +54,11 @@ struct MapSectionGenerator
 	{
 		double X, Y;
 
-		operator int() const { return xs_FloorToInt(X) + 65536 * xs_FloorToInt(Y); }
+		operator int() const { return RoundDown(X) + 65536 * RoundDown(Y); }
 		bool operator!= (const cvertex_t &other) const { return fabs(X - other.X) >= EQUAL_EPSILON || fabs(Y - other.Y) >= EQUAL_EPSILON; }
 		cvertex_t& operator =(const vertex_t *v) { X = v->fX(); Y = v->fY(); return *this; }
 	};
-	
+
 	MapSectionGenerator(FLevelLocals *l)
 	{
 		Level = l;
@@ -68,7 +70,7 @@ struct MapSectionGenerator
 
 	//==========================================================================
 	//
-	// 
+	//
 	//
 	//==========================================================================
 
@@ -178,7 +180,7 @@ struct MapSectionGenerator
 
 	//==========================================================================
 	//
-	// 
+	//
 	//
 	//==========================================================================
 
@@ -242,7 +244,7 @@ static void SpreadHackedFlag(subsector_t * sub)
 
 //==========================================================================
 //
-// 
+//
 //
 //==========================================================================
 
@@ -259,13 +261,13 @@ void MapLoader::PrepareSectorData()
 	}
 
 	auto subsectorbuffer = Level->subsectorbuffer.Data();
-	for (auto &sec : Level->sectors) 
+	for (auto &sec : Level->sectors)
 	{
 		sec.subsectors = subsectorbuffer;
 		subsectorbuffer += sec.subsectorcount;
 		sec.subsectorcount = 0;
 	}
-	
+
 	for (auto &sub : Level->subsectors)
 	{
 		sub.render_sector->subsectors[sub.render_sector->subsectorcount++] = &sub;
@@ -279,8 +281,8 @@ void MapLoader::PrepareSectorData()
 			seg_t * seg = sub.firstline;
 			for(uint32_t j=0;j<sub.numlines;j++)
 			{
-				if (!(sub.hacked&1) && seg[j].linedef==0 && 
-						seg[j].PartnerSeg!=NULL && 
+				if (!(sub.hacked&1) && seg[j].linedef==0 &&
+						seg[j].PartnerSeg!=NULL &&
 						sub.render_sector != seg[j].PartnerSeg->Subsector->render_sector)
 				{
 					DPrintf(DMSG_NOTIFY, "Found hack: (%f,%f) (%f,%f)\n", seg[j].v1->fX(), seg[j].v1->fY(), seg[j].v2->fX(), seg[j].v2->fY());
@@ -326,7 +328,7 @@ void MapLoader::PrepareTransparentDoors(sector_t * sector)
 			}
 
 			sector_t * sec=getNextSector(ln, sector);
-			if (sec==NULL) 
+			if (sec==NULL)
 			{
 				solidwall=true;
 				continue;
@@ -377,7 +379,7 @@ void MapLoader::PrepareTransparentDoors(sector_t * sector)
 
 //==========================================================================
 //
-// 
+//
 //
 //==========================================================================
 
@@ -477,7 +479,7 @@ static int segcmp(const void *a, const void *b)
 {
 	seg_t *A = *(seg_t**)a;
 	seg_t *B = *(seg_t**)b;
-	return xs_RoundToInt(FRACUNIT*(A->sidefrac - B->sidefrac));
+	return RoundHalfUp(FRACUNIT*(A->sidefrac - B->sidefrac));
 }
 
 //==========================================================================
@@ -718,7 +720,7 @@ void MapLoader::InitRenderInfo()
 	FloodSectorStacks();
 	TArray<int> checkmap(Level->vertexes.Size(), true);
 	memset(checkmap.Data(), -1, sizeof(int)*Level->vertexes.Size());
-	for(auto &sec : Level->sectors) 
+	for(auto &sec : Level->sectors)
 	{
 		int i = Index(&sec);
 		PrepareTransparentDoors(&sec);
@@ -863,7 +865,7 @@ void MapLoader::FixHoles()
 			{
 				if ((*segloop)[0]->v1 != segloop->Last()->v2)
 				{
-					// There was no connected seg, leaving an unclosed loop. 
+					// There was no connected seg, leaving an unclosed loop.
 					// Clear this and continue looking.
 					segloop->Clear();
 				}
@@ -937,7 +939,10 @@ void MapLoader::FixHoles()
 				DPrintf(DMSG_NOTIFY, "Adding dummy subsector for sector %d\n", Index(segloop[0]->Subsector->render_sector));
 
 				subsector_t &sub = Level->subsectors[newssstart++];
-				memset(&sub, 0, sizeof(sub));
+
+				sub.sprites.Clear();
+				memset((void*)&sub, 0, sizeof(sub));
+
 				sub.sector = segloop[0]->frontsector;
 				sub.render_sector = segloop[0]->Subsector->render_sector;
 				sub.numlines = segloop.Size();

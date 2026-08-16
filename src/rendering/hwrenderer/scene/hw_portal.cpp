@@ -1,27 +1,17 @@
-// 
-//---------------------------------------------------------------------------
-//
-// Copyright(C) 2004-2018 Christoph Oelckers
-// All rights reserved.
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public License
-// along with this program.  If not, see http://www.gnu.org/licenses/
-//
-//--------------------------------------------------------------------------
-//
 /*
 ** hw_portal.cpp
-**   portal maintenance classes for skyboxes, horizons etc. (API independent parts)
+**
+** portal maintenance classes for skyboxes, horizons etc. (API independent parts)
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 2004-2018 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
 **
 */
 
@@ -36,11 +26,15 @@
 #include "flatvertices.h"
 #include "hw_clock.h"
 #include "hw_lighting.h"
+#include "hw_cvars.h"
 #include "texturemanager.h"
+#include "hw_viewpointbuffer.h"
 
+// [UZDXREMA] Per-eye portal budget. Consumed by hw_drawinfo.cpp:
+// "if (gl_max_portals > -1 && portalsPerEye >= gl_max_portals) return;"
 CVAR(Int, gl_max_portals, -1, CVAR_ARCHIVE);
 
-EXTERN_CVAR(Int, r_mirror_recursions)
+// r_portal_recursions comes from hw_cvars.h (was r_mirror_recursions before 5.0.0-rc.2).
 EXTERN_CVAR(Bool, gl_mirror_player)
 EXTERN_CVAR(Bool, gl_portals)
 
@@ -98,7 +92,7 @@ void FPortalSceneState::EndFrame(HWDrawInfo *di, FRenderState &state)
 
 	while (di->Portals.Pop(p) && p)
 	{
-		if (gl_portalinfo) 
+		if (gl_portalinfo)
 		{
 			Printf("%sProcessing %s, depth = %d\n", indent.GetChars(), p->GetName(), renderdepth);
 		}
@@ -130,7 +124,7 @@ bool FPortalSceneState::RenderFirstSkyPortal(int recursion, HWDrawInfo *outer_di
 {
 	HWPortal * best = nullptr;
 	unsigned bestindex = 0;
-	bool usestencil = outer_di->Viewpoint.IsAllowedOoB();
+	bool usestencil = outer_di->Viewpoint.bDoOob;
 
 	// Find the one with the highest amount of lines.
 	// Normally this is also the one that saves the largest amount
@@ -163,29 +157,10 @@ bool FPortalSceneState::RenderFirstSkyPortal(int recursion, HWDrawInfo *outer_di
 	if (best)
 	{
 		portals.Delete(bestindex);
-		VSMatrix tempmatrixRight;
-		const bool useMultiviewSkyProjection = outer_di->HasMultiviewViewpoints && outer_di->HasMultiviewProjectionMatrix2;
-		if (usestencil && ((strcmp(best->GetName(), "Sky") == 0) || (strcmp(best->GetName(), "Skybox") == 0)))
-		{
-			tempmatrix = outer_di->VPUniforms.mProjectionMatrix; // ensure perspective projection matrix for skies
-			outer_di->VPUniforms.mProjectionMatrix = outer_di->ProjectionMatrix2;
-			if (useMultiviewSkyProjection)
-			{
-				tempmatrixRight = outer_di->MultiviewVPUniforms[1].mProjectionMatrix;
-				outer_di->MultiviewVPUniforms[0].mProjectionMatrix = outer_di->MultiviewProjectionMatrix2[0];
-				outer_di->MultiviewVPUniforms[1].mProjectionMatrix = outer_di->MultiviewProjectionMatrix2[1];
-			}
-		}
+		// The sky projection swap (mono and, for VR, the per-eye multiview matrices) used to
+		// live here in UZDXREMA. Upstream moved it into RenderPortal() below, which also covers
+		// the EndFrame() path, so it is re-seated there rather than duplicated here.
 		RenderPortal(best, state, usestencil, outer_di);
-		if (usestencil && ((strcmp(best->GetName(), "Sky") == 0) || (strcmp(best->GetName(), "Skybox") == 0)))
-		{
-			outer_di->VPUniforms.mProjectionMatrix = tempmatrix;
-			if (useMultiviewSkyProjection)
-			{
-				outer_di->MultiviewVPUniforms[0].mProjectionMatrix = tempmatrix;
-				outer_di->MultiviewVPUniforms[1].mProjectionMatrix = tempmatrixRight;
-			}
-		}
 		delete best;
 		return true;
 	}
@@ -195,7 +170,36 @@ bool FPortalSceneState::RenderFirstSkyPortal(int recursion, HWDrawInfo *outer_di
 
 void FPortalSceneState::RenderPortal(HWPortal *p, FRenderState &state, bool usestencil, HWDrawInfo *outer_di)
 {
+	VSMatrix tempmatrix;
+	VSMatrix tempmatrixLeft, tempmatrixRight;
+	const bool isSkyPortal = (p->GetHWPortalType() == HWP_SKY) || (p->GetHWPortalType() == HWP_SKYBOX);
+	const bool swapSkyProjection = outer_di->Viewpoint.bDoOrtho && isSkyPortal;
+	// [UZDXREMA] In stereo/multiview rendering the mono VPUniforms are not what the eyes read.
+	// The per-eye viewpoints need the very same perspective-projection substitution, otherwise
+	// the sky/skybox gets drawn through the orthographic matrix in VR.
+	const bool swapMultiviewSkyProjection = swapSkyProjection && outer_di->HasMultiviewViewpoints && outer_di->HasMultiviewProjectionMatrix2;
+	if (swapSkyProjection)
+	{
+		tempmatrix = outer_di->VPUniforms.mProjectionMatrix; // ensure perspective projection matrix for skies
+		outer_di->VPUniforms.mProjectionMatrix = outer_di->ProjectionMatrix2;
+		if (swapMultiviewSkyProjection)
+		{
+			tempmatrixLeft = outer_di->MultiviewVPUniforms[0].mProjectionMatrix;
+			tempmatrixRight = outer_di->MultiviewVPUniforms[1].mProjectionMatrix;
+			outer_di->MultiviewVPUniforms[0].mProjectionMatrix = outer_di->MultiviewProjectionMatrix2[0];
+			outer_di->MultiviewVPUniforms[1].mProjectionMatrix = outer_di->MultiviewProjectionMatrix2[1];
+		}
+	}
 	if (gl_portals) outer_di->RenderPortal(p, state, usestencil);
+	if (swapSkyProjection)
+	{
+		outer_di->VPUniforms.mProjectionMatrix = tempmatrix;
+		if (swapMultiviewSkyProjection)
+		{
+			outer_di->MultiviewVPUniforms[0].mProjectionMatrix = tempmatrixLeft;
+			outer_di->MultiviewVPUniforms[1].mProjectionMatrix = tempmatrixRight;
+		}
+	}
 }
 
 
@@ -210,7 +214,7 @@ void HWPortal::DrawPortalStencil(FRenderState &state, int pass)
 	if (mPrimIndices.Size() == 0)
 	{
 		mPrimIndices.Resize(2 * lines.Size());
-		
+
 		for (unsigned int i = 0; i < lines.Size(); i++)
 		{
 			mPrimIndices[i * 2] = lines[i].vertindex;
@@ -244,7 +248,7 @@ void HWPortal::DrawPortalStencil(FRenderState &state, int pass)
 		}
 
 	}
-	
+
 	for (unsigned int i = 0; i < mPrimIndices.Size(); i += 2)
 	{
 		state.Draw(DT_TriangleFan, mPrimIndices[i], mPrimIndices[i + 1], i == 0);
@@ -256,11 +260,11 @@ void HWPortal::DrawPortalStencil(FRenderState &state, int pass)
 
 		if (mBottomCap != ~0u)
 		{
-			state.Draw(DT_TriangleStrip, mBottomCap, 4, false);
+			state.Draw(DT_TriangleStrip, mBottomCap, 4, screen->IsVulkan());
 		}
 		if (mTopCap != ~0u)
 		{
-			state.Draw(DT_TriangleStrip, mTopCap, 4, false);
+			state.Draw(DT_TriangleStrip, mTopCap, 4, screen->IsVulkan());
 		}
 
 		if (pass == STP_DepthRestore) state.SetDepthRange(0, 1);
@@ -279,9 +283,16 @@ void HWPortal::SetupStencil(HWDrawInfo *di, FRenderState &state, bool usestencil
 	Clocker c(PortalAll);
 
 	rendered_portals++;
-	portalsPerEye++;
+	portalsPerEye++;	// [UZDXREMA] per-eye portal budget, see gl_max_portals
+
 	if (usestencil)
 	{
+		if (GetMirrorSide() != 0) // (strcmp(GetName(), "Planemirror ceiling") == 0) || (strcmp(GetName(), "Planemirror floor") == 0))
+		{
+			di->VPUniforms.mViewMatrix.translate(0.0, -zshift * GetMirrorSide(), 0.0);
+			screen->mViewpoints->SetViewpoint(state, &di->VPUniforms);
+		}
+
 		// Create stencil
 		state.SetStencil(0, SOP_Increment);	// create stencil, increment stencil of valid pixels
 		state.SetColorMask(false);
@@ -289,20 +300,20 @@ void HWPortal::SetupStencil(HWDrawInfo *di, FRenderState &state, bool usestencil
 		state.EnableTexture(false);
 		state.ResetColor();
 		state.SetDepthFunc(DF_Less);
-			
+
 		if (NeedDepthBuffer())
 		{
 			state.SetDepthMask(false);							// don't write to Z-buffer!
-				
+
 			DrawPortalStencil(state, STP_Stencil);
-				
+
 			// Clear Z-buffer
 			state.SetStencil(1, SOP_Keep); // draw sky into stencil. This stage doesn't modify the stencil.
 			state.SetDepthMask(true);							// enable z-buffer again
 			state.SetDepthRange(1, 1);
 			state.SetDepthFunc(DF_Always);
 			DrawPortalStencil(state, STP_DepthClear);
-				
+
 			// set normal drawing mode
 			state.EnableTexture(true);
 			state.SetDepthRange(0, 1);
@@ -314,7 +325,7 @@ void HWPortal::SetupStencil(HWDrawInfo *di, FRenderState &state, bool usestencil
 		{
 			// No z-buffer is needed therefore we can skip all the complicated stuff that is involved
 			// Note: We must draw the stencil with z-write enabled here because there is no second pass!
-				
+
 			state.SetDepthMask(true);
 			DrawPortalStencil(state, STP_AllInOne);
 			state.SetStencil(1, SOP_Keep); // draw sky into stencil. This stage doesn't modify the stencil.
@@ -325,8 +336,13 @@ void HWPortal::SetupStencil(HWDrawInfo *di, FRenderState &state, bool usestencil
 			state.SetDepthMask(false);							// don't write to Z-buffer!
 		}
 		screen->stencilValue++;
-		
-		
+
+		if (GetMirrorSide() != 0) // (strcmp(GetName(), "Planemirror ceiling") == 0) || (strcmp(GetName(), "Planemirror floor") == 0))
+		{
+			di->VPUniforms.mViewMatrix.translate(0.0, zshift * GetMirrorSide(), 0.0);
+			screen->mViewpoints->SetViewpoint(state, &di->VPUniforms);
+		}
+
 	}
 	else
 	{
@@ -359,12 +375,18 @@ void HWPortal::RemoveStencil(HWDrawInfo *di, FRenderState &state, bool usestenci
 
 	if (usestencil)
 	{
-		
+
+		if (GetMirrorSide() != 0) // (strcmp(GetName(), "Planemirror ceiling") == 0) || (strcmp(GetName(), "Planemirror floor") == 0))
+		{
+			di->VPUniforms.mViewMatrix.translate(0.0, -zshift * GetMirrorSide(), 0.0);
+			screen->mViewpoints->SetViewpoint(state, &di->VPUniforms);
+		}
+
 		state.SetColorMask(false);						// no graphics
 		state.SetEffect(EFF_NONE);
 		state.ResetColor();
 		state.EnableTexture(false);
-		
+
 		if (needdepth)
 		{
 			// first step: reset the depth buffer to max. depth
@@ -376,22 +398,27 @@ void HWPortal::RemoveStencil(HWDrawInfo *di, FRenderState &state, bool usestenci
 		{
 			state.EnableDepthTest(true);
 		}
-		
+
 		// second step: restore the depth buffer to the previous values and reset the stencil
 		state.SetDepthFunc(DF_LEqual);
 		state.SetDepthRange(0, 1);
 		state.SetStencil(0, SOP_Decrement);
 		DrawPortalStencil(state, STP_DepthRestore);
 		state.SetDepthFunc(DF_Less);
-		
-		
+
+
 		state.EnableTexture(true);
 		state.SetEffect(EFF_NONE);
 		state.SetColorMask(true);
 		screen->stencilValue--;
-		
+
 		// restore old stencil op.
 		state.SetStencil(0, SOP_Keep);
+		if (GetMirrorSide() != 0) // (strcmp(GetName(), "Planemirror ceiling") == 0) || (strcmp(GetName(), "Planemirror floor") == 0))
+		{
+			di->VPUniforms.mViewMatrix.translate(0.0, zshift * GetMirrorSide(), 0.0);
+			screen->mViewpoints->SetViewpoint(state, &di->VPUniforms);
+		}
 	}
 	else
 	{
@@ -404,10 +431,10 @@ void HWPortal::RemoveStencil(HWDrawInfo *di, FRenderState &state, bool usestenci
 			state.EnableDepthTest(true);
 			state.SetDepthMask(true);
 		}
-		
+
 		// This draws a valid z-buffer into the stencil's contents to ensure it
 		// doesn't get overwritten by the level's geometry.
-		
+
 		state.ResetColor();
 		state.SetDepthFunc(DF_LEqual);
 		state.SetDepthRange(0, 1);
@@ -426,7 +453,7 @@ void HWPortal::RemoveStencil(HWDrawInfo *di, FRenderState &state, bool usestenci
 
 //-----------------------------------------------------------------------------
 //
-// 
+//
 //
 //-----------------------------------------------------------------------------
 
@@ -521,14 +548,18 @@ int HWLinePortal::ClipPoint(const DVector2 &pos)
 bool HWMirrorPortal::Setup(HWDrawInfo *di, FRenderState &rstate, Clipper *clipper)
 {
 	auto state = mState;
-	if (state->renderdepth > r_mirror_recursions)
+	if (state->renderdepth > r_portal_recursions)
 	{
 		return false;
 	}
 
 	auto &vp = di->Viewpoint;
-	state->vpIsAllowedOoB = vp.IsAllowedOoB();
-	di->UpdateCurrentMapSection();
+	state->vpIsAllowedOoB = vp.bDoOob;
+	// di->UpdateCurrentMapSection();
+	if (linedef->sidedef[0] && linedef->sidedef[0]->numsegs > 0)
+	{
+		di->CurrentMapSections.Set(linedef->sidedef[0]->segs[0]->Subsector->mapsection); // This makes line mirrors work when viewed through portals
+	}
 
 	di->mClipPortal = this;
 	DAngle StartAngle = vp.Angles.Yaw;
@@ -560,7 +591,7 @@ bool HWMirrorPortal::Setup(HWDrawInfo *di, FRenderState &rstate, Clipper *clippe
 	}
 	else
 	{
-		// any mirror--use floats to avoid integer overflow. 
+		// any mirror--use floats to avoid integer overflow.
 		// Use doubles to avoid losing precision which is very important here.
 
 		double dx = v2->fX() - v1->fX();
@@ -597,7 +628,7 @@ bool HWMirrorPortal::Setup(HWDrawInfo *di, FRenderState &rstate, Clipper *clippe
 	angle_t af = di->FrustumAngle();
 	if (af < ANGLE_180) clipper->SafeAddClipRangeRealAngles(vp.Angles.Yaw.BAMs() + af, vp.Angles.Yaw.BAMs() - af);
 
-	if(!di->Viewpoint.IsAllowedOoB())
+	if(!di->Viewpoint.bDoOob)
 		clipper->SafeAddClipRange(linedef->v1, linedef->v2);
 	return true;
 }
@@ -628,12 +659,12 @@ bool HWLineToLinePortal::Setup(HWDrawInfo *di, FRenderState &rstate, Clipper *cl
 {
 	// TODO: Handle recursion more intelligently
 	auto &state = mState;
-	if (state->renderdepth>r_mirror_recursions)
+	if (state->renderdepth>r_portal_recursions)
 	{
 		return false;
 	}
 	auto &vp = di->Viewpoint;
-	state->vpIsAllowedOoB = vp.IsAllowedOoB();
+	state->vpIsAllowedOoB = vp.bDoOob;
 	di->mClipPortal = this;
 
 	line_t *origin = glport->lines[0]->mOrigin;
@@ -713,7 +744,7 @@ bool HWSkyboxPortal::Setup(HWDrawInfo *di, FRenderState &rstate, Clipper *clippe
 		return false;
 	}
 	auto &vp = di->Viewpoint;
-	state->vpIsAllowedOoB = vp.IsAllowedOoB();
+	state->vpIsAllowedOoB = vp.bDoOob;
 
 	state->skyboxrecursion++;
 	state->PlaneMirrorMode = 0;
@@ -736,7 +767,12 @@ bool HWSkyboxPortal::Setup(HWDrawInfo *di, FRenderState &rstate, Clipper *clippe
 
 	vp.ViewActor = origin;
 
+	di->VPUniforms.mThickFogDistance /= 16.0; // Skyviewpoint sectors are scaled up by 16x
+	di->VPUniforms.mThickFogMultiplier *= 16.0; // Skyviewpoint sectors are scaled up by 16x
 	di->SetupView(rstate, vp.Pos.X, vp.Pos.Y, vp.Pos.Z, !!(state->MirrorFlag & 1), !!(state->PlaneMirrorFlag & 1));
+	vp.OffPos = vp.Pos; // Do this after di->SetupView()
+	// [UZDXREMA] Strip the per-eye positional offset so a skybox reads as infinitely distant
+	// in stereo instead of as a small room sitting right in front of the player.
 	di->RemoveMultiviewPositionParallax();
 	di->ApplyViewpoint(rstate);
 	di->SetViewArea();
@@ -750,6 +786,8 @@ void HWSkyboxPortal::Shutdown(HWDrawInfo *di, FRenderState &rstate)
 {
 	rstate.SetDepthClamp(oldclamp);
 
+	di->VPUniforms.mThickFogDistance *= 16.0; // Revert back
+	di->VPUniforms.mThickFogMultiplier /= 16.0; // Revert back
 	auto state = mState;
 	portal->mFlags &= ~PORTSF_INSKYBOX;
 	state->inskybox = false;
@@ -827,7 +865,7 @@ bool HWSectorStackPortal::Setup(HWDrawInfo *di, FRenderState &rstate, Clipper *c
 
 	FSectorPortalGroup *portal = origin;
 	auto &vp = di->Viewpoint;
-	state->vpIsAllowedOoB = vp.IsAllowedOoB();
+	state->vpIsAllowedOoB = vp.bDoOob;
 
 	vp.Pos += origin->mDisplacement;
 	vp.ActorPos += origin->mDisplacement;
@@ -836,7 +874,7 @@ bool HWSectorStackPortal::Setup(HWDrawInfo *di, FRenderState &rstate, Clipper *c
 
 	// avoid recursions!
 	if (origin->plane != -1) screen->instack[origin->plane]++;
-	if (vp.IsAllowedOoB() && lines.Size() > 0)
+	if (vp.bDoOob && lines.Size() > 0)
 	{
 
 		flat.plane.GetFromSector(lines[0].sub->sector, origin->plane);
@@ -850,7 +888,7 @@ bool HWSectorStackPortal::Setup(HWDrawInfo *di, FRenderState &rstate, Clipper *c
 	// If the viewpoint is not within the portal, we need to invalidate the entire clip area.
 	// The portal will re-validate the necessary parts when its subsectors get traversed.
 	subsector_t *sub = di->Level->PointInRenderSubsector(vp.Pos);
-	if (vp.IsAllowedOoB()) sub = di->Level->PointInRenderSubsector(vp.OffPos);
+	if (vp.bDoOob) sub = di->Level->PointInRenderSubsector(vp.OffPos);
 	if (!(di->ss_renderflags[sub->Index()] & SSRF_SEEN))
 	{
 		clipper->SafeAddClipRange(0, ANGLE_MAX);
@@ -907,10 +945,21 @@ const char *HWSectorStackPortal::GetName() { return "Sectorstack"; }
 //
 //-----------------------------------------------------------------------------
 
+void HWPlaneMirrorPortal::SetupCoverage(HWDrawInfo *di)
+{
+	for (unsigned int i = 0; i < lines.Size(); i++)
+	{
+		subsector_t *sub = lines[i].sub;
+		di->CurrentMapSections.Set(sub->mapsection);
+		di->ss_renderflags[sub->Index()] |= SSRF_SEEN;
+	}
+	SetCoverage(di, di->Level->HeadNode());
+}
+
 bool HWPlaneMirrorPortal::Setup(HWDrawInfo *di, FRenderState &rstate, Clipper *clipper)
 {
 	auto state = mState;
-	if (state->renderdepth > r_mirror_recursions)
+	if (state->renderdepth > r_portal_recursions)
 	{
 		return false;
 	}
@@ -918,7 +967,7 @@ bool HWPlaneMirrorPortal::Setup(HWDrawInfo *di, FRenderState &rstate, Clipper *c
 	std::swap(screen->instack[sector_t::floor], screen->instack[sector_t::ceiling]);
 
 	auto &vp = di->Viewpoint;
-	state->vpIsAllowedOoB = vp.IsAllowedOoB();
+	state->vpIsAllowedOoB = vp.bDoOob;
 	old_pm = state->PlaneMirrorMode;
 
 	// the player is always visible in a mirror.
@@ -926,6 +975,8 @@ bool HWPlaneMirrorPortal::Setup(HWDrawInfo *di, FRenderState &rstate, Clipper *c
 
 	double planez = origin->ZatPoint(vp.Pos);
 	vp.Pos.Z = 2 * planez - vp.Pos.Z;
+	vp.OffPos.Z = 2 * planez - vp.OffPos.Z;
+	vp.ViewVector3D.Z = - vp.ViewVector3D.Z;
 	vp.ViewActor = nullptr;
 	state->PlaneMirrorMode = origin->fC() < 0 ? -1 : 1;
 
@@ -933,7 +984,9 @@ bool HWPlaneMirrorPortal::Setup(HWDrawInfo *di, FRenderState &rstate, Clipper *c
 	di->SetClipHeight(planez, state->PlaneMirrorMode < 0 ? -1.f : 1.f);
 	di->SetupView(rstate, vp.Pos.X, vp.Pos.Y, vp.Pos.Z, !!(state->MirrorFlag & 1), !!(state->PlaneMirrorFlag & 1));
 	vp.ViewVector3D.Z = - vp.ViewVector3D.Z;
-	vp.OffPos.Z = 2 * planez - vp.OffPos.Z;
+	// NOTE: vp.OffPos.Z is already mirrored above, before SetupView(). Do not mirror it a
+	// second time here (that was the old UZDXREMA placement) or it cancels back out.
+	SetupCoverage(di);
 	ClearClipper(di, clipper);
 
 	di->UpdateCurrentMapSection();
@@ -943,7 +996,7 @@ bool HWPlaneMirrorPortal::Setup(HWDrawInfo *di, FRenderState &rstate, Clipper *c
 
 void HWPlaneMirrorPortal::DrawPortalStencil(FRenderState &state, int pass)
 {
-	if (mState->vpIsAllowedOoB)
+	if (true) // mState->vpIsAllowedOoB)
 	{
 		bool isceiling = planesused & (1 << sector_t::ceiling);
 		for (unsigned int i = 0; i < lines.Size(); i++)
@@ -955,6 +1008,28 @@ void HWPlaneMirrorPortal::DrawPortalStencil(FRenderState &state, int pass)
 
 			state.SetNormal(flat.plane.plane.Normal().X, flat.plane.plane.Normal().Z, flat.plane.plane.Normal().Y);
 			state.DrawIndexed(DT_Triangles, flat.iboindex + flat.section->vertexindex, flat.section->vertexcount, i == 0);
+		}
+		// Cannot combine these two for loops because of the DrawIndexed() vs Draw() calls interleaving
+		for (unsigned int i = 0; i < lines.Size(); i++)
+		{
+			flat.section = lines[i].sub->section;
+			flat.iboindex = lines[i].sub->sector->iboindex[isceiling ? sector_t::ceiling : sector_t::floor];
+			flat.plane.GetFromSector(lines[i].sub->sector, isceiling ? sector_t::ceiling : sector_t::floor);
+			screen->mVertexData->Map();
+			auto verts = screen->mVertexData->AllocVertices(5);
+			auto ptr = verts.first;
+			ptr[0].Set(lines[i].vertexes[0]->p.X, flat.plane.plane.ZatPoint(lines[i].vertexes[0]->p),
+					   lines[i].vertexes[0]->p.Y, 0, 0);
+			ptr[1].Set(lines[i].vertexes[1]->p.X, flat.plane.plane.ZatPoint(lines[i].vertexes[1]->p),
+					   lines[i].vertexes[1]->p.Y, 0, 0);
+			ptr[2].Set(lines[i].vertexes[1]->p.X, flat.plane.plane.ZatPoint(lines[i].vertexes[1]->p) + zshift*GetMirrorSide(),
+					   lines[i].vertexes[1]->p.Y, 0, 0);
+			ptr[3].Set(lines[i].vertexes[0]->p.X, flat.plane.plane.ZatPoint(lines[i].vertexes[0]->p) + zshift*GetMirrorSide(),
+					   lines[i].vertexes[0]->p.Y, 0, 0);
+			ptr[4].Set(lines[i].vertexes[0]->p.X, flat.plane.plane.ZatPoint(lines[i].vertexes[0]->p),
+					   lines[i].vertexes[0]->p.Y, 0, 0);
+			screen->mVertexData->Unmap();
+			state.Draw(DT_TriangleStrip, verts.second, 5, screen->IsVulkan());
 		}
 	}
 	else
@@ -973,6 +1048,8 @@ void HWPlaneMirrorPortal::Shutdown(HWDrawInfo *di, FRenderState &rstate)
 }
 
 const char *HWPlaneMirrorPortal::GetName() { return origin->fC() < 0? "Planemirror ceiling" : "Planemirror floor"; }
+
+int HWPlaneMirrorPortal::GetMirrorSide() const { return origin->fC() < 0 ? -1 : 1; };
 
 
 //-----------------------------------------------------------------------------
@@ -1118,7 +1195,7 @@ void HWHorizonPortal::DrawContents(HWDrawInfo *di, FRenderState &state)
 
 //-----------------------------------------------------------------------------
 //
-// 
+//
 //
 //-----------------------------------------------------------------------------
 
@@ -1138,7 +1215,7 @@ void HWEEHorizonPortal::DrawContents(HWDrawInfo *di, FRenderState &state)
 	{
 		HWHorizonInfo horz;
 		horz.plane.GetFromSector(sector, sector_t::ceiling);
-		horz.lightlevel = hw_ClampLight(sector->GetCeilingLight());
+		horz.lightlevel = RescaleLightLevel(sector->GetCeilingLight());
 		horz.colormap = sector->Colormap;
 		horz.specialcolor = 0xffffffff;
 		if (portal->mType == PORTS_PLANE)
@@ -1152,7 +1229,7 @@ void HWEEHorizonPortal::DrawContents(HWDrawInfo *di, FRenderState &state)
 	{
 		HWHorizonInfo horz;
 		horz.plane.GetFromSector(sector, sector_t::floor);
-		horz.lightlevel = hw_ClampLight(sector->GetFloorLight());
+		horz.lightlevel = RescaleLightLevel(sector->GetFloorLight());
 		horz.colormap = sector->Colormap;
 		horz.specialcolor = 0xffffffff;
 		if (portal->mType == PORTS_PLANE)
@@ -1166,5 +1243,3 @@ void HWEEHorizonPortal::DrawContents(HWDrawInfo *di, FRenderState &state)
 
 const char *HWHorizonPortal::GetName() { return "Horizon"; }
 const char *HWEEHorizonPortal::GetName() { return "EEHorizon"; }
-
-

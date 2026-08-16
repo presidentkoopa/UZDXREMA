@@ -1,28 +1,21 @@
-//-----------------------------------------------------------------------------
-//
-// Copyright 2016-2018 Christoph Oelckers
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see http://www.gnu.org/licenses/
-//
-//-----------------------------------------------------------------------------
-//
-// VM iterators
-//
-// These classes are thin wrappers which wrap the standars iterators into a DObject
-// so that the VM can use them
-//
-//-----------------------------------------------------------------------------
+/*
+** vmiterators.cpp
+**
+** VM iterators
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 2016-2018 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+** These classes are thin wrappers which wrap the standard iterators into
+** a DObject so that the VM can use them
+*/
 
 #include "actor.h"
 #include "p_tags.h"
@@ -41,17 +34,17 @@ class DThinkerIterator : public DObject, public FThinkerIterator
 	DECLARE_ABSTRACT_CLASS(DThinkerIterator, DObject)
 
 public:
-	DThinkerIterator(FLevelLocals *Level, PClass *cls, int statnum = MAX_STATNUM + 1)
-		: FThinkerIterator(Level, cls, statnum)
+	DThinkerIterator(FLevelLocals *Level, PClass *cls, int statnum = MAX_STATNUM + 1, bool clientside = false)
+		: FThinkerIterator(Level, cls, statnum, clientside)
 	{
 	}
 };
 
 IMPLEMENT_CLASS(DThinkerIterator, true, false);
 
-static DThinkerIterator *CreateThinkerIterator(PClass *type, int statnum)
+static DThinkerIterator *CreateThinkerIterator(PClass *type, int statnum, bool clientSide)
 {
-	return Create<DThinkerIterator>(currentVMLevel, type, statnum);
+	return Create<DThinkerIterator>(currentVMLevel, type, statnum, clientSide);
 }
 
 DEFINE_ACTION_FUNCTION_NATIVE(DThinkerIterator, Create, CreateThinkerIterator)
@@ -59,7 +52,8 @@ DEFINE_ACTION_FUNCTION_NATIVE(DThinkerIterator, Create, CreateThinkerIterator)
 	PARAM_PROLOGUE;
 	PARAM_CLASS(type, DThinker);
 	PARAM_INT(statnum);
-	ACTION_RETURN_OBJECT(CreateThinkerIterator(type, statnum));
+	PARAM_BOOL(clientSide);
+	ACTION_RETURN_OBJECT(CreateThinkerIterator(type, statnum, clientSide));
 }
 
 static DThinker *NextThinker(DThinkerIterator *self, bool exact)
@@ -101,7 +95,7 @@ public:
 	FMultiBlockLinesIterator iterator;
 	FMultiBlockLinesIterator::CheckResult cres;
 
-	
+
 	DBlockLinesIterator(AActor *actor, double checkradius)
 		: iterator(check, actor, checkradius)
 	{
@@ -352,9 +346,9 @@ public:
 
 IMPLEMENT_CLASS(DActorIterator, true, false);
 
-static DActorIterator *CreateActI(FLevelLocals *Level, int tid, PClassActor *type)
+static DActorIterator *CreateActI(FLevelLocals *Level, int tid, PClassActor *type, bool clientSide)
 {
-	return Create<DActorIterator>(Level->TIDHash, type, tid);
+	return Create<DActorIterator>(clientSide ? Level->ClientSideTIDHash : Level->TIDHash, type, tid);
 }
 
 DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, CreateActorIterator, CreateActI)
@@ -362,7 +356,8 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, CreateActorIterator, CreateActI)
 	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
 	PARAM_INT(tid);
 	PARAM_CLASS(type, AActor);
-	ACTION_RETURN_OBJECT(CreateActI(self, tid, type));
+	PARAM_BOOL(clientSide)
+	ACTION_RETURN_OBJECT(CreateActI(self, tid, type, clientSide));
 }
 
 static AActor *NextActI(DActorIterator *self)
@@ -384,6 +379,126 @@ static void ReinitActI(DActorIterator *self)
 DEFINE_ACTION_FUNCTION_NATIVE(DActorIterator, Reinit, ReinitActI)
 {
 	PARAM_SELF_PROLOGUE(DActorIterator);
+	self->Reinit();
+	return 0;
+}
+
+//===========================================================================
+//
+// Behavior iterator. This can be created in two ways;
+// -Across an Actor's behaviors
+// -Across all behaviors of a given type
+//
+//===========================================================================
+
+class DBehaviorIterator : public DObject
+{
+	DECLARE_ABSTRACT_CLASS(DBehaviorIterator, DObject)
+	size_t _index;
+	TArray<TObjPtr<DBehavior*>> _behaviors;
+
+public:
+	DBehaviorIterator(const AActor& mobj, PClass* type)
+	{
+		TMap<FName, TObjPtr<DBehavior*>>::ConstIterator it = { mobj.Behaviors };
+		TMap<FName, TObjPtr<DBehavior*>>::ConstPair* pair = nullptr;
+		while (it.NextPair(pair))
+		{
+			auto b = pair->Value.Get();
+			if (b == nullptr)
+				continue;
+
+			if (type == nullptr || b->IsKindOf(type))
+				_behaviors.Push(pair->Value);
+		}
+
+		Reinit();
+	}
+
+	DBehaviorIterator(const FLevelLocals& level, PClass* type, PClass* ownerType, bool clientSide)
+	{
+		auto& list = clientSide ? level.ClientSideActorBehaviors : level.ActorBehaviors;
+		for (auto& b : list)
+		{
+			if (ownerType != nullptr && !b->Owner->IsKindOf(ownerType))
+				continue;
+
+			if (type == nullptr || b->IsKindOf(type))
+				_behaviors.Push(MakeObjPtr<DBehavior*>(b));
+		}
+
+		Reinit();
+	}
+
+	DBehavior* Next()
+	{
+		while (_index < _behaviors.Size())
+		{
+			auto b = _behaviors[_index++].Get();
+			if (b != nullptr)
+				return b;
+		}
+
+		return nullptr;
+	}
+
+	void Reinit() { _index = 0u; }
+
+	void OnDestroy() override
+	{
+		_behaviors.Reset();
+		Super::OnDestroy();
+	}
+};
+
+IMPLEMENT_CLASS(DBehaviorIterator, true, false);
+
+static DBehaviorIterator* CreateBehaviorItFromActor(AActor* mobj, PClass* type)
+{
+	return Create<DBehaviorIterator>(*mobj, type);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(DBehaviorIterator, CreateFrom, CreateBehaviorItFromActor)
+{
+	PARAM_PROLOGUE;
+	PARAM_OBJECT_NOT_NULL(mobj, AActor);
+	PARAM_CLASS(type, DBehavior);
+	ACTION_RETURN_OBJECT(CreateBehaviorItFromActor(mobj, type));
+}
+
+static DBehaviorIterator* CreateBehaviorIt(PClass* type, PClass* ownerType, bool clientSide)
+{
+	return Create<DBehaviorIterator>(*primaryLevel, type, ownerType, clientSide);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(DBehaviorIterator, Create, CreateBehaviorIt)
+{
+	PARAM_PROLOGUE;
+	PARAM_CLASS(type, DBehavior);
+	PARAM_CLASS(ownerType, AActor);
+	PARAM_BOOL(clientSide);
+	ACTION_RETURN_OBJECT(CreateBehaviorIt(type, ownerType, clientSide));
+}
+
+static DBehavior* NextBehavior(DBehaviorIterator* self)
+{
+	return self->Next();
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(DBehaviorIterator, Next, NextBehavior)
+{
+	PARAM_SELF_PROLOGUE(DBehaviorIterator);
+	ACTION_RETURN_OBJECT(self->Next());
+}
+
+static void ReinitBehavior(DBehaviorIterator* self)
+{
+	self->Reinit();
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(DBehaviorIterator, Reinit, ReinitBehavior)
+{
+	PARAM_SELF_PROLOGUE(DBehaviorIterator);
 	self->Reinit();
 	return 0;
 }

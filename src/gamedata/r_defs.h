@@ -1,31 +1,22 @@
-//-----------------------------------------------------------------------------
-//
-// Copyright 1993-1996 id Software
-// Copyright 1994-1996 Raven Software
-// Copyright 1998-1998 Chi Hoang, Lee Killough, Jim Flynn, Rand Phares, Ty Halderman
-// Copyright 1999-2016 Randy Heit
-// Copyright 2002-2016 Christoph Oelckers
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see http://www.gnu.org/licenses/
-//
-//-----------------------------------------------------------------------------
-//
-// DESCRIPTION:
-//		Refresh/rendering module, shared data struct definitions.
-//
-//-----------------------------------------------------------------------------
-
+/*
+** r_defs.h
+**
+** Refresh/rendering module, shared data struct definitions.
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1994-1996 Raven Software
+** Copyright 1998-1998 Chi Hoang, Lee Killough, Jim Flynn, Rand Phares, Ty Halderman
+** Copyright 1999-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 #ifndef __R_DEFS_H__
 #define __R_DEFS_H__
@@ -332,7 +323,7 @@ public:
 	{
 		return D;
 	}
-	
+
 	bool isSlope() const
 	{
 		return !normal.XY().isZero();
@@ -520,7 +511,7 @@ enum
 	SECF_NORESPAWN		= 8,	// players can not respawn in this sector
 	SECF_FRICTION		= 16,	// sector has friction enabled
 	SECF_PUSH			= 32,	// pushers enabled
-	SECF_SILENTMOVE		= 64,	// Sector movement makes mo sound (Eternity got this so this may be useful for an extended cross-port standard.) 
+	SECF_SILENTMOVE		= 64,	// Sector movement makes mo sound (Eternity got this so this may be useful for an extended cross-port standard.)
 	SECF_DMGTERRAINFX	= 128,	// spawns terrain splash when inflicting damage
 	SECF_ENDGODMODE		= 256,	// getting damaged by this sector ends god mode
 	SECF_ENDLEVEL		= 512,	// ends level when health goes below 10
@@ -604,12 +595,12 @@ struct FTransform
 	// [RH] floor and ceiling texture rotation
 	DAngle Angle, baseAngle;
 
-	finline bool operator == (const FTransform &other) const
+	inline bool operator == (const FTransform &other) const
 	{
 		return xOffs == other.xOffs && yOffs + baseyOffs == other.yOffs + other.baseyOffs &&
 			xScale == other.xScale && yScale == other.yScale && Angle + baseAngle == other.Angle + other.baseAngle;
 	}
-	finline bool operator != (const FTransform &other) const
+	inline bool operator != (const FTransform &other) const
 	{
 		return !(*this == other);
 	}
@@ -790,6 +781,7 @@ struct sector_t
 	int prevsec;						// -1 or number of sector for previous step
 	int nextsec;						// -1 or number of next step sector
 
+	int LastDamage;						// Last time this sector had SectorDamage called on it.
 	FName damagetype;					// [RH] Means-of-death for applied damage
 	int damageamount;					// [RH] Damage to do while standing on floor
 	short damageinterval;				// Interval for damage application
@@ -809,7 +801,7 @@ struct sector_t
 	// Member functions
 
 private:
-	bool MoveAttached(int crush, double move, int floorOrCeiling, bool resetfailed, bool instant = false);
+	bool MoveAttached(int crush, double move, int floorOrCeiling, bool resetfailed, bool instant = false, bool* crushed = nullptr);
 public:
 	EMoveResult MoveFloor(double speed, double dest, int crush, int direction, bool hexencrush, bool instant = false);
 	EMoveResult MoveCeiling(double speed, double dest, int crush, int direction, bool hexencrush);
@@ -829,7 +821,7 @@ public:
 	void RemoveForceField();
 	int Index() const { return sectornum; }
 
-	bool IsDangerous(const DVector3& pos, double height) const;
+	bool IsDangerous(const DVector3& pos, double height, int moTID);
 
 	void AdjustFloorClip () const;
 	void SetColor(PalEntry pe, int desat);
@@ -964,7 +956,7 @@ public:
 		planes[pos].Flags |= Or;
 	}
 
-	int GetPlaneLight(int pos) const 
+	int GetPlaneLight(int pos) const
 	{
 		return planes[pos].Light;
 	}
@@ -1080,7 +1072,7 @@ public:
 
 	void SetPlaneReflectivity(int pos, double val)
 	{
-		reflect[pos] = val;
+		reflect[pos] = float(val);
 	}
 
 	double GetPlaneReflectivity(int pos)
@@ -1242,6 +1234,8 @@ enum
 	WALLF_ABSLIGHTING_MID		= WALLF_ABSLIGHTING_TIER << 1, 	// Mid tier light is absolute instead of relative
 	WALLF_ABSLIGHTING_BOTTOM 	= WALLF_ABSLIGHTING_TIER << 2,	// Bottom tier light is absolute instead of relative
 
+	WALLF_BLOCKRENDERING		= 4096,	// [XA] Do not render any geometry on the other side of this line (similar to 1-sided walls, but only when seeing through this side of the line)
+
 	WALLF_DITHERTRANS			= 8192,	// Render with dithering transparency shader (gets reset every frame)
 	WALLF_DITHERTRANS_TOP		= WALLF_DITHERTRANS << 0,	// Top tier (gets reset every frame)
 	WALLF_DITHERTRANS_MID		= WALLF_DITHERTRANS << 1,	// Mid tier (gets reset every frame)
@@ -1329,8 +1323,8 @@ struct side_t
 	int16_t		Light;
 	int16_t		TierLights[3];	// per-tier light levels
 	uint16_t	Flags;
+	double		alpha;
 	int			UDMFIndex;		// needed to access custom UDMF fields which are stored in loading order.
-	FLightNode * lighthead;		// all dynamic lights that may affect this wall
 	LightmapSurface* lightmap;
 	seg_t **segs;	// all segs belonging to this sidedef in ascending order. Used for precise rendering
 	int numsegs;
@@ -1350,6 +1344,22 @@ struct side_t
 		TierLights[which] = l;
 	}
 
+	void SetAlpha(double a)
+	{
+		alpha = a;
+	}
+
+	void ClearAlpha()
+	{
+		// [XA] use DBL_MAX as a sentinel value for "alpha not set",
+		// instructing the renderer to use the linedef's alpha instead
+		alpha = DBL_MAX;
+	}
+
+	bool HasAlpha()
+	{
+		return alpha != DBL_MAX;
+	}
 
 	FLevelLocals *GetLevel()
 	{
@@ -1369,7 +1379,7 @@ struct side_t
 	{
 		textures[which].xOffset = offset;;
 	}
-	
+
 	void SetTextureXOffset(double offset)
 	{
 		textures[top].xOffset =
@@ -1678,7 +1688,7 @@ struct seg_t
 {
 	vertex_t*	v1;
 	vertex_t*	v2;
-	
+
 	side_t* 	sidedef;
 	line_t* 	linedef;
 
@@ -1693,7 +1703,7 @@ struct seg_t
 	int				segnum;
 
 	int Index() const { return segnum; }
-	
+
 	FLevelLocals *GetLevel() const
 	{
 		return frontsector->Level;
@@ -1753,7 +1763,7 @@ struct subsector_t
 };
 
 
-	
+
 
 //
 // BSP node.
@@ -1911,7 +1921,7 @@ inline void sector_t::SetColor(PalEntry pe, int desat) { ::SetColor(this, pe, de
 inline void sector_t::SetFade(PalEntry pe) { ::SetFade(this, pe); }
 inline int sector_t::GetFloorLight() const { return ::GetFloorLight(this); }
 inline int sector_t::GetCeilingLight() const { return ::GetCeilingLight(this); }
-inline int sector_t::GetSpriteLight() const 
+inline int sector_t::GetSpriteLight() const
 {
 	return GetTexture(ceiling) == skyflatnum ? GetCeilingLight() : GetFloorLight();
 }

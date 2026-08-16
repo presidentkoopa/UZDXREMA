@@ -1,33 +1,23 @@
 /*
+** sc_man_scanner.re
+**
 **
 **
 **---------------------------------------------------------------------------
-** Copyright 2005-2016 Randy Heit
+**
+** Copyright 2005-2016 Marisa Heit
 ** Copyright 2005-2016 Christoph Oelckers
-** All rights reserved.
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+**---------------------------------------------------------------------------
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
@@ -177,7 +167,7 @@ std2:
 		/* Other keywords from UnrealScript */
 		'abstract'					{ RET(TK_Abstract); }
 		'foreach'					{ RET(ParseVersion >= MakeVersion(4, 10, 0)? TK_ForEach : TK_Identifier); }
-		'unsafe'					{ RET(ParseVersion >= MakeVersion(4, 14, 2)? TK_Unsafe : TK_Identifier); }
+		'unsafe'					{ RET(ParseVersion >= MakeVersion(4, 15, 1)? TK_Unsafe : TK_Identifier); }
 		'true'						{ RET(TK_True); }
 		'false'						{ RET(TK_False); }
 		'none'						{ RET(TK_None); }
@@ -189,6 +179,7 @@ std2:
 		'out'						{ RET(ParseVersion >= MakeVersion(1, 0, 0)? TK_Out : TK_Identifier); }
 		'static'					{ RET(TK_Static); }
 		'transient'					{ RET(ParseVersion >= MakeVersion(1, 0, 0)? TK_Transient : TK_Identifier); }
+		'norollback'				{ RET(ParseVersion >= MakeVersion(4, 15, 1)? TK_NoRollback : TK_Identifier); }
 		'final'						{ RET(ParseVersion >= MakeVersion(1, 0, 0)? TK_Final : TK_Identifier); }
 		'extend'					{ RET(ParseVersion >= MakeVersion(1, 0, 0)? TK_Extend : TK_Identifier); }
 		'protected'					{ RET(ParseVersion >= MakeVersion(1, 0, 0)? TK_Protected : TK_Identifier); }
@@ -223,7 +214,7 @@ std2:
 		'bright'					{ RET(StateOptions ? TK_Bright : TK_Identifier); }
 		'fast'						{ RET(StateOptions ? TK_Fast : TK_Identifier); }
 		'slow'						{ RET(StateOptions ? TK_Slow : TK_Identifier); }
-		'ticadjust'					{ RET(StateOptions ? TK_NoDelay : TK_Identifier); }	
+		'ticadjust'					{ RET(StateOptions ? TK_NoDelay : TK_Identifier); }
 		'nodelay'					{ RET(StateOptions ? TK_NoDelay : TK_Identifier); }
 		'canraise'					{ RET(StateOptions ? TK_CanRaise : TK_Identifier); }
 		'offset'					{ RET(StateOptions ? TK_Offset : TK_Identifier); }
@@ -272,6 +263,7 @@ std2:
 		"!="						{ RET(TK_Neq); }
 		"~=="						{ RET(TK_ApproxEq); }
 		"<>="						{ RET(TK_LtGtEq); }
+		"<=>"						{ RET(TK_LtEqGt); }
 		"**"						{ RET(TK_MulMul); }
 		"::"						{ RET(TK_ColonColon); }
 		"->"						{ RET(TK_Arrow); }

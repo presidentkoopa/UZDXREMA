@@ -1,105 +1,112 @@
-//-----------------------------------------------------------------------------
-//
-// Copyright 1993-1996 id Software
-// Copyright 1999-2016 Randy Heit
-// Copyright 2002-2016 Christoph Oelckers
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see http://www.gnu.org/licenses/
-//
-//-----------------------------------------------------------------------------
-//
+/*
+** g_game.cpp
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2002-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
 
+// HEADER FILES ------------------------------------------------------------
 
-
-#include <string.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <stddef.h>
 #include <memory>
+#include <stdio.h>
+#include <string.h>
 
-#include "i_time.h"
-
-#include "version.h"
-#include "doomdef.h" 
-#include "doomstat.h"
-#include "d_protocol.h"
+#include "a_dynlight.h"
+#include "a_keys.h"
+#include "a_morph.h"
+#include "am_map.h"
+#include "basics.h"
+#include "c_bind.h"
+#include "c_buttons.h"
+#include "c_console.h"
+#include "c_dispatch.h"
+#include "cmdlib.h"
+#include "d_buttons.h"
+#include "d_event.h"
+#include "d_main.h"
+#include "d_net.h"
 #include "d_netinf.h"
+#include "d_protocol.h"
+#include "dobjgc.h"
+#include "doomdef.h"
+#include "doommenu.h"
+#include "doomstat.h"
+#include "events.h"
+#include "filesystem.h"
+#include "fs_findfile.h"
+#include "g_game.h"
+#include "g_hub.h"
+#include "g_levellocals.h"
+#include "gi.h"
+#include "gstrings.h"
+#include "hu_stuff.h"
+#include "hwrenderer/scene/hw_drawinfo.h"
+#include "i_interface.h"
+#include "i_system.h"
+#include "i_time.h"
 #include "intermission/intermission.h"
 #include "m_argv.h"
 #include "m_misc.h"
-#include "menu.h"
-#include "m_crc32.h"
-#include "p_saveg.h"
-#include "p_tick.h"
-#include "d_main.h"
-#include "wi_stuff.h"
-#include "hu_stuff.h"
-#include "st_stuff.h"
-#include "am_map.h"
-#include "c_console.h"
-#include "c_bind.h"
-#include "c_dispatch.h"
-#include "filesystem.h"
-#include "p_local.h" 
-#include "gstrings.h"
-#include "r_sky.h"
-#include "g_game.h"
-#include "sbar.h"
 #include "m_png.h"
-#include "a_keys.h"
-#include "cmdlib.h"
-#include "d_net.h"
-#include "d_event.h"
-#include "p_acs.h"
-#include "p_effect.h"
-#include "m_joy.h"
-#include "r_utility.h"
-#include "a_morph.h"
-#include "p_spec.h"
-#include "serializer_doom.h"
-#include "vm.h"
-#include "dobjgc.h"
-#include "gi.h"
-#include "a_dynlight.h"
-#include "i_system.h"
-#include "p_conversation.h"
-#include "v_palette.h"
-#include "s_music.h"
-#include "p_setup.h"
-#include "d_event.h"
+#include "menu.h"
 #include "model.h"
-
-#include "v_video.h"
-#include "g_hub.h"
-#include "g_levellocals.h"
-#include "events.h"
-#include "c_buttons.h"
-#include "d_buttons.h"
-#include "hwrenderer/scene/hw_drawinfo.h"
-#include "doommenu.h"
+#include "p_acs.h"
+#include "p_conversation.h"
+#include "p_effect.h"
+#include "p_local.h"
+#include "p_saveg.h"
+#include "p_setup.h"
+#include "p_spec.h"
+#include "p_tick.h"
+#include "r_sky.h"
+#include "r_utility.h"
+#include "s_music.h"
+#include "sbar.h"
 #include "screenjob.h"
-#include "i_interface.h"
-#include "fs_findfile.h"
+#include "serializer_doom.h"
+#include "st_stuff.h"
+#include "v_palette.h"
+#include "version.h"
+#include "vm.h"
+#include "wi_stuff.h"
+
+// [UZDXREMA] Fork-owned VR headers. Kept out of the alphabetical block above so
+// they stay obvious when merging upstream again.
 #include "hw_vrmodes.h"
 #include "hw_vrwheel.h"
 #include <QzDoom/VrCommon.h>
 #include <cmath>
 
+// MACROS ------------------------------------------------------------------
 
-static FRandom pr_dmspawn ("DMSpawn");
-static FRandom pr_pspawn ("PlayerSpawn");
+#define MAXPLMOVE        (forwardmove[1])
+#define TURBOTHRESHOLD   12800
+#define SLOWTURNTICS     6
+#define ANALOG_LOOK_BASE 1280
 
+// TYPES -------------------------------------------------------------------
+
+enum {
+	SPY_CANCEL = 0,
+	SPY_NEXT,
+	SPY_PREV,
+};
+
+// EXTERNAL FUNCTION PROTOTYPES --------------------------------------------
+
+// [UZDXREMA] VR locomotion / canonical-aim helpers.
 static inline int joyint(double val);
 EXTERN_CVAR(Float, vr_vunits_per_meter);
 
@@ -136,7 +143,7 @@ static void VR_ApplyTeleportBurstMove(int forwardScale, int sideScale, int &forw
 	forward += joyint_deadzone(clamp(burstForwardUnits / kTeleportBurstUnitsPerTick, -1.0f, 1.0f) * forwardScale);
 }
 
-static void VR_ApplyMultiplayerCrouchButton(ticcmd_t* cmd, bool vrActive)
+static void VR_ApplyMultiplayerCrouchButton(usercmd_t* cmd, bool vrActive)
 {
 	static bool vrMpCrouchTarget = false;
 	static float vrMpCrouchBlend = 0.0f;
@@ -186,7 +193,7 @@ static void VR_ApplyMultiplayerCrouchButton(ticcmd_t* cmd, bool vrActive)
 
 	if (vrMpCrouchBlend >= 0.5f)
 	{
-		cmd->ucmd.buttons |= BT_CROUCH;
+		cmd->buttons |= BT_CROUCH;
 	}
 }
 
@@ -268,28 +275,109 @@ namespace
 	}
 }
 
-extern int startpos, laststartpos;
-
 bool WriteZip(const char* filename, const FileSys::FCompressedBuffer* content, size_t contentcount);
-bool	G_CheckDemoStatus (void);
-void	G_ReadDemoTiccmd (ticcmd_t *cmd, int player);
-void	G_WriteDemoTiccmd (ticcmd_t *cmd, int player, int buf);
-void	G_PlayerReborn (int player);
 
-void	G_DoNewGame (void);
-void	G_DoLoadGame (void);
-void	G_DoPlayDemo (void);
-void	G_DoCompleted (void);
-void	G_DoVictory (void);
-void	G_DoWorldDone (void);
-void	G_DoSaveGame (bool okForQuicksave, bool forceQuicksave, FString filename, const char *description);
-void	G_DoAutoSave ();
-void	G_DoQuickSave ();
+void G_DoCompleted (void);
+void G_DoMapWarp();
+void G_DoNewGame (void);
+void G_DoQuickSave ();
+void G_DoWorldDone (void);
 
 void STAT_Serialize(FSerializer &file);
 
-CVARD_NAMED(Int, gameskill, skill, 2, CVAR_SERVERINFO|CVAR_LATCH, "sets the skill for the next newly started game")
-CVAR(Bool, save_formatted, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)	// use formatted JSON for saves (more readable but a larger files and a bit slower.
+bool CanChat();
+void CT_Stop();
+
+// PUBLIC FUNCTION PROTOTYPES ----------------------------------------------
+
+// PRIVATE FUNCTION PROTOTYPES ---------------------------------------------
+
+void G_ReadDemoTiccmd (usercmd_t *cmd, int player);
+void G_WriteDemoTiccmd (usercmd_t *cmd, int player, int buf);
+void G_PlayerReborn (int player);
+
+void G_DoAutoSave ();
+void G_DoPlayDemo (void);
+void G_DoSaveGame (bool okForQuicksave, bool forceQuicksave, FString filename, const char *description);
+void G_DoVictory (void);
+
+void SetupLoadingCVars();
+void FinishLoadingCVars();
+bool CheckGZDoomSaveCompat(FString &engine, FString &software);
+
+// EXTERNAL DATA DECLARATIONS ----------------------------------------------
+
+extern int     startpos;
+extern int     laststartpos;
+extern bool    playedtitlemusic;
+extern uint8_t globalfreeze;
+extern uint8_t *streamPos;
+
+EXTERN_CVAR (Float, con_midtime);
+EXTERN_CVAR (Int, net_disablepause);
+EXTERN_CVAR (Bool, net_limitsaves);
+
+EXTERN_CVAR (Int, turnspeedwalkfast);
+EXTERN_CVAR (Int, turnspeedsprintfast);
+EXTERN_CVAR (Int, turnspeedwalkslow);
+EXTERN_CVAR (Int, turnspeedsprintslow);
+
+EXTERN_CVAR (Bool, invertmouse);
+EXTERN_CVAR (Bool, invertmousex);
+
+EXTERN_CVAR (Int, team);
+EXTERN_CVAR (Bool, sv_singleplayerrespawn);
+
+gameaction_t    gameaction;
+
+bool            sendpause;   // send a pause event next tic
+bool            sendsave;    // send a save event next tic
+bool            sendturn180; // [RH] send a 180 degree turn next tic
+bool            usergame;    // ok to save / end game
+bool            insave;      // Game is saving - used to block exit commands
+
+
+// PUBLIC DATA DEFINITIONS -------------------------------------------------
+
+bool            timingdemo;  // if true, exit with report on completion
+bool            nodrawers;   // for comparative timing purposes
+bool            noblit;      // for comparative timing purposes
+
+bool            viewactive;
+
+bool            multiplayernext = false; // [SP] Map coop/dm implementation
+player_t        players[MAXPLAYERS];
+bool            playeringame[MAXPLAYERS];
+
+int             gametic;
+
+FString         newdemoname;
+FString         newdemomap;
+FString         demoname;
+bool            demorecording;
+bool            demoplayback;
+bool            demonew; // [RH] Only used around G_InitNew for demos
+int             demover;
+TArray<uint8_t> demobuffer;
+TArrayView<uint8_t> demo_p;
+
+bool            singledemo;      // quit after playing a demo from cmdline
+bool            precache = true; // if true, load all graphics at start
+
+bool            SendLand;
+const AActor    *SendItemUse;
+const AActor    *SendItemDrop;
+int             SendItemDropAmount;
+
+float           mousex; // mouse values are used once
+float           mousey;
+
+FString         savegamefile;
+FString         savedescription;
+FString         BackupSaveName;
+
+CVARD_NAMED (Int, gameskill, skill, 2, CVAR_SERVERINFO|CVAR_LATCH, "sets the skill for the next newly started game")
+CVAR (Bool, save_formatted, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // use formatted JSON for saves (more readable but a larger files and a bit slower.
 CVAR (Int, deathmatch, 0, CVAR_SERVERINFO|CVAR_LATCH);
 CVAR (Bool, chasedemo, false, 0);
 CVAR (Bool, storesavepic, true, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
@@ -297,15 +385,22 @@ CVAR (Bool, longsavemessages, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 CVAR (Bool, cl_waitforsave, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR (Bool, enablescriptscreenshot, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR (Bool, cl_restartondeath, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
+// [UZDXREMA] Fork cvars.
 CVAR (Bool, puristmode, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR (Bool, vanilla_melee_attack, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
-CVAR(Bool, use_walk_multiplier, false, 0)
-EXTERN_CVAR (Float, con_midtime);
+CVAR (Bool, use_walk_multiplier, false, 0)
 EXTERN_CVAR(Bool, vr_teleport);
 EXTERN_CVAR(Int, vr_move_speed);
 EXTERN_CVAR(Float, vr_run_multiplier);
 EXTERN_CVAR(Float, vr_walk_multiplier);
 EXTERN_CVAR(Bool, vr_laser_sight);
+
+FARG(nodraw, "Debug", "Stops the game from drawing anything.", "",
+	"Causes ZDoom not to draw anything at all. Only useful with -timedemo.");
+FARG(noblit, "Debug", "Prevents the screen from updating.", "",
+	"Causes ZDoom not to update the display on the screen, but it still draws everything to an"
+	" internal buffer. Only useful with -timedemo.");
 
 //==========================================================================
 //
@@ -323,115 +418,40 @@ CUSTOM_CVAR (Int, displaynametags, 0, CVAR_ARCHIVE)
 	}
 }
 
-CVAR(Int, nametagcolor, CR_GOLD, CVAR_ARCHIVE)
+CVAR (Int,  nametagcolor,  CR_GOLD, CVAR_ARCHIVE);
+CVAR (Bool, demo_compress, true,    CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
 
-extern bool playedtitlemusic;
+CVAR (Bool,  cl_run,     false, CVAR_GLOBALCONFIG|CVAR_ARCHIVE); // Always run?
+CVAR (Bool,  freelook,   true,  CVAR_GLOBALCONFIG|CVAR_ARCHIVE); // Always mlook?
+CVAR (Bool,  lookstrafe, false, CVAR_GLOBALCONFIG|CVAR_ARCHIVE); // Always strafe with mouse?
+CVAR (Float, m_forward,  1.f,   CVAR_GLOBALCONFIG|CVAR_ARCHIVE);
+CVAR (Float, m_side,     2.f,   CVAR_GLOBALCONFIG|CVAR_ARCHIVE);
 
-gameaction_t	gameaction;
-
+// [UZDXREMA] Exposed to the VR layer / QzDoom shell.
 int getGameState()
 {
 	return (int)gamestate;
 }
 
-bool 			sendpause;				// send a pause event next tic 
-bool			sendsave;				// send a save event next tic 
-bool			sendturn180;			// [RH] send a 180 degree turn next tic
-bool 			usergame;				// ok to save / end game
-bool			insave;					// Game is saving - used to block exit commands
-
-bool			timingdemo; 			// if true, exit with report on completion 
-bool 			nodrawers;				// for comparative timing purposes 
-bool 			noblit; 				// for comparative timing purposes 
-
-bool	 		viewactive;
-
-bool			multiplayernext = false;		// [SP] Map coop/dm implementation
-player_t		players[MAXPLAYERS];
-bool			playeringame[MAXPLAYERS];
-
-int 			gametic;
-
-CVAR(Bool, demo_compress, true, CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
-FString			newdemoname;
-FString			newdemomap;
-FString			demoname;
-bool 			demorecording;
-bool 			demoplayback;
-bool			demonew;				// [RH] Only used around G_InitNew for demos
-int				demover;
-uint8_t*			demobuffer;
-uint8_t*			demo_p;
-uint8_t*			democompspot;
-uint8_t*			demobodyspot;
-size_t			maxdemosize;
-uint8_t*			zdemformend;			// end of FORM ZDEM chunk
-uint8_t*			zdembodyend;			// end of ZDEM BODY chunk
-bool 			singledemo; 			// quit after playing a demo from cmdline 
- 
-bool 			precache = true;		// if true, load all graphics at start 
-  
-short			consistancy[MAXPLAYERS][BACKUPTICS];
- 
- 
-#define MAXPLMOVE				(forwardmove[1]) 
- 
-#define TURBOTHRESHOLD	12800
-
-EXTERN_CVAR (Int, turnspeedwalkfast)
-EXTERN_CVAR (Int, turnspeedsprintfast)
-EXTERN_CVAR (Int, turnspeedwalkslow)
-EXTERN_CVAR (Int, turnspeedsprintslow)
-
-int				forwardmove[2], sidemove[2];
-FIntCVarRef		*angleturn[4] = {&turnspeedwalkfast, &turnspeedsprintfast, &turnspeedwalkslow, &turnspeedsprintslow};
-int				flyspeed[2] = {1*256, 3*256};
-int				lookspeed[2] = {450, 512};
-
-#define SLOWTURNTICS	6 
-
-CVAR (Bool,		cl_run,			false,	CVAR_GLOBALCONFIG|CVAR_ARCHIVE)		// Always run?
-CVAR (Bool,		freelook,		true,	CVAR_GLOBALCONFIG|CVAR_ARCHIVE)		// Always mlook?
-CVAR (Bool,		lookstrafe,		false,	CVAR_GLOBALCONFIG|CVAR_ARCHIVE)		// Always strafe with mouse?
-CVAR (Float,	m_forward,		1.f,	CVAR_GLOBALCONFIG|CVAR_ARCHIVE)
-CVAR (Float,	m_side,			2.f,	CVAR_GLOBALCONFIG|CVAR_ARCHIVE)
- 
-int 			turnheld;								// for accelerative turning 
-
-EXTERN_CVAR (Bool, invertmouse)
-EXTERN_CVAR (Bool, invertmousex)
-
-// mouse values are used once 
-float 			mousex;
-float 			mousey; 		
-
-FString			savegamefile;
-FString			savedescription;
-
-// [RH] Name of screenshot file to generate (usually NULL)
-FString			shotfile;
-
-FString savename;
-FString BackupSaveName;
-
-bool SendLand;
-const AActor *SendItemUse, *SendItemDrop;
-int SendItemDropAmount;
-
-extern uint8_t globalfreeze;
-
-EXTERN_CVAR (Int, team)
+// You can change cl_analog_sensitivity_pitch's default to 1.6f if the old historical
+// behavior is preferred, but IMO that is so fast that it's practically unplayable...
+CVAR (Float, cl_analog_sensitivity_yaw,   1.f,   CVAR_GLOBALCONFIG|CVAR_ARCHIVE);
+CVAR (Float, cl_analog_sensitivity_pitch, 0.6f,  CVAR_GLOBALCONFIG|CVAR_ARCHIVE);
+CVAR (Bool,  cl_analog_run,               true,  CVAR_GLOBALCONFIG|CVAR_ARCHIVE);
+CVAR (Bool,  cl_analog_straferun,         false, CVAR_GLOBALCONFIG|CVAR_ARCHIVE);
 
 CVAR (Bool, teamplay, false, CVAR_SERVERINFO)
 
-// Workaround for x64 code generation bug in MSVC 2015 
+// Workaround for x64 code generation bug in MSVC 2015
 // Optimized targets contain illegal instructions in the function below
 #if defined _M_X64 && _MSC_VER < 1910
 #pragma optimize("", off)
 #endif // _M_X64 && _MSC_VER < 1910
 
+int forwardmove[2], sidemove[2];
+
 // [RH] Allow turbo setting anytime during game
-CUSTOM_CVAR (Float, turbo, 100.f, CVAR_NOINITCALL)
+CUSTOM_CVAR (Float, turbo, 100.f, CVAR_NOINITCALL | CVAR_CHEAT)
 {
 	if (self < 10.f)
 	{
@@ -467,6 +487,71 @@ CUSTOM_CVAR (Float, turbo, 100.f, CVAR_NOINITCALL)
 #pragma optimize("", on)
 #endif // _M_X64 && _MSC_VER < 1910
 
+CVAR (Bool, bot_allowspy, false, 0);
+
+CVAR (Int, autosavenum, 0, CVAR_NOSET|CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
+CVAR (Int, disableautosave, 0, CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
+CVAR (Bool, saveloadconfirmation, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG); // [mxd]
+
+CUSTOM_CVAR (Int, autosavecount, 4, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+{
+	if (self < 0)
+		self = 0;
+}
+
+CVAR (Int, quicksavenum, -1, CVAR_NOSET|CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
+CVAR (Bool, quicksaverotation, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG);
+
+CUSTOM_CVAR (Int, quicksaverotationcount, 4, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+{
+	if (self < 1)
+		self = 1;
+}
+
+// PRIVATE DATA DEFINITIONS ------------------------------------------------
+
+constexpr char  True[] = "true";
+
+static FRandom pr_dmspawn ("DMSpawn");
+static FRandom pr_pspawn ("PlayerSpawn");
+
+uint8_t         *democompspot;
+uint8_t         *demobodyspot;
+size_t          maxdemosize;
+uint8_t         *zdemformend; // end of FORM ZDEM chunk
+uint8_t         *zdembodyend; // end of ZDEM BODY chunk
+
+FIntCVarRef     *angleturn[4] = {&turnspeedwalkfast, &turnspeedsprintfast, &turnspeedwalkslow, &turnspeedsprintslow};
+int             flyspeed[2] = {1*256, 3*256};
+int             lookspeed[2] = {450, 512};
+
+int             turnheld; // for accelerative turning
+
+FString         shotfile; // [RH] Name of screenshot file to generate (usually NULL)
+
+FString         savename;
+
+bool            stoprecording;
+
+static int      nextautosave = -1;
+static int      lastquicksave = -1;
+
+static usercmd_t emptycmd;
+
+static float    axis_yaw = 0; // used for debug printouts
+static float    axis_pitch = 0;
+static float    axis_forward = 0;
+static float    axis_side = 0;
+static float    axis_up = 0;
+static int      strafe = 0;
+static int      speed = 0;
+static int      forward = 0;
+static int      side = 0;
+static int      fly = 0;
+static uint32_t buttons = 0;
+
+// CODE --------------------------------------------------------------------
+
 CCMD (turnspeeds)
 {
 	if (argv.argc() == 1)
@@ -501,6 +586,7 @@ CCMD (turnspeeds)
 	}
 }
 
+// [UZDXREMA] Fork-only: hand off the ready weapon to the other hand.
 CCMD (switchhand)
 {
 	if (argv.argc() > 1)
@@ -528,21 +614,35 @@ CCMD (switchhand)
 	}
 }
 
-CCMD (slot)
+CCMD(slot)
 {
+	// [UZDXREMA] The VR ring owns the thumb while it is open.
+	if (VRWheel_IsActive()) return;
+
 	if (argv.argc() > 1)
 	{
-		int slot = atoi (argv[1]);
+		int slot = WST_NONE;
+		if (!C_IsValidInt(argv[1], slot))
+		{
+			Printf("Invalid weapon slot %s\n", argv[1]);
+			return;
+		}
+
+		// [UZDXREMA] Optional second argument picks the hand (0 = main, 1 = off).
+		// Upstream 5.0 defers weapon selection through DEM_WEAPSELECT, whose payload
+		// is a single int8 with no room for a hand and whose d_net.cpp handler calls
+		// PickWeapon() without the fork's 4th argument. Per-hand selection therefore
+		// keeps the fork's immediate PickWeapon() call and ships the chosen weapon
+		// through SendItemUse / DEM_INVUSE exactly as it always has.
 		int hand = 0;
 		if (argv.argc() > 2)
 		{
-			hand = atoi(argv[2]);
+			hand = atoi(argv[2]) ? 1 : 0;
 		}
 
 		auto mo = players[consoleplayer].mo;
-		if (slot < NUM_WEAPON_SLOTS && mo)
+		if (slot >= 0 && slot < NUM_WEAPON_SLOTS && mo)
 		{
-			// Needs to be redone
 			IFVIRTUALPTRNAME(mo, NAME_PlayerPawn, PickWeapon)
 			{
 				VMValue param[] = { mo, slot, !(dmflags2 & DF2_DONTCHECKAMMO), hand };
@@ -582,6 +682,20 @@ CCMD (land)
 
 CCMD (pause)
 {
+	if (netgame)
+	{
+		if (net_disablepause == 2 && (!paused || !players[consoleplayer].settings_controller))
+		{
+			Printf("Pausing the game is currently disabled\n");
+			return;
+		}
+		else if (net_disablepause == 1 && !players[consoleplayer].settings_controller)
+		{
+			Printf("Only settings controllers can currently (un)pause the game\n");
+			return;
+		}
+	}
+
 	sendpause = true;
 }
 
@@ -656,8 +770,9 @@ CCMD (turn180)
 	sendturn180 = true;
 }
 
-CCMD (weapnext)
+CCMD(weapnext)
 {
+	// [UZDXREMA] The VR ring owns the thumb while it is open.
 	if (VRWheel_IsActive()) return;
 	int hand = 0;
 	if (argv.argc() > 1)
@@ -690,8 +805,9 @@ CCMD (weapnext)
 	}
 }
 
-CCMD (weapprev)
+CCMD(weapprev)
 {
+	// [UZDXREMA] The VR ring owns the thumb while it is open.
 	if (VRWheel_IsActive()) return;
 	int hand = 0;
 	if (argv.argc() > 1)
@@ -747,8 +863,7 @@ CCMD (invnext)
 	{
 		IFVM(PlayerPawn, InvNext)
 		{
-			VMValue param = players[consoleplayer].mo;
-			VMCall(func, &param, 1, nullptr, 0);
+			CallVM<void>(func, players[consoleplayer].mo);
 		}
 	}
 }
@@ -760,8 +875,7 @@ CCMD(invprev)
 	{
 		IFVM(PlayerPawn, InvPrev)
 		{
-			VMValue param = players[consoleplayer].mo;
-			VMCall(func, &param, 1, nullptr, 0);
+			CallVM<void>(func, players[consoleplayer].mo);
 		}
 	}
 }
@@ -770,6 +884,7 @@ CCMD (invuseall)
 {
 	if (VRWheel_IsActive()) return;
 	SendItemUse = (const AActor *)1;
+	WantsFlechetteItem = false;
 }
 
 CCMD (invuse)
@@ -777,7 +892,11 @@ CCMD (invuse)
 	if (VRWheel_IsActive()) return;
 	if (players[consoleplayer].inventorytics == 0)
 	{
-		if (players[consoleplayer].mo) SendItemUse = players[consoleplayer].mo->PointerVar<AActor>(NAME_InvSel);
+		if (players[consoleplayer].mo)
+		{
+			SendItemUse = players[consoleplayer].mo->PointerVar<AActor>(NAME_InvSel);
+			WantsFlechetteItem = false;
+		}
 	}
 	players[consoleplayer].inventorytics = 0;
 }
@@ -795,8 +914,6 @@ CCMD(invquery)
 	}
 }
 
-constexpr char True[] = "true";
-
 CCMD (use)
 {
 	if (VRWheel_IsActive()) return;
@@ -807,6 +924,7 @@ CCMD (use)
 			subclass = !stricmp(argv[2], True) || atoi(argv[2]);
 
 		SendItemUse = players[consoleplayer].mo->FindInventory(argv[1], subclass);
+		WantsFlechetteItem = false;
 	}
 }
 
@@ -844,17 +962,11 @@ CCMD (drop)
 }
 
 CCMD (useflechette)
-{ 
-	if (players[consoleplayer].mo == nullptr) return;
-	IFVIRTUALPTRNAME(players[consoleplayer].mo, NAME_PlayerPawn, GetFlechetteItem)
-	{
-		VMValue params[] = { players[consoleplayer].mo };
-		AActor *cls;
-		VMReturn ret((void**)&cls);
-		VMCall(func, params, 1, &ret, 1);
-
-		if (cls != nullptr) SendItemUse = cls;
-	}
+{
+	// These should be mutually exclusive to prevent the flechette from being used at
+	// the same time as another item.
+	WantsFlechetteItem = true;
+	SendItemUse = nullptr;
 }
 
 CCMD (select)
@@ -913,13 +1025,27 @@ FBaseCVar* G_GetUserCVar(int playernum, const char* cvarname)
 	return cvar;
 }
 
-static ticcmd_t emptycmd;
-
-ticcmd_t* G_BaseTiccmd()
+usercmd_t* G_BaseTiccmd()
 {
 	return &emptycmd;
 }
 
+ADD_STAT (analogue)
+{
+	return FStringf(
+		"[x% .3f y% .3f z% .3f r 0.000 p% .3f y% .3f]",
+		axis_forward, axis_side, axis_up, axis_pitch, axis_yaw
+	);
+}
+
+ADD_STAT (digital)
+{
+	return FStringf(
+		"[ strafe %d speed %d forward %3d side %3d fly %3d button %08b %08b %08b %08b ]",
+		strafe, speed, forward, side, fly,
+		buttons>>24 & 0xff, buttons>>16&0xff, buttons>>8&0xff, buttons>>0&0xff
+	);
+}
 
 //
 // G_BuildTiccmd
@@ -927,175 +1053,214 @@ ticcmd_t* G_BaseTiccmd()
 // or reads it from the demo buffer.
 // If recording a demo, write it out
 //
-void G_BuildTiccmd (ticcmd_t *cmd)
+void G_BuildTiccmd (usercmd_t *cmd)
 {
+	usercmd_t *base;
+
+	// [UZDXREMA] The headset owns yaw/pitch and locomotion while VR is active.
 	auto vrmode = VRMode::GetVRModeCached(true);
 
-	int 		strafe;
-	int 		speed;
-	int 		forward;
-	int 		side;
-	int			fly;
-
-	ticcmd_t	*base;
-
-	base = G_BaseTiccmd (); 
+	base = G_BaseTiccmd();
 	*cmd = *base;
 
-	cmd->consistancy = consistancy[consoleplayer][(maketic/ticdup)%BACKUPTICS];
+	// Update axis polling for the button map
+	buttonMap.GetAxes();
 
 	strafe = buttonMap.ButtonDown(Button_Strafe);
 	speed = buttonMap.ButtonDown(Button_Speed) ^ (int)cl_run;
 
-	forward = side = fly = 0;
-
-	// [RH] only use two stage accelerative turning on the keyboard
-	//		and not the joystick, since we treat the joystick as
-	//		the analog device it is.
-	if (buttonMap.ButtonDown(Button_Left) || buttonMap.ButtonDown(Button_Right))
-		turnheld += ticdup;
-	else
-		turnheld = 0;
-
-	// let movement keys cancel each other out
-	if (strafe)
-	{
-		if (buttonMap.ButtonDown(Button_Right))
-			side += sidemove[speed];
-		if (buttonMap.ButtonDown(Button_Left))
-			side -= sidemove[speed];
-	}
-	else
-	{
-		int tspeed = speed;
-
-		if (turnheld < SLOWTURNTICS)
-			tspeed += 2;		// slow turn
-		
-		if (!vrmode->IsVR() && buttonMap.ButtonDown(Button_Right))
-		{
-			G_AddViewAngle (*angleturn[tspeed]);
-		}
-		if (!vrmode->IsVR() && buttonMap.ButtonDown(Button_Left))
-		{
-			G_AddViewAngle (-*angleturn[tspeed]);
-		}
-	}
-
-	if (!vrmode->IsVR() && buttonMap.ButtonDown(Button_LookUp))
-	{
-		G_AddViewPitch (lookspeed[speed]);
-	}
-	if (!vrmode->IsVR() && buttonMap.ButtonDown(Button_LookDown))
-	{
-		G_AddViewPitch (-lookspeed[speed]);
-	}
-
-	if (buttonMap.ButtonDown(Button_MoveUp))
-		fly += flyspeed[speed];
-	if (buttonMap.ButtonDown(Button_MoveDown))
-		fly -= flyspeed[speed];
-
-	if (buttonMap.ButtonDown(Button_Klook))
-	{
-		if (!vrmode->IsVR() && buttonMap.ButtonDown(Button_Forward))
-			G_AddViewPitch (lookspeed[speed]);
-		if (!vrmode->IsVR() && buttonMap.ButtonDown(Button_Back))
-			G_AddViewPitch (-lookspeed[speed]);
-	}
-	else
-	{
-		if (!vrmode->IsVR() && buttonMap.ButtonDown(Button_Forward))
-			forward += forwardmove[speed];
-		if (!vrmode->IsVR() && buttonMap.ButtonDown(Button_Back))
-			forward -= forwardmove[speed];
-	}
-
-	if (!vrmode->IsVR() && buttonMap.ButtonDown(Button_MoveRight))
-		side += sidemove[speed];
-	if (!vrmode->IsVR() && buttonMap.ButtonDown(Button_MoveLeft))
-		side -= sidemove[speed];
-
 	// buttons
-	if (buttonMap.ButtonDown(Button_Attack))		cmd->ucmd.buttons |= BT_ATTACK;
-	if (buttonMap.ButtonDown(Button_AltAttack))		cmd->ucmd.buttons |= BT_ALTATTACK;
-	if (buttonMap.ButtonDown(Button_Use))			cmd->ucmd.buttons |= BT_USE;
-	if (buttonMap.ButtonDown(Button_Jump))			cmd->ucmd.buttons |= BT_JUMP;
-	if (buttonMap.ButtonDown(Button_Crouch))		cmd->ucmd.buttons |= BT_CROUCH;
-	if (buttonMap.ButtonDown(Button_Zoom))			cmd->ucmd.buttons |= BT_ZOOM;
-	if (buttonMap.ButtonDown(Button_Reload))		cmd->ucmd.buttons |= BT_RELOAD;
-	if (buttonMap.ButtonDown(Button_MH_Reload))		cmd->ucmd.buttons |= BT_MAINHANDRELOAD;
-	if (buttonMap.ButtonDown(Button_OH_Reload))		cmd->ucmd.buttons |= BT_OFFHANDRELOAD;
-	if (buttonMap.ButtonDown(Button_OH_Attack))		cmd->ucmd.buttons |= BT_OFFHANDATTACK;
-	if (buttonMap.ButtonDown(Button_OH_AltAttack))	cmd->ucmd.buttons |= BT_OFFHANDALTATTACK;
+	if (buttonMap.ButtonDown(Button_Attack))     cmd->buttons |= BT_ATTACK;
+	if (buttonMap.ButtonDown(Button_AltAttack))  cmd->buttons |= BT_ALTATTACK;
+	if (buttonMap.ButtonDown(Button_Use))        cmd->buttons |= BT_USE;
+	if (buttonMap.ButtonDown(Button_Jump))       cmd->buttons |= BT_JUMP;
+	if (buttonMap.ButtonDown(Button_Crouch))     cmd->buttons |= BT_CROUCH;
+	if (buttonMap.ButtonDown(Button_Zoom))       cmd->buttons |= BT_ZOOM;
+	if (buttonMap.ButtonDown(Button_Reload))     cmd->buttons |= BT_RELOAD;
 
-	if (buttonMap.ButtonDown(Button_User1))			cmd->ucmd.buttons |= BT_USER1;
-	if (buttonMap.ButtonDown(Button_User2))			cmd->ucmd.buttons |= BT_USER2;
-	if (buttonMap.ButtonDown(Button_User3))			cmd->ucmd.buttons |= BT_USER3;
-	if (buttonMap.ButtonDown(Button_User4))			cmd->ucmd.buttons |= BT_USER4;
+	// [UZDXREMA] Off-hand / main-hand dual-wield bits.
+	if (buttonMap.ButtonDown(Button_MH_Reload))   cmd->buttons |= BT_MAINHANDRELOAD;
+	if (buttonMap.ButtonDown(Button_OH_Reload))   cmd->buttons |= BT_OFFHANDRELOAD;
+	if (buttonMap.ButtonDown(Button_OH_Attack))   cmd->buttons |= BT_OFFHANDATTACK;
+	if (buttonMap.ButtonDown(Button_OH_AltAttack)) cmd->buttons |= BT_OFFHANDALTATTACK;
 
-	if (buttonMap.ButtonDown(Button_Speed))			cmd->ucmd.buttons |= BT_SPEED;
-	if (buttonMap.ButtonDown(Button_Strafe))		cmd->ucmd.buttons |= BT_STRAFE;
-	if (buttonMap.ButtonDown(Button_MoveRight))		cmd->ucmd.buttons |= BT_MOVERIGHT;
-	if (buttonMap.ButtonDown(Button_MoveLeft))		cmd->ucmd.buttons |= BT_MOVELEFT;
-	if (buttonMap.ButtonDown(Button_LookDown))		cmd->ucmd.buttons |= BT_LOOKDOWN;
-	if (buttonMap.ButtonDown(Button_LookUp))		cmd->ucmd.buttons |= BT_LOOKUP;
-	if (buttonMap.ButtonDown(Button_Back))			cmd->ucmd.buttons |= BT_BACK;
-	if (buttonMap.ButtonDown(Button_Forward))		cmd->ucmd.buttons |= BT_FORWARD;
-	if (buttonMap.ButtonDown(Button_Right))			cmd->ucmd.buttons |= BT_RIGHT;
-	if (buttonMap.ButtonDown(Button_Left))			cmd->ucmd.buttons |= BT_LEFT;
-	if (buttonMap.ButtonDown(Button_MoveDown))		cmd->ucmd.buttons |= BT_MOVEDOWN;
-	if (buttonMap.ButtonDown(Button_MoveUp))		cmd->ucmd.buttons |= BT_MOVEUP;
-	if (buttonMap.ButtonDown(Button_ShowScores))	cmd->ucmd.buttons |= BT_SHOWSCORES;
-	if (speed) cmd->ucmd.buttons |= BT_RUN;
+	if (buttonMap.ButtonDown(Button_User1))      cmd->buttons |= BT_USER1;
+	if (buttonMap.ButtonDown(Button_User2))      cmd->buttons |= BT_USER2;
+	if (buttonMap.ButtonDown(Button_User3))      cmd->buttons |= BT_USER3;
+	if (buttonMap.ButtonDown(Button_User4))      cmd->buttons |= BT_USER4;
 
-	// [BB] Per hand, not globally. A wheel on one hand used to strip both hands'
-	// fire and reload, so opening the main-hand ring disarmed the off hand as
-	// well -- which defeats the whole point of a ring per hand. The hand holding
-	// a ring loses its buttons; the other one keeps playing.
+	if (buttonMap.ButtonDown(Button_Speed))      cmd->buttons |= BT_SPEED;
+	if (buttonMap.ButtonDown(Button_Strafe))     cmd->buttons |= BT_STRAFE;
+	if (buttonMap.ButtonDown(Button_MoveRight))  cmd->buttons |= BT_MOVERIGHT;
+	if (buttonMap.ButtonDown(Button_MoveLeft))   cmd->buttons |= BT_MOVELEFT;
+	if (buttonMap.ButtonDown(Button_LookDown))   cmd->buttons |= BT_LOOKDOWN;
+	if (buttonMap.ButtonDown(Button_LookUp))     cmd->buttons |= BT_LOOKUP;
+	if (buttonMap.ButtonDown(Button_Back))       cmd->buttons |= BT_BACK;
+	if (buttonMap.ButtonDown(Button_Forward))    cmd->buttons |= BT_FORWARD;
+	if (buttonMap.ButtonDown(Button_Right))      cmd->buttons |= BT_RIGHT;
+	if (buttonMap.ButtonDown(Button_Left))       cmd->buttons |= BT_LEFT;
+	if (buttonMap.ButtonDown(Button_MoveDown))   cmd->buttons |= BT_MOVEDOWN;
+	if (buttonMap.ButtonDown(Button_MoveUp))     cmd->buttons |= BT_MOVEUP;
+	if (buttonMap.ButtonDown(Button_ShowScores)) cmd->buttons |= BT_SHOWSCORES;
+	if (speed)                                   cmd->buttons |= BT_RUN;
+
+	// [UZDXREMA] Per hand, not globally. A wheel on one hand must not strip both
+	// hands' fire and reload, so opening the main-hand ring would otherwise disarm
+	// the off hand as well -- which defeats the whole point of a ring per hand. The
+	// hand holding a ring loses its buttons; the other one keeps playing. This has
+	// to run after the whole button block above and before any HELD() test below.
 	if (VRWheel_ShouldSuppressHandInput(VR_MAINHAND))
 	{
-		cmd->ucmd.buttons &= ~(BT_ATTACK | BT_ALTATTACK | BT_USE | BT_RELOAD | BT_MAINHANDRELOAD);
+		cmd->buttons &= ~(BT_ATTACK | BT_ALTATTACK | BT_USE | BT_RELOAD | BT_MAINHANDRELOAD);
 	}
 	if (VRWheel_ShouldSuppressHandInput(VR_OFFHAND))
 	{
-		cmd->ucmd.buttons &= ~(BT_OFFHANDRELOAD | BT_OFFHANDATTACK | BT_OFFHANDALTATTACK);
+		cmd->buttons &= ~(BT_OFFHANDRELOAD | BT_OFFHANDATTACK | BT_OFFHANDALTATTACK);
 	}
 
-	// Handle joysticks/game controllers.
-	float joyaxes[NUM_JOYAXIS];
-
-	I_GetAxes(joyaxes);
+	forward = side = fly = 0;
 
 	// Remap some axes depending on button state.
-	if (buttonMap.ButtonDown(Button_Strafe) || (buttonMap.ButtonDown(Button_Mlook) && lookstrafe))
+	axis_yaw = buttonMap.ButtonAnalog(Button_Left) - buttonMap.ButtonAnalog(Button_Right);
+	axis_pitch = buttonMap.ButtonAnalog(Button_LookUp) - buttonMap.ButtonAnalog(Button_LookDown);
+	axis_forward = buttonMap.ButtonAnalog(Button_Forward) - buttonMap.ButtonAnalog(Button_Back);
+	axis_side = buttonMap.ButtonAnalog(Button_MoveLeft) - buttonMap.ButtonAnalog(Button_MoveRight);
+	axis_up = buttonMap.ButtonAnalog(Button_MoveUp) - buttonMap.ButtonAnalog(Button_MoveDown);
+
+	if (cl_analog_straferun)
 	{
-		joyaxes[JOYAXIS_Side] = joyaxes[JOYAXIS_Yaw];
-		joyaxes[JOYAXIS_Yaw] = 0;
+		// Rescale diagonal analog input from roughly [0.77, 0.77] to [1.0, 1.0],
+		// which enables analog sticks to be able to strafe run like a keyboard can.
+
+		// This is inaccurate to how Doom had originally handled analog input, but
+		// that's why it's an option, after all.
+
+		const float sqrtOf2Frac = 0.41421356237309504880; // sqrt(2)'s fractional value
+
+		float move_min = min<float>(fabs(axis_side), fabs(axis_forward));
+		float move_max = max<float>(fabs(axis_side), fabs(axis_forward));
+
+		float scale = 1.0f;
+		if (move_max > EQUAL_EPSILON)
+		{
+			scale += (move_min / move_max) * sqrtOf2Frac;
+		}
+
+		axis_forward = std::clamp(axis_forward * scale, -1.f, 1.f);
+		axis_side = std::clamp(axis_side * scale, -1.f, 1.f);
 	}
+
+#define HELD(b) static_cast<bool>(cmd->buttons&(b))
+
+	if (HELD(BT_STRAFE) || (lookstrafe && buttonMap.ButtonDown(Button_Mlook)))
+	{
+		axis_side = axis_yaw;
+		axis_yaw = 0.0f;
+	}
+
 	if (buttonMap.ButtonDown(Button_Mlook))
 	{
-		joyaxes[JOYAXIS_Pitch] = joyaxes[JOYAXIS_Forward];
-		joyaxes[JOYAXIS_Forward] = 0;
+		axis_pitch = axis_forward;
+		axis_forward = 0.0f;
 	}
 
-	if (joyaxes[JOYAXIS_Pitch] != 0)
+	auto i_axis_side    = joyint(axis_side * sidemove[cl_analog_run | speed]);
+	auto i_axis_forward = joyint(axis_forward * forwardmove[cl_analog_run | speed]);
+	auto i_axis_fly     = joyint(axis_up * 2048);
+	auto i_axis_pitch   = joyint(axis_pitch * ANALOG_LOOK_BASE * cl_analog_sensitivity_pitch);
+	auto i_axis_yaw     = joyint(axis_yaw * -ANALOG_LOOK_BASE * cl_analog_sensitivity_yaw);
+
+	// [RH] only use two stage accelerative turning on the keyboard
+	//		and not the joystick, since we treat the joystick as
+	//		the analog device it is. (turnheld)
+	if (i_axis_yaw)
 	{
-		G_AddViewPitch(joyint(joyaxes[JOYAXIS_Pitch] * 2048));
+		G_AddViewAngle(i_axis_yaw);
+		turnheld = 0;
 	}
-	if (joyaxes[JOYAXIS_Yaw] != 0)
+	else if (!HELD(BT_RIGHT|BT_LEFT))
 	{
-		G_AddViewAngle(joyint(-1280 * joyaxes[JOYAXIS_Yaw]));
+		turnheld = 0;
+	}
+	else if (strafe)
+	{
+		turnheld += TicDup;
+		if (HELD(BT_RIGHT)) side += sidemove[speed];
+		if (HELD(BT_LEFT))  side -= sidemove[speed];
+	}
+	else
+	{
+		turnheld += TicDup;
+		int tspeed = speed;
+
+		if (turnheld < SLOWTURNTICS) tspeed += 2; // slow turn
+
+		// [UZDXREMA] The HMD owns yaw in VR; keyboard turning must not fight it.
+		if (!vrmode->IsVR())
+		{
+			if (HELD(BT_RIGHT)) G_AddViewAngle(*angleturn[tspeed]);
+			if (HELD(BT_LEFT))  G_AddViewAngle(-*angleturn[tspeed]);
+		}
 	}
 
-	side -= joyint(sidemove[speed] * joyaxes[JOYAXIS_Side]);
-	forward += joyint(joyaxes[JOYAXIS_Forward] * forwardmove[speed]);
-	fly += joyint(joyaxes[JOYAXIS_Up] * 2048);
+	if (i_axis_pitch)
+	{
+		G_AddViewPitch(i_axis_pitch);
+	}
+	// [UZDXREMA] The HMD owns pitch in VR; keyboard look must not fight it.
+	else if (!vrmode->IsVR())
+	{
+		if (HELD(BT_LOOKUP))   G_AddViewPitch(lookspeed[speed]);
+		if (HELD(BT_LOOKDOWN)) G_AddViewPitch(-lookspeed[speed]);
+	}
+
+	if (i_axis_fly)
+	{
+		fly += i_axis_fly;
+	}
+	else
+	{
+		if (HELD(BT_MOVEUP))   fly += flyspeed[speed];
+		if (HELD(BT_MOVEDOWN)) fly -= flyspeed[speed];
+	}
+
+	if (i_axis_side)
+	{
+		side -= i_axis_side;
+	}
+	else if (buttonMap.ButtonDown(Button_Klook))
+	{
+		// [UZDXREMA] The HMD owns pitch in VR.
+		if (!vrmode->IsVR())
+		{
+			if (HELD(BT_FORWARD)) G_AddViewPitch(lookspeed[speed]);
+			if (HELD(BT_BACK))    G_AddViewPitch(-lookspeed[speed]);
+		}
+	}
+	// [UZDXREMA] VR locomotion comes from VR_GetMove() below, not the keyboard.
+	else if (!vrmode->IsVR())
+	{
+		if (HELD(BT_FORWARD)) forward += forwardmove[speed];
+		if (HELD(BT_BACK))    forward -= forwardmove[speed];
+	}
+
+	if (i_axis_forward)
+	{
+		forward += i_axis_forward;
+	}
+	// [UZDXREMA] VR locomotion comes from VR_GetMove() below, not the keyboard.
+	else if (!vrmode->IsVR())
+	{
+		if (HELD(BT_MOVERIGHT)) side += sidemove[speed];
+		if (HELD(BT_MOVELEFT))  side -= sidemove[speed];
+	}
+
+#undef HELD
 
 	// Handle mice.
 	if (!buttonMap.ButtonDown(Button_Mlook) && !freelook)
 	{
-		forward += xs_CRoundToInt(mousey * m_forward);
+		forward += RoundHalfEven(mousey * m_forward); // why round to even?
 	}
 	if (vrmode->IsVR())
 	{
@@ -1204,7 +1369,7 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 		VR_ClearMultiplayerTeleportTarget();
 	}
 
-	cmd->ucmd.pitch = LocalViewPitch >> 16;
+	cmd->pitch = LocalViewPitch >> 16;
 
 	if (SendLand)
 	{
@@ -1213,7 +1378,7 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 	}
 
 	if (strafe || lookstrafe)
-		side += xs_CRoundToInt(mousex * m_side);
+		side += RoundHalfEven(mousex * m_side); // why round to even?
 
 	mousex = mousey = 0;
 
@@ -1227,29 +1392,28 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 	else if (side < -MAXPLMOVE)
 		side = -MAXPLMOVE;
 
-
-	cmd->ucmd.forwardmove += clamp(forward, -127, 127);
-	cmd->ucmd.sidemove += clamp(side, -127, 127);
-	cmd->ucmd.yaw = LocalViewAngle >> 16;
-	cmd->ucmd.upmove = fly;
+	cmd->forwardmove += clamp(forward, -127, 127);
+	cmd->sidemove += clamp(side, -127, 127);
+	cmd->yaw = LocalViewAngle >> 16;
+	cmd->upmove = fly;
 
 	// Multiplayer reconstructs weapon aim from weaponpitch/weaponyaw for both
 	// VR and flatscreen peers. These fields use the same stored convention as
 	// AActor::AttackPitch/AttackAngle: pitch is negated, and yaw is stored as
 	// world yaw minus 90 degrees.
-	cmd->ucmd.weaponpitch = cmd->ucmd.pitch;
-	cmd->ucmd.weaponyaw = cmd->ucmd.yaw;
+	cmd->weaponpitch = cmd->pitch;
+	cmd->weaponyaw = cmd->yaw;
 	{
 		const float cmdAngleScale = 65536.0f / 360.0f;
 		player_t* localPlayer = &players[consoleplayer];
 		if (localPlayer != nullptr && localPlayer->mo != nullptr)
 		{
-			const DAngle yawDelta = DAngle::fromDeg(cmd->ucmd.yaw * (360.0 / 65536.0));
-			const DAngle pitchDelta = DAngle::fromDeg(cmd->ucmd.pitch * (360.0 / 65536.0));
+			const DAngle yawDelta = DAngle::fromDeg(cmd->yaw * (360.0 / 65536.0));
+			const DAngle pitchDelta = DAngle::fromDeg(cmd->pitch * (360.0 / 65536.0));
 			const DAngle absoluteYaw = localPlayer->mo->Angles.Yaw + yawDelta;
 			const DAngle absolutePitch = localPlayer->mo->Angles.Pitch - pitchDelta;
-			cmd->ucmd.weaponyaw = (short)std::lround((absoluteYaw - DAngle::fromDeg(90.0)).Degrees() * cmdAngleScale);
-			cmd->ucmd.weaponpitch = (short)std::lround((-absolutePitch).Degrees() * cmdAngleScale);
+			cmd->weaponyaw = (short)std::lround((absoluteYaw - DAngle::fromDeg(90.0)).Degrees() * cmdAngleScale);
+			cmd->weaponpitch = (short)std::lround((-absolutePitch).Degrees() * cmdAngleScale);
 		}
 	}
 	if (vrmode->IsVR())
@@ -1259,7 +1423,7 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 		player_t* localPlayer = &players[consoleplayer];
 		if (multiplayer)
 		{
-			GVRCanonicalAimOwner = VR_ResolveCanonicalAimOwner(localPlayer, cmd->ucmd.buttons);
+			GVRCanonicalAimOwner = VR_ResolveCanonicalAimOwner(localPlayer, cmd->buttons);
 		}
 		else
 		{
@@ -1274,8 +1438,8 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 		const float weaponYaw = -90.0f + bodyYaw + (sourceAngles[YAW] - playerYaw);
 		const float weaponPitch = -sourceAngles[PITCH];
 
-		cmd->ucmd.weaponpitch = (short)std::lround(weaponPitch * cmdAngleScale);
-		cmd->ucmd.weaponyaw = (short)std::lround(weaponYaw * cmdAngleScale);
+		cmd->weaponpitch = (short)std::lround(weaponPitch * cmdAngleScale);
+		cmd->weaponyaw = (short)std::lround(weaponYaw * cmdAngleScale);
 	}
 	LocalViewAngle = 0;
 	LocalViewPitch = 0;
@@ -1284,7 +1448,7 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 	if (sendturn180)
 	{
 		sendturn180 = false;
-		cmd->ucmd.buttons |= BT_TURN180;
+		cmd->buttons |= BT_TURN180;
 	}
 	if (sendpause)
 	{
@@ -1317,9 +1481,22 @@ void G_BuildTiccmd (ticcmd_t *cmd)
 		Net_WriteInt32(SendItemDropAmount);
 		SendItemDrop = NULL;
 	}
+	if (SendWeaponSlot != WST_NONE)
+	{
+		Net_WriteInt8(DEM_WEAPSELECT);
+		Net_WriteInt8(SendWeaponSlot);
+		SendWeaponSlot = WST_NONE;
+	}
+	if (WantsFlechetteItem)
+	{
+		Net_WriteInt8(DEM_USEFLECHETTE);
+		WantsFlechetteItem = false;
+	}
 
-	cmd->ucmd.forwardmove <<= 8;
-	cmd->ucmd.sidemove <<= 8;
+	cmd->forwardmove <<= 8;
+	cmd->sidemove <<= 8;
+
+	buttons = cmd->buttons;
 }
 
 static int LookAdjust(int look)
@@ -1402,15 +1579,6 @@ void G_AddViewAngle (int yaw, bool mouse)
 	}
 }
 
-CVAR (Bool, bot_allowspy, false, 0)
-
-
-enum {
-	SPY_CANCEL = 0,
-	SPY_NEXT,
-	SPY_PREV,
-};
-
 // [RH] Spy mode has been separated into two console commands.
 //		One goes forward; the other goes backward.
 static void ChangeSpy (int changespy)
@@ -1440,7 +1608,7 @@ static void ChangeSpy (int changespy)
 	// Otherwise, cycle to the next player.
 	bool checkTeam = !demoplayback && deathmatch;
 	int pnum = consoleplayer;
-	if (changespy != SPY_CANCEL) 
+	if (changespy != SPY_CANCEL)
 	{
 		player_t *player = players[consoleplayer].camera->player;
 		// only use the camera as starting index if it's a valid player.
@@ -1462,7 +1630,7 @@ static void ChangeSpy (int changespy)
 	}
 
 	players[consoleplayer].camera = players[pnum].mo;
-	S_UpdateSounds(players[consoleplayer].camera);
+	S_UpdateSounds(players[consoleplayer].camera, 0);
 	StatusBar->AttachToPlayer (&players[pnum]);
 	if (demoplayback || multiplayer)
 	{
@@ -1500,18 +1668,20 @@ CCMD (toggle_laser_sight)
 //
 bool G_Responder (event_t *ev)
 {
+	if (!CanChat())
+		CT_Stop();
+
 	// check events
 	if (ev->type != EV_Mouse && primaryLevel->localEventManager->Responder(ev)) // [ZZ] ZScript ate the event // update 07.03.17: mouse events are handled directly
 		return true;
-	
+
 	if (gamestate == GS_INTRO || gamestate == GS_CUTSCENE)
 	{
 		return ScreenJobResponder(ev);
 	}
-	
 	// any other key pops up menu if in demos
 	// [RH] But only if the key isn't bound to a "special" command
-	if (gameaction == ga_nothing && 
+	if (gameaction == ga_nothing &&
 		(demoplayback || gamestate == GS_DEMOSCREEN || gamestate == GS_TITLELEVEL))
 	{
 		if (chatmodeon) chatmodeon = 0;
@@ -1532,11 +1702,11 @@ bool G_Responder (event_t *ev)
 				stricmp (cmd, "spyprev") &&
 				stricmp (cmd, "chase") &&
 				stricmp (cmd, "+showscores") &&
-				stricmp (cmd, "bumpgamma") &&
+				stricmp (cmd, "bumplight") &&
 				stricmp (cmd, "screenshot")))
 			{
 				M_StartControlPanel(true);
-				M_SetMenu(NAME_Mainmenu, -1);
+				M_SetMenu(NAME_MainMenu, -1);
 				return true;
 			}
 			else
@@ -1550,8 +1720,8 @@ bool G_Responder (event_t *ev)
 		return false;
 	}
 
-	if (CT_Responder (ev))
-		return true;			// chat ate the event
+	if (CT_Responder(ev))
+		return true; // chat ate the event
 
 	if ((ConsoleState != c_up || gamestate == GS_FULLCONSOLE) && ev->type == EV_KeyDown)
 	{
@@ -1611,9 +1781,9 @@ bool G_Responder (event_t *ev)
 	if (gamestate == GS_LEVEL)
 	{
 		if (ST_Responder (ev))
-			return true;		// status window ate it
+			return true; // status window ate it
 		if (!viewactive && primaryLevel->automap && primaryLevel->automap->Responder (ev, false))
-			return true;		// automap ate it
+			return true; // automap ate it
 	}
 
 	switch (ev->type)
@@ -1629,22 +1799,22 @@ bool G_Responder (event_t *ev)
 
 	// [RH] mouse buttons are sent as key up/down events
 	case EV_Mouse:
-        if(invertmousex)
-        {
+		if(invertmousex)
+		{
 		   mousex = -ev->x;
-        }
-        else
-        {
-            mousex = ev->x;
-        }
-        if(invertmouse)
-        {
-            mousey = -ev->y;
-        }
-        else
-        {
-            mousey = ev->y;
-        }
+		}
+		else
+		{
+			mousex = ev->x;
+		}
+		if(invertmouse)
+		{
+			mousey = -ev->y;
+		}
+		else
+		{
+			mousey = ev->y;
+		}
 		break;
 	}
 
@@ -1681,28 +1851,35 @@ static void G_FullConsole()
 
 }
 
-//==========================================================================
-//
-// FRandom :: StaticSumSeeds
-//
-// This function produces a uint32_t that can be used to check the consistancy
-// of network games between different machines. Only a select few RNGs are
-// used for the sum, because not all RNGs are important to network sync.
-//
-//==========================================================================
-
-extern FRandom pr_spawnmobj;
-extern FRandom pr_acs;
-extern FRandom pr_chase;
-extern FRandom pr_damagemobj;
-
-static uint32_t StaticSumSeeds()
+void D_RunCutscene()
 {
-	return
-		pr_spawnmobj.Seed() +
-		pr_acs.Seed() +
-		pr_chase.Seed() +
-		pr_damagemobj.Seed();
+	// Only single player games can cancel out of the screen job via client-side logic.
+	if (ScreenJobTick() && !demoplayback)
+	{
+		if (netgame)
+		{
+			// Only the host can determine this.
+			if (consoleplayer != Net_Arbitrator)
+				return;
+
+			int type = ST_VOTE;
+			IFVM(ScreenJobRunner, GetSkipType)
+				type = VMCallSingle<int>(func, cutscene.runner);
+
+			if (type != ST_UNSKIPPABLE)
+				return;
+		}
+
+		Net_WriteInt8(DEM_ENDSCREENJOB);
+	}
+}
+
+// This is used to allow the server to check for when players are ready to advance. For singleplayer we can just
+// use the net message from the cutscene finishing to know when to go.
+static void D_CheckCutsceneAdvance()
+{
+	if (netgame && !demoplayback && Net_CheckCutsceneReady())
+		Net_AdvanceCutscene();
 }
 
 //
@@ -1711,29 +1888,21 @@ static uint32_t StaticSumSeeds()
 //
 void G_Ticker ()
 {
-	int i;
-	gamestate_t	oldgamestate;
+	gamestate_t oldgamestate;
+
+	C_TickQueuedInputs();
 
 	// do player reborns if needed
-	for (i = 0; i < MAXPLAYERS; i++)
+	// TODO: These should really be moved to queues.
+	for (unsigned int i = 0; i < MAXPLAYERS; ++i)
 	{
-		if (playeringame[i])
-		{
-			if (players[i].playerstate == PST_GONE)
-			{
-				G_DoPlayerPop(i);
-			}
-			if (players[i].playerstate == PST_REBORN || players[i].playerstate == PST_ENTER)
-			{
-				primaryLevel->DoReborn(i);
-			}
-		}
-	}
+		if (!playeringame[i])
+			continue;
 
-	if (ToggleFullscreen)
-	{
-		ToggleFullscreen = false;
-		AddCommandString ("toggle vid_fullscreen");
+		if (players[i].playerstate == PST_GONE)
+			G_DoPlayerPop(i);
+		else if (players[i].playerstate == PST_REBORN || players[i].playerstate == PST_ENTER)
+			primaryLevel->DoReborn(i, false);
 	}
 
 	// do things to change the game state
@@ -1752,7 +1921,7 @@ void G_Ticker ()
 			G_RecordDemo(newdemoname.GetChars());
 			G_BeginRecording(newdemomap.GetChars());
 			[[fallthrough]];
-		case ga_newgame2:	// Silence GCC (see above)
+		case ga_newgame2: // Silence GCC (see above)
 		case ga_newgame:
 			G_DoNewGame ();
 			break;
@@ -1783,23 +1952,17 @@ void G_Ticker ()
 		case  ga_playdemo:
 			G_DoPlayDemo ();
 			break;
+		case ga_mapwarp:
+			G_DoMapWarp();
+			break;
 		case ga_completed:
 			G_DoCompleted ();
 			break;
 		case ga_worlddone:
 			G_DoWorldDone ();
 			break;
-		case ga_screenshot:
-			M_ScreenShot (shotfile.GetChars());
-			shotfile = "";
-			gameaction = ga_nothing;
-			break;
 		case ga_fullconsole:
 			G_FullConsole ();
-			gameaction = ga_nothing;
-			break;
-		case ga_togglemap:
-			AM_ToggleMap ();
 			gameaction = ga_nothing;
 			break;
 		case ga_resumeconversation:
@@ -1829,84 +1992,41 @@ void G_Ticker ()
 		C_AdjustBottom ();
 	}
 
-	// get commands, check consistancy, and build new consistancy check
-	int buf = (gametic/ticdup)%BACKUPTICS;
-
-	// [RH] Include some random seeds and player stuff in the consistancy
-	// check, not just the player's x position like BOOM.
-	uint32_t rngsum = StaticSumSeeds ();
+	// get commands
+	const int curTic = gametic / TicDup;
 
 	//Added by MC: For some of that bot stuff. The main bot function.
 	primaryLevel->BotInfo.Main (primaryLevel);
 
-	for (i = 0; i < MAXPLAYERS; i++)
+	for (auto client : NetworkClients)
 	{
-		if (playeringame[i])
+		usercmd_t *cmd = &players[client].cmd;
+		usercmd_t* nextCmd = &ClientStates[client].Tics[curTic % BACKUPTICS].Command;
+
+		RunPlayerCommands(client, curTic);
+		if (demorecording)
+			G_WriteDemoTiccmd(nextCmd, client, curTic);
+
+		players[client].oldbuttons = cmd->buttons;
+		if (demoplayback)
+			G_ReadDemoTiccmd(cmd, client);
+		else
+			memcpy(cmd, nextCmd, sizeof(usercmd_t));
+
+		// check for turbo cheats
+		if (multiplayer && turbo > 100.f && cmd->forwardmove > TURBOTHRESHOLD &&
+			!(gametic & 31) && ((gametic >> 5) & (MAXPLAYERS-1)) == client)
 		{
-			ticcmd_t *cmd = &players[i].cmd;
-			ticcmd_t *newcmd = &netcmds[i][buf];
-
-			if ((gametic % ticdup) == 0)
-			{
-				RunNetSpecs (i, buf);
-			}
-			if (demorecording)
-			{
-				G_WriteDemoTiccmd (newcmd, i, buf);
-			}
-			players[i].oldbuttons = cmd->ucmd.buttons;
-			// If the user alt-tabbed away, paused gets set to -1. In this case,
-			// we do not want to read more demo commands until paused is no
-			// longer negative.
-			if (demoplayback)
-			{
-				G_ReadDemoTiccmd (cmd, i);
-			}
-			else
-			{
-				memcpy(cmd, newcmd, sizeof(ticcmd_t));
-			}
-
-			// check for turbo cheats
-			if (multiplayer && turbo > 100.f && cmd->ucmd.forwardmove > TURBOTHRESHOLD &&
-				!(gametic&31) && ((gametic>>5)&(MAXPLAYERS-1)) == i )
-			{
-				Printf ("%s is turbo!\n", players[i].userinfo.GetName());
-			}
-
-			if (netgame && players[i].Bot == NULL && !demoplayback && (gametic%ticdup) == 0)
-			{
-				//players[i].inconsistant = 0;
-				if (gametic > BACKUPTICS*ticdup && consistancy[i][buf] != cmd->consistancy)
-				{
-					players[i].inconsistant = gametic - BACKUPTICS*ticdup;
-				}
-				if (players[i].mo)
-				{
-					uint32_t sum = rngsum + int((players[i].mo->X() + players[i].mo->Y() + players[i].mo->Z())*257) + players[i].mo->Angles.Yaw.BAMs() + players[i].mo->Angles.Pitch.BAMs();
-					sum ^= players[i].health;
-					consistancy[i][buf] = sum;
-				}
-				else
-				{
-					consistancy[i][buf] = rngsum;
-				}
-			}
+			Printf("%s is turbo!\n", players[client].userinfo.GetName());
 		}
 	}
 
-	// [ZZ] also tick the UI part of the events
-	primaryLevel->localEventManager->UiTick();
 	C_RunDelayedCommands();
 
 	// do main actions
 	switch (gamestate)
 	{
 	case GS_LEVEL:
-		P_Ticker ();
-		primaryLevel->automap->Ticker ();
-		break;
-
 	case GS_TITLELEVEL:
 		P_Ticker ();
 		break;
@@ -1925,19 +2045,12 @@ void G_Ticker ()
 
 	case GS_CUTSCENE:
 	case GS_INTRO:
-		if (ScreenJobTick())
-		{
-			// synchronize termination with the playsim.
-			Net_WriteInt8(DEM_ENDSCREENJOB);
-		}
+		D_CheckCutsceneAdvance();
 		break;
 
 	default:
 		break;
 	}
-
-	// [MK] Additional ticker for UI events right after all others
-	primaryLevel->localEventManager->PostUiTick();
 }
 
 
@@ -1956,8 +2069,7 @@ void G_PlayerFinishLevel (int player, EFinishLevelType mode, int flags)
 {
 	IFVM(PlayerPawn, PlayerFinishLevel)
 	{
-		VMValue params[] = { players[player].mo, mode, flags };
-		VMCall(func, params, 3, nullptr, 0);
+		CallVM<void>(func, players[player].mo, (int)mode, flags);
 	}
 }
 
@@ -1969,19 +2081,19 @@ void G_PlayerFinishLevel (int player, EFinishLevelType mode, int flags)
 //
 void FLevelLocals::PlayerReborn (int player)
 {
-	player_t*	p;
-	int 		frags[MAXPLAYERS];
-	int			fragcount;	// [RH] Cumulative frags
-	int 		killcount;
-	int 		itemcount;
-	int 		secretcount;
-	int			chasecam;
-	uint8_t		currclass;
-	userinfo_t  userinfo;	// [RH] Save userinfo
-	AActor *actor;
+	player_t*   p;
+	int         frags[MAXPLAYERS];
+	int         fragcount; // [RH] Cumulative frags
+	int         killcount;
+	int         itemcount;
+	int         secretcount;
+	int         chasecam;
+	int         currclass;
+	userinfo_t  userinfo; // [RH] Save userinfo
+	AActor      *actor;
 	PClassActor *cls;
-	FString		log;
-	DBot		*Bot;		//Added by MC:
+	FString     log;
+	DBot        *Bot; //Added by MC:
 
 	p = &players[player];
 
@@ -1996,7 +2108,7 @@ void FLevelLocals::PlayerReborn (int player)
 	cls = p->cls;
 	log = p->LogText;
 	chasecam = p->cheats & CF_CHASECAM;
-	Bot = p->Bot;			//Added by MC:
+	Bot = p->Bot; //Added by MC:
 	const bool settings_controller = p->settings_controller;
 
 	// Reset player structure to its defaults
@@ -2015,12 +2127,12 @@ void FLevelLocals::PlayerReborn (int player)
 	p->cls = cls;
 	p->LogText = log;
 	p->cheats |= chasecam;
-	p->Bot = Bot;			//Added by MC:
+	p->Bot = Bot; //Added by MC:
 	p->settings_controller = settings_controller;
-	p->LastSafePos = p->mo->Pos();
+	p->LastSafePos.Update(*p->mo, true);
 
-	p->oldbuttons = ~0, p->attackdown = true; p->usedown = true;	// don't do anything immediately
-	p->ohattackdown = true;
+	p->oldbuttons = ~0, p->attackdown = true; p->usedown = true; // don't do anything immediately
+	p->ohattackdown = true; // [UZDXREMA] off-hand too
 	p->original_oldbuttons = ~0;
 	p->playerstate = PST_LIVE;
 	NetworkEntityManager::SetClientNetworkEntity(p->mo, p - players);
@@ -2031,8 +2143,7 @@ void FLevelLocals::PlayerReborn (int player)
 
 		IFVIRTUALPTRNAME(actor, NAME_PlayerPawn, GiveDefaultInventory)
 		{
-			VMValue params[1] = { actor };
-			VMCall(func, params, 1, nullptr, 0);
+			CallVM<void>(func, actor);
 		}
 		p->ReadyWeapon = p->PendingWeapon;
 	}
@@ -2048,10 +2159,10 @@ void FLevelLocals::PlayerReborn (int player)
 }
 
 //
-// G_CheckSpot	
+// G_CheckSpot
 // Returns false if the player cannot be respawned
-// at the given mapthing spot  
-// because something is occupying it 
+// at the given mapthing spot
+// because something is occupying it
 //
 
 bool FLevelLocals::CheckSpot (int playernum, FPlayerStart *mthing)
@@ -2078,8 +2189,8 @@ bool FLevelLocals::CheckSpot (int playernum, FPlayerStart *mthing)
 		return true;
 	}
 
-	oldz = players[playernum].mo->Z();	// [RH] Need to save corpse's z-height
-	players[playernum].mo->SetZ(spot.Z);		// [RH] Checks are now full 3-D
+	oldz = players[playernum].mo->Z();   // [RH] Need to save corpse's z-height
+	players[playernum].mo->SetZ(spot.Z); // [RH] Checks are now full 3-D
 
 	// killough 4/2/98: fix bug where P_CheckPosition() uses a non-solid
 	// corpse to detect collisions with other players in DM starts
@@ -2091,7 +2202,7 @@ bool FLevelLocals::CheckSpot (int playernum, FPlayerStart *mthing)
 	players[playernum].mo->flags |=  MF_SOLID;
 	i = P_CheckPosition(players[playernum].mo, spot.XY());
 	players[playernum].mo->flags &= ~MF_SOLID;
-	players[playernum].mo->SetZ(oldz);	// [RH] Restore corpse's height
+	players[playernum].mo->SetZ(oldz); // [RH] Restore corpse's height
 	if (!i)
 		return false;
 
@@ -2100,9 +2211,9 @@ bool FLevelLocals::CheckSpot (int playernum, FPlayerStart *mthing)
 
 
 //
-// G_DeathMatchSpawnPlayer 
-// Spawns a player at one of the random death match spots 
-// called at level load and each death 
+// G_DeathMatchSpawnPlayer
+// Spawns a player at one of the random death match spots
+// called at level load and each death
 //
 
 // [RH] Returns the distance of the closest player to the given mapthing
@@ -2110,7 +2221,7 @@ double FLevelLocals::PlayersRangeFromSpot (FPlayerStart *spot)
 {
 	double closest = INT_MAX;
 	double distance;
-	int i;
+	unsigned int i;
 
 	for (i = 0; i < MAXPLAYERS; i++)
 	{
@@ -2206,7 +2317,7 @@ void FLevelLocals::DeathMatchSpawnPlayer (int playernum)
 		I_Error ("No deathmatch starts");
 
 	bool hasSpawned = false;
-	for (int i = 0; i < MAXPLAYERS; ++i)
+	for (unsigned int i = 0; i < MAXPLAYERS; ++i)
 	{
 		if (PlayerInGame(i) && Players[i]->mo != nullptr && Players[i]->health > 0)
 		{
@@ -2345,7 +2456,6 @@ void FLevelLocals::QueueBody (AActor *body)
 //
 // G_DoReborn
 //
-EXTERN_CVAR(Bool, sv_singleplayerrespawn)
 void FLevelLocals::DoReborn (int playernum, bool force)
 {
 	if (!multiplayer && !(flags2 & LEVEL2_ALLOWRESPAWN) && !sv_singleplayerrespawn &&
@@ -2436,7 +2546,7 @@ void G_DoPlayerPop(int playernum)
 	Printf("%s\n", message.GetChars());
 
 	// [RH] Revert each player to their own view if spying through the player who left
-	for (int ii = 0; ii < MAXPLAYERS; ++ii)
+	for (int ii = 0; ii < signed(MAXPLAYERS); ++ii)
 	{
 		if (playeringame[ii] && players[ii].camera == players[playernum].mo)
 		{
@@ -2477,11 +2587,10 @@ void G_ScreenShot (const char *filename)
 	if (gameaction == ga_nothing)
 	{
 		shotfile = filename;
-		gameaction = ga_screenshot;
+		M_ScreenShot(shotfile.GetChars());
+		shotfile = "";
 	}
 }
-
-
 
 //
 // G_InitFromSavegame
@@ -2564,7 +2673,7 @@ void C_SerializeCVars(FSerializer& arc, const char* label, uint32_t filter)
 			while (it.NextPair(pair))
 			{
 				auto cvar = pair->Value;
-				
+
 				if ((cvar->Flags & filter) && !(cvar->Flags & (CVAR_NOSAVE | CVAR_IGNORE | CVAR_CONFIG_ONLY)))
 				{
 					UCVarValue val = cvar->GetGenericRep(CVAR_String);
@@ -2598,13 +2707,9 @@ void C_SerializeCVars(FSerializer& arc, const char* label, uint32_t filter)
 	}
 }
 
-
-void SetupLoadingCVars();
-void FinishLoadingCVars();
-bool CheckGZDoomSaveCompat(FString &engine, FString &software);
-
 void G_DoLoadGame ()
 {
+	Net_ResetCommands(true);
 	SetupLoadingCVars();
 	bool hidecon;
 
@@ -2645,6 +2750,14 @@ void G_DoLoadGame ()
 	arc("Save Version", SaveVersion);
 	arc("Engine", engine);
 	arc("Current Map", map);
+	arc("GameUUID", GameUUID);
+
+	TArray<FString> allowLoadIn;
+
+	if(arc.HasKey("AllowLoadIn"))
+	{
+		arc("AllowLoadIn", allowLoadIn);
+	}
 
 	#if LOAD_GZDOOM_4142_SAVES
 	FString software = arc.GetString("Software");
@@ -2653,9 +2766,9 @@ void G_DoLoadGame ()
 	{
 		gzdoom_compat_ok = CheckGZDoomSaveCompat(engine, software);
 	}
-	if (engine.CompareNoCase(GAMESIG) != 0 && !gzdoom_compat_ok)
+	if ((engine.CompareNoCase(GAMESIG) != 0 && allowLoadIn.FindNoCase(GAMESIG) == allowLoadIn.Size()) && !gzdoom_compat_ok)
 	#else
-	if (engine.CompareNoCase(GAMESIG) != 0)
+	if (engine.CompareNoCase(GAMESIG) != 0 && allowLoadIn.FindNoCase(GAMESIG) == allowLoadIn.Size())
 	#endif
 	{
 		// Make a special case for the message printed for old savegames that don't
@@ -2729,14 +2842,14 @@ void G_DoLoadGame ()
 
 	primaryLevel->BotInfo.RemoveAllBots(primaryLevel, true);
 
-	savegamerestore = true;		// Use the player actors in the savegame
+	savegamerestore = true; // Use the player actors in the savegame
 
 	FString cvar;
 	arc("importantcvars", cvar);
 	if (!cvar.IsEmpty())
 	{
-		uint8_t *vars_p = (uint8_t *)cvar.GetChars();
-		C_ReadCVars(&vars_p);
+		auto vars_p = cvar.GetTArrayView();
+		C_ReadCVars(vars_p);
 	}
 	else
 	{
@@ -2754,7 +2867,7 @@ void G_DoLoadGame ()
 	level.time = Scale(time[1], TICRATE, time[0]);
 
 	G_ReadSnapshots(resfile.get());
-	resfile.reset(nullptr);	// we no longer need the resource file below this point
+	resfile.reset(nullptr); // we no longer need the resource file below this point
 	G_ReadVisited(arc);
 
 	// load a base level
@@ -2771,6 +2884,7 @@ void G_DoLoadGame ()
 
 	NextSkill = -1;
 	arc("nextskill", NextSkill);
+	Net_SetWaiting();
 
 	if (level.info != nullptr)
 		level.info->Snapshot.Clean();
@@ -2795,18 +2909,22 @@ void G_SaveGame (const char *filename, const char *description, bool quick)
 	{
 		Printf ("%s\n", GStrings.GetString("TXT_SAVEPENDING"));
 	}
-    else if (!usergame)
+	else if (!usergame)
 	{
 		Printf ("%s\n", GStrings.GetString("TXT_NOTSAVEABLE"));
-    }
-    else if (gamestate != GS_LEVEL)
+	}
+	else if (gamestate != GS_LEVEL)
 	{
 		Printf ("%s\n", GStrings.GetString("TXT_NOTINLEVEL"));
-    }
-    else if (players[consoleplayer].health <= 0 && !multiplayer)
-    {
+	}
+	else if (players[consoleplayer].health <= 0 && !multiplayer)
+	{
 		Printf ("%s\n", GStrings.GetString("TXT_SPPLAYERDEAD"));
-    }
+	}
+	else if (netgame && net_limitsaves && !players[consoleplayer].settings_controller)
+	{
+		Printf("Only settings controllers can save the game\n");
+	}
 	else
 	{
 		savegamefile = filename;
@@ -2832,34 +2950,20 @@ CCMD(opensaves)
 	I_OpenShellFolder(name.GetChars());
 }
 
-CVAR (Int, autosavenum, 0, CVAR_NOSET|CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
-static int nextautosave = -1;
-CVAR (Int, disableautosave, 0, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
-CVAR (Bool, saveloadconfirmation, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // [mxd]
-CUSTOM_CVAR (Int, autosavecount, 4, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
-{
-	if (self < 0)
-		self = 0;
-}
-CVAR (Int, quicksavenum, -1, CVAR_NOSET|CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
-static int lastquicksave = -1;
-CVAR (Bool, quicksaverotation, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
-CUSTOM_CVAR (Int, quicksaverotationcount, 4, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
-{
-	if (self < 1)
-		self = 1;
-}
-
 void G_DoAutoSave ()
 {
+	// Never autosave in netgames since you can't load this properly anyway.
+	if (netgame)
+		return;
+
 	FString description;
 	FString file;
 	// Keep up to four autosaves at a time
 	UCVarValue num;
 	const char *readableTime;
 	int count = autosavecount != 0 ? autosavecount : 1;
-	
-	if (nextautosave == -1) 
+
+	if (nextautosave == -1)
 	{
 		nextautosave = (autosavenum + 1) % count;
 	}
@@ -2887,14 +2991,18 @@ void G_DoAutoSave ()
 
 void G_DoQuickSave ()
 {
+	// Never quicksave in netgames since you can't load this properly anyway.
+	if (netgame)
+		return;
+
 	FString description;
 	FString file;
 	// Keeps a rotating set of quicksaves
 	UCVarValue num;
 	const char *readableTime;
 	int count = quicksaverotationcount != 0 ? quicksaverotationcount : 1;
-	
-	if (quicksavenum < 0) 
+
+	if (quicksavenum < 0)
 	{
 		lastquicksave = 0;
 	}
@@ -3010,8 +3118,8 @@ void G_DoSaveGame (bool okForQuicksave, bool forceQuicksave, FString filename, c
 	}
 
 	BufferWriter savepic;
-	FSerializer savegameinfo;		// this is for displayable info about the savegame
-	FSerializer savegameglobals;	// and this for non-level related info that must be saved.
+	FSerializer savegameinfo;    // this is for displayable info about the savegame
+	FSerializer savegameglobals; // and this for non-level related info that must be saved.
 
 	savegameinfo.OpenWriter(true);
 	savegameglobals.OpenWriter(save_formatted);
@@ -3029,9 +3137,21 @@ void G_DoSaveGame (bool okForQuicksave, bool forceQuicksave, FString filename, c
 	savegameinfo.AddString("Software", buf)
 		.AddString("Engine", GAMESIG)
 		("Save Version", ver)
+		("GameUUID", GameUUID)
 		.AddString("Title", description)
 		.AddString("Current Map", primaryLevel->MapName.GetChars());
 
+	TArray<const char *> allowLoadIn {ALLOWLOADIN};
+
+	if(allowLoadIn.Size() > 0)
+	{
+		savegameinfo.BeginArray("AllowLoadIn");
+		for(const char *port : allowLoadIn)
+		{
+			savegameinfo.AddString(nullptr, port);
+		}
+		savegameinfo.EndArray();
+	}
 
 	PutSaveWads (savegameinfo);
 	PutSaveComment (savegameinfo);
@@ -3073,7 +3193,7 @@ void G_DoSaveGame (bool okForQuicksave, bool forceQuicksave, FString filename, c
 	savegame_content.Push(savegameglobals.GetCompressedOutput());
 	savegame_filenames.Push("globals.json");
 	G_WriteSnapshots (savegame_filenames, savegame_content);
-	
+
 	for (unsigned i = 0; i < savegame_content.Size(); i++)
 		savegame_content[i].filename = savegame_filenames[i].GetChars();
 
@@ -3111,34 +3231,31 @@ void G_DoSaveGame (bool okForQuicksave, bool forceQuicksave, FString filename, c
 
 	// We don't need the snapshot any longer.
 	level.info->Snapshot.Clean();
-		
+
 	insave = false;
 
 	if (cl_waitforsave)
 		I_FreezeTime(false);
 }
 
-
-
-
 //
 // DEMO RECORDING
 //
 
-void G_ReadDemoTiccmd (ticcmd_t *cmd, int player)
+void G_ReadDemoTiccmd (usercmd_t *cmd, int player)
 {
 	int id = DEM_BAD;
 
 	while (id != DEM_USERCMD && id != DEM_EMPTYUSERCMD)
 	{
-		if (!demorecording && demo_p >= zdembodyend)
+		if (!demorecording && demo_p.Data() >= zdembodyend)
 		{
 			// nothing left in the BODY chunk, so end playback.
 			G_CheckDemoStatus ();
 			break;
 		}
 
-		id = ReadInt8 (&demo_p);
+		id = ReadInt8 (demo_p);
 
 		switch (id)
 		{
@@ -3148,7 +3265,7 @@ void G_ReadDemoTiccmd (ticcmd_t *cmd, int player)
 			break;
 
 		case DEM_USERCMD:
-			UnpackUserCmd (&cmd->ucmd, &cmd->ucmd, &demo_p);
+			UnpackUserCmd (*cmd, cmd, demo_p);
 			break;
 
 		case DEM_EMPTYUSERCMD:
@@ -3157,7 +3274,7 @@ void G_ReadDemoTiccmd (ticcmd_t *cmd, int player)
 
 		case DEM_DROPPLAYER:
 			{
-				uint8_t i = ReadInt8 (&demo_p);
+				uint8_t i = ReadInt8 (demo_p);
 				if (i < MAXPLAYERS)
 				{
 					playeringame[i] = false;
@@ -3166,22 +3283,18 @@ void G_ReadDemoTiccmd (ticcmd_t *cmd, int player)
 			break;
 
 		default:
-			Net_DoCommand (id, &demo_p, player);
+			Net_DoCommand (id, demo_p, player);
 			break;
 		}
 	}
-} 
-
-bool stoprecording;
+}
 
 CCMD (stop)
 {
 	stoprecording = true;
 }
 
-extern uint8_t *lenspot;
-
-void G_WriteDemoTiccmd (ticcmd_t *cmd, int player, int buf)
+void G_WriteDemoTiccmd (usercmd_t *cmd, int player, int buf)
 {
 	uint8_t *specdata;
 	int speclen;
@@ -3197,30 +3310,26 @@ void G_WriteDemoTiccmd (ticcmd_t *cmd, int player, int buf)
 	}
 
 	// [RH] Write any special "ticcmds" for this player to the demo
-	if ((specdata = NetSpecs[player][buf].GetData (&speclen)) && gametic % ticdup == 0)
-	{
-		memcpy (demo_p, specdata, speclen);
-		demo_p += speclen;
-		NetSpecs[player][buf].SetData (NULL, 0);
-	}
+	if ((specdata = ClientStates[player].Tics[buf % BACKUPTICS].Data.GetData (&speclen)) && !(gametic % TicDup))
+		WriteBytes(TArrayView(specdata, speclen), demo_p);
 
 	// [RH] Now write out a "normal" ticcmd.
-	WriteUserCmdMessage (&cmd->ucmd, &players[player].cmd.ucmd, &demo_p);
+	WriteUserCmdMessage (*cmd, &players[player].cmd, demo_p);
 
 	// [RH] Bigger safety margin
-	if (demo_p > demobuffer + maxdemosize - 64)
+	if (demo_p.Data() > demobuffer.Data() + demobuffer.Size() - 64)
 	{
-		ptrdiff_t pos = demo_p - demobuffer;
-		ptrdiff_t spot = lenspot - demobuffer;
-		ptrdiff_t comp = democompspot - demobuffer;
-		ptrdiff_t body = demobodyspot - demobuffer;
+		ptrdiff_t pos = demo_p.Data() - demobuffer.Data();
+		ptrdiff_t spot = streamPos - demobuffer.Data();
+		ptrdiff_t comp = democompspot - demobuffer.Data();
+		ptrdiff_t body = demobodyspot - demobuffer.Data();
 		// [RH] Allocate more space for the demo
 		maxdemosize += 0x20000;
-		demobuffer = (uint8_t *)M_Realloc (demobuffer, maxdemosize);
-		demo_p = demobuffer + pos;
-		lenspot = demobuffer + spot;
-		democompspot = demobuffer + comp;
-		demobodyspot = demobuffer + body;
+		demobuffer.Resize(maxdemosize);
+		demo_p = TArrayView(demobuffer.Data() + pos, demobuffer.Size() - pos);
+		streamPos = demobuffer.Data() + spot;
+		democompspot = demobuffer.Data() + comp;
+		demobodyspot = demobuffer.Data() + body;
 	}
 }
 
@@ -3236,52 +3345,50 @@ void G_RecordDemo (const char* name)
 	FixPathSeperator (demoname);
 	DefaultExtension (demoname, ".lmp");
 	maxdemosize = 0x20000;
-	demobuffer = (uint8_t *)M_Malloc (maxdemosize);
-	demorecording = true; 
+	demobuffer.Resize(maxdemosize);
+	demorecording = true;
 }
 
 
 // [RH] Demos are now saved as IFF FORMs. I've also removed support
-//		for earlier ZDEMs since I didn't want to bother supporting
-//		something that probably wasn't used much (if at all).
+//      for earlier ZDEMs since I didn't want to bother supporting
+//      something that probably wasn't used much (if at all).
 
 void G_BeginRecording (const char *startmap)
 {
-	int i;
+	unsigned int i;
 
 	if (startmap == NULL)
 	{
 		startmap = primaryLevel->MapName.GetChars();
 	}
-	demo_p = demobuffer;
+	demo_p = TArrayView(demobuffer.Data(), demobuffer.Size());
 
-	WriteInt32 (FORM_ID, &demo_p);			// Write FORM ID
-	demo_p += 4;							// Leave space for len
-	WriteInt32 (ZDEM_ID, &demo_p);			// Write ZDEM ID
+	WriteInt32 (FORM_ID, demo_p); // Write FORM ID
+	AdvanceStream(demo_p, 4);     // Leave space for len
+	WriteInt32 (ZDEM_ID, demo_p); // Write ZDEM ID
 
 	// Write header chunk
-	StartChunk (ZDHD_ID, &demo_p);
-	WriteInt16 (DEMOGAMEVERSION, &demo_p);	// Write ZDoom version
-	*demo_p++ = 2;							// Write minimum version needed to use this demo.
-	*demo_p++ = 3;							// (Useful?)
+	StartChunk (ZDHD_ID, demo_p);
+	WriteInt16 (DEMOGAMEVERSION, demo_p); // Write ZDoom version
+	WriteInt8(2, demo_p);                 // Write minimum version needed to use this demo.
+	WriteInt8(3, demo_p);                 // (Useful?)
 
-	strcpy((char*)demo_p, startmap);		// Write name of map demo was recorded on.
-	demo_p += strlen(startmap) + 1;
-	WriteInt32(rngseed, &demo_p);			// Write RNG seed
-	*demo_p++ = consoleplayer;
-	FinishChunk (&demo_p);
+	WriteString(startmap, demo_p);        // Write name of map demo was recorded on.
+	WriteInt32(rngseed, demo_p);          // Write RNG seed
+	WriteInt8(consoleplayer, demo_p);
+	FinishChunk (demo_p);
 
 	// Write player info chunks
 	for (i = 0; i < MAXPLAYERS; i++)
 	{
 		if (playeringame[i])
 		{
-			StartChunk(UINF_ID, &demo_p);
-			WriteInt8((uint8_t)i, &demo_p);
+			StartChunk(UINF_ID, demo_p);
+			WriteInt8((uint8_t)i, demo_p);
 			auto str = D_GetUserInfoStrings(i);
-			memcpy(demo_p, str.GetChars(), str.Len() + 1);
-			demo_p += str.Len();
-			FinishChunk(&demo_p);
+			WriteFString(str, demo_p);
+			FinishChunk(demo_p);
 		}
 	}
 
@@ -3290,29 +3397,29 @@ void G_BeginRecording (const char *startmap)
 	// enough.
 	if (multiplayer)
 	{
-		StartChunk (NETD_ID, &demo_p);
-		FinishChunk (&demo_p);
+		StartChunk (NETD_ID, demo_p);
+		FinishChunk (demo_p);
 	}
 
 	// Write cvars chunk
-	StartChunk (VARS_ID, &demo_p);
-	C_WriteCVars (&demo_p, CVAR_SERVERINFO|CVAR_DEMOSAVE);
-	FinishChunk (&demo_p);
+	StartChunk (VARS_ID, demo_p);
+	C_WriteCVars (demo_p, CVAR_SERVERINFO|CVAR_DEMOSAVE);
+	FinishChunk (demo_p);
 
 	// Write weapon ordering chunk
-	StartChunk (WEAP_ID, &demo_p);
-	P_WriteDemoWeaponsChunk(&demo_p);
-	FinishChunk (&demo_p);
+	StartChunk (WEAP_ID, demo_p);
+	P_WriteDemoWeaponsChunk(demo_p);
+	FinishChunk (demo_p);
 
 	// Indicate body is compressed
-	StartChunk (COMP_ID, &demo_p);
-	democompspot = demo_p;
-	WriteInt32 (0, &demo_p);
-	FinishChunk (&demo_p);
+	StartChunk (COMP_ID, demo_p);
+	democompspot = demo_p.Data();
+	WriteInt32 (0, demo_p);
+	FinishChunk (demo_p);
 
 	// Begin BODY chunk
-	StartChunk (BODY_ID, &demo_p);
-	demobodyspot = demo_p;
+	StartChunk (BODY_ID, demo_p);
+	demobodyspot = demo_p.Data();
 }
 
 
@@ -3357,13 +3464,14 @@ UNSAFE_CCMD (timedemo)
 }
 
 // [RH] Process all the information in a FORM ZDEM
-//		until a BODY chunk is entered.
+//      until a BODY chunk is entered.
 bool G_ProcessIFFDemo (FString &mapname)
 {
 	bool headerHit = false;
 	bool bodyHit = false;
 	int numPlayers = 0;
-	int id, len, i;
+	int id, len;
+	unsigned int i;
 	uLong uncompSize = 0;
 	uint8_t *nextchunk;
 
@@ -3372,13 +3480,13 @@ bool G_ProcessIFFDemo (FString &mapname)
 	for (i = 0; i < MAXPLAYERS; i++)
 		playeringame[i] = 0;
 
-	len = ReadInt32 (&demo_p);
-	zdemformend = demo_p + len + (len & 1);
+	len = ReadInt32 (demo_p);
+	zdemformend = demo_p.Data() + len + (len & 1);
 
 	// Check to make sure this is a ZDEM chunk file.
 	// TODO: Support multiple FORM ZDEMs in a CAT. Might be useful.
 
-	id = ReadInt32 (&demo_p);
+	id = ReadInt32 (demo_p);
 	if (id != ZDEM_ID)
 	{
 		Printf ("Not a " GAMENAME " demo file!\n");
@@ -3387,11 +3495,11 @@ bool G_ProcessIFFDemo (FString &mapname)
 
 	// Process all chunks until a BODY chunk is encountered.
 
-	while (demo_p < zdemformend && !bodyHit)
+	while (demo_p.Data() < zdemformend && !bodyHit)
 	{
-		id = ReadInt32 (&demo_p);
-		len = ReadInt32 (&demo_p);
-		nextchunk = demo_p + len + (len & 1);
+		id = ReadInt32 (demo_p);
+		len = ReadInt32 (demo_p);
+		nextchunk = demo_p.Data() + len + (len & 1);
 		if (nextchunk > zdemformend)
 		{
 			Printf ("Demo is mangled!\n");
@@ -3403,49 +3511,48 @@ bool G_ProcessIFFDemo (FString &mapname)
 		case ZDHD_ID:
 			headerHit = true;
 
-			demover = ReadInt16 (&demo_p);	// ZDoom version demo was created with
+			demover = ReadInt16 (demo_p); // ZDoom version demo was created with
 			if (demover < MINDEMOVERSION)
 			{
 				Printf ("Demo requires an older version of " GAMENAME "!\n");
 				//return true;
 			}
-			if (ReadInt16 (&demo_p) > DEMOGAMEVERSION)	// Minimum ZDoom version
+			if (ReadInt16 (demo_p) > DEMOGAMEVERSION) // Minimum ZDoom version
 			{
 				Printf ("Demo requires a newer version of " GAMENAME "!\n");
 				return true;
 			}
 			if (demover >= 0x21a)
 			{
-				mapname = (char*)demo_p;
-				demo_p += mapname.Len() + 1;
+				mapname = ReadStringConst(demo_p);
 			}
 			else
 			{
-				mapname = FString((char*)demo_p, 8);
-				demo_p += 8;
+				mapname = FString((char*)demo_p.Data(), 8);
+				AdvanceStream(demo_p, 8);
 			}
-			rngseed = ReadInt32 (&demo_p);
+			rngseed = ReadInt32 (demo_p);
 			// Only reset the RNG if this demo is not in conjunction with a savegame.
 			if (mapname[0] != 0)
 			{
 				FRandom::StaticClearRandom ();
 				M_ClearRandom();
 			}
-			consoleplayer = *demo_p++;
+			consoleplayer = ReadInt8(demo_p);
 			break;
 
 		case VARS_ID:
-			C_ReadCVars (&demo_p);
+			C_ReadCVars (demo_p);
 			break;
 
 		case UINF_ID:
-			i = ReadInt8 (&demo_p);
+			i = ReadInt8 (demo_p);
 			if (!playeringame[i])
 			{
 				playeringame[i] = 1;
 				numPlayers++;
 			}
-			D_ReadUserInfoStrings (i, &demo_p, false);
+			D_ReadUserInfoStrings (i, demo_p, false);
 			break;
 
 		case NETD_ID:
@@ -3453,21 +3560,21 @@ bool G_ProcessIFFDemo (FString &mapname)
 			break;
 
 		case WEAP_ID:
-			P_ReadDemoWeaponsChunk(&demo_p);
+			P_ReadDemoWeaponsChunk(demo_p);
 			break;
 
 		case BODY_ID:
 			bodyHit = true;
-			zdembodyend = demo_p + len;
+			zdembodyend = demo_p.Data() + len;
 			break;
 
 		case COMP_ID:
-			uncompSize = ReadInt32 (&demo_p);
+			uncompSize = ReadInt32 (demo_p);
 			break;
 		}
 
 		if (!bodyHit)
-			demo_p = nextchunk;
+			demo_p = TArrayView(nextchunk, demo_p.Size() + demo_p.Data() - nextchunk);
 	}
 
 	if (!headerHit)
@@ -3494,17 +3601,16 @@ bool G_ProcessIFFDemo (FString &mapname)
 
 	if (uncompSize > 0)
 	{
-		uint8_t *uncompressed = (uint8_t*)M_Malloc(uncompSize);
-		int r = uncompress (uncompressed, &uncompSize, demo_p, uLong(zdembodyend - demo_p));
+		auto uncompressed = TArray<uint8_t>(uncompSize, true);
+		int r = uncompress (uncompressed.Data(), &uncompSize, demo_p.Data(), uLong(zdembodyend - demo_p.Data()));
 		if (r != Z_OK)
 		{
 			Printf ("Could not decompress demo! %s\n", M_ZLibError(r).GetChars());
-			M_Free(uncompressed);
 			return true;
 		}
-		M_Free (demobuffer);
-		zdembodyend = uncompressed + uncompSize;
-		demobuffer = demo_p = uncompressed;
+		zdembodyend = uncompressed.Data() + uncompSize;
+		demobuffer = std::move(uncompressed);
+		demo_p = TArrayView(demobuffer.Data(), uncompSize);
 	}
 
 	return false;
@@ -3521,9 +3627,9 @@ void G_DoPlayDemo (void)
 	demolump = fileSystem.CheckNumForFullName (defdemoname.GetChars(), true);
 	if (demolump >= 0)
 	{
-		int demolen = fileSystem.FileLength (demolump);
-		demobuffer = (uint8_t *)M_Malloc(demolen);
-		fileSystem.ReadFile (demolump, demobuffer);
+		size_t demolen = fileSystem.FileLength (demolump);
+		demobuffer.Resize(demolen);
+		fileSystem.ReadFile (demolump, demobuffer.Data());
 	}
 	else
 	{
@@ -3534,35 +3640,35 @@ void G_DoPlayDemo (void)
 		{
 			I_Error("Unable to open demo '%s'", defdemoname.GetChars());
 		}
-		auto len = fr.GetLength();
-		demobuffer = (uint8_t*)M_Malloc(len);
-		if (fr.Read(demobuffer, len) != len)
+		size_t demolen = fr.GetLength();
+		demobuffer.Resize(demolen);
+		if (static_cast<size_t>(fr.Read(demobuffer.Data(), demolen)) != demolen)
 		{
 			I_Error("Unable to read demo '%s'", defdemoname.GetChars());
 		}
 	}
-	demo_p = demobuffer;
+	if (demobuffer.Size() < 4)
+	{ // Empty demo lump; return
+		return;
+	}
+	demo_p = TArrayView(demobuffer.Data(), demobuffer.Size());
 
 	if (singledemo) Printf ("Playing demo %s\n", defdemoname.GetChars());
 
-	C_BackupCVars ();		// [RH] Save cvars that might be affected by demo
+	C_BackupCVars (); // [RH] Save cvars that might be affected by demo
 
-	if (ReadInt32 (&demo_p) != FORM_ID)
+	if (ReadInt32 (demo_p) != FORM_ID)
 	{
 		const char *eek = "Cannot play non-" GAMENAME " demos.\n";
 
 		C_ForgetCVars();
-		M_Free(demobuffer);
-		demo_p = demobuffer = NULL;
+		demobuffer.Resize(0);
+		demo_p = NULL;
 		if (singledemo)
 		{
 			I_Error ("%s", eek);
 		}
-		else
-		{
-			//Printf (PRINT_BOLD, "%s", eek);
-			gameaction = ga_nothing;
-		}
+		gameaction = ga_nothing;
 	}
 	else if (G_ProcessIFFDemo (mapname))
 	{
@@ -3572,7 +3678,7 @@ void G_DoPlayDemo (void)
 	}
 	else
 	{
-		// don't spend a lot of time in loadlevel 
+		// don't spend a lot of time in loadlevel
 		precache = false;
 		demonew = true;
 		if (mapname.Len() != 0)
@@ -3598,10 +3704,9 @@ void G_DoPlayDemo (void)
 //
 void G_TimeDemo (const char* name)
 {
-	nodrawers = !!Args->CheckParm ("-nodraw");
-	noblit = !!Args->CheckParm ("-noblit");
+	nodrawers = !!Args->CheckParm (FArg_nodraw);
+	noblit = !!Args->CheckParm (FArg_noblit);
 	timingdemo = true;
-	singletics = true;
 
 	defdemoname = name;
 	gameaction = (gameaction == ga_loadgame) ? ga_loadgameplaydemo : ga_playdemo;
@@ -3633,16 +3738,14 @@ bool G_CheckDemoStatus (void)
 		if (timingdemo)
 			endtime = I_GetTime () - starttime;
 
-		C_RestoreCVars ();		// [RH] Restore cvars demo might have changed
-		M_Free (demobuffer);
-		demobuffer = NULL;
+		C_RestoreCVars (); // [RH] Restore cvars demo might have changed
+		demobuffer.Reset();
 
 		P_SetupWeapons_ntohton();
 		demoplayback = false;
 		netgame = false;
 		multiplayer = false;
-		singletics = false;
-		for (int i = 1; i < MAXPLAYERS; i++)
+		for (unsigned int i = 1; i < MAXPLAYERS; i++)
 			playeringame[i] = 0;
 		consoleplayer = 0;
 		players[0].camera = nullptr;
@@ -3671,17 +3774,15 @@ bool G_CheckDemoStatus (void)
 		}
 		else
 		{
-			D_AdvanceDemo (); 
+			D_AdvanceDemo ();
 		}
 
-		return true; 
+		return true;
 	}
 
 	if (demorecording)
 	{
-		uint8_t *formlen;
-
-		WriteInt8 (DEM_STOP, &demo_p);
+		WriteInt8 (DEM_STOP, demo_p);
 
 		if (demo_compress)
 		{
@@ -3689,37 +3790,36 @@ bool G_CheckDemoStatus (void)
 			// a compressed version. If the BODY successfully compresses, the
 			// contents of the COMP chunk will be changed to indicate the
 			// uncompressed size of the BODY.
-			uLong len = uLong(demo_p - demobodyspot);
+			uLong len = uLong(demo_p.Data() - demobodyspot);
 			uLong outlen = (len + len/100 + 12);
 			TArray<Byte> compressed(outlen, true);
 			int r = compress2 (compressed.Data(), &outlen, demobodyspot, len, 9);
 			if (r == Z_OK && outlen < len)
 			{
-				formlen = democompspot;
-				WriteInt32 (len, &democompspot);
+				UncheckedWriteInt32 (len, &democompspot);
 				memcpy (demobodyspot, compressed.Data(), outlen);
-				demo_p = demobodyspot + outlen;
+				demo_p = TArrayView(demobodyspot + outlen, demo_p.Size() + len - outlen);
 			}
 		}
-		FinishChunk (&demo_p);
-		formlen = demobuffer + 4;
-		WriteInt32 (int(demo_p - demobuffer - 8), &formlen);
+		FinishChunk (demo_p);
+		uint8_t* formlen = demobuffer.Data() + 4;
+		UncheckedWriteInt32 (int(demo_p.Data() - demobuffer.Data() - 8), &formlen);
 
 		auto fw = FileWriter::Open(demoname.GetChars());
 		bool saved = false;
 		if (fw != nullptr)
 		{
-			const size_t size = demo_p - demobuffer;
-			saved = fw->Write(demobuffer, size) == size;
+			const size_t size = demo_p.Data() - demobuffer.Data();
+			saved = fw->Write(demobuffer.Data(), size) == size;
 			delete fw;
 			if (!saved) RemoveFile(demoname.GetChars());
 		}
-		M_Free (demobuffer); 
+		demobuffer.Reset();
 		demorecording = false;
 		stoprecording = false;
 		if (saved)
 		{
-			Printf ("Demo %s recorded\n", demoname.GetChars()); 
+			Printf ("Demo %s recorded\n", demoname.GetChars());
 		}
 		else
 		{
@@ -3727,14 +3827,14 @@ bool G_CheckDemoStatus (void)
 		}
 	}
 
-	return false; 
+	return false;
 }
 
 void G_StartSlideshow(FLevelLocals *Level, FName whichone, int state)
 {
 	auto SelectedSlideshow = whichone == NAME_None ? Level->info->slideshow : whichone;
 	auto slide = F_StartIntermission(SelectedSlideshow, state);
-	RunIntermission(nullptr, nullptr, slide, nullptr, [](bool)
+	RunIntermission(nullptr, nullptr, slide, nullptr, false, [](bool)
 	{
 		primaryLevel->SetMusic();
 		gamestate = GS_LEVEL;

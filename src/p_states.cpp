@@ -1,47 +1,34 @@
 /*
 ** p_states.cpp
+**
 ** state management
 **
 **---------------------------------------------------------------------------
-** Copyright 1998-2008 Randy Heit
-** Copyright 2006-2008 Christoph Oelckers
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 1998-2016 Marisa Heit
+** Copyright 2006-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 **---------------------------------------------------------------------------
 **
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
+**---------------------------------------------------------------------------
 **
 */
+
 #include "actor.h"
-#include "cmdlib.h"
 #include "c_dispatch.h"
-#include "v_text.h"
-#include "thingdef.h"
+#include "cmdlib.h"
+#include "codegen.h"
 #include "r_state.h"
 #include "templates.h"
-#include "codegen.h"
-
+#include "thingdef.h"
 
 // stores indices for symbolic state labels for some old-style DECORATE functions.
 FStateLabelStorage StateLabels;
@@ -444,7 +431,7 @@ FStateDefine *FStateDefinitions::FindStateLabelInList(TArray<FStateDefine> & lis
 
 //==========================================================================
 //
-// Finds the address of a state label given by name. 
+// Finds the address of a state label given by name.
 // Adds the state label if it doesn't exist
 //
 //==========================================================================
@@ -606,7 +593,7 @@ void FStateDefinitions::InstallStates(PClassActor *info, AActor *defaults)
 	}
 
 	auto &sl = info->ActorInfo()->StateList;
-	if (sl != NULL) 
+	if (sl != NULL)
 	{
 		sl->Destroy();
 		M_Free(sl);
@@ -1097,16 +1084,18 @@ void DumpStateHelper(FStateLabels *StateList, const FString &prefix)
 		if (state != NULL)
 		{
 			const PClassActor *owner = FState::StaticFindStateOwner(state);
+			auto pfx = prefix.GetChars();
+			auto label = StateList->Labels[i].Label.GetChars();
 			if (owner == NULL)
 			{
 				if (state->DehIndex >= 0)
-					Printf(PRINT_LOG, "%s%s: DehExtra %d\n", prefix.GetChars(), state->DehIndex);
+					Printf(PRINT_LOG, "%s%s: DehExtra %d\n", pfx, label, state->DehIndex);
 				else
-					Printf(PRINT_LOG, "%s%s: invalid\n", prefix.GetChars(), StateList->Labels[i].Label.GetChars());
+					Printf(PRINT_LOG, "%s%s: invalid\n", pfx, label);
 			}
 			else
 			{
-				Printf(PRINT_LOG, "%s%s: %s\n", prefix.GetChars(), StateList->Labels[i].Label.GetChars(), FState::StaticGetStateName(state).GetChars());
+				Printf(PRINT_LOG, "%s%s: %s\n", pfx, label, FState::StaticGetStateName(state).GetChars());
 			}
 		}
 		if (StateList->Labels[i].Children != NULL)

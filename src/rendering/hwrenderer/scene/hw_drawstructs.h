@@ -1,10 +1,28 @@
+/*
+** hw_drawstructs.h
+**
+** One wall segment in the draw list
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 2018-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
+
 #pragma once
+
 //==========================================================================
 //
 // One wall segment in the draw list
 //
 //==========================================================================
 #include <functional>
+
 #include "r_defs.h"
 #include "renderstyle.h"
 #include "textures.h"
@@ -100,7 +118,7 @@ struct HWSeg
 	float y1,y2;
 	float fracleft, fracright;	// fractional offset of the 2 vertices on the linedef
 
-	FVector3 Normal() const 
+	FVector3 Normal() const
 	{
 		// we do not use the vector math inlines here because they are not optimized for speed but accuracy in the playsim and this is called quite frequently.
 		float x = y2 - y1;
@@ -331,25 +349,25 @@ public:
 	bool stack;
 	bool ceiling;
 	uint8_t renderflags;
-    uint8_t hacktype;
+	uint8_t hacktype;
 	int iboindex;
 	//int vboheight;
 
 	int dynlightindex;
 
 	void CreateSkyboxVertices(FFlatVertex *buffer);
-	void SetupLights(HWDrawInfo *di, FLightNode *head, FDynLightData &lightdata, int portalgroup);
+	void SetupLights(HWDrawInfo *di, FDynLightData &lightdata, int portalgroup);
 
 	void PutFlat(HWDrawInfo *di, bool fog = false);
 	void Process(HWDrawInfo *di, sector_t * model, int whichplane, bool notexture);
 	void SetFrom3DFloor(F3DFloor *rover, bool top, bool underside);
 	void ProcessSector(HWDrawInfo *di, sector_t * frontsector, int which = 7 /*SSRF_RENDERALL*/);	// cannot use constant due to circular dependencies.
-	
+
 	void DrawSubsectors(HWDrawInfo *di, FRenderState &state);
 	void DrawFlat(HWDrawInfo *di, FRenderState &state, bool translucent);
-    
-    void DrawOtherPlanes(HWDrawInfo *di, FRenderState &state);
-    void DrawFloodPlanes(HWDrawInfo *di, FRenderState &state);
+
+	void DrawOtherPlanes(HWDrawInfo *di, FRenderState &state);
+	void DrawFloodPlanes(HWDrawInfo *di, FRenderState &state);
 };
 
 //==========================================================================

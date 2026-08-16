@@ -1,55 +1,49 @@
 /*
 ** sdlglvideo.cpp
 **
+**
+**
 **---------------------------------------------------------------------------
-** Copyright 2005-2016 Christoph Oelckers et.al.
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** Copyright 2005-2016 Marisa Heit
+** Copyright 2005-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
 
 // HEADER FILES ------------------------------------------------------------
 
-#include "c_console.h"
+#include <SDL2/SDL.h>
+
+#ifdef HAVE_VULKAN
+#include <SDL2/SDL_vulkan.h>
+#include <zvulkan/vulkanbuilders.h>
+#include <zvulkan/vulkandevice.h>
+#include <zvulkan/vulkaninstance.h>
+#include <zvulkan/vulkansurface.h>
+#endif
+
+#include "basics.h"
 #include "c_dispatch.h"
-#include "i_module.h"
+#include "gl_framebuffer.h"
+#include "gl_sysfb.h"
 #include "i_soundinternal.h"
-#include "i_system.h"
 #include "i_video.h"
 #include "m_argv.h"
 #include "printf.h"
 #include "v_video.h"
 #include "version.h"
-
-#include "gl_sysfb.h"
-#include "gl_system.h"
-#include "hardware.h"
-
-#include "gl_framebuffer.h"
-#include "gl_renderer.h"
 
 #ifdef HAVE_GLES2
 #include "gles_framebuffer.h"
@@ -57,19 +51,14 @@
 
 #ifdef HAVE_VULKAN
 #include "vulkan/system/vk_renderdevice.h"
-#include "common/rendering/stereo3d/openxr/oxr_loader.h"
+// [UZDXREMA] Desktop OpenXR bootstrap: QueryOpenXRVulkanBootstrapInfo() lives in
+// oxr_loader.cpp and VR_OPENXR_MOBILE in hw_vrmodes.h. SDLVideo::CreateFrameBuffer
+// below needs both to build an XR-compatible Vulkan instance.
 #include "common/rendering/hwrenderer/data/hw_vrmodes.h"
-#include <zvulkan/vulkanbuilders.h>
-#include <zvulkan/vulkandevice.h>
-#include <zvulkan/vulkaninstance.h>
-#include <zvulkan/vulkansurface.h>
+#include "common/rendering/stereo3d/openxr/oxr_loader.h"
 #endif
 
 // MACROS ------------------------------------------------------------------
-
-#if defined HAVE_VULKAN
-#include <SDL2/SDL_vulkan.h>
-#endif // HAVE_VULKAN
 
 // TYPES -------------------------------------------------------------------
 
@@ -78,6 +67,7 @@
 // PRIVATE FUNCTION PROTOTYPES ---------------------------------------------
 
 // EXTERNAL DATA DECLARATIONS ----------------------------------------------
+
 extern IVideo *Video;
 
 #ifdef HAVE_VULKAN
@@ -90,6 +80,7 @@ EXTERN_CVAR (Int, vid_defwidth)
 EXTERN_CVAR (Int, vid_defheight)
 EXTERN_CVAR (Bool, cl_capfps)
 EXTERN_CVAR(Bool, vk_debug)
+EXTERN_FARG(glversion);
 
 // PUBLIC DATA DEFINITIONS -------------------------------------------------
 
@@ -174,7 +165,7 @@ namespace Priv
 		int xWindowPos = (win_x <= 0) ? SDL_WINDOWPOS_CENTERED_DISPLAY(vid_adapter) : win_x;
 		int yWindowPos = (win_y <= 0) ? SDL_WINDOWPOS_CENTERED_DISPLAY(vid_adapter) : win_y;
 		Printf("Creating window [%dx%d] on adapter %d\n", (*win_w), (*win_h), (*vid_adapter));
-		
+
 		FString caption;
 		caption.Format(GAMENAME " %s (%s)", GetVersionString(), GetGitTime());
 
@@ -245,7 +236,7 @@ CUSTOM_CVAR(Int, vid_adapter, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITC
 		// Get displays and default display size
 		Priv::updateDisplayInfo();
 
-    int display = (*self) % Priv::numberOfDisplays;
+	int display = (*self) % Priv::numberOfDisplays;
 
 		// TODO control better when updateDisplayInfo fails
 		SDL_Rect* bounds = &Priv::displayBounds[vid_adapter % Priv::numberOfDisplays];
@@ -286,8 +277,8 @@ CUSTOM_CVAR(Int, vid_adapter, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITC
 			SDL_SetWindowPosition(Priv::window, SDL_WINDOWPOS_CENTERED_DISPLAY(display), SDL_WINDOWPOS_CENTERED_DISPLAY(display));
 		}
 
-    display = SDL_GetWindowDisplayIndex(Priv::window);
-    if (display >= 0) {
+	display = SDL_GetWindowDisplayIndex(Priv::window);
+	if (display >= 0) {
 			Printf("New display is %d\n", display );
 		} else {
 			Printf("A problem occured trying to change of display %s\n", SDL_GetError());
@@ -302,7 +293,7 @@ public:
 	~SDLVideo ();
 
 	void DumpAdapters();
-	
+
 	DFrameBuffer *CreateFrameBuffer ();
 
 private:
@@ -352,7 +343,7 @@ SDLVideo::SDLVideo ()
 	}
 
 #ifdef HAVE_VULKAN
-	Priv::vulkanEnabled = V_GetBackend() == 1;
+	Priv::vulkanEnabled = vid_preferbackend == BACKEND_VULKAN;
 
 	if (Priv::vulkanEnabled)
 	{
@@ -377,14 +368,14 @@ void SDLVideo::DumpAdapters()
 {
 	Priv::updateDisplayInfo();
   for (int i=0; i < Priv::numberOfDisplays; i++) {
-    Printf("%s%d. [%dx%d @ (%d,%d)]\n",
-        vid_adapter == i ? TEXTCOLOR_BOLD : "",
-        i,
-        Priv::displayBounds[i].w,
-        Priv::displayBounds[i].h,
-        Priv::displayBounds[i].x,
-        Priv::displayBounds[i].y
-      );
+	Printf("%s%d. [%dx%d @ (%d,%d)]\n",
+		vid_adapter == i ? TEXTCOLOR_BOLD : "",
+		i,
+		Priv::displayBounds[i].w,
+		Priv::displayBounds[i].h,
+		Priv::displayBounds[i].x,
+		Priv::displayBounds[i].y
+	  );
   }
 }
 
@@ -460,7 +451,7 @@ DFrameBuffer *SDLVideo::CreateFrameBuffer ()
 	if (fb == nullptr)
 	{
 #ifdef HAVE_GLES2
-		if (V_GetBackend() != 0)
+		if (vid_preferbackend != BACKEND_OPENGL)
 			fb = new OpenGLESRenderer::OpenGLFrameBuffer(0, vid_fullscreen);
 		else
 #endif
@@ -482,11 +473,6 @@ IVideo *gl_CreateVideo()
 SystemBaseFrameBuffer::SystemBaseFrameBuffer (void *, bool fullscreen)
 : DFrameBuffer (vid_defwidth, vid_defheight)
 {
-	if (Priv::window != nullptr)
-	{
-		SDL_SetWindowFullscreen(Priv::window, fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
-		SDL_ShowWindow(Priv::window);
-	}
 }
 
 int SystemBaseFrameBuffer::GetClientWidth()
@@ -521,6 +507,7 @@ bool SystemBaseFrameBuffer::IsFullscreen ()
 
 void SystemBaseFrameBuffer::ToggleFullscreen(bool yes)
 {
+	SDL_ShowWindow(Priv::window);
 	SDL_SetWindowFullscreen(Priv::window, yes ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
 	if ( !yes )
 	{
@@ -560,7 +547,7 @@ void SystemBaseFrameBuffer::SetWindowSize(int w, int h)
 		SDL_GetWindowPosition(Priv::window, &x, &y);
 		win_x = x;
 		win_y = y;
-		
+
 	}
 }
 
@@ -579,7 +566,7 @@ SystemGLFrameBuffer::SystemGLFrameBuffer(void *hMonitor, bool fullscreen)
 	int glveridx = 0;
 	int i;
 
-	const char *version = Args->CheckValue("-glversion");
+	const char *version = Args->CheckValue(FArg_glversion);
 	if (version != NULL)
 	{
 		double gl_version = strtod(version, NULL) + 0.01;
@@ -587,7 +574,7 @@ SystemGLFrameBuffer::SystemGLFrameBuffer(void *hMonitor, bool fullscreen)
 		int vermin = (int)(gl_version*10.0) % 10;
 
 		while (glvers[glveridx][0] > vermaj || (glvers[glveridx][0] == vermaj &&
-		        glvers[glveridx][1] > vermin))
+				glvers[glveridx][1] > vermin))
 		{
 			glveridx++;
 			if (glvers[glveridx][0] == 0)
@@ -601,7 +588,7 @@ SystemGLFrameBuffer::SystemGLFrameBuffer(void *hMonitor, bool fullscreen)
 	for ( ; glvers[glveridx][0] > 0; ++glveridx)
 	{
 		Priv::SetupPixelFormat(0, glvers[glveridx]);
-		Priv::CreateWindow(SDL_WINDOW_OPENGL | (fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0));
+		Priv::CreateWindow(SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN | (fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0));
 
 		if (Priv::window == nullptr)
 		{
@@ -735,6 +722,8 @@ void I_SetWindowTitle(const char* caption)
 	}
 }
 
+// [UZDXREMA] Called from d_main.cpp right before D_DoomLoop(); upstream now
+// creates the window SDL_WINDOW_HIDDEN, so raising it here still matters.
 void I_FocusWindow()
 {
 	SDL_RaiseWindow(Priv::window);

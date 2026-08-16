@@ -297,14 +297,19 @@ class ZoneHeap {
   //! Create a new `ZoneHeap`.
   //!
   //! NOTE: To use it, you must first `init()` it.
-  ASMJIT_INLINE ZoneHeap() noexcept {
-    ::memset(this, 0, sizeof(*this));
-  }
+  ASMJIT_INLINE ZoneHeap() noexcept:
+    _zone{},
+    _slots{},
+    _dynamicBlocks{}
+  {}
+
   //! Create a new `ZoneHeap` initialized to use `zone`.
-  explicit ASMJIT_INLINE ZoneHeap(Zone* zone) noexcept {
-    ::memset(this, 0, sizeof(*this));
-    _zone = zone;
-  }
+  explicit ASMJIT_INLINE ZoneHeap(Zone* zone) noexcept:
+    _zone(zone),
+    _slots{},
+    _dynamicBlocks{}
+  {}
+
   //! Destroy the `ZoneHeap`.
   ASMJIT_INLINE ~ZoneHeap() noexcept { reset(); }
 
@@ -461,7 +466,7 @@ class ZoneHeap {
 template <typename T>
 class ZoneList {
 public:
-  ASMJIT_NONCOPYABLE(ZoneList<T>)
+  ASMJIT_NONCOPYABLE(ZoneList)
 
   // --------------------------------------------------------------------------
   // [Link]
@@ -643,7 +648,7 @@ public:
 template <typename T>
 class ZoneVector : public ZoneVectorBase {
 public:
-  ASMJIT_NONCOPYABLE(ZoneVector<T>)
+  ASMJIT_NONCOPYABLE(ZoneVector)
 
   // --------------------------------------------------------------------------
   // [Construction / Destruction]

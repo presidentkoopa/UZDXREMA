@@ -1,22 +1,45 @@
+/*
+** i_mainwindow.cpp
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1998-2016 Marisa Heit
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
+**---------------------------------------------------------------------------
+**
+*/
 
-#include "i_mainwindow.h"
-#include "resource.h"
-#include "startupinfo.h"
-#include "gstrings.h"
-#include "palentry.h"
-#include "st_start.h"
-#include "i_input.h"
-#include "version.h"
-#include "utf8.h"
-#include "v_font.h"
-#include "i_net.h"
-#include "engineerrors.h"
-#include "common/widgets/errorwindow.h"
-#include "common/widgets/netstartwindow.h"
+
 #include <richedit.h>
 #include <shellapi.h>
 #include <commctrl.h>
 #include <dwmapi.h>
+
+#include "engineerrors.h"
+#include "gstrings.h"
+#include "i_input.h"
+#include "i_mainwindow.h"
+#include "i_net.h"
+#include "palentry.h"
+#include "resource.h"
+#include "st_start.h"
+#include "startupinfo.h"
+#include "utf8.h"
+#include "v_font.h"
+#include "version.h"
+#include "widgets/errorwindow.h"
 
 #pragma comment(lib, "dwmapi.lib")
 
@@ -116,31 +139,6 @@ void MainWindow::ShowErrorPane(const char* text)
 		alltext.append(line.GetChars(), line.Len());
 
 	restartrequest = ErrorWindow::ExecModal(text, alltext);
-}
-
-void MainWindow::ShowNetStartPane(const char* message, int maxpos)
-{
-	NetStartWindow::ShowNetStartPane(message, maxpos);
-}
-
-void MainWindow::HideNetStartPane()
-{
-	NetStartWindow::HideNetStartPane();
-}
-
-void MainWindow::CloseNetStartPane()
-{
-	NetStartWindow::NetClose();
-}
-
-void MainWindow::SetNetStartProgress(int pos)
-{
-	NetStartWindow::SetNetStartProgress(pos);
-}
-
-bool MainWindow::RunMessageLoop(bool (*timer_callback)(void*), void* userdata)
-{
-	return NetStartWindow::RunMessageLoop(timer_callback, userdata);
 }
 
 bool MainWindow::CheckForRestart()

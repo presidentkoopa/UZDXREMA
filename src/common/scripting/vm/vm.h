@@ -1,34 +1,23 @@
 /*
 ** vm.h
+**
 ** VM <-> native interface
 **
 **---------------------------------------------------------------------------
-** Copyright -2016 Randy Heit
+**
+** Copyright 2009-2016 Marisa Heit
 ** Copyright 2016 Christoph Oelckers
-** All rights reserved.
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+**---------------------------------------------------------------------------
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
@@ -37,15 +26,15 @@
 #define VM_H
 
 #include "autosegs.h"
-#include "zstring.h"
-#include "vectors.h"
-#include "quaternion.h"
+#include "basics.h"
 #include "cmdlib.h"
 #include "engineerrors.h"
 #include "memarena.h"
 #include "name.h"
+#include "quaternion.h"
 #include "scopebarrier.h"
-#include <type_traits>
+#include "vectors.h"
+#include "zstring.h"
 
 class DObject;
 union VMOP;
@@ -67,8 +56,6 @@ typedef unsigned short		VM_UHALF;
 typedef signed short		VM_SHALF;
 typedef unsigned int		VM_UWORD;
 typedef signed int			VM_SWORD;
-
-#define VM_EPSILON			(1/65536.0)
 
 // Register types for VMParam
 enum
@@ -534,6 +521,302 @@ inline int VMCallAction(VMFunction *func, VMValue *params, int numparams, VMRetu
 	return VMCall(func, params, numparams, results, numresults);
 }
 
+template<typename T> struct VMArgTypeTrait { typedef T type; static const int ArgCount = 1; };
+template<> struct VMArgTypeTrait<DVector2> { typedef double type; static const int ArgCount = 2; };
+template<> struct VMArgTypeTrait<DVector3> { typedef double type; static const int ArgCount = 3; };
+template<> struct VMArgTypeTrait<DVector4> { typedef double type; static const int ArgCount = 4; };
+template<> struct VMArgTypeTrait<DQuaternion> { typedef double type; static const int ArgCount = 4; };
+
+template<typename T> struct VMReturnTypeTrait { typedef T type; static const int ReturnCount = 1; };
+template<> struct VMReturnTypeTrait<void> { typedef void type; static const int ReturnCount = 0; };
+
+template<typename T, typename... Vals>
+struct FirstTemplateValue
+{
+	using type = T;
+};
+
+
+
+void VMCheckParamCount(VMFunction* func, int retcount, int argcount);
+
+template<typename... Rets>
+void VMCheckParamCount(VMFunction* func, int argcount)
+{
+	if constexpr (sizeof...(Rets) == 1)
+	{
+		return VMCheckParamCount(func, VMReturnTypeTrait<typename FirstTemplateValue<Rets...>::type>::ReturnCount, argcount);
+	}
+	else
+	{
+		return VMCheckParamCount(func, sizeof...(Rets), argcount);
+	}
+}
+
+// The type can't be mapped to ZScript automatically:
+
+template<typename NativeType> void VMCheckParam(VMFunction* func, int index) = delete;
+template<typename NativeType> void VMCheckReturn(VMFunction* func, int index) = delete;
+
+// Native types we support converting to/from:
+
+template<> void VMCheckParam<int>(VMFunction* func, int index);
+template<> void VMCheckParam<double>(VMFunction* func, int index);
+template<> void VMCheckParam<DVector2>(VMFunction* func, int index);
+template<> void VMCheckParam<DVector3>(VMFunction* func, int index);
+template<> void VMCheckParam<DVector4>(VMFunction* func, int index);
+template<> void VMCheckParam<DQuaternion>(VMFunction* func, int index);
+template<> void VMCheckParam<FString>(VMFunction* func, int index);
+template<> void VMCheckParam<DObject*>(VMFunction* func, int index);
+
+template<> void VMCheckReturn<void>(VMFunction* func, int index);
+template<> void VMCheckReturn<int>(VMFunction* func, int index);
+template<> void VMCheckReturn<double>(VMFunction* func, int index);
+template<> void VMCheckReturn<DVector2>(VMFunction* func, int index);
+template<> void VMCheckReturn<DVector3>(VMFunction* func, int index);
+template<> void VMCheckReturn<DVector4>(VMFunction* func, int index);
+template<> void VMCheckReturn<DQuaternion>(VMFunction* func, int index);
+template<> void VMCheckReturn<FString>(VMFunction* func, int index);
+template<> void VMCheckReturn<DObject*>(VMFunction* func, int index);
+template<> void VMCheckReturn<void*>(VMFunction* func, int index);
+
+template<typename T>
+struct vm_decay_pointer_object
+{ // convert any pointer to a type derived from DObject into a pointer to DObject, and any other to a pointer to void
+	using decayed = typename std::conditional<std::is_base_of_v<DObject, typename std::pointer_traits<T>::element_type>,
+		typename std::pointer_traits<T>::template rebind<DObject>,
+		typename std::pointer_traits<T>::template rebind<void>>::type;
+};
+
+template<typename T>
+struct vm_decay_pointer_void
+{ // convert any pointer to a pointer to void
+	using decayed = typename std::pointer_traits<T>::template rebind<void>;
+};
+
+template<typename T>
+struct vm_decay_none
+{
+	using decayed = T;
+};
+
+template<typename T>
+using vm_pointer_decay = typename std::conditional<std::is_pointer_v<T>, vm_decay_pointer_object<T>, vm_decay_none<T>>::type::decayed;
+
+template<typename T>
+using vm_pointer_decay_void = typename std::conditional<std::is_pointer_v<T>, vm_decay_pointer_void<T>, vm_decay_none<T>>::type::decayed;
+
+template<typename RetVal, typename... Args, size_t... I>
+void VMValidateSignatureSingle(VMFunction* func, std::index_sequence<I...>)
+{
+	VMCheckParamCount<RetVal>(func, sizeof...(Args));
+	VMCheckReturn<vm_pointer_decay<RetVal>>(func, 0);
+	(VMCheckParam<vm_pointer_decay<Args>>(func, I), ...);
+}
+
+template<typename... Rets, typename... Args, size_t... IRets, size_t... IArgs>
+void VMValidateSignatureMulti(VMFunction* func, std::index_sequence<IRets...>, std::index_sequence<IArgs...>, Args... args)
+{
+	VMCheckParamCount<Rets...>(func, sizeof...(Args));
+	(VMCheckReturn<vm_pointer_decay<Rets>>(func, IRets), ...);
+	(VMCheckParam<vm_pointer_decay<Args>>(func, IArgs), ...);
+}
+
+void VMCallCheckResult(VMFunction* func, VMValue* params, int numparams, VMReturn* results, int numresults);
+
+
+struct VMValueMulti
+{
+	VMValue vals[4];
+	int count;
+
+	template<typename T>
+	VMValueMulti(T val)
+	{
+		vals[0] = val;
+		count = 1;
+	}
+
+	VMValueMulti(DVector2 val)
+	{
+		vals[0] = val.X;
+		vals[1] = val.Y;
+		count = 2;
+	}
+
+	VMValueMulti(DVector3 val)
+	{
+		vals[0] = val.X;
+		vals[1] = val.Y;
+		vals[2] = val.Z;
+		count = 3;
+	}
+
+	VMValueMulti(DVector4 val)
+	{
+		vals[0] = val.X;
+		vals[1] = val.Y;
+		vals[2] = val.Z;
+		vals[3] = val.W;
+		count = 4;
+	}
+
+	VMValueMulti(DQuaternion val)
+	{
+		vals[0] = val.X;
+		vals[1] = val.Y;
+		vals[2] = val.Z;
+		vals[3] = val.W;
+		count = 4;
+	}
+};
+
+template<typename... Args>
+constexpr int numArgs()
+{
+	return (VMArgTypeTrait<Args>::ArgCount + ...);
+}
+
+template<typename... Args>
+constexpr bool hasVector()
+{
+	return (VMArgTypeTrait<Args>::ArgCount + ...) != sizeof...(Args);
+}
+
+
+template<typename... Args>
+typename VMReturnTypeTrait<void>::type VMCallVoid(VMFunction* func, Args... args)
+{
+	VMValidateSignatureSingle<void, Args...>(func, std::make_index_sequence<sizeof...(Args)>{});
+	if constexpr(hasVector<Args...>())
+	{
+		VMValueMulti arglist[] = { args... };
+
+		constexpr int argCount = numArgs<Args...>();
+
+		VMValue params[argCount];
+
+		for(int i = 0, j = 0; i < sizeof...(Args); i++)
+		{
+			for(int k = 0; k < arglist[i].count; k++, j++)
+			{
+				params[j] = arglist[i].vals[k];
+			}
+		}
+
+		VMCallCheckResult(func, params, argCount, nullptr, 0);
+	}
+	else
+	{
+		VMValue params[] = { args... };
+		VMCallCheckResult(func, params, sizeof...(Args), nullptr, 0);
+	}
+}
+
+template<typename RetVal, typename... Args>
+typename VMReturnTypeTrait<RetVal>::type VMCallSingle(VMFunction* func, Args... args)
+{
+	VMValidateSignatureSingle<RetVal, Args...>(func, std::make_index_sequence<sizeof...(Args)>{});
+	if constexpr(hasVector<Args...>())
+	{
+		VMValueMulti arglist[] = { args... };
+
+		constexpr int argCount = numArgs<Args...>();
+
+		VMValue params[argCount];
+
+		for(unsigned i = 0, j = 0; i < sizeof...(Args); i++)
+		{
+			for(int k = 0; k < arglist[i].count; k++, j++)
+			{
+				params[j] = arglist[i].vals[k];
+			}
+		}
+
+		vm_pointer_decay_void<RetVal> resultval; // convert any pointer to void
+		VMReturn results(&resultval);
+		VMCallCheckResult(func, params, argCount, &results, 1);
+		return (RetVal)resultval;
+	}
+	else
+	{
+		VMValue params[] = { args... };
+
+		vm_pointer_decay_void<RetVal> resultval; // convert any pointer to void
+		VMReturn results(&resultval);
+		VMCallCheckResult(func, params, sizeof...(Args), &results, 1);
+		return (RetVal)resultval;
+	}
+}
+
+template<typename... Rets, typename... Args, size_t... IRets>
+std::tuple<typename VMReturnTypeTrait<Rets>::type...> VMCallMultiImpl(VMFunction* func,  std::index_sequence<IRets...> retsSeq, Args... args)
+{
+	VMValidateSignatureMulti<Rets...>(func, retsSeq, std::make_index_sequence<sizeof...(Args)>{}, std::forward<Args>(args)...);
+	if constexpr(hasVector<Args...>())
+	{
+		VMValueMulti arglist[] = { args... };
+
+		constexpr int argCount = numArgs<Args...>();
+
+		VMValue params[argCount];
+
+		for(unsigned i = 0, j = 0; i < sizeof...(Args); i++)
+		{
+			for(int k = 0; k < arglist[i].count; k++, j++)
+			{
+				params[j] = arglist[i].vals[k];
+			}
+		}
+
+		std::tuple<typename VMReturnTypeTrait<vm_pointer_decay_void<Rets>>::type...> resultval; // convert any pointer to void
+		VMReturn results[sizeof...(Rets)] { &std::get<IRets>(resultval)... };
+		VMCallCheckResult(func, params, argCount, results, sizeof...(Rets));
+		return (std::tuple<typename VMReturnTypeTrait<Rets>::type...>)resultval;
+	}
+	else
+	{
+		VMValue params[] = { args... };
+
+		std::tuple<typename VMReturnTypeTrait<vm_pointer_decay_void<Rets>>::type...> resultval; // convert any pointer to void
+		VMReturn results[sizeof...(Rets)] { &std::get<IRets>(resultval)... };
+		VMCallCheckResult(func, params, sizeof...(Args), results, sizeof...(Rets));
+		return (std::tuple<typename VMReturnTypeTrait<Rets>::type...>)resultval;
+	}
+}
+
+template<typename... Rets, typename... Args>
+std::tuple<typename VMReturnTypeTrait<Rets>::type...> VMCallMulti(VMFunction* func, Args... args)
+{
+	return VMCallMultiImpl<Rets...>(func, std::make_index_sequence<sizeof...(Rets)>{}, std::forward<Args>(args)...);
+}
+
+template<typename... Rets>
+using MultiVMReturn = std::conditional<
+							(sizeof...(Rets) > 1),
+							std::tuple<typename VMReturnTypeTrait<Rets>::type...>,
+							typename VMReturnTypeTrait<typename FirstTemplateValue<Rets...>::type>::type
+					  >;
+
+template<typename... Rets, typename... Args>
+typename MultiVMReturn<Rets...>::type CallVM(VMFunction* func, Args... args)
+{
+	static_assert(sizeof...(Rets) > 0, "missing return type in VMCall");
+	if constexpr(sizeof...(Rets) == 1 && std::is_same_v<typename FirstTemplateValue<Rets...>::type, void>)
+	{
+		return VMCallVoid(func, std::forward<Args>(args)...);
+	}
+	else if constexpr(sizeof...(Rets) == 1)
+	{
+		return VMCallSingle<Rets...>(func, std::forward<Args>(args)...);
+	}
+	else
+	{
+		return VMCallMulti<Rets...>(func, std::forward<Args>(args)...);
+	}
+}
+
+
 // Use these to collect the parameters in a native function.
 // variable name <x> at position <p>
 [[noreturn]]
@@ -602,13 +885,16 @@ bool AssertObject(void * ob);
 
 typedef int(*actionf_p)(VM_ARGS);
 
-struct FieldDesc
+struct FieldDesc : FAutoSegEntry<FieldDesc>
 {
 	const char *ClassName;
 	const char *FieldName;
 	size_t FieldOffset;
 	unsigned FieldSize;
 	int BitValue;
+
+	FieldDesc(const char * cn, const char * fn, size_t fo, unsigned fs, int bv)
+	: FAutoSegEntry(AutoSegs::ClassFields, this), ClassName(cn), FieldName(fn), FieldOffset(fo), FieldSize(fs), BitValue(bv) {}
 };
 
 namespace
@@ -641,29 +927,20 @@ struct DirectNativeDesc
 	void *Ptr;
 };
 
-struct AFuncDesc
+struct AFuncDesc : FAutoSegEntry<AFuncDesc>
 {
 	const char *ClassName;
 	const char *FuncName;
 	actionf_p Function;
 	VMNativeFunction **VMPointer;
 	DirectNativeDesc DirectNative;
+
+	AFuncDesc(const char * cn, const char * fn, actionf_p f, VMNativeFunction **vm, DirectNativeDesc dn)
+	: FAutoSegEntry(AutoSegs::ActionFunctons, this), ClassName(cn), FuncName(fn), Function(f), VMPointer(vm), DirectNative(dn) {}
+
+	AFuncDesc(const char * cn, const char * fn, actionf_p f, VMNativeFunction **vm) : AFuncDesc(cn, fn, f, vm, {}) {}
+
 };
-
-#if defined(_MSC_VER)
-#pragma section(SECTION_AREG,read)
-#pragma section(SECTION_FREG,read)
-
-#define MSVC_ASEG __declspec(allocate(SECTION_AREG))
-#define MSVC_FSEG __declspec(allocate(SECTION_FREG))
-#define GCC_ASEG
-#define GCC_FSEG
-#else
-#define MSVC_ASEG
-#define MSVC_FSEG
-#define GCC_ASEG __attribute__((section(SECTION_AREG))) __attribute__((used))
-#define GCC_FSEG __attribute__((section(SECTION_FREG))) __attribute__((used))
-#endif
 
 // Macros to handle action functions. These are here so that I don't have to
 // change every single use in case the parameters change.
@@ -672,82 +949,54 @@ struct AFuncDesc
 	static int AF_##cls##_##name(VM_ARGS); \
 	VMNativeFunction *cls##_##name##_VMPtr; \
 	static const AFuncDesc cls##_##name##_Hook = { #cls, #name, AF_##cls##_##name, &cls##_##name##_VMPtr, native }; \
-	extern AFuncDesc const *const cls##_##name##_HookPtr; \
-	MSVC_ASEG AFuncDesc const *const cls##_##name##_HookPtr GCC_ASEG = &cls##_##name##_Hook; \
 	static int AF_##cls##_##name(VM_ARGS)
 
 #define DEFINE_ACTION_FUNCTION_NATIVE0(cls, name, native) \
 	static int AF_##cls##_##name(VM_ARGS); \
 	VMNativeFunction *cls##_##name##_VMPtr; \
 	static const AFuncDesc cls##_##name##_Hook = { #cls, #name, AF_##cls##_##name, &cls##_##name##_VMPtr }; \
-	extern AFuncDesc const *const cls##_##name##_HookPtr; \
-	MSVC_ASEG AFuncDesc const *const cls##_##name##_HookPtr GCC_ASEG = &cls##_##name##_Hook; \
 	static int AF_##cls##_##name(VM_ARGS)
 
 #define DEFINE_ACTION_FUNCTION(cls, name) \
 	static int AF_##cls##_##name(VM_ARGS); \
 	VMNativeFunction *cls##_##name##_VMPtr; \
 	static const AFuncDesc cls##_##name##_Hook = { #cls, #name, AF_##cls##_##name, &cls##_##name##_VMPtr }; \
-	extern AFuncDesc const *const cls##_##name##_HookPtr; \
-	MSVC_ASEG AFuncDesc const *const cls##_##name##_HookPtr GCC_ASEG = &cls##_##name##_Hook; \
 	static int AF_##cls##_##name(VM_ARGS)
 
 // cls is the scripted class name, icls the internal one (e.g. player_t vs. Player)
 #define DEFINE_FIELD_X(cls, icls, name) \
 	static const FieldDesc VMField_##icls##_##name = { "A" #cls, #name, (unsigned)myoffsetof(icls, name), (unsigned)sizeof(icls::name), 0 }; \
-	extern FieldDesc const *const VMField_##icls##_##name##_HookPtr; \
-	MSVC_FSEG FieldDesc const *const VMField_##icls##_##name##_HookPtr GCC_FSEG = &VMField_##icls##_##name;
 
 // This is for cases where the internal size does not match the part that gets exported.
 #define DEFINE_FIELD_UNSIZED(cls, icls, name) \
 	static const FieldDesc VMField_##icls##_##name = { "A" #cls, #name, (unsigned)myoffsetof(icls, name), ~0u, 0 }; \
-	extern FieldDesc const *const VMField_##icls##_##name##_HookPtr; \
-	MSVC_FSEG FieldDesc const *const VMField_##icls##_##name##_HookPtr GCC_FSEG = &VMField_##icls##_##name;
 
 #define DEFINE_FIELD_NAMED_X(cls, icls, name, scriptname) \
 	static const FieldDesc VMField_##cls##_##scriptname = { "A" #cls, #scriptname, (unsigned)myoffsetof(icls, name), (unsigned)sizeof(icls::name), 0 }; \
-	extern FieldDesc const *const VMField_##cls##_##scriptname##_HookPtr; \
-	MSVC_FSEG FieldDesc const *const VMField_##cls##_##scriptname##_HookPtr GCC_FSEG = &VMField_##cls##_##scriptname;
 
 #define DEFINE_FIELD_X_BIT(cls, icls, name, bitval) \
 	static const FieldDesc VMField_##icls##_##name = { "A" #cls, #name, (unsigned)myoffsetof(icls, name), (unsigned)sizeof(icls::name), bitval }; \
-	extern FieldDesc const *const VMField_##icls##_##name##_HookPtr; \
-	MSVC_FSEG FieldDesc const *const VMField_##icls##_##name##_HookPtr GCC_FSEG = &VMField_##cls##_##name;
 
 #define DEFINE_FIELD(cls, name) \
 	static const FieldDesc VMField_##cls##_##name = { #cls, #name, (unsigned)myoffsetof(cls, name), (unsigned)sizeof(cls::name), 0 }; \
-	extern FieldDesc const *const VMField_##cls##_##name##_HookPtr; \
-	MSVC_FSEG FieldDesc const *const VMField_##cls##_##name##_HookPtr GCC_FSEG = &VMField_##cls##_##name;
 
 #define DEFINE_FIELD_NAMED(cls, name, scriptname) \
 		static const FieldDesc VMField_##cls##_##scriptname = { #cls, #scriptname, (unsigned)myoffsetof(cls, name), (unsigned)sizeof(cls::name), 0 }; \
-	extern FieldDesc const *const VMField_##cls##_##scriptname##_HookPtr; \
-	MSVC_FSEG FieldDesc const *const VMField_##cls##_##scriptname##_HookPtr GCC_FSEG = &VMField_##cls##_##scriptname;
 
 #define DEFINE_FIELD_NAMED_UNSIZED(cls, name, scriptname) \
 		static const FieldDesc VMField_##cls##_##scriptname = { #cls, #scriptname, (unsigned)myoffsetof(cls, name), ~0u, 0 }; \
-	extern FieldDesc const *const VMField_##cls##_##scriptname##_HookPtr; \
-	MSVC_FSEG FieldDesc const *const VMField_##cls##_##scriptname##_HookPtr GCC_FSEG = &VMField_##cls##_##scriptname;
 
 #define DEFINE_FIELD_BIT(cls, name, scriptname, bitval) \
 		static const FieldDesc VMField_##cls##_##scriptname = { #cls, #scriptname, (unsigned)myoffsetof(cls, name), (unsigned)sizeof(cls::name), bitval }; \
-	extern FieldDesc const *const VMField_##cls##_##scriptname##_HookPtr; \
-	MSVC_FSEG FieldDesc const *const VMField_##cls##_##scriptname##_HookPtr GCC_FSEG = &VMField_##cls##_##scriptname;
 
 #define DEFINE_GLOBAL(name) \
 	static const FieldDesc VMGlobal_##name = { "", #name, (size_t)&name, (unsigned)sizeof(name), 0 }; \
-	extern FieldDesc const *const VMGlobal_##name##_HookPtr; \
-	MSVC_FSEG FieldDesc const *const VMGlobal_##name##_HookPtr GCC_FSEG = &VMGlobal_##name;
 
 #define DEFINE_GLOBAL_NAMED(iname, name) \
 	static const FieldDesc VMGlobal_##name = { "", #name, (size_t)&iname, (unsigned)sizeof(iname), 0 }; \
-	extern FieldDesc const *const VMGlobal_##name##_HookPtr; \
-	MSVC_FSEG FieldDesc const *const VMGlobal_##name##_HookPtr GCC_FSEG = &VMGlobal_##name;
 
 #define DEFINE_GLOBAL_UNSIZED(name) \
 	static const FieldDesc VMGlobal_##name = { "", #name, (size_t)&name, ~0u, 0 }; \
-	extern FieldDesc const *const VMGlobal_##name##_HookPtr; \
-	MSVC_FSEG FieldDesc const *const VMGlobal_##name##_HookPtr GCC_FSEG = &VMGlobal_##name;
 
 
 

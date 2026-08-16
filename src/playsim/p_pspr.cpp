@@ -1,27 +1,23 @@
-//-----------------------------------------------------------------------------
-//
-// Copyright 1993-1996 id Software
-// Copyright 1994-1996 Raven Software
-// Copyright 1998-1998 Chi Hoang, Lee Killough, Jim Flynn, Rand Phares, Ty Halderman
-// Copyright 1999-2016 Randy Heit
-// Copyright 2002-2016 Christoph Oelckers
-// Copyright 2016 Leonard2
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see http://www.gnu.org/licenses/
-//
-//-----------------------------------------------------------------------------
-//
+/*
+** p_pspr.cpp
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 id Software
+** Copyright 1994-1996 Raven Software
+** Copyright 1998-1998 Chi Hoang, Lee Killough, Jim Flynn, Rand Phares, Ty Halderman
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2002-2016 Christoph Oelckers
+** Copyright 2016 Leonard2
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 // HEADER FILES ------------------------------------------------------------
 
@@ -212,13 +208,13 @@ DPSprite::DPSprite(player_t *owner, AActor *caller, int id)
 	{
 		Coord[i] = DVector2(0, 0);
 		Prev.v[i] = Vert.v[i] = FVector2(0,0);
-  	}
-  	
-  	alpha = 1;
+	}
+
+	alpha = 1;
 	Tint = 0xffffffff;   // RS fork: untinted until ZScript says otherwise
 	Glow = 0;
 	LastPatch.SetInvalid();
-  	Renderstyle = STYLE_Normal;
+	Renderstyle = STYLE_Normal;
 
 	DPSprite *prev = nullptr;
 	DPSprite *next = Owner->psprites;
@@ -348,7 +344,7 @@ DPSprite *player_t::GetPSprite(PSPLayers layer, AActor *newcaller)
 	}
 
 	if (newcaller == nullptr || layer == PSP_CALLERID) return nullptr; // Error case was not handled properly. This function cannot give a guarantee to always succeed!
-	
+
 	DPSprite *pspr = FindPSprite(layer);
 	if (pspr == nullptr)
 	{
@@ -489,7 +485,7 @@ void DPSprite::NewTick()
 	// This function should be called after the beginning of a tick, before any possible
 	// prprite-event, or near the end, after any possible psprite event.
 	// Because data is reset for every tick (which it must be) this has no impact on savegames.
-	for (int i = 0; i < MAXPLAYERS; i++)
+	for (unsigned int i = 0; i < MAXPLAYERS; i++)
 	{
 		if (playeringame[i])
 		{
@@ -599,6 +595,8 @@ void DPSprite::SetState(FState *newstate, bool pending)
 
 	int statelooplimit = 300000;
 
+	int statelooplimit = 300000;
+
 	processPending = pending;
 
 	do
@@ -681,7 +679,7 @@ void DPSprite::SetState(FState *newstate, bool pending)
 			if (newstate->ActionFunc != nullptr && newstate->ActionFunc->Unsafe)
 			{
 				// If an unsafe function (i.e. one that accesses user variables) is being detected, print a warning once and remove the bogus function. We may not call it because that would inevitably crash.
-				Printf(TEXTCOLOR_RED "Unsafe state call in state %sd to %s which accesses user variables. The action function has been removed from this state\n", 
+				Printf(TEXTCOLOR_RED "Unsafe state call in state %sd to %s which accesses user variables. The action function has been removed from this state\n",
 					FState::StaticGetStateName(newstate).GetChars(), newstate->ActionFunc->PrintableName);
 				newstate->ActionFunc = nullptr;
 			}
@@ -750,74 +748,81 @@ void P_BringUpWeapon (player_t *player)
 // [XA] Added new bob styles and exposed bob properties. Thanks, Ryan Cordell!
 // [SP] Added new user option for bob speed
 //
+// Previously this was called from the renderer but accidentally left in the
+// play scope, making it possible to modify the world from it and breaking
+// the prediction. It's now been moved to the player thinking so it can be
+// called across all players to help prevent desyncs, but requires a bit of a
+// gross render hack to determine which one to call. Unfortunately there isn't
+// a good way to fix this, so for now this will have to do.
+//
 //============================================================================
 
-void P_BobWeapon (player_t *player, float *x, float *y, double ticfrac)
+EPSPBobType BobType = PSPB_None;
+FPlayerBob PlayerBob[MAXPLAYERS] = {};
+
+void P_BobWeapon(player_t* player)
 {
+	auto& bob = PlayerBob[player - players];
 	IFVIRTUALPTRNAME(player->mo, NAME_PlayerPawn, BobWeapon)
 	{
-		VMValue param[] = { player->mo, ticfrac };
-		DVector2 result;
-		VMReturn ret(&result);
-		VMCall(func, param, 2, &ret, 1);
-		
-		auto inv = player->mo->Inventory;
-		while(inv != nullptr && !(inv->ObjectFlags & OF_EuthanizeMe)) // same loop as ModifyDamage, except it actually checks if it's overriden before calling
+		bob.UpdateInterpolation(true);
+
+		DVector2 result = CallVM<DVector2>(func, player->mo, 1.0);
+
+		auto inv = player->mo->Inventory.Get();
+		while (inv != nullptr && !(inv->ObjectFlags & OF_EuthanizeMe)) // same loop as ModifyDamage, except it actually checks if it's overriden before calling
 		{
-			auto nextinv = inv->Inventory;
+			auto nextinv = inv->Inventory.Get();
 			IFOVERRIDENVIRTUALPTRNAME(inv, NAME_Inventory, ModifyBob)
 			{
-				VMValue param[] = { (DObject*)inv, result.X, result.Y, ticfrac };
-				VMCall(func, param, 4, &ret, 1);
+				DVector2 r2 = CallVM<DVector2>(func, inv, result, 1.0);
+				result = r2;
 			}
 			inv = nextinv;
 		}
 
+		// [VR] In stereo modes the view model is rigidly parented to the
+		// controller, so engine bob must be suppressed for the local player.
+		// Falling through to ResetInterpolation() below yields zero bob.
 		if (!P_UseLocalVrViewModelSuppression(player))
 		{
-			*x = (float)result.X;
-			*y = (float)result.Y;
+			bob.SetBob2D(player->BobTimer, FVector2(result));
 			return;
 		}
 	}
-	*x = *y = 0;
+	bob.ResetInterpolation();
 }
 
-void P_BobWeapon3D (player_t *player, FVector3 *translation, FVector3 *rotation, double ticfrac)
+void P_BobWeapon3D(player_t* player)
 {
+	auto& bob = PlayerBob[player - players];
 	IFVIRTUALPTRNAME(player->mo, NAME_PlayerPawn, BobWeapon3D)
 	{
-		VMValue param[] = { player->mo, ticfrac };
-		DVector3 t, r;
-		VMReturn returns[2];
-		returns[0].Vec3At(&t);
-		returns[1].Vec3At(&r);
-		VMCall(func, param, 2, returns, 2);
+		bob.UpdateInterpolation(false);
 
-		auto inv = player->mo->Inventory;
-		while(inv != nullptr && !(inv->ObjectFlags & OF_EuthanizeMe))
+		auto [t, r] = CallVM<DVector3, DVector3>(func, player->mo, 1.0);
+
+		auto inv = player->mo->Inventory.Get();
+		while (inv != nullptr && !(inv->ObjectFlags & OF_EuthanizeMe))
 		{
-			auto nextinv = inv->Inventory;
+			auto nextinv = inv->Inventory.Get();
 			IFOVERRIDENVIRTUALPTRNAME(inv, NAME_Inventory, ModifyBob3D)
 			{
-				VMValue param[] = { (DObject*)inv, t.X, t.Y, t.Z, r.X, r.Y, r.Z, ticfrac };
-				VMCall(func, param, 8, returns, 2);
+				auto [t2, r2] = CallVM<DVector3, DVector3>(func, inv, t, r, 1.0);
+				t = t2;
+				r = r2;
 			}
 			inv = nextinv;
 		}
 
+		// [VR] See P_BobWeapon: suppressed => fall through to zero bob.
 		if (!P_UseLocalVrViewModelSuppression(player))
 		{
-			translation->X = (float)t.X;
-			translation->Y = (float)t.Y;
-			translation->Z = (float)t.Z;
-			rotation->X = (float)r.X;
-			rotation->Y = (float)r.Y;
-			rotation->Z = (float)r.Z;
+			bob.SetBob3D(player->BobTimer, FVector3(t), FVector3(r));
 			return;
 		}
 	}
-	*translation = *rotation = {};
+	bob.ResetInterpolation();
 }
 
 //---------------------------------------------------------------------------
@@ -844,7 +849,7 @@ static void P_CheckWeaponButtons (player_t *player, int hand = 0)
 	for (size_t i = 0; i < countof(ButtonChecks); ++i)
 	{
 		if ((player->WeaponState & ButtonChecks[i].StateFlag) &&
-			(player->cmd.ucmd.buttons & ButtonChecks[i].ButtonFlag) &&
+			(player->cmd.buttons & ButtonChecks[i].ButtonFlag) &&
 			(hand == ButtonChecks[i].Hand))
 		{
 			FState *state = weapon->FindState(ButtonChecks[i].StateName);
@@ -935,7 +940,7 @@ DEFINE_ACTION_FUNCTION(AActor, A_OverlayScale)
 	PARAM_FLOAT(wx)
 	PARAM_FLOAT(wy)
 	PARAM_INT(flags)
-	
+
 	if (!ACTION_CALL_FROM_PSPRITE() || ((flags & WOF_KEEPX) && (flags & WOF_KEEPY)))
 		return 0;
 
@@ -1047,7 +1052,7 @@ void A_OverlayOffset(AActor *self, int layer, double wx, double wy, int flags)
 
 		if (!(flags & WOF_KEEPX))		psp->x = (flags & WOF_ADD) ? psp->x + wx : wx;
 		if (!(flags & WOF_KEEPY))		psp->y = (flags & WOF_ADD) ? psp->y + wy : wy;
-		
+
 		if (!(flags & (WOF_ADD | WOF_INTERPOLATE)))
 			psp->ResetInterpolation();
 	}
@@ -1057,8 +1062,8 @@ DEFINE_ACTION_FUNCTION(AActor, A_OverlayOffset)
 {
 	PARAM_ACTION_PROLOGUE(AActor);
 	PARAM_INT(layer)
-	PARAM_FLOAT(wx)	
-	PARAM_FLOAT(wy)	
+	PARAM_FLOAT(wx)
+	PARAM_FLOAT(wy)
 	PARAM_INT(flags)
 	A_OverlayOffset(self, ((layer != 0) ? layer : stateinfo->mPSPIndex), wx, wy, flags);
 	return 0;
@@ -1067,8 +1072,8 @@ DEFINE_ACTION_FUNCTION(AActor, A_OverlayOffset)
 DEFINE_ACTION_FUNCTION(AActor, A_WeaponOffset)
 {
 	PARAM_ACTION_PROLOGUE(AActor);
-	PARAM_FLOAT(wx)	
-	PARAM_FLOAT(wy)	
+	PARAM_FLOAT(wx)
+	PARAM_FLOAT(wy)
 	PARAM_INT(flags)
 
 	if (ACTION_CALL_FROM_PSPRITE())
@@ -1201,7 +1206,7 @@ DEFINE_ACTION_FUNCTION(AActor, OverlayX)
 	if (ACTION_CALL_FROM_PSPRITE())
 	{
 		double res = GetOverlayPosition(self, ((layer != 0) ? layer : stateinfo->mPSPIndex), false);
-		ACTION_RETURN_FLOAT(res);	
+		ACTION_RETURN_FLOAT(res);
 	}
 	ACTION_RETURN_FLOAT(0.);
 }
@@ -1539,7 +1544,7 @@ void P_SetSafeFlash(AActor *weapon, player_t *player, FState *flashstate, int in
 			// try again with parent class
 			cls = static_cast<PClassActor *>(cls->ParentClass);
 		}
-		
+
 		// if we get here the target state doesn't belong to any class in the inheritance chain.
 		// This can happen with Dehacked if the flash states are remapped.
 		// In this case we should check the Dehacked state map to get the proper state.
@@ -1640,7 +1645,7 @@ ADD_STAT(psprites)
 {
 	FString out;
 	DPSprite *pspr;
-	for (int i = 0; i < MAXPLAYERS; i++)
+	for (unsigned int i = 0; i < MAXPLAYERS; i++)
 	{
 		if (!playeringame[i])
 			continue;

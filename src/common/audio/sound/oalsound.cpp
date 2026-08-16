@@ -1,33 +1,23 @@
 /*
 ** oalsound.cpp
+**
 ** System interface for sound; uses OpenAL
 **
 **---------------------------------------------------------------------------
+**
 ** Copyright 2008-2010 Chris Robinson
-** All rights reserved.
+** Copyright 2010-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
+**---------------------------------------------------------------------------
 **
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
 **---------------------------------------------------------------------------
 **
 */
@@ -36,14 +26,10 @@
 #include <chrono>
 
 #include "c_cvars.h"
-
-#include "oalsound.h"
-#include "c_dispatch.h"
-#include "v_text.h"
-#include "i_module.h"
 #include "cmdlib.h"
-#include "m_fixed.h"
-
+#include "i_module.h"
+#include "oalsound.h"
+#include "printf.h"
 
 const char *GetSampleTypeName(SampleType type);
 const char *GetChannelConfigName(ChannelConfig chan);
@@ -52,14 +38,36 @@ FModule OpenALModule{"OpenAL"};
 
 #include "oalload.h"
 
+#ifdef __linux
+// SteamDeck exposes a broken JACK device, which takes precedence over the
+// working pulseaudio backend. JACK is likely to not be wanted, so disabling
+// it by default shouldn't cause any issues. If someone wants to use JACK,
+// they can change `snd_aldriver` to reflect that (or set ALSOFT_DRIVERS)
+// https://github.com/kcat/openal-soft/blob/993b8c8/alsoftrc.sample#L46-L53
+#define DEFAULT_DRIVER "-jack,"
+#else
+#define DEFAULT_DRIVER ""
+#endif
+
 CUSTOM_CVAR(Int, snd_channels, 128, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)	// number of channels available
 {
-	if (self < 64) self = 64;
+	if (self < 8) self = 8;
 }
-CVAR(Bool, snd_waterreverb, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) 
+CVARD(String, snd_aldriver, DEFAULT_DRIVER, CVAR_ARCHIVE|CVAR_GLOBALCONFIG, "See alsoftrc.sample for details")
+CVAR(Bool, snd_waterreverb, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR (String, snd_aldevice, "Default", CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 CVAR (Bool, snd_efx, false, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 CVAR (String, snd_alresampler, "Default", CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+CVAR (Int, snd_musicmode, 0, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+CUSTOM_CVAR (Float, snd_superstereowidth, 0.45f, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
+{
+	if (self > 1.0f)
+		self = 1.0f;
+	else if (!(self >= 0.0f))
+		self = 0.0f;
+	else if(GSnd)
+		GSnd->UpdateMusicParams();
+}
 
 #ifdef _WIN32
 #define OPENALLIB "soft_oal.dll"
@@ -98,24 +106,68 @@ bool IsOpenALPresent()
 #endif
 }
 
-
-
-
 ReverbContainer *ForcedEnvironment;
 
-
 #ifndef NO_OPENAL
-
 
 EXTERN_CVAR (Int, snd_channels)
 EXTERN_CVAR (Int, snd_samplerate)
 EXTERN_CVAR (Bool, snd_waterreverb)
 EXTERN_CVAR (Int, snd_hrtf)
 
-
 #define MAKE_PTRID(x)  ((void*)(uintptr_t)(x))
 #define GET_PTRID(x)  ((uint32_t)(uintptr_t)(x))
 
+namespace {
+
+/* Values used by snd_musicmode. */
+enum MusicMode : int {
+	Normal = 0,
+	DirectMix = 1,
+	SuperStereo = 2,
+};
+
+
+static constexpr uint8_t SampleTypeSize(SampleType stype)
+{
+	switch(stype)
+	{
+	case SampleType_UInt8: return sizeof(uint8_t);
+	case SampleType_Int16: return sizeof(int16_t);
+	case SampleType_Float32: return sizeof(float);
+	}
+	return 0;
+}
+
+static constexpr uint8_t ChannelCount(ChannelConfig chans)
+{
+	switch(chans)
+	{
+	case ChannelConfig_Mono: return 1;
+	case ChannelConfig_Stereo: return 2;
+	}
+	return 0;
+}
+
+static constexpr ALenum GetFormat(SampleType stype, ChannelConfig chans)
+{
+	if(stype == SampleType_UInt8)
+	{
+		if(chans == ChannelConfig_Mono) return AL_FORMAT_MONO8;
+		if(chans == ChannelConfig_Stereo) return AL_FORMAT_STEREO8;
+	}
+	if(stype == SampleType_Int16)
+	{
+		if(chans == ChannelConfig_Mono) return AL_FORMAT_MONO16;
+		if(chans == ChannelConfig_Stereo) return AL_FORMAT_STEREO16;
+	}
+	if(stype == SampleType_Float32)
+	{
+		if(chans == ChannelConfig_Mono) return AL_FORMAT_MONO_FLOAT32;
+		if(chans == ChannelConfig_Stereo) return AL_FORMAT_STEREO_FLOAT32;
+	}
+	return AL_NONE;
+}
 
 static ALenum checkALError(const char *fn, unsigned int ln)
 {
@@ -160,6 +212,8 @@ static ALvoid AL_APIENTRY _wrap_ProcessUpdatesSOFT(void)
 {
 	alcProcessContext(alcGetCurrentContext());
 }
+
+} // namespace
 
 
 class OpenALSoundStream : public SoundStream
@@ -221,6 +275,19 @@ class OpenALSoundStream : public SoundStream
 			alSourcef(Source, AL_SOURCE_RADIUS, 0.f);
 		if(Renderer->AL.SOFT_source_spatialize)
 			alSourcei(Source, AL_SOURCE_SPATIALIZE_SOFT, AL_AUTO_SOFT);
+		if(Renderer->AL.SOFT_UHJ)
+		{
+			const ALenum mode{(*snd_musicmode == MusicMode::SuperStereo)
+				? AL_SUPER_STEREO_SOFT : AL_NORMAL_SOFT};
+			alSourcei(Source, AL_STEREO_MODE_SOFT, mode);
+			alSourcef(Source, AL_SUPER_STEREO_WIDTH_SOFT, *snd_superstereowidth);
+		}
+		if(Renderer->AL.SOFT_direct_channels_remix)
+		{
+			const ALenum mode{(*snd_musicmode == MusicMode::DirectMix)
+				? AL_REMIX_UNMATCHED_SOFT : AL_FALSE};
+			alSourcei(Source, AL_DIRECT_CHANNELS_SOFT, mode);
+		}
 
 		alGenBuffers(BufferCount, Buffers);
 		return (getALError() == AL_NO_ERROR);
@@ -306,12 +373,14 @@ public:
 	virtual void SetVolume(float vol)
 	{
 		Volume = vol;
-		UpdateVolume();
+		UpdateParams();
 	}
 
-	void UpdateVolume()
+	void UpdateParams()
 	{
 		alSourcef(Source, AL_GAIN, Renderer->MusicVolume*Volume);
+		if(Renderer->AL.SOFT_UHJ)
+			alSourcef(Source, AL_SUPER_STEREO_WIDTH_SOFT, *snd_superstereowidth);
 		getALError();
 	}
 
@@ -461,7 +530,7 @@ public:
 		return ok;
 	}
 
-	bool Init(SoundStreamCallback callback, int buffbytes, int flags, int samplerate, void *userdata)
+	bool Init(SoundStreamCallback callback, int buffbytes, SampleType stype, ChannelConfig chans, int samplerate, void *userdata)
 	{
 		if(!SetupSource())
 			return false;
@@ -470,47 +539,15 @@ public:
 		UserData = userdata;
 		SampleRate = samplerate;
 
-		Format = AL_NONE;
-		if((flags&Bits8)) /* Signed or unsigned? We assume unsigned 8-bit... */
-		{
-			if((flags&Mono)) Format = AL_FORMAT_MONO8;
-			else Format = AL_FORMAT_STEREO8;
-		}
-		else if((flags&Float))
-		{
-			if(alIsExtensionPresent("AL_EXT_FLOAT32"))
-			{
-				if((flags&Mono)) Format = AL_FORMAT_MONO_FLOAT32;
-				else Format = AL_FORMAT_STEREO_FLOAT32;
-			}
-		}
-		else if((flags&Bits32))
-		{
-		}
-		else
-		{
-			if((flags&Mono)) Format = AL_FORMAT_MONO16;
-			else Format = AL_FORMAT_STEREO16;
-		}
-
+		Format = GetFormat(stype, chans);
 		if(Format == AL_NONE)
 		{
-			Printf("Unsupported format: 0x%x\n", flags);
+			Printf("Unhandled audio format: %s, %s\n", GetChannelConfigName(chans),
+				GetSampleTypeName(stype));
 			return false;
 		}
 
-		FrameSize = 1;
-		if((flags&Bits8))
-			FrameSize *= 1;
-		else if((flags&(Bits32|Float)))
-			FrameSize *= 4;
-		else
-			FrameSize *= 2;
-
-		if((flags&Mono))
-			FrameSize *= 1;
-		else
-			FrameSize *= 2;
+		FrameSize = SampleTypeSize(stype) * ChannelCount(chans);
 
 		buffbytes += FrameSize-1;
 		buffbytes -= buffbytes%FrameSize;
@@ -526,23 +563,27 @@ public:
 
 #define PITCH_MULT (0.7937005f) /* Approx. 4 semitones lower; what Nash suggested */
 
-static size_t GetChannelCount(ChannelConfig chans)
-{
-	switch(chans)
-	{
-		case ChannelConfig_Mono: return 1;
-		case ChannelConfig_Stereo: return 2;
-	}
-	return 0;
-}
-
 static float GetRolloff(const FRolloffInfo *rolloff, float distance)
 {
 	return soundEngine->GetRolloff(rolloff, distance);
 }
 
+void trysetenv(const char *k, const char *v)
+{
+#ifdef _WIN32
+	size_t size;
+	getenv_s(&size, nullptr, 0, k);
+	if (size == 0) _putenv_s(k, v);
+#else
+	setenv(k, v, 0);
+#endif
+}
+
 ALCdevice *OpenALSoundRenderer::InitDevice()
 {
+	// allow setting this from game
+	trysetenv("ALSOFT_DRIVERS", snd_aldriver);
+
 	ALCdevice *device = NULL;
 	if (IsOpenALPresent())
 	{
@@ -564,7 +605,7 @@ ALCdevice *OpenALSoundRenderer::InitDevice()
 	}
 	else
 	{
-		Printf(TEXTCOLOR_ORANGE"Failed to load openal32.dll\n");
+		Printf(TEXTCOLOR_ORANGE"Failed to load soft_oal.dll\n");
 	}
 	return device;
 }
@@ -672,10 +713,12 @@ OpenALSoundRenderer::OpenALSoundRenderer()
 	AL.EXT_source_distance_model = !!alIsExtensionPresent("AL_EXT_source_distance_model");
 	AL.EXT_SOURCE_RADIUS = !!alIsExtensionPresent("AL_EXT_SOURCE_RADIUS");
 	AL.SOFT_deferred_updates = !!alIsExtensionPresent("AL_SOFT_deferred_updates");
+	AL.SOFT_direct_channels_remix = !!alIsExtensionPresent("AL_SOFT_direct_channels_remix");
 	AL.SOFT_loop_points = !!alIsExtensionPresent("AL_SOFT_loop_points");
 	AL.SOFT_source_latency = !!alIsExtensionPresent("AL_SOFT_source_latency");
 	AL.SOFT_source_resampler = !!alIsExtensionPresent("AL_SOFT_source_resampler");
 	AL.SOFT_source_spatialize = !!alIsExtensionPresent("AL_SOFT_source_spatialize");
+	AL.SOFT_UHJ = !!alIsExtensionPresent("AL_SOFT_UHJ");
 
 	// Speed of sound is in units per second. Presuming we want to simulate a
 	// typical speed of sound of 343.3 meters per second, multiply it by the
@@ -987,8 +1030,13 @@ void OpenALSoundRenderer::SetSfxVolume(float volume)
 void OpenALSoundRenderer::SetMusicVolume(float volume)
 {
 	MusicVolume = volume;
+	UpdateMusicParams();
+}
+
+void OpenALSoundRenderer::UpdateMusicParams()
+{
 	for(uint32_t i = 0;i < Streams.Size();++i)
-		Streams[i]->UpdateVolume();
+		Streams[i]->UpdateParams();
 }
 
 unsigned int OpenALSoundRenderer::GetMSLength(SoundHandle sfx)
@@ -1094,7 +1142,7 @@ SoundHandle OpenALSoundRenderer::LoadSoundRaw(uint8_t *sfxdata, int length, int 
 	{
 		static bool warned = false;
 		if(!warned)
-			Printf(DMSG_WARNING, "Loop points not supported!\n");
+			DPrintf(DMSG_WARNING, "Loop points not supported!\n");
 		warned = true;
 	}
 
@@ -1109,10 +1157,6 @@ SoundHandle OpenALSoundRenderer::LoadSound(uint8_t *sfxdata, int length, int def
 #endif
 
 	SoundHandle retval = { NULL };
-	ALenum format = AL_NONE;
-	ChannelConfig chans;
-	SampleType type;
-	int srate;
 	uint32_t loop_start = 0, loop_end = ~0u;
 	zmusic_bool startass = false, endass = false;
 
@@ -1130,23 +1174,23 @@ SoundHandle OpenALSoundRenderer::LoadSound(uint8_t *sfxdata, int length, int def
 	if (!decoder)
 		return retval;
 
+	ChannelConfig chans;
+	SampleType type;
+	int srate;
 	SoundDecoder_GetInfo(decoder, &srate, &chans, &type);
-	int samplesize = 1;
-#ifdef __MOBILE__
-	if (chans == ChannelConfig_Mono || monoize)
-#else
-	if (chans == ChannelConfig_Mono)
-#endif
-	{
-		if (type == SampleType_UInt8) format = AL_FORMAT_MONO8, samplesize = 1;
-		if (type == SampleType_Int16) format = AL_FORMAT_MONO16, samplesize = 2;
-	}
-	else if (chans == ChannelConfig_Stereo)
-	{
-		if (type == SampleType_UInt8) format = AL_FORMAT_STEREO8, samplesize = 2;
-		if (type == SampleType_Int16) format = AL_FORMAT_STEREO16, samplesize = 4;
-	}
 
+	ALenum format = GetFormat(type, chans);
+	int samplesize = SampleTypeSize(type) * ChannelCount(chans);
+#ifdef __MOBILE__
+	// [UZDXREMA] The mobile path downmixes multi-channel samples to mono further
+	// below, so describe the buffer to OpenAL with the mono layout it will end up
+	// having rather than the layout the decoder reported.
+	if (monoize && chans != ChannelConfig_Mono)
+	{
+		format = GetFormat(type, ChannelConfig_Mono);
+		samplesize = SampleTypeSize(type);
+	}
+#endif
 	if (format == AL_NONE)
 	{
 		SoundDecoder_Close(decoder);
@@ -1263,12 +1307,12 @@ void OpenALSoundRenderer::UnloadSound(SoundHandle sfx)
 }
 
 
-SoundStream *OpenALSoundRenderer::CreateStream(SoundStreamCallback callback, int buffbytes, int flags, int samplerate, void *userdata)
+SoundStream *OpenALSoundRenderer::CreateStream(SoundStreamCallback callback, int buffbytes, SampleType stype, ChannelConfig chans, int samplerate, void *userdata)
 {
 	if(StreamThread.get_id() == std::thread::id())
 		StreamThread = std::thread(std::mem_fn(&OpenALSoundRenderer::BackgroundProc), this);
 	OpenALSoundStream *stream = new OpenALSoundStream(this);
-	if (!stream->Init(callback, buffbytes, flags, samplerate, userdata))
+	if (!stream->Init(callback, buffbytes, stype, chans, samplerate, userdata))
 	{
 		delete stream;
 		return NULL;
@@ -1325,6 +1369,10 @@ FISoundChannel *OpenALSoundRenderer::StartSound(SoundHandle sfx, float vol, floa
 		alSourcef(source, AL_PITCH, pitch * PITCH_MULT);
 	else
 		alSourcef(source, AL_PITCH, pitch);
+	if(AL.SOFT_UHJ)
+		alSourcei(source, AL_STEREO_MODE_SOFT, AL_NORMAL_SOFT);
+	if(AL.SOFT_direct_channels_remix)
+		alSourcei(source, AL_DIRECT_CHANNELS_SOFT, AL_FALSE);
 
 	if(!reuse_chan || reuse_chan->StartTime == 0)
 	{
@@ -1389,7 +1437,7 @@ FISoundChannel *OpenALSoundRenderer::StartSound3D(SoundHandle sfx, SoundListener
 		if(lowest)
 		{
 			if(lowest->Priority < priority || (lowest->Priority == priority &&
-			                                   lowest->DistanceSqr > dist_sqr))
+											   lowest->DistanceSqr > dist_sqr))
 				StopChannel(lowest);
 		}
 		if(FreeSfx.Size() == 0)
@@ -1493,6 +1541,10 @@ FISoundChannel *OpenALSoundRenderer::StartSound3D(SoundHandle sfx, SoundListener
 		alSourcef(source, AL_PITCH, pitch * PITCH_MULT);
 	else
 		alSourcef(source, AL_PITCH, pitch);
+	if(AL.SOFT_UHJ)
+		alSourcei(source, AL_STEREO_MODE_SOFT, AL_NORMAL_SOFT);
+	if(AL.SOFT_direct_channels_remix)
+		alSourcei(source, AL_DIRECT_CHANNELS_SOFT, AL_FALSE);
 
 	if(!reuse_chan || reuse_chan->StartTime == 0)
 	{
@@ -1762,11 +1814,11 @@ void OpenALSoundRenderer::UpdateListener(SoundListener *listener)
 
 	alListenerfv(AL_ORIENTATION, orient);
 	alListener3f(AL_POSITION, listener->position.X,
-	                          listener->position.Y,
-	                         -listener->position.Z);
+							  listener->position.Y,
+							 -listener->position.Z);
 	alListener3f(AL_VELOCITY, listener->velocity.X,
-	                          listener->velocity.Y,
-	                         -listener->velocity.Z);
+							  listener->velocity.Y,
+							 -listener->velocity.Z);
 	getALError();
 
 	const ReverbContainer *env = ForcedEnvironment;
@@ -2081,10 +2133,10 @@ void OpenALSoundRenderer::LoadReverb(const ReverbContainer *env)
 		if(type == AL_EFFECT_EAXREVERB)
 		{
 			ALfloat reflectpan[3] = { props.ReflectionsPan0,
-			                          props.ReflectionsPan1,
-			                          props.ReflectionsPan2 };
+									  props.ReflectionsPan1,
+									  props.ReflectionsPan2 };
 			ALfloat latepan[3] = { props.ReverbPan0, props.ReverbPan1,
-			                       props.ReverbPan2 };
+								   props.ReverbPan2 };
 #undef SETPARAM
 #define SETPARAM(e,t,v) alEffectf((e), AL_EAXREVERB_##t, clamp((v), AL_EAXREVERB_MIN_##t, AL_EAXREVERB_MAX_##t))
 			SETPARAM(*envReverb, DIFFUSION, props.EnvDiffusion);
@@ -2212,4 +2264,3 @@ void I_BuildALResamplersList(FOptionValues* opt)
 	}
 #endif
 }
-

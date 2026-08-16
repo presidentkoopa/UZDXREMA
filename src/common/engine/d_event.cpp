@@ -1,48 +1,41 @@
 /*
-** c_dispatch.cpp
+** d_event.cpp
+**
 ** Functions for executing console commands and aliases
 **
 **---------------------------------------------------------------------------
-** Copyright 1998-2016 Randy Heit
+**
+** Copyright 1998-2016 Marisa Heit
 ** Copyright 2003-2019 Christoph Oelckers
-** All rights reserved.
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** SPDX-License-Identifier: GPL-3.0-or-later
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 **---------------------------------------------------------------------------
 **
-*/ 
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: BSD-3-Clause
+**
+**---------------------------------------------------------------------------
+**
+*/
 
 #include "c_bind.h"
-#include "d_eventbase.h"
 #include "c_console.h"
+#include "c_cvars.h"
+#include "d_eventbase.h"
 #include "d_gui.h"
-#include "menu.h"
-#include "utf8.h"
-#include "m_joy.h"
-#include "vm.h"
 #include "gamestate.h"
 #include "i_interface.h"
+#include "keydef.h"
+#include "m_joy.h"
+#include "menu.h"
+#include "utf8.h"
+#include "vm.h"
+
+extern bool ToggleFullscreen;
 
 int eventhead;
 int eventtail;
@@ -74,6 +67,7 @@ void D_ProcessEvents (void)
 	while (eventtail != eventhead)
 	{
 		event_t *ev = &events[eventtail];
+
 		eventtail = (eventtail + 1) & (MAXEVENTS - 1);
 
 		if (ev->type == EV_KeyUp && keywasdown[ev->data1])
@@ -87,10 +81,20 @@ void D_ProcessEvents (void)
 		if (ev->type == EV_DeviceChange)
 			UpdateJoystickMenu(I_UpdateDeviceList());
 
+#if defined(__linux__) || defined(_WIN32)
+		// I cannot test on macos, so it is disabled for now
+		if ((ev->type == EV_KeyDown && ev->data1 == KEY_ENTER && (ev->data3 & GKM_ALT))
+		|| (ev->type == EV_GUI_Event && ev->subtype == EV_GUI_KeyDown && ev->data1 == GK_RETURN && (ev->data3 & GKM_ALT)))
+		{
+			ToggleFullscreen = !ToggleFullscreen;
+			continue;
+		}
+#endif
+
 		// allow the game to intercept Escape before dispatching it.
 		if (ev->type != EV_KeyDown || ev->data1 != KEY_ESCAPE || !sysCallbacks.WantEscape || !sysCallbacks.WantEscape())
 		{
-			if (gamestate != GS_INTRO) // GS_INTRO blocks the UI.
+			if (gamestate != GS_STARTUP && gamestate != GS_INTRO) // GS_INTRO blocks the UI.
 			{
 				if (C_Responder(ev))
 					continue;				// console ate the event
@@ -119,7 +123,7 @@ void D_ProcessEvents (void)
 // there are dead chars involved, so those should be removed, too. We do
 // this by changing the message type to EV_None rather than by actually
 // removing the event from the queue.
-// 
+//
 //==========================================================================
 
 void D_RemoveNextCharEvent()
@@ -236,8 +240,8 @@ FUiEvent::FUiEvent(const event_t *ev)
 		IsCtrl = !!(ev->data3 & GKM_CTRL);
 		break;
 	case EV_GUI_Char:
-		KeyChar = ev->data1;
-		KeyString = MakeUTF8(ev->data1);
+		KeyChar = (uint16_t)ev->data1;
+		KeyString = MakeUTF8((uint16_t)ev->data1);
 		IsAlt = !!ev->data2; // only true for Win32, not sure about SDL
 		break;
 	default: // mouse event
@@ -267,4 +271,3 @@ DEFINE_FIELD_X(InputEvent, FInputEvent, KeyString);
 DEFINE_FIELD_X(InputEvent, FInputEvent, KeyChar);
 DEFINE_FIELD_X(InputEvent, FInputEvent, MouseX);
 DEFINE_FIELD_X(InputEvent, FInputEvent, MouseY);
-

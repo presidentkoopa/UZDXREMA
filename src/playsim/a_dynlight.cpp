@@ -1,56 +1,24 @@
-// 
-//---------------------------------------------------------------------------
-//
-// Copyright(C) 2004-2016 Christoph Oelckers
-// All rights reserved.
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public License
-// along with this program.  If not, see http://www.gnu.org/licenses/
-//
-//--------------------------------------------------------------------------
-//
 /*
 ** a_dynlight.cpp
+**
 ** Implements actors representing dynamic lights (hardware independent)
 **
+**---------------------------------------------------------------------------
+**
+** Copyright 2004-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
 **
 ** all functions marked with [TS] are licensed under
-**---------------------------------------------------------------------------
+**
 ** Copyright 2003 Timothy Stump
-** All rights reserved.
 **
-** Redistribution and use in source and binary forms, with or without
-** modification, are permitted provided that the following conditions
-** are met:
+** SPDX-License-Identifier: BSD-3-Clause
 **
-** 1. Redistributions of source code must retain the above copyright
-**    notice, this list of conditions and the following disclaimer.
-** 2. Redistributions in binary form must reproduce the above copyright
-**    notice, this list of conditions and the following disclaimer in the
-**    documentation and/or other materials provided with the distribution.
-** 3. The name of the author may not be used to endorse or promote products
-**    derived from this software without specific prior written permission.
-**
-** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
-** OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-** IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-** INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
-** NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-** DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-** THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
-** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 **---------------------------------------------------------------------------
 **
 */
@@ -96,7 +64,8 @@ static FDynamicLight *GetLight(FLevelLocals *Level)
 		FreeList.Pop(ret);
 	}
 	else ret = (FDynamicLight*)DynLightArena.Alloc(sizeof(FDynamicLight));
-	memset(ret, 0, sizeof(*ret));
+	memset((void*)ret, 0, sizeof(*ret));
+	ret = new(ret)FDynamicLight();
 	ret->m_cycler.m_increment = true;
 	ret->next = Level->lights;
 	Level->lights = ret;
@@ -118,11 +87,14 @@ static FDynamicLight *GetLight(FLevelLocals *Level)
 
 void AttachLight(AActor *self)
 {
+	if(self->ObjectFlags & OF_EuthanizeMe) return;
 	auto light = GetLight(self->Level);
 
 	light->pSpotInnerAngle = &self->AngleVar(NAME_SpotInnerAngle);
 	light->pSpotOuterAngle = &self->AngleVar(NAME_SpotOuterAngle);
-	light->pPitch = &self->Angles.Pitch;
+	light->lightDefIntensity = 1.0;
+	light->Yaw = self->Angles.Yaw;
+	light->Pitch = self->Angles.Pitch;
 	light->pLightFlags = (LightFlags*)&self->IntVar(NAME_lightflags);
 	light->pArgs = self->args;
 	light->specialf1 = DAngle::fromDeg(double(self->SpawnAngle)).Normalized360().Degrees();
@@ -219,6 +191,7 @@ void FDynamicLight::ReleaseLight()
 	else Level->lights = next;
 	if (next != nullptr) next->prev = prev;
 	next = prev = nullptr;
+	this->~FDynamicLight();
 	FreeList.Push(this);
 }
 
@@ -238,7 +211,7 @@ void FDynamicLight::Activate()
 	{
 		float pulseTime = float(specialf1 / TICRATE);
 
-		m_lastUpdate = Level->maptime;
+		m_lastUpdate = GetTimer();
 		if (!swapped) m_cycler.SetParams(float(GetSecondaryIntensity()), float(GetIntensity()), pulseTime);
 		else m_cycler.SetParams(float(GetIntensity()), float(GetSecondaryIntensity()), pulseTime);
 		m_cycler.ShouldCycle(true);
@@ -260,6 +233,7 @@ void FDynamicLight::Tick()
 	if (!target)
 	{
 		// How did we get here? :?
+		UnlinkLight();
 		ReleaseLight();
 		return;
 	}
@@ -288,9 +262,10 @@ void FDynamicLight::Tick()
 	{
 	case PulseLight:
 	{
-		float diff = (Level->maptime - m_lastUpdate) / (float)TICRATE;
-		
-		m_lastUpdate = Level->maptime;
+		const int timer = GetTimer();
+		float diff = (timer - m_lastUpdate) / (float)TICRATE;
+
+		m_lastUpdate = timer;
 		m_cycler.Update(diff);
 		m_currentRadius = float(m_cycler.GetVal());
 		break;
@@ -307,7 +282,7 @@ void FDynamicLight::Tick()
 	{
 		int flickerRange = GetSecondaryIntensity() - GetIntensity();
 		float amt = randLight() / 255.f;
-		
+
 		if (m_tickCount > specialf1)
 		{
 			m_tickCount = 0;
@@ -325,7 +300,7 @@ void FDynamicLight::Tick()
 	{
 		int rnd = randLight();
 		float pct = specialf1/360.f;
-		
+
 		m_currentRadius = m_Radius[rnd >= pct * 255];
 		break;
 	}
@@ -334,9 +309,9 @@ void FDynamicLight::Tick()
 	{
 		int flickerRange = GetSecondaryIntensity() - GetIntensity();
 		float amt = randLight() / 255.f;
-		
+
 		m_tickCount++;
-		
+
 		if (m_tickCount > specialf1)
 		{
 			m_currentRadius = GetIntensity() + (amt * flickerRange);
@@ -350,12 +325,12 @@ void FDynamicLight::Tick()
 	{
 		float intensity;
 		float scale = GetIntensity() / 8.f;
-		
+
 		if (scale == 0.f) scale = 1.f;
-		
+
 		intensity = Sector? Sector->lightlevel * scale : 0;
 		intensity = clamp<float>(intensity, 0.f, 255.f);
-		
+
 		m_currentRadius = intensity;
 		break;
 	}
@@ -392,6 +367,12 @@ void FDynamicLight::UpdateLocation()
 		DAngle angle = target->Angles.Yaw;
 		double s = angle.Sin();
 		double c = angle.Cos();
+		if (IsSpot())
+		{
+			Yaw = angle;
+			if (!explicitpitch)
+				Pitch = target->Angles.Pitch;
+		}
 
 		Pos = target->Vec3Offset(m_off.X * c + m_off.Y * s, m_off.X * s - m_off.Y * c, m_off.Z + target->GetBobOffset());
 		Sector = target->subsector->sector;	// Get the render sector. target->Sector is the sector according to play logic.
@@ -432,83 +413,58 @@ void FDynamicLight::UpdateLocation()
 
 //=============================================================================
 //
-// These have been copied from the secnode code and modified for the light links
-//
-// P_AddSecnode() searches the current list to see if this sector is
-// already there. If not, it adds a sector node at the head of the list of
-// sectors this object appears in. This is called when creating a list of
-// nodes that will get linked in later. Returns a pointer to the new node.
+// Attempts to emplace the light node in the TMap
 //
 //=============================================================================
 
-FLightNode * AddLightNode(FLightNode ** thread, void * linkto, FDynamicLight * light, FLightNode *& nextnode, bool *created = nullptr)
-{
-	FLightNode * node;
 
-	node = nextnode;
-	while (node)
-    {
-		if (node->targ==linkto)   // Already have a node for this sector?
+int FSection::Index() const
+{
+	return int(this - &sector->Level->sections.allSections[0]);
+}
+
+void FDynamicLight::AddLightNode(FSection *section, side_t *sidedef)
+{
+	if (section)
+	{
+		if(Level->lightlists.flat_dlist.SSize() <= section->Index())
 		{
-			node->lightsource = light; // Yes. Setting m_thing says 'keep it'.
-			if (created) *created = false;
-			return(nextnode);
+			Level->lightlists.flat_dlist.Resize(section->Index() + 1);
 		}
-		node = node->nextTarget;
-    }
 
-	// Couldn't find an existing node for this sector. Add one at the head
-	// of the list.
-	
-	node = new FLightNode;
-	
-	node->targ = linkto;
-	node->lightsource = light; 
+		auto &flatLightList = Level->lightlists.flat_dlist[section->Index()];
 
-	node->prevTarget = &nextnode; 
-	node->nextTarget = nextnode;
+		if (!flatLightList.CheckKey(this))
+		{
+			FLightNode * node = new FLightNode;
+			node->lightsource = this;
 
-	if (nextnode) nextnode->prevTarget = &node->nextTarget;
-	
-	// Add new node at head of sector thread starting at s->touching_thinglist
-	
-	node->prevLight = thread;  	
-	node->nextLight = *thread; 
-	if (node->nextLight) node->nextLight->prevLight=&node->nextLight;
-	*thread = node;
-	if (created) *created = true;
-	return(node);
-}
-
-
-//=============================================================================
-//
-// P_DelSecnode() deletes a sector node from the list of
-// sectors this object appears in. Returns a pointer to the next node
-// on the linked list, or nullptr.
-//
-//=============================================================================
-
-static FLightNode * DeleteLightNode(FLightNode * node)
-{
-	FLightNode * tn;  // next node on thing thread
-	
-	if (node)
-    {
-		
-		*node->prevTarget = node->nextTarget;
-		if (node->nextTarget) node->nextTarget->prevTarget=node->prevTarget;
-
-		*node->prevLight = node->nextLight;
-		if (node->nextLight) node->nextLight->prevLight=node->prevLight;
-		
-		// Return this node to the freelist
-		tn=node->nextTarget;
-		delete node;
-		return(tn);
+			flatLightList.TryEmplace(this, node);
+			touchlists.flat_tlist.SortedAddUnique(section);
+			dynlights_linked_sectors++;	// [UZDXREMA] perf instrumentation
+		}
 	}
-	return(nullptr);
+	else if (sidedef)
+	{
+		if(Level->lightlists.wall_dlist.SSize() <= sidedef->Index())
+		{
+			Level->lightlists.wall_dlist.Resize(sidedef->Index() + 1);
+		}
+
+		auto &wallLightList = Level->lightlists.wall_dlist[sidedef->Index()];
+
+		if (!wallLightList.CheckKey(this))
+		{
+			FLightNode * node = new FLightNode;
+			node->lightsource = this;
+
+			wallLightList.TryEmplace(this, node);
+			touchlists.wall_tlist.SortedAddUnique(sidedef);
+			dynlights_linked_sides++;	// [UZDXREMA] perf instrumentation
+		}
+	}
 }
+
 
 
 
@@ -569,9 +525,7 @@ void FDynamicLight::CollectWithinRadius(const DVector3 &opos, FSection *section,
 		auto pos = collected_ss[i].pos;
 		section = collected_ss[i].sect;
 
-		bool createdSectorLink = false;
-		touching_sector = AddLightNode(&section->lighthead, section, this, touching_sector, &createdSectorLink);
-		if (createdSectorLink) dynlights_linked_sectors++;
+		AddLightNode(section, NULL);
 
 
 		auto processSide = [&](side_t *sidedef, const vertex_t *v1, const vertex_t *v2)
@@ -583,9 +537,8 @@ void FDynamicLight::CollectWithinRadius(const DVector3 &opos, FSection *section,
 				if ((pos.Y - v1->fY()) * (v2->fX() - v1->fX()) + (v1->fX() - pos.X) * (v2->fY() - v1->fY()) <= 0)
 				{
 					linedef->validcount = ::validcount;
-					bool createdSideLink = false;
-					touching_sides = AddLightNode(&sidedef->lighthead, sidedef, this, touching_sides, &createdSideLink);
-					if (createdSideLink) dynlights_linked_sides++;
+
+					AddLightNode(NULL, sidedef);
 				}
 				else if (linedef->sidedef[0] == sidedef && linedef->sidedef[1] == nullptr)
 				{
@@ -688,23 +641,8 @@ void FDynamicLight::CollectWithinRadius(const DVector3 &opos, FSection *section,
 
 void FDynamicLight::LinkLight()
 {
-	dynlights_link_calls++;
-	// mark the old light nodes
-	FLightNode * node;
-	
-	node = touching_sides;
-	while (node)
-    {
-		node->lightsource = nullptr;
-		node = node->nextTarget;
-    }
-	node = touching_sector;
-	while (node)
-	{
-		node->lightsource = nullptr;
-		node = node->nextTarget;
-	}
-
+	dynlights_link_calls++;	// [UZDXREMA] perf instrumentation
+	UnlinkLight();
 	if (radius>0)
 	{
 		// passing in radius*radius allows us to do a distance check without any calls to sqrt
@@ -715,33 +653,6 @@ void FDynamicLight::LinkLight()
 		CollectWithinRadius(Pos, sect, float(radius*radius));
 
 	}
-		
-	// Now delete any nodes that won't be used. These are the ones where
-	// m_thing is still nullptr.
-	
-	node = touching_sides;
-	while (node)
-	{
-		if (node->lightsource == nullptr)
-		{
-			dynlights_removed_side_links++;
-			node = DeleteLightNode(node);
-		}
-		else
-			node = node->nextTarget;
-	}
-
-	node = touching_sector;
-	while (node)
-	{
-		if (node->lightsource == nullptr)
-		{
-			dynlights_removed_sector_links++;
-			node = DeleteLightNode(node);
-		}
-		else
-			node = node->nextTarget;
-	}
 }
 
 
@@ -750,19 +661,37 @@ void FDynamicLight::LinkLight()
 // Deletes the link lists
 //
 //==========================================================================
-void FDynamicLight::UnlinkLight ()
+void FDynamicLight::UnlinkLight()
 {
-	dynlights_unlink_calls++;
-	while (touching_sides)
+	dynlights_unlink_calls++;	// [UZDXREMA] perf instrumentation
+
+	for(int i = 0; i < touchlists.wall_tlist.SSize(); i++)
 	{
-		dynlights_removed_side_links++;
-		touching_sides = DeleteLightNode(touching_sides);
+		auto sidedef = touchlists.wall_tlist[i];
+		if (!sidedef) continue;
+
+		if(Level->lightlists.wall_dlist.SSize() > sidedef->Index())
+		{
+			Level->lightlists.wall_dlist[sidedef->Index()].Remove(this);
+			dynlights_removed_side_links++;	// [UZDXREMA] perf instrumentation
+		}
 	}
-	while (touching_sector)
+
+	for(int i = 0; i < touchlists.flat_tlist.SSize(); i++)
 	{
-		dynlights_removed_sector_links++;
-		touching_sector = DeleteLightNode(touching_sector);
+		auto sec = touchlists.flat_tlist[i];
+		if (!sec) continue;
+
+		if(Level->lightlists.flat_dlist.SSize() > sec->Index())
+		{
+			Level->lightlists.flat_dlist[sec->Index()].Remove(this);
+			dynlights_removed_sector_links++;	// [UZDXREMA] perf instrumentation
+		}
 	}
+
+	touchlists.flat_tlist.Clear();
+	touchlists.wall_tlist.Clear();
+
 	shadowmapped = false;
 }
 
@@ -774,9 +703,11 @@ void FDynamicLight::UnlinkLight ()
 
 void AActor::AttachLight(unsigned int count, const FLightDefaults *lightdef)
 {
+	if(ObjectFlags & OF_EuthanizeMe) return;
+
 	FDynamicLight *light;
 
-	if (count < AttachedLights.Size()) 
+	if (count < AttachedLights.Size())
 	{
 		light = AttachedLights[count];
 		assert(light != nullptr);
@@ -878,9 +809,11 @@ unsigned FindUserLight(AActor *self, FName id, bool create = false)
 
 int AttachLightDef(AActor *self, int _lightid, int _lightname)
 {
+	if(self->ObjectFlags & OF_EuthanizeMe) return 0;
+
 	FName lightid = FName(ENamedName(_lightid));
 	FName lightname = FName(ENamedName(_lightname));
-	
+
 	// Todo: Optimize. This may be too slow.
 	auto lightdef = LightDefaults.FindEx([=](const auto &a) {
 		return a->GetName() == lightname;
@@ -910,8 +843,10 @@ DEFINE_ACTION_FUNCTION_NATIVE(AActor, A_AttachLightDef, AttachLightDef)
 //
 //==========================================================================
 
-int AttachLightDirect(AActor *self, int _lightid, int type, int color, int radius1, int radius2, int flags, double ofs_x, double ofs_y, double ofs_z, double param, double spoti, double spoto, double spotp)
+int AttachLightDirect(AActor *self, int _lightid, int type, int color, int radius1, int radius2, int flags, double ofs_x, double ofs_y, double ofs_z, double param, double spoti, double spoto, double spotp, double intensity)
 {
+	if(self->ObjectFlags & OF_EuthanizeMe) return 0;
+
 	FName lightid = FName(ENamedName(_lightid));
 	auto userlight = self->UserLights[FindUserLight(self, lightid, true)];
 	userlight->SetType(ELightType(type));
@@ -926,6 +861,7 @@ int AttachLightDirect(AActor *self, int _lightid, int type, int color, int radiu
 	userlight->SetParameter(type == PulseLight? param*TICRATE : param*360.);
 	userlight->SetSpotInnerAngle(spoti);
 	userlight->SetSpotOuterAngle(spoto);
+	userlight->SetLightDefIntensity(intensity);
 	if (spotp >= -90. && spotp <= 90.)
 	{
 		userlight->SetSpotPitch(spotp);
@@ -955,7 +891,8 @@ DEFINE_ACTION_FUNCTION_NATIVE(AActor, A_AttachLight, AttachLightDirect)
 	PARAM_FLOAT(spoti);
 	PARAM_FLOAT(spoto);
 	PARAM_FLOAT(spotp);
-	ACTION_RETURN_BOOL(AttachLightDirect(self, lightid.GetIndex(), type, color, radius1, radius2, flags, ofs_x, ofs_y, ofs_z, parami, spoti, spoto, spotp));
+	PARAM_FLOAT(intensity);
+	ACTION_RETURN_BOOL(AttachLightDirect(self, lightid.GetIndex(), type, color, radius1, radius2, flags, ofs_x, ofs_y, ofs_z, parami, spoti, spoto, spotp, intensity));
 }
 
 //==========================================================================
@@ -1004,7 +941,7 @@ void FLevelLocals::DeleteAllAttachedLights()
 	auto it = GetThinkerIterator<AActor>();
 	AActor * a;
 
-	while ((a=it.Next())) 
+	while ((a=it.Next()))
 	{
 		a->DeleteAttachedLights();
 	}
@@ -1021,7 +958,7 @@ void FLevelLocals::RecreateAllAttachedLights()
 	auto it = GetThinkerIterator<AActor>();
 	AActor * a;
 
-	while ((a=it.Next())) 
+	while ((a=it.Next()))
 	{
 		if (!a->IsKindOf(NAME_DynamicLight))
 		{

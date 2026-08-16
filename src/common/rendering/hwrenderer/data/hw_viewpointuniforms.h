@@ -1,3 +1,19 @@
+/*
+** hw_viewpointuniforms.h
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
+
 #pragma once
 
 #include "matrix.h"
@@ -371,6 +387,23 @@ struct HWViewpointUniforms
 	FVector4 mFogFollow = { 0.f, 0.f, 0.f, 0.f };
 
 
+	// Upstream 5.0.0 thick-fog knobs. They are APPENDED here, after the last
+	// FVector4, because that is where gl_shader.cpp's ViewpointUBO and
+	// vk_shader.cpp's ViewpointData put uThickFogDistance/uThickFogMultiplier
+	// -- a uniform block is matched by OFFSET, not by name order.
+	float mThickFogDistance = -1.f;
+	float mThickFogMultiplier = 30.f;
+
+	// Two scalars past the last vec4 leave the struct 8 bytes short of a
+	// 16-byte boundary. std140 rounds a block/struct size UP to a multiple of
+	// 16 when it is used as an array element, and the Vulkan path declares
+	// `ViewpointData viewpoints[2]` (one entry per eye), so without this pad
+	// the C++ upload stride and the shader's array stride disagree and the
+	// right eye reads the left eye's tail. Do not remove; do not declare these
+	// in any of the GLSL copies -- std140 supplies the same padding implicitly.
+	float mPadding1 = 0.f;
+	float mPadding2 = 0.f;
+
 	void CalcDependencies()
 	{
 		mNormalViewMatrix.computeNormalMatrix(mViewMatrix);
@@ -378,6 +411,3 @@ struct HWViewpointUniforms
 };
 
 static_assert((sizeof(HWViewpointUniforms) % 16) == 0, "HWViewpointUniforms must remain 16-byte aligned for std140 array stride.");
-
-
-

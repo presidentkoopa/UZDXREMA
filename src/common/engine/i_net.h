@@ -1,18 +1,42 @@
+/*
+** i_net.h
+**
+**
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 1993-1996 by id Software, Inc.
+** Copyright 1999-2016 Marisa Heit
+** Copyright 2009-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+** Code written prior to 2026 is also licensed under:
+**
+** SPDX-License-Identifier: LicenseRef-Doom-Source-License
+**
+**---------------------------------------------------------------------------
+**
+*/
+
 #ifndef __I_NET_H__
 #define __I_NET_H__
 
 #include <stdint.h>
+#include "m_argv.h"
+#include "tarray.h"
 
-// Called by D_DoomMain.
-int I_InitNetwork (void);
-void CloseNetwork(void);
-void I_NetCmd (void);
-void I_NetMessage(const char*, ...);
-void I_NetError(const char* error);
-void I_NetProgress(int val);
-void I_NetInit(const char* msg, int num);
-bool I_NetLoop(bool (*timer_callback)(void*), void* userdata);
-void I_NetDone();
+inline constexpr size_t MAXPLAYERS = 64u;
+
+EXTERN_FARG(host);
+EXTERN_FARG(join);
+
+// [UZDXREMA] VR net-wait shell. Consumed by hw_vrmodes.cpp and doommenu.cpp.
+// The enums must stay ahead of the prototypes below (default argument use).
 bool I_ConsumeCancelledNetWaitBoot();
 const char* I_GetLocalAddress();
 
@@ -63,78 +87,87 @@ int I_GetNetWaitTotalPlayers();
 
 enum ENetConstants
 {
-	MAXNETNODES = 8,	// max computers in a game 
-	DOOMCOM_ID = 0x12345678,
-	BACKUPTICS = 36,	// number of tics to remember
-	MAXTICDUP = 5,
-	LOCALCMDTICS =(BACKUPTICS*MAXTICDUP),
+	BACKUPTICS = 35 * 5,	// Remember up to 5 seconds of data.
+	MAXTICDUP = 3,
+	MAXSENDTICS = 35 * 1,	// Only send up to 1 second of data at a time.
+	STABILITYTICS = 17,
+	LOCALCMDTICS = (BACKUPTICS * MAXTICDUP),
 	MAX_MSGLEN = 14000,
-
-	CMD_SEND = 1,
-	CMD_GET = 2,
 };
 
-// [RH]
-// New generic packet structure:
-//
-// Header:
-//  One byte with following flags.
-//  One byte with starttic
-//  One byte with master's maketic (master -> slave only!)
-//  If NCMD_RETRANSMIT set, one byte with retransmitfrom
-//  If NCMD_XTICS set, one byte with number of tics (minus 3, so theoretically up to 258 tics in one packet)
-//  If NCMD_QUITTERS, one byte with number of players followed by one byte with each player's consolenum
-//  If NCMD_MULTI, one byte with number of players followed by one byte with each player's consolenum
-//     - The first player's consolenum is not included in this list, because it always matches the sender
-//
-// For each tic:
-//  Two bytes with consistancy check, followed by tic data
-//
-// Setup packets are different, and are described just before D_ArbitrateNetStart().
-
-enum ENCMD
+enum ENetCommand
 {
-	NCMD_EXIT				= 0x80,
-	NCMD_RETRANSMIT 		= 0x40,
-	NCMD_SETUP				= 0x20,
-	NCMD_MULTI				= 0x10,		// multiple players in this packet
-	NCMD_QUITTERS			= 0x08,		// one or more players just quit (packet server only)
-	NCMD_COMPRESSED			= 0x04,		// remainder of packet is compressed
-
-	NCMD_XTICS				= 0x03,		// packet contains >2 tics
-	NCMD_2TICS				= 0x02,		// packet contains 2 tics
-	NCMD_1TICS				= 0x01,		// packet contains 1 tic
-	NCMD_0TICS				= 0x00,		// packet contains 0 tics
+	CMD_NONE,
+	CMD_SEND,
+	CMD_GET,
 };
 
-//
-// Network packet data.
-//
-struct doomcom_t
+enum ENetFlags
 {
-	uint32_t	id;				// should be DOOMCOM_ID
-	int16_t	intnum;			// DOOM executes an int to execute commands
+	NCMD_EXIT = 0x80,		// Client has left the game
+	NCMD_RETRANSMIT = 0x40,		//
+	NCMD_SETUP = 0x20,		// Guest is letting the host know who it is
+	NCMD_LEVELREADY = 0x10,		// After loading a level, guests send this over to the host who then sends it back after all are received
+	NCMD_QUITTERS = 0x08,		// Client is getting info about one or more players quitting
+	NCMD_COMPRESSED = 0x04,		// Remainder of packet is compressed
+	NCMD_LATENCYACK = 0x02,		// A latency packet was just read, so let the sender know.
+	NCMD_LATENCY = 0x01,		// Latency packet, used for measuring RTT.
+};
 
-// communication between DOOM and the driver
-	int16_t	command;		// CMD_SEND or CMD_GET
-	int16_t	remotenode;		// dest for send, set by get (-1 = no packet).
-	int16_t	datalength;		// bytes in data to be sent
+struct FVerificationError
+{
+	enum EVerifyError : uint8_t
+	{
+		VE_NONE,
+		VE_ENGINE,
+		VE_FILE_UNKNOWN,
+		VE_FILE_MISSING,
+		VE_FILE_ORDER,
+	};
 
-// info common to all nodes
-	int16_t	numnodes;		// console is always node 0.
-	int16_t	ticdup;			// 1 = no duplication, 2-5 = dup for slow nets
+	EVerifyError Error = VE_NONE;
+	uint8_t Major = 0u, Minor = 0u, Revision = 0u;
+	uint8_t NetMajor = 0u, NetMinor = 0u, NetRevision = 0u;
+	TArray<FString> UnknownFiles = {};
+	TArray<FString> ExpectedOrder = {};
+	// Since the guest didn't load these, we have no checksum to fetch the proper name, so send over our own.
+	TArray<FString> MissingFiles = {};
+};
 
-// info specific to this node
-	int16_t	consoleplayer;
-	int16_t	numplayers;
+struct FClientStack : public TArray<int>
+{
+	inline bool InGame(int i) const { return Find(i) < Size(); }
 
-// packet data to be sent
-	uint8_t	data[MAX_MSGLEN];
+	void operator+=(const int i)
+	{
+		if (!InGame(i))
+			SortedInsert(i);
+	}
 
-}; 
+	void operator-=(const int i)
+	{
+		Delete(Find(i));
+	}
+};
 
-extern doomcom_t doomcom;
 extern bool netgame, multiplayer;
 extern int consoleplayer;
+extern int Net_Arbitrator;
+extern FClientStack NetworkClients;
+extern uint8_t NetBuffer[MAX_MSGLEN];
+extern size_t NetBufferLength;
+extern uint8_t TicDup;
+extern int RemoteClient;
+extern int MaxClients;
+
+bool I_InitNetwork();
+void I_ClearClient(size_t client);
+void I_NetCmd(ENetCommand cmd);
+void I_NetDone();
+void HandleIncomingConnection();
+void CloseNetwork();
+
+void StartNetworkLean();
+bool IsNetworkStartedLean();
 
 #endif
