@@ -3294,6 +3294,8 @@ namespace s3d
 								-weaponangles[PITCH]);
 							player->mo->AttackAngle = DAngle::fromDeg(-90 + getViewpointYaw() + (weaponangles[YAW] - playerYaw));
 							player->mo->AttackRoll = DAngle::fromDeg(weaponangles[ROLL]);
+							// Same value, kept somewhere the playsim will not zero it.
+							player->mo->MainHandRoll = player->mo->AttackRoll;
 						}
 					}
 

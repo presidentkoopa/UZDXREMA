@@ -1668,6 +1668,23 @@ public:
 	DAngle   AttackAngle;
 	DAngle   AttackRoll;
 
+	// The main hand's REAL wrist roll, which AttackRoll cannot carry.
+	//
+	// AttackPitch and AttackAngle survive the playsim because the usercmd has
+	// a weaponpitch and a weaponyaw to rebuild them from; there is no
+	// weaponroll (see d_protocol.h), so UpdateCanonicalMainHandPose zeroes
+	// AttackRoll every tic to keep peers deterministic. The VR backends had
+	// already written the true value a moment earlier, and it was thrown away
+	// before any script could read it -- so the held model visibly rolled with
+	// the wrist while ZScript was told the wrist was level.
+	//
+	// This field is renderer-owned like the Hmd* block below: written by the
+	// VR backends, never touched by the playsim, never serialised. Read it
+	// for presentation -- anything welded to the held weapon -- and keep
+	// reading AttackRoll for anything that must agree across a network.
+	// OffhandRoll needs no equivalent: nothing zeroes it outside multiplayer.
+	DAngle   MainHandRoll;
+
 	DVector3 (*AttackDir)(AActor* actor, DAngle yaw, DAngle pitch);
 
 	DVector3 OffhandPos;

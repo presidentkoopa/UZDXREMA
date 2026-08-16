@@ -65,6 +65,14 @@
 #include "texturemanager.h"
 #include "v_draw.h"
 #include "types.h"		// [BB] PType and the type singletons, for the field reflection natives below
+#include "i_specialpaths.h"	// [BB] M_GetConfigPath, for JSON profile natives below
+#include "rapidjson/rapidjson.h"
+#include "rapidjson/writer.h"
+#include "rapidjson/prettywriter.h"
+#include "rapidjson/document.h"
+#include "rapidjson/stringbuffer.h"
+#include <fstream>
+#include <sstream>
 
 DVector2 AM_GetPosition();
 int Net_GetLatency(int *ld, int *ad);
@@ -5328,6 +5336,188 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, VRHaptic, VRHaptic)
 	return 0;
 }
 
+// ---------------------------------------------------------------------------
+// JSON PROFILES -- named key/double documents, saved under the same writable
+// directory doomxr.ini itself lives in, in an "rs_profiles" subfolder.
+// ZScript has no file I/O and no JSON parser of its own -- everywhere else in
+// this codebase that reads or writes JSON does it in C++ via rapidjson
+// (already vendored for savegames; see serializer.cpp), so this is that same
+// approach exposed for script's own use rather than a second, ad-hoc,
+// hand-rolled parser living in ZScript string-scanning code.
+//
+// SHAPE: a flat map of string key -> double. No nesting, no arrays, no other
+// value types -- deliberately, because a flat map needs no schema
+// negotiation between script and native code. A caller with different data
+// just picks different key names ("hip_left_pitch", "seat_height", whatever);
+// it does not need new natives.
+//
+// PROTOCOL, because ZScript cannot pass a whole array or struct into a
+// native call (see the model-orientation natives above for the same
+// constraint): the caller builds up one profile with a sequence of
+// JSONProfileSetDouble calls against an in-progress buffer, then
+// JSONProfileSave flushes it to disk. Loading is the mirror: JSONProfileLoad
+// parses the file into that buffer, then the caller pulls values back out
+// with JSONProfileGetDouble. Exactly one profile is ever "in progress" at a
+// time -- the VM is single-threaded and non-reentrant here, so one static
+// buffer is enough and avoids a handle/token system for no real benefit.
+//
+// NAME SANITIZATION is load-bearing, not decoration: this writes to a real
+// path on disk from a name a mod controls, in principle any mod, not just
+// this one. A name must never be able to walk outside rs_profiles/ or
+// collide with an unrelated file. Anything outside [A-Za-z0-9_-], empty, or
+// over 64 characters is refused outright rather than silently truncated or
+// substituted -- a caller that gets false back knows its name did not
+// resolve to a file; a caller that got a silently mangled name would not.
+static TMap<FString, double> JSONProfileBuffer;
+
+static bool SanitizeProfileName(const FString &name, FString &outClean)
+{
+	if (name.IsEmpty() || name.Len() > 64)
+		return false;
+
+	for (int i = 0; i < name.Len(); ++i)
+	{
+		char c = name[i];
+		bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+		          (c >= '0' && c <= '9') || c == '_' || c == '-';
+		if (!ok)
+			return false;
+	}
+
+	outClean = name;
+	return true;
+}
+
+// M_GetConfigPath(false) specifically -- for_reading=false takes that
+// function's early "!for_reading || FileExists(path)" return unconditionally,
+// before it ever reaches the old-config migration branch (which can prompt
+// the user with a dialog). false is what makes this call side-effect-free.
+static FString ProfileDirectory()
+{
+	FString cfg = M_GetConfigPath(false);
+	ptrdiff_t slash = cfg.LastIndexOfAny("/\\");
+	FString dir = (slash >= 0) ? cfg.Left((long)slash) : cfg;
+	dir += "/rs_profiles";
+	CreatePath(dir.GetChars());
+	return dir;
+}
+
+static FString ProfilePath(const FString &cleanName)
+{
+	FString p = ProfileDirectory();
+	p += "/";
+	p += cleanName;
+	p += ".json";
+	return p;
+}
+
+static void JSONProfileBegin(FLevelLocals*)
+{
+	JSONProfileBuffer.Clear();
+}
+
+static void JSONProfileSetDouble(FLevelLocals*, const FString &key, double value)
+{
+	JSONProfileBuffer.Insert(key, value);
+}
+
+static double JSONProfileGetDouble(FLevelLocals*, const FString &key, double defaultValue)
+{
+	auto val = JSONProfileBuffer.CheckKey(key);
+	return val ? *val : defaultValue;
+}
+
+static int JSONProfileSave(FLevelLocals*, const FString &name)
+{
+	FString clean;
+	if (!SanitizeProfileName(name, clean))
+		return 0;
+
+	rapidjson::StringBuffer buffer;
+	rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);
+	writer.StartObject();
+	TMap<FString, double>::Iterator it(JSONProfileBuffer);
+	TMap<FString, double>::Pair *pair;
+	while (it.NextPair(pair))
+	{
+		writer.Key(pair->Key.GetChars());
+		writer.Double(pair->Value);
+	}
+	writer.EndObject();
+
+	std::ofstream f(ProfilePath(clean).GetChars(), std::ios::binary | std::ios::trunc);
+	if (!f.is_open())
+		return 0;
+	f.write(buffer.GetString(), (std::streamsize)buffer.GetSize());
+	return f.good() ? 1 : 0;
+}
+
+static int JSONProfileLoad(FLevelLocals*, const FString &name)
+{
+	JSONProfileBuffer.Clear();
+
+	FString clean;
+	if (!SanitizeProfileName(name, clean))
+		return 0;
+
+	std::ifstream f(ProfilePath(clean).GetChars(), std::ios::binary);
+	if (!f.is_open())
+		return 0;
+
+	std::stringstream ss;
+	ss << f.rdbuf();
+	std::string contents = ss.str();
+
+	rapidjson::Document doc;
+	if (doc.Parse(contents.c_str()).HasParseError() || !doc.IsObject())
+		return 0;
+
+	for (auto mit = doc.MemberBegin(); mit != doc.MemberEnd(); ++mit)
+	{
+		if (mit->value.IsNumber())
+			JSONProfileBuffer.Insert(FString(mit->name.GetString()), mit->value.GetDouble());
+	}
+	return 1;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, JSONProfileBegin, JSONProfileBegin)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	JSONProfileBegin(self);
+	return 0;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, JSONProfileSetDouble, JSONProfileSetDouble)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_STRING(key);
+	PARAM_FLOAT(value);
+	JSONProfileSetDouble(self, key, value);
+	return 0;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, JSONProfileGetDouble, JSONProfileGetDouble)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_STRING(key);
+	PARAM_FLOAT(defaultValue);
+	ACTION_RETURN_FLOAT(JSONProfileGetDouble(self, key, defaultValue));
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, JSONProfileSave, JSONProfileSave)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_STRING(name);
+	ACTION_RETURN_BOOL(JSONProfileSave(self, name) != 0);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, JSONProfileLoad, JSONProfileLoad)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_STRING(name);
+	ACTION_RETURN_BOOL(JSONProfileLoad(self, name) != 0);
+}
+
 // [BB] FIELD REFLECTION -- read another mod's data without linking to it.
 //
 // ZScript can only reach a field through a TYPED reference, and a typed
@@ -5692,9 +5882,24 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, GetModelOrientationHint, GetModelOri
 // all until someone finds and moves it, which is why centering kept failing
 // even after the orientation fix landed.
 //
-// pixelstretch is passed rather than pulled from self->info, since the
-// caller (an actor already holding a level pointer) has it for free and it
-// keeps this function from needing to know how FLevelLocals stores it.
+// STRETCH IS 1.0 HERE, ALWAYS -- this was the second centering bug, found
+// after the first (missing actor-scale) fix cut the drift from ~4.5 units to
+// ~1.0 rather than to zero. RenderModel's local `stretch` variable starts at
+// 1.f and is ONLY recomputed to getAspectFactor(pixelstretch)/pixelstretch
+// INSIDE `if (smf_flags & MDL_CORRECTPIXELSTRETCH)`, a block that runs BEFORE
+// the offset translate() -- so the translate divides by that real stretch
+// value ONLY when the flag is set. When it is not (confirmed true for every
+// block in both MODELDEFs here -- MDL_CORRECTPIXELSTRETCH never appears),
+// `stretch` is still 1.f at the translate() call, and the SEPARATE
+// `!(smf_flags & MDL_CORRECTPIXELSTRETCH)` block that computes the real
+// aspect stretch runs AFTER the translate, as its own later scale() call --
+// it resizes the whole mesh uniformly, it does not touch the offset value.
+// Dividing by the passed-in pixelstretch here (as this function used to)
+// applied a correction the renderer was never actually applying at that step.
+// pixelstretch is still accepted as a parameter for API stability and in
+// case a future weapon block opts into MDL_CORRECTPIXELSTRETCH, but nothing
+// in it is used while that flag stays absent from the data, which is the
+// only case this has ever needed to handle.
 static int GetModelOffsetHint(FLevelLocals* self, PClass* cls, int sprite, int frame, double pixelstretch,
 	double* outX, double* outY, double* outZ)
 {
@@ -5708,10 +5913,9 @@ static int GetModelOffsetHint(FLevelLocals* self, PClass* cls, int sprite, int f
 	if (smf == nullptr) return 0;
 	if (smf->xscale == 0.0f || smf->yscale == 0.0f || smf->zscale == 0.0f) return 0;
 
-	float stretch = (pixelstretch != 0.0) ? (float)pixelstretch : 1.0f;
 	*outX = smf->xoffset / smf->xscale;
 	*outY = smf->yoffset / smf->yscale;
-	*outZ = smf->zoffset / (smf->zscale * stretch);
+	*outZ = smf->zoffset / smf->zscale;
 	return 1;
 }
 
@@ -5752,16 +5956,56 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, GetModelOffsetHint, GetModelOffsetHi
 //
 // actorAngle/Pitch/Roll are passed in rather than read from an AActor,
 // because the caller (a holster prop) wants the WOULD-BE offset for angles
-// it has computed but not necessarily assigned to anything yet.
+// it has computed but not necessarily assigned to anything yet. Same for
+// actorScaleX/Y.
+//
+// THE SCALE MATTERS, and getting that wrong is its own separate bug. In
+// RenderModel the calls are, in this order:
+//     objectToWorldMatrix.scale(scaleFactorX, scaleFactorZ, scaleFactorY);   // step 3
+//     objectToWorldMatrix.translate(xoffset/xscale, zoffset/(zscale*stretch), yoffset/yscale); // step 4
+// and because a later matrix call applies to the raw vertex FIRST, the offset
+// translate happens BEFORE the scale -- so the offset is multiplied by it. The
+// engine's comment on step 4 ("model offsets do not depend on model scalings")
+// is only half the story: smf->xscale cancels against scaleFactorX, but the
+// ACTOR's own Scale does not cancel and survives into the final displacement:
+//     world displacement = (actorScaleX * xoffset,
+//                           actorScaleX * yoffset,
+//                           actorScaleY * zoffset / stretch)   [pre-rotation]
+// Ignoring that made this function over-correct by 1/actorScale -- at a holster
+// prop's 0.18 scale it subtracted roughly four times too much and pushed the
+// shrunken model clean outside the marker sphere it was supposed to sit in.
 static int GetModelWorldOffset(FLevelLocals* self, PClass* cls, int sprite, int frame, double pixelstretch,
 	double actorAngle, double actorPitch, double actorRoll,
+	double actorScaleX, double actorScaleY,
 	double* outDX, double* outDY, double* outDZ)
 {
 	*outDX = 0.0; *outDY = 0.0; *outDZ = 0.0;
 
-	double localX, localY, localZ;
-	if (!GetModelOffsetHint(self, cls, sprite, frame, pixelstretch, &localX, &localY, &localZ))
-		return 0;
+	if (cls == nullptr) return 0;
+	auto def = GetDefaultByType(cls);
+	if (def == nullptr || !def->hasmodel) return 0;
+
+	FSpriteModelFrame* smf = FindModelFrame(cls, sprite, frame, false);
+	if (smf == nullptr) return 0;
+
+	// The MODELDEF scales cancel out of the product above, so unlike
+	// GetModelOffsetHint this never divides by them and cannot trip over a
+	// zero or negative scale. A mirrored model (negative xscale) likewise
+	// needs no special case: the sign cancels for exactly the same reason.
+	//
+	// NO stretch division -- see the long comment on GetModelOffsetHint's
+	// declaration. This used to divide localZ by the passed-in pixelstretch
+	// (~1.2), a correction RenderModel only actually applies at this step
+	// under MDL_CORRECTPIXELSTRETCH, which is absent from every block in both
+	// MODELDEFs here. That extra division was the second centering bug: it
+	// cut real drift from ~4.5 units to ~1.0 (an improvement, since it landed
+	// on top of a genuine first bug -- the missing actor-scale factor -- but
+	// not the whole fix). pixelstretch is kept as a parameter for the same
+	// future-flag reason GetModelOffsetHint keeps it, unused while that flag
+	// stays absent from the data.
+	const double localX = actorScaleX * smf->xoffset;
+	const double localY = actorScaleX * smf->yoffset;
+	const double localZ = actorScaleY * smf->zoffset;
 
 	// RenderModel's own rotation sequence, replicated exactly:
 	//   rotate(-angle, 0,1,0); rotate(pitch, 0,0,1); rotate(-roll, 1,0,0);
@@ -5804,8 +6048,10 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, GetModelWorldOffset, GetModelWorldOf
 	PARAM_FLOAT(actorAngle);
 	PARAM_FLOAT(actorPitch);
 	PARAM_FLOAT(actorRoll);
+	PARAM_FLOAT(actorScaleX);
+	PARAM_FLOAT(actorScaleY);
 	double dx, dy, dz;
-	int found = GetModelWorldOffset(self, cls, sprite, frame, pixelstretch, actorAngle, actorPitch, actorRoll, &dx, &dy, &dz);
+	int found = GetModelWorldOffset(self, cls, sprite, frame, pixelstretch, actorAngle, actorPitch, actorRoll, actorScaleX, actorScaleY, &dx, &dy, &dz);
 	if (numret > 0) ret[0].SetInt(found);
 	if (numret > 1) ret[1].SetFloat(dx);
 	if (numret > 2) ret[2].SetFloat(dy);

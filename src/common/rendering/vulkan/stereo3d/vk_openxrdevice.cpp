@@ -3972,6 +3972,8 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 						: -weaponangles[PITCH]);
 					player->mo->AttackAngle = DAngle::fromDeg(-90 + GetViewpointYaw() + (weaponangles[YAW] - playerYaw));
 					player->mo->AttackRoll = DAngle::fromDeg(weaponangles[ROLL]);
+					// Same value, kept somewhere the playsim will not zero it.
+					player->mo->MainHandRoll = player->mo->AttackRoll;
 				}
 			}
 

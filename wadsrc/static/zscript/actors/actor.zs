@@ -275,6 +275,14 @@ class Actor : Thinker native
 	native readonly double AttackPitch;
 	native readonly double AttackRoll;
 	native readonly double AttackAngle;
+
+	// The main hand's REAL wrist roll. AttackRoll is zeroed every tic by the
+	// playsim -- the usercmd has no weaponroll to rebuild it from, so it must
+	// read the same on every peer -- which left script believing the wrist was
+	// level while the held model rolled with it. Use this for anything welded
+	// to the weapon; use AttackRoll for anything that must agree over a net.
+	// OffhandRoll is already true and needs no counterpart.
+	native readonly double MainHandRoll;
 	native readonly vector3 OffhandPos;
 	native readonly double OffhandPitch;
 	native readonly double OffhandRoll;

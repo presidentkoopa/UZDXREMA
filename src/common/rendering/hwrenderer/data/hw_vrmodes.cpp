@@ -1397,6 +1397,8 @@ void VRMode::SetUp() const
 						: -weaponangles[PITCH]);
 					player->mo->AttackAngle = DAngle::fromDeg(-90 + r_viewpoint.Angles.Yaw.Degrees() + (weaponangles[YAW] - playerYaw));
 					player->mo->AttackRoll = DAngle::fromDeg(weaponangles[ROLL]);
+					// Same value, kept somewhere the playsim will not zero it.
+					player->mo->MainHandRoll = player->mo->AttackRoll;
 				}
 
 				VSMatrix offhandTransform;

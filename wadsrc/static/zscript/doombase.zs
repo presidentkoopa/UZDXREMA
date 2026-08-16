@@ -805,6 +805,25 @@ struct LevelLocals native
 	// duration in milliseconds, both clamped. Honours vr_enable_haptics.
 	native void VRHaptic(int hand, double intensity, double durationMs);
 
+	// Named JSON profiles -- a flat key/double document per name, saved under
+	// the same directory doomxr.ini itself lives in (a "rs_profiles"
+	// subfolder), read and written through the engine's own JSON library so a
+	// hand-edited file gets real parsing, not a hand-rolled ZScript scanner.
+	//
+	// PROTOCOL: exactly one profile is ever "in progress" at a time.
+	//   SAVE:  JSONProfileBegin() -> JSONProfileSetDouble(key, val) per field
+	//          -> JSONProfileSave(name)
+	//   LOAD:  JSONProfileLoad(name) -> JSONProfileGetDouble(key, default) per
+	//          field
+	// name is restricted to [A-Za-z0-9_-], 1-64 characters -- anything else
+	// is refused (false/no write/no load) rather than silently mangled, since
+	// this writes to a real path on disk.
+	native void JSONProfileBegin();
+	native void JSONProfileSetDouble(string key, double value);
+	native double JSONProfileGetDouble(string key, double defaultValue = 0.0);
+	native bool JSONProfileSave(string name);
+	native bool JSONProfileLoad(string name);
+
 	native bool IsVRInputSuppressed();
 
 	// FIELD REFLECTION -- read another mod's data without linking to it.
@@ -885,8 +904,16 @@ struct LevelLocals native
 	// actor's origin should be targetWorldPos - result) so that, once the
 	// engine applies the model's own baked offset AND the actor's own
 	// rotation on top, the MESH lands at targetWorldPos.
+	// actorScaleX/Y are REQUIRED for a correct answer, not a refinement: the
+	// renderer applies the model's baked offset BEFORE its scale (the offset
+	// translate is issued after the scale call, and later matrix calls reach
+	// the vertex first), so the actor's own Scale multiplies straight into the
+	// displacement. Pass the same Scale the actor is drawn at -- passing 1,1
+	// for a shrunken prop over-corrects by 1/scale and throws the mesh well
+	// clear of where it was meant to sit.
 	native bool, double, double, double GetModelWorldOffset(class<Actor> cls, int sprite, int frame,
-		double pixelstretch, double actorAngle, double actorPitch, double actorRoll);
+		double pixelstretch, double actorAngle, double actorPitch, double actorRoll,
+		double actorScaleX = 1.0, double actorScaleY = 1.0);
 
 	native int, Vector2 AimBillboard(Vector3 start, Vector3 dir, double maxDist = 0);
 	// Point versus billboard -- the touch case. Returns the nearest billboard

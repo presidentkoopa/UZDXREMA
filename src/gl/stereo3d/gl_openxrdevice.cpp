@@ -641,6 +641,8 @@ namespace s3d
 
                         player->mo->AttackAngle = DAngle::fromDeg(-90 + getViewpointYaw() + (weaponangles[YAW]- playerYaw));
                         player->mo->AttackRoll = DAngle::fromDeg(weaponangles[ROLL]);
+                        // Same value, kept somewhere the playsim will not zero it.
+                        player->mo->MainHandRoll = player->mo->AttackRoll;
 
                         player->mo->AttackPos.X = player->mo->X() - (weaponoffset[0] * vr_vunits_per_meter);
                         player->mo->AttackPos.Y = player->mo->Y() - (weaponoffset[2] * vr_vunits_per_meter);
