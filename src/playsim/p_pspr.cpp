@@ -595,8 +595,6 @@ void DPSprite::SetState(FState *newstate, bool pending)
 
 	int statelooplimit = 300000;
 
-	int statelooplimit = 300000;
-
 	processPending = pending;
 
 	do

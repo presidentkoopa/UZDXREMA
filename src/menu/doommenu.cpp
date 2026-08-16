@@ -215,11 +215,19 @@ static void UpdateHostMultiplayerMenuIpItem()
 	gHostMultiplayerMenuIpItem = item;
 }
 
+// [UZDXREMA] Upstream 5.0.0 removed the doomcom/netnode model, and with it
+// ENetConstants::MAXNETNODES (the old "max computers in a game" cap of 8).
+// The equivalent ceiling on the number of participants a host may ask for is
+// now MAXPLAYERS in i_net.h - HostGame() in common/engine/i_net.cpp fatals if
+// the -host count exceeds it. Keep the menu offering exactly the range the
+// engine will accept.
+static constexpr int MP_MAX_HOST_PLAYERS = (int)MAXPLAYERS;
+
 void M_BuildMultiplayerOptionGroups()
 {
 	{
 		auto* players = new FOptionValues;
-		for (int i = 2; i <= MAXNETNODES; ++i)
+		for (int i = 2; i <= MP_MAX_HOST_PLAYERS; ++i)
 		{
 			FOptionValues::Pair pair;
 			pair.Value = i;
@@ -227,7 +235,7 @@ void M_BuildMultiplayerOptionGroups()
 			players->mValues.Push(pair);
 		}
 		SetOptionValues(FName("MultiplayerPlayers"), players);
-		if (mp_host_players < 2 || mp_host_players > MAXNETNODES)
+		if (mp_host_players < 2 || mp_host_players > MP_MAX_HOST_PLAYERS)
 		{
 			mp_host_players = 2;
 		}

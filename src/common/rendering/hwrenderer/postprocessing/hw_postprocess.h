@@ -966,6 +966,8 @@ struct PresentUniforms
 {
 	float InvGamma;
 	float Contrast;
+	float Brightness;	// UZDXREMA: additive VR brightness lift, driven by vid_brightness.
+						// Distinct from upstream's BlackPoint/WhitePoint remap below.
 	float Saturation;
 	float BlackPoint;
 	float WhitePoint;
@@ -982,6 +984,7 @@ struct PresentUniforms
 		{
 			{ "InvGamma", UniformType::Float, offsetof(PresentUniforms, InvGamma) },
 			{ "Contrast", UniformType::Float, offsetof(PresentUniforms, Contrast) },
+			{ "Brightness", UniformType::Float, offsetof(PresentUniforms, Brightness) },
 			{ "Saturation", UniformType::Float, offsetof(PresentUniforms, Saturation) },
 			{ "BlackPoint", UniformType::Float, offsetof(PresentUniforms, BlackPoint) },
 			{ "WhitePoint", UniformType::Float, offsetof(PresentUniforms, WhitePoint) },

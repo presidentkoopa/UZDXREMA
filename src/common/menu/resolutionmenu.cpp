@@ -42,6 +42,14 @@ EXTERN_CVAR(Int, vr_mode)
 EXTERN_CVAR(Int, vid_defwidth)
 EXTERN_CVAR(Int, vid_defheight)
 
+// [UZDXREMA] Upstream 5.0.0 dropped the `int V_GetBackend();` prototype from
+// v_video.h (it now reads vid_preferbackend directly at each use site), but the
+// fork's definition still lives in common/rendering/v_video.cpp because the VR
+// paths need the range-clamped value. Declare it locally until the prototype is
+// restored to v_video.h. Returns a BACKEND_* value (BACKEND_OPENGL / BACKEND_VULKAN
+// / BACKEND_OPENGLES), clamped to BACKEND_OPENGL when vid_preferbackend is bogus.
+int V_GetBackend();
+
 CCMD (menu_resolution_set_custom)
 {
 	if (argv.argc() > 2)
@@ -71,7 +79,8 @@ CCMD (menu_resolution_commit_changes)
 		vid_scalefactor = 1.;
 		vid_defwidth = *menu_resolution_custom_width;
 		vid_defheight = *menu_resolution_custom_height;
-		if (V_GetBackend() == 1 && vr_mode == VR_OPENXR_MOBILE)
+		// VR_OPENXR_MOBILE only runs on the Vulkan backend.
+		if (V_GetBackend() == BACKEND_VULKAN && vr_mode == VR_OPENXR_MOBILE)
 		{
 			// OpenXR keeps the desktop mirror stable and uses the requested
 			// resolution as the internal render size instead of resizing the

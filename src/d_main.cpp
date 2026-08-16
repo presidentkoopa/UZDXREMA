@@ -2496,7 +2496,9 @@ static void ParseCommandLineFile()
 	FCommandLine argv(value.GetChars());
 	for (int i = 1; i < argv.argc(); ++i)
 	{
-		Args->AppendArg(argv[i]);
+		// These tokens come from an external text file, so they are raw args,
+		// not one of the known FArg constants.
+		Args->AppendRawArg(argv[i]);
 	}
 	Args->CollectFiles(FArg_file, nullptr);
 }
@@ -2539,7 +2541,8 @@ static void ParseMultiplayerCommandLineFile()
 		}
 		for (int i = firstArg; i < argv.argc(); ++i)
 		{
-			Args->AppendArg(argv[i]);
+			// Raw args read from commandline_mp.txt - see ParseCommandLineFile above.
+			Args->AppendRawArg(argv[i]);
 		}
 		Args->CollectFiles(FArg_file, nullptr);
 		restartFile.Close();

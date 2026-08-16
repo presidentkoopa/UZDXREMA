@@ -285,7 +285,12 @@ static void AppendBenchmarkHeader(FString& out)
 {
 	out.AppendFormat("Timestamp: %s", myasctime());
 	out.AppendFormat("%s version %s (%s)\n", GAMENAME, GetVersionString(), GetGitHash());
-	out.AppendFormat("Git describe: %s\n", GetGitDescription());
+	// GetGitDescription() no longer exists: UZDoom 5.0.0 reworked revision reporting
+	// (cmake/UpdateRevision.cmake -> cmake/gitinfo.h.in, src/version.cpp). GIT_DESCRIPTION
+	// is now what GetVersionString() returns, and it is already stamped on the line above,
+	// so record the closest tag / distance / commit timestamp here instead - same purpose
+	// (pinning the exact build a benchmark run came from), no duplicated field.
+	out.AppendFormat("Git describe: %s (+%d) @ %s\n", GetGitTag(), GetGitDistance(), GetGitTime());
 	if (!benchlabel.IsEmpty())
 		out.AppendFormat("Bench label: %s\n", benchlabel.GetChars());
 

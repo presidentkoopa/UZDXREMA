@@ -10,19 +10,33 @@
 
 extern bool wantToRestart;
 
+// The command line arguments this profile system strips before a restart.
+// All of these are defined with FARG() in d_main.cpp.
+EXTERN_FARG(iwad);
+EXTERN_FARG(deh);
+EXTERN_FARG(bex);
+EXTERN_FARG(playdemo);
+EXTERN_FARG(file);
+EXTERN_FARG(altdeath);
+EXTERN_FARG(deathmatch);
+EXTERN_FARG(skill);
+EXTERN_FARG(savedir);
+EXTERN_FARG(xlat);
+EXTERN_FARG(oldsprites);
+
 CUSTOM_CVAR(String, cmdlineprofile, "", CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL)
 {
-	Args->RemoveArgs("-iwad");
-	Args->RemoveArgs("-deh");
-	Args->RemoveArgs("-bex");
-	Args->RemoveArgs("-playdemo");
-	Args->RemoveArgs("-file");
-	Args->RemoveArgs("-altdeath");
-	Args->RemoveArgs("-deathmatch");
-	Args->RemoveArgs("-skill");
-	Args->RemoveArgs("-savedir");
-	Args->RemoveArgs("-xlat");
-	Args->RemoveArgs("-oldsprites");
+	Args->RemoveArgs(FArg_iwad);
+	Args->RemoveArgs(FArg_deh);
+	Args->RemoveArgs(FArg_bex);
+	Args->RemoveArgs(FArg_playdemo);
+	Args->RemoveArgs(FArg_file);
+	Args->RemoveArgs(FArg_altdeath);
+	Args->RemoveArgs(FArg_deathmatch);
+	Args->RemoveArgs(FArg_skill);
+	Args->RemoveArgs(FArg_savedir);
+	Args->RemoveArgs(FArg_xlat);
+	Args->RemoveArgs(FArg_oldsprites);
 
 	wantToRestart = true;
 }

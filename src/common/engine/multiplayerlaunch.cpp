@@ -13,6 +13,13 @@
 
 extern bool wantToRestart;
 
+// [UZDXREMA] Upstream 5.0.0 removed the doomcom/netnode model, and with it
+// ENetConstants::MAXNETNODES (the old "max computers in a game" cap of 8).
+// The participant ceiling a host may request is now MAXPLAYERS in i_net.h -
+// HostGame() in i_net.cpp fatals if the -host count exceeds it - so validate
+// the pending launch against that instead.
+static constexpr int MP_MAX_HOST_PLAYERS = (int)MAXPLAYERS;
+
 enum EPendingMultiplayerLaunchMode
 {
 	MP_LAUNCH_None,
@@ -162,7 +169,7 @@ bool M_ValidatePendingMultiplayerLaunch(FString& errorText)
 {
 	if (PendingMultiplayerLaunch.Mode == MP_LAUNCH_Host)
 	{
-		if (PendingMultiplayerLaunch.PlayerCount < 2 || PendingMultiplayerLaunch.PlayerCount > MAXNETNODES)
+		if (PendingMultiplayerLaunch.PlayerCount < 2 || PendingMultiplayerLaunch.PlayerCount > MP_MAX_HOST_PLAYERS)
 		{
 			errorText = GStrings.GetString("OPTMNU_MULTIPLAYER_HOST_INVALID_PLAYERS");
 			return false;

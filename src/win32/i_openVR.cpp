@@ -54,16 +54,67 @@ static const Hand Hands[NUM_AXES] = { OFF, OFF, OFF, OFF, ON, ON, ON, ON };
 static const Source Sources[NUM_AXES] = { PAD, STICK, PAD, STICK, PAD, STICK, PAD, STICK };
 static const Axis AxisSources[NUM_AXES] = { X, X, Y, Y, X, X, Y, Y };
 
-static const EJoyAxis DefaultMap[NUM_AXES] =
+//===========================================================================
+//
+// FORK NOTE -- former "DefaultMap[]" axis-to-game-function table
+//
+// UZDoom 5.0.0-rc.2 removed the per-device axis mapping API from
+// IJoystickConfig: enum EJoyAxis, GetAxisMap(), SetAxisMap() and
+// IsAxisMapDefault() no longer exist. Axis-to-game-function binding now lives
+// in the bindings system, addressed by axis codes (see NUM_AXIS_CODES), and is
+// no longer something a device driver declares for itself.
+//
+// The mapping this fork used to ship as its default -- and which the user was
+// free to override from the joystick menu -- was exactly:
+//
+//     OFF_HAND_PAD_X    -> JOYAXIS_Side      (off-hand pad, horizontal)
+//     OFF_HAND_STICK_X  -> JOYAXIS_Side      (off-hand thumbstick, horizontal)
+//     OFF_HAND_PAD_Y    -> JOYAXIS_Forward   (off-hand pad, vertical)
+//     OFF_HAND_STICK_Y  -> JOYAXIS_Forward   (off-hand thumbstick, vertical)
+//     ON_HAND_PAD_X     -> JOYAXIS_Yaw       (on-hand/dominant pad, horizontal)
+//     ON_HAND_STICK_X   -> JOYAXIS_Yaw       (on-hand/dominant stick, horizontal)
+//     ON_HAND_PAD_Y     -> JOYAXIS_Up        (on-hand/dominant pad, vertical)
+//     ON_HAND_STICK_Y   -> JOYAXIS_Up        (on-hand/dominant stick, vertical)
+//
+// Note that nothing was ever mapped to JOYAXIS_Pitch by default, which is why
+// GetPitch() below yields 0 unless the table is changed.
+//
+// TODO: this default has to be re-expressed as default axis-code BINDINGS in
+// the new bindings system. Until that is done, the *configurable* half of the
+// old behaviour (the user remapping a VR axis to a different game function from
+// the menu) is gone -- there is nowhere in the new IJoystickConfig to put it.
+//
+// The table itself is kept below in fork-local form, because it is NOT only
+// configuration: GetYaw()/GetPitch()/GetDirectionalMove() are VR-specific
+// accumulators read once per *render* frame by gl_openvr.cpp (via
+// I_OpenVRGetYaw/Pitch/DirectionalMove) and they need to know which physical VR
+// axis drives which motion. Deleting the table outright would silently kill VR
+// smooth turning and stick locomotion. It is now a private enum rather than
+// EJoyAxis so it carries no implication of being engine-visible, and it is
+// const because it is no longer user-editable.
+//
+//===========================================================================
+
+enum VRAxisFunction
 {
-	JOYAXIS_Side,
-	JOYAXIS_Side,
-	JOYAXIS_Forward,
-	JOYAXIS_Forward,
-	JOYAXIS_Yaw,
-	JOYAXIS_Yaw,
-	JOYAXIS_Up,
-	JOYAXIS_Up,
+	VRFUNC_None,
+	VRFUNC_Yaw,
+	VRFUNC_Pitch,
+	VRFUNC_Forward,
+	VRFUNC_Side,
+	VRFUNC_Up,
+};
+
+static const VRAxisFunction AxisFunctions[NUM_AXES] =
+{
+	VRFUNC_Side,		// OFF_HAND_PAD_X
+	VRFUNC_Side,		// OFF_HAND_STICK_X
+	VRFUNC_Forward,		// OFF_HAND_PAD_Y
+	VRFUNC_Forward,		// OFF_HAND_STICK_Y
+	VRFUNC_Yaw,			// ON_HAND_PAD_X
+	VRFUNC_Yaw,			// ON_HAND_STICK_X
+	VRFUNC_Up,			// ON_HAND_PAD_Y
+	VRFUNC_Up,			// ON_HAND_STICK_Y
 };
 
 
@@ -115,7 +166,7 @@ public:
 		return 0.0f;
 	}
 
-	void AddAxes(float axes[NUM_JOYAXIS])
+	void AddAxes(float axes[NUM_AXIS_CODES])
 	{
 		// OpenVR gameplay should be driven by the VR backend's explicit movement, turn, and
 		// stick-to-button paths rather than the engine's generic joystick gameplay axes. Leaving
@@ -132,8 +183,8 @@ public:
 
 		for (int i = 0; i < NUM_AXES; i++)
 		{
-			//JOYAXIS_Yaw needs special handling - must accumulate per render frame, not logical frame
-			if (Axes[i].GameAxis == JOYAXIS_Yaw)
+			//yaw needs special handling - must accumulate per render frame, not logical frame
+			if (AxisFunctions[i] == VRFUNC_Yaw)
 			{
 				yaw += GetAxisValue(i, offState, onState);
 			}
@@ -151,7 +202,8 @@ public:
 
 		for (int i = 0; i < NUM_AXES; i++)
 		{
-			if (Axes[i].GameAxis == JOYAXIS_Pitch)
+			// nothing is assigned to pitch by default; see the fork note above
+			if (AxisFunctions[i] == VRFUNC_Pitch)
 			{
 				pitch += GetAxisValue(i, offState, onState);
 			}
@@ -170,7 +222,7 @@ public:
 		for (int i = 0; i < NUM_AXES; i++)
 		{
 			//must accumulate per render frame, not logical frame
-			if (Axes[i].GameAxis == JOYAXIS_Forward)
+			if (AxisFunctions[i] == VRFUNC_Forward)
 			{
 				yaw += GetAxisValue(i, offState, onState);
 			}
@@ -194,6 +246,28 @@ public:
 		Multiplier = scale;
 	}
 
+	// The OpenVR backend drives haptics itself through its own action set, so it
+	// does not expose an engine-side rumble strength. Same stance as FDInputJoystick.
+	bool HasHaptics()
+	{
+		return false;
+	}
+
+	float GetHapticsStrength()
+	{
+		return JOYHAPSTRENGTH_DEFAULT;
+	}
+
+	void SetHapticsStrength(float strength)
+	{
+		// no engine-side haptics on this device
+	}
+
+	bool IsHapticsStrengthDefault()
+	{
+		return true;
+	}
+
 	int GetNumAxes()
 	{
 		return NUM_AXES;
@@ -208,13 +282,31 @@ public:
 		return 0;
 	}
 
-	EJoyAxis GetAxisMap(int axis)
+	float GetAxisDigitalThreshold(int axis)
 	{
 		if (unsigned(axis) < NUM_AXES)
 		{
-			return Axes[axis].GameAxis;
+			return Axes[axis].DigitalThreshold;
 		}
-		return JOYAXIS_None;
+		return JOYTHRESH_DEFAULT;
+	}
+
+	EJoyCurve GetAxisResponseCurve(int axis)
+	{
+		if (unsigned(axis) < NUM_AXES)
+		{
+			return Axes[axis].ResponseCurvePreset;
+		}
+		return JOYCURVE_DEFAULT;
+	}
+
+	float GetAxisResponseCurvePoint(int axis, int point)
+	{
+		if (unsigned(axis) < NUM_AXES && unsigned(point) < 4)
+		{
+			return Axes[axis].ResponseCurve.pts[point];
+		}
+		return 0;
 	}
 
 	const char* GetAxisName(int axis)
@@ -239,19 +331,42 @@ public:
 		Axes[axis].DeadZone = v;
 	}
 
-	void SetAxisMap(int axis, EJoyAxis map)
-	{
-		Axes[axis].GameAxis = map;
-	}
-
 	void SetAxisScale(int axis, float v)
 	{
 		Axes[axis].Multiplier = v;
 	}
 
+	void SetAxisDigitalThreshold(int axis, float threshold)
+	{
+		if (unsigned(axis) < NUM_AXES)
+		{
+			Axes[axis].DigitalThreshold = threshold;
+		}
+	}
+
+	void SetAxisResponseCurve(int axis, EJoyCurve preset)
+	{
+		if (unsigned(axis) < NUM_AXES)
+		{
+			if (preset >= NUM_JOYCURVE || preset < JOYCURVE_CUSTOM) return;
+			Axes[axis].ResponseCurvePreset = preset;
+			if (preset == JOYCURVE_CUSTOM) return;
+			Axes[axis].ResponseCurve = JOYCURVE[preset];
+		}
+	}
+
+	void SetAxisResponseCurvePoint(int axis, int point, float value)
+	{
+		if (unsigned(axis) < NUM_AXES && unsigned(point) < 4)
+		{
+			Axes[axis].ResponseCurvePreset = JOYCURVE_CUSTOM;
+			Axes[axis].ResponseCurve.pts[point] = value;
+		}
+	}
+
 	bool IsSensitivityDefault()
 	{
-		return Multiplier == 1;
+		return Multiplier == JOYSENSITIVITY_DEFAULT;
 	}
 
 	bool IsAxisDeadZoneDefault(int axis)
@@ -259,23 +374,45 @@ public:
 		return Axes[axis].DeadZone == DEFAULT_DEADZONE;
 	}
 
-	bool IsAxisMapDefault(int axis)
-	{
-		return Axes[axis].GameAxis == DefaultMap[axis];
-	}
-
 	bool IsAxisScaleDefault(int axis)
 	{
 		return Axes[axis].Multiplier == 1;
+	}
+
+	bool IsAxisDigitalThresholdDefault(int axis)
+	{
+		if (unsigned(axis) < NUM_AXES)
+		{
+			return Axes[axis].DigitalThreshold == Axes[axis].DefaultDigitalThreshold;
+		}
+		return true;
+	}
+
+	bool IsAxisResponseCurveDefault(int axis)
+	{
+		if (unsigned(axis) < NUM_AXES)
+		{
+			return Axes[axis].ResponseCurvePreset == Axes[axis].DefaultResponseCurvePreset;
+		}
+		return true;
 	}
 
 	void SetDefaultConfig()
 	{
 		for (int i = 0; i < NUM_AXES; ++i)
 		{
-			Axes[i].GameAxis = DefaultMap[i];
 			Axes[i].DeadZone = DEFAULT_DEADZONE;
 			Axes[i].Multiplier = 1.0f;
+
+			// Every axis on this device is one half of a thumbstick or trackpad,
+			// so use the same per-orientation digital thresholds i_dijoy gives to
+			// a stick rather than the generic JOYTHRESH_DEFAULT.
+			Axes[i].DigitalThreshold = AxisSources[i] == X ? JOYTHRESH_STICK_X : JOYTHRESH_STICK_Y;
+			Axes[i].ResponseCurvePreset = JOYCURVE_DEFAULT;
+			Axes[i].ResponseCurve = JOYCURVE[JOYCURVE_DEFAULT];
+
+			Axes[i].DefaultDigitalThreshold = Axes[i].DigitalThreshold;
+			Axes[i].DefaultResponseCurvePreset = Axes[i].ResponseCurvePreset;
 		}
 	}
 
@@ -311,7 +448,9 @@ public:
 	{
 		float Multiplier;
 		float DeadZone;
-		EJoyAxis GameAxis;
+		float DigitalThreshold, DefaultDigitalThreshold;
+		EJoyCurve ResponseCurvePreset, DefaultResponseCurvePreset;
+		CubicBezier ResponseCurve;
 		FString Name;
 	};
 	
@@ -335,7 +474,7 @@ public:
 	{
 		m_device.ProcessInput();
 	}
-	void AddAxes(float axes[NUM_JOYAXIS])
+	void AddAxes(float axes[NUM_AXIS_CODES])
 	{
 		m_device.AddAxes(axes);
 	}

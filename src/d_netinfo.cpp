@@ -68,7 +68,19 @@ CVAR (Int,		cl_otherplayerhealth,	2,			CVAR_ARCHIVE);
 
 static void D_AssignDefaultMultiplayerName()
 {
-	if (doomcom.numnodes <= 1 || strcmp(name, "Player") != 0)
+	// [UZDXREMA] Upstream 5.0.0 deleted the global doomcom_t block, so the old
+	// "doomcom.numnodes <= 1 means single player" test has to be rebuilt from
+	// the client-stack model in i_net.h:
+	//  - MaxClients is the participant count the host negotiated (1 for single
+	//    player). It is already correct when HostGame() calls Net_SetupUserInfo().
+	//  - A guest sends its user info before it learns MaxClients (see the
+	//    PRE_CONNECT_ACK branch in common/engine/i_net.cpp, where
+	//    Net_SetupUserInfo() runs one line ahead of the MaxClients assignment),
+	//    so MaxClients is still 1 there. netgame covers that path: JoinGame()
+	//    calls StartNetwork() - which sets netgame - before the handshake loop.
+	// Single player and the network-reset path leave both at their defaults, so
+	// they still bail out here exactly like numnodes <= 1 used to.
+	if ((MaxClients <= 1 && !netgame) || strcmp(name, "Player") != 0)
 	{
 		return;
 	}

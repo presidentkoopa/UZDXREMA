@@ -37,6 +37,7 @@
 #include "hw_clock.h"
 #include "hw_lightbuffer.h"
 #include "hw_skydome.h"
+#include "hw_vrmodes.h"	// UZDXREMA: VRMode::GetVRModeCached / VR_OPENXR_MOBILE
 #include "hwrenderer/data/hw_viewpointbuffer.h"
 #include "m_png.h"
 #include "printf.h"

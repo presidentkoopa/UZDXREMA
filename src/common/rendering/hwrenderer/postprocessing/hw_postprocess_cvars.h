@@ -77,6 +77,7 @@ EXTERN_CVAR(Float, gl_ssao_exponent)
 EXTERN_CVAR(Float, gl_paltonemap_powtable)
 EXTERN_CVAR(Bool, gl_paltonemap_reverselookup)
 EXTERN_CVAR(Float, gl_menu_blur)
+EXTERN_CVAR(Float, vid_brightness)	// UZDXREMA: kept after upstream removed it; see hw_cvars.cpp
 EXTERN_CVAR(Float, vid_contrast)
 EXTERN_CVAR(Float, vid_saturation)
 EXTERN_CVAR(Float, vid_i_blackpoint)

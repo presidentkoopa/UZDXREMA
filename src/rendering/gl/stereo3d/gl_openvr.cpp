@@ -32,6 +32,8 @@
 #include <string>
 #include <map>
 #include <cmath>
+#include <cinttypes> // PRIu64 - used to be pulled in transitively via m_random.h -> sfmt/SFMTObj.h -> SFMT.h -> <inttypes.h>,
+                     // which UZDoom 5.0.0 removed along with the SFMT RNG. Include it directly now.
 #include "p_trace.h"
 #include "p_linetracedata.h"
 #include "gl_load/gl_system.h"

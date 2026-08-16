@@ -67,6 +67,14 @@ using namespace OpenGLRenderer;
 
 extern thread_local bool isWorkerThread;
 
+// [UZDXREMA] Upstream 5.0.0 dropped the `int V_GetBackend();` prototype from
+// v_video.h (it now reads vid_preferbackend directly at each use site), but the
+// fork's definition still lives in common/rendering/v_video.cpp because the VR
+// paths need the range-clamped value. Declare it locally until the prototype is
+// restored to v_video.h. Returns a BACKEND_* value (BACKEND_OPENGL / BACKEND_VULKAN
+// / BACKEND_OPENGLES), clamped to BACKEND_OPENGL when vid_preferbackend is bogus.
+int V_GetBackend();
+
 EXTERN_CVAR(Bool, vr_hud_mount);
 EXTERN_CVAR(Int, vr_hud_mount_pos);
 EXTERN_CVAR(Float, vr_hud_mount_scale);
@@ -296,7 +304,9 @@ namespace
 #ifdef USE_OPENXR
 	const s3d::VKOpenXRDeviceMode* GetOpenXRNetWaitMode()
 	{
-		if (V_GetBackend() != 1)
+		// The OpenXR device mode is Vulkan-only; on the GL/GLES backends the
+		// active stereo mode can never be a VKOpenXRDeviceMode.
+		if (V_GetBackend() != BACKEND_VULKAN)
 			return nullptr;
 		auto* mode = dynamic_cast<const s3d::VKOpenXRDeviceMode*>(VRMode::GetVRModeCached(true));
 		return (mode != nullptr && mode->IsVR()) ? mode : nullptr;
@@ -1152,7 +1162,9 @@ const VRMode *VRMode::GetVRMode(bool toscreen)
 #endif
 #ifdef USE_OPENXR
 	case VR_OPENXR_MOBILE:
-		if (V_GetBackend() == 1)
+		// VR_OPENXR_MOBILE is only implemented on the Vulkan backend; fall back
+		// to mono on OpenGL (which uses VR_OPENVR instead) and OpenGLES.
+		if (V_GetBackend() == BACKEND_VULKAN)
 		{
 			const VRMode& vrmode = s3d::VKOpenXRDeviceMode::getInstance();
 			const bool initialized = vrmode.IsInitialized();
