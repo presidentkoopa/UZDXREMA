@@ -4969,6 +4969,18 @@ void D_Cleanup()
 	PClassActor::AllActorClasses.Clear();
 	ScriptUtil::Clear();
 
+	// UZDXREMA: the VR HUD surface's native FCanvas is real GC-tracked state,
+	// but GetVRHudSurface() returns a function-local static -- process
+	// lifetime by design, so the canvas survives level unload on purpose
+	// (rebuilding it every level load would be wasteful). Nothing else in
+	// this shutdown sequence knows about it, so without this call it is
+	// exactly the kind of survivor GC::Root == nullptr below is built to
+	// catch: still reachable when everything else has been torn down. Must
+	// run here, before PClass::StaticShutdown() - Clear() touches
+	// Canvas->Tex and Texture->Canvas, which needs class metadata that call
+	// is about to invalidate.
+	GetVRHudSurface().Clear();
+
 	// UZDXREMA TEMPORARY DIAGNOSTIC - remove once the GC::Root leak is found.
 	// GC::Root is the head of the linked list of every allocated DObject; a
 	// survivor past this point means something is still reachable after a
