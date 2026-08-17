@@ -1018,6 +1018,18 @@ struct LevelLocals native
 		double pixelstretch, double actorAngle, double actorPitch, double actorRoll,
 		double actorScaleX = 1.0, double actorScaleY = 1.0);
 
+	// How physically big the model is, in world units, at actor Scale (1,1)
+	// -- the measurement GetModelOrientationHint/OffsetHint/WorldOffset don't
+	// give: they answer which way and how far off-center, not how large.
+	// Solve scale = targetRadius / this per weapon instead of one flat
+	// multiplier applied to every model regardless of its real size. A
+	// conservative bounding-sphere radius (largest |X|/|Y|/|Z| independently,
+	// not necessarily one vertex), not a tight fit -- errs toward showing
+	// slightly small rather than clipping outside a holster's marker.
+	// found=0 for the usual reasons (no model, no matching frame) plus any
+	// model format that has not measured its own geometry for this.
+	native bool, double GetModelBoundsHint(class<Actor> cls, int sprite, int frame);
+
 	native int, Vector2 AimBillboard(Vector3 start, Vector3 dir, double maxDist = 0);
 	// Point versus billboard -- the touch case. Returns the nearest billboard
 	// the point is within maxRange of and inside the bounds of, its UV, and

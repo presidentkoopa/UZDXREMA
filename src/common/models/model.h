@@ -151,6 +151,17 @@ public:
 
 	virtual const TArray<VSMatrix>* GetBasePose() {return nullptr;}
 
+	// Largest |X|/|Y|/|Z| across the model's own raw local-space vertices,
+	// tracked independently per axis (not necessarily from the same vertex --
+	// a conservative bounding proxy, not a tight AABB). Unscaled by the
+	// MODELDEF's own Scale block; the caller (GetModelBoundsHint) applies
+	// that the same way GetModelWorldOffset applies actor scale to an
+	// offset -- this just answers the one thing script has no other way to
+	// see: how big the raw mesh actually is. False/zero for any format that
+	// does not override this; a holster falling back to a flat guess for an
+	// unmeasured model is no worse off than it is today.
+	virtual bool GetLocalExtent(float *outMaxAbsX, float *outMaxAbsY, float *outMaxAbsZ) { return false; }
+
 	void SetVertexBuffer(int type, IModelVertexBuffer *buffer) { mVBuf[type] = buffer; }
 	IModelVertexBuffer *GetVertexBuffer(int type) const { return mVBuf[type]; }
 	void DestroyVertexBuffer();

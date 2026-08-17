@@ -688,6 +688,34 @@ void FOBJModel::AddSkins(uint8_t* hitlist, const FTextureID* surfaceskinids)
 }
 
 /**
+ * Largest |X|/|Y|/|Z| across every parsed vertex, tracked independently per
+ * axis. verts holds the raw "v" lines exactly as parsed -- RealignVector
+ * (BuildVertexBuffer, RenderFrame) only negates Z before draw, which cannot
+ * change an absolute-value magnitude, so this needs no realignment step of
+ * its own to match what actually gets rendered.
+ */
+bool FOBJModel::GetLocalExtent(float* outMaxAbsX, float* outMaxAbsY, float* outMaxAbsZ)
+{
+	float mx = 0.f, my = 0.f, mz = 0.f;
+	for (unsigned i = 0; i < verts.Size(); i++)
+	{
+		// Hand-rolled abs rather than fabsf/std::abs -- nothing else in this
+		// file already pulls in <cmath>, and this avoids adding a new
+		// include for something this trivial.
+		float ax = (verts[i].X < 0.f) ? -verts[i].X : verts[i].X;
+		float ay = (verts[i].Y < 0.f) ? -verts[i].Y : verts[i].Y;
+		float az = (verts[i].Z < 0.f) ? -verts[i].Z : verts[i].Z;
+		if (ax > mx) mx = ax;
+		if (ay > my) my = ay;
+		if (az > mz) mz = az;
+	}
+	*outMaxAbsX = mx;
+	*outMaxAbsY = my;
+	*outMaxAbsZ = mz;
+	return verts.Size() > 0;
+}
+
+/**
  * Remove the data that was loaded
  */
 FOBJModel::~FOBJModel()

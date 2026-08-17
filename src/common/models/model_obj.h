@@ -96,6 +96,7 @@ public:
 	void RenderFrame(FModelRenderer* renderer, FGameTexture* skin, int frame, int frame2, double inter, FTranslationID translation, const FTextureID* surfaceskinids, int boneStartPosition) override;
 	void BuildVertexBuffer(FModelRenderer* renderer) override;
 	void AddSkins(uint8_t* hitlist, const FTextureID* surfaceskinids) override;
+	bool GetLocalExtent(float* outMaxAbsX, float* outMaxAbsY, float* outMaxAbsZ) override;
 };
 
 #endif

@@ -6181,6 +6181,73 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, GetModelWorldOffset, GetModelWorldOf
 	return min(numret, 4);
 }
 
+// GetModelBoundsHint -- the one measurement the holster system still had to
+// guess at: how physically big a model actually is. GetModelOrientationHint
+// and GetModelWorldOffset answer "which way" and "how far off-center"; this
+// answers "how big", so a holster can solve scale = targetRadius /
+// measuredRadius per weapon instead of applying one flat multiplier to every
+// model regardless of its real size (today's behaviour -- a BFG and a pistol
+// get the identical number and do not read as "the same size" in the ring).
+//
+// Returns a WORLD-space radius at actor Scale (1,1): FModel::GetLocalExtent
+// hands back the model's raw per-axis extent in its own local units,
+// unscaled by anything; this multiplies each axis by that FRAME's own
+// MODELDEF Scale (smf->xscale/yscale/zscale) before combining them, the same
+// "bake the model's own baked scale in, leave only actor scale for the
+// caller" split GetModelWorldOffset already uses for position. A caller that
+// wants the real actor-space radius just multiplies by its own Scale, same
+// as it already does for the offset natives.
+//
+// Only as precise as GetLocalExtent's own contract: max |X|/|Y|/|Z|
+// independently, not necessarily from one vertex, then combined as if they
+// were -- a conservative (slightly oversized, never undersized) proxy for a
+// tight bounding sphere. Good enough to solve "fit inside this radius"
+// without needing exact mesh geometry on the script side, and erring toward
+// too small on screen rather than clipping outside the marker.
+//
+// found=0 whenever the earlier three natives would also fail to resolve a
+// (class, sprite, frame) triple, PLUS whenever the resolved model's format
+// has no GetLocalExtent override (returns false by FModel's own default) --
+// currently true for every format except FOBJModel, which the SAME real
+// vertex data used for GetLocalExtent's silhouette check already lives on.
+static int GetModelBoundsHint(FLevelLocals* self, PClass* cls, int sprite, int frame, double* outRadius)
+{
+	*outRadius = 0.0;
+
+	if (cls == nullptr) return 0;
+	auto def = GetDefaultByType(cls);
+	if (def == nullptr || !def->hasmodel) return 0;
+
+	FSpriteModelFrame* smf = FindModelFrame(cls, sprite, frame, false);
+	if (smf == nullptr) return 0;
+	if (smf->modelsAmount == 0 || smf->modelIDs[0] < 0) return 0;
+
+	FModel* model = Models[smf->modelIDs[0]];
+	if (model == nullptr) return 0;
+
+	float ex, ey, ez;
+	if (!model->GetLocalExtent(&ex, &ey, &ez)) return 0;
+
+	const double sx = (double)ex * smf->xscale;
+	const double sy = (double)ey * smf->yscale;
+	const double sz = (double)ez * smf->zscale;
+	*outRadius = sqrt(sx * sx + sy * sy + sz * sz);
+	return 1;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, GetModelBoundsHint, GetModelBoundsHint)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_POINTER(cls, PClass);
+	PARAM_INT(sprite);
+	PARAM_INT(frame);
+	double radius;
+	int found = GetModelBoundsHint(self, cls, sprite, frame, &radius);
+	if (numret > 0) ret[0].SetInt(found);
+	if (numret > 1) ret[1].SetFloat(radius);
+	return min(numret, 2);
+}
+
 DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, AimBillboard, AimBillboard)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
