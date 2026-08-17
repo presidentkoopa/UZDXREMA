@@ -59,6 +59,17 @@ class Weapon : StateProvider
 	// 0 (the ZScript default) = use vr_stabilize_distance_inches. A negative
 	// value disables stabilize for this weapon outright, e.g. on melee.
 	double StabilizeDistance;
+
+	// Generic "not available for switching right now" flag -- lives here
+	// rather than on any one mod's weapon base class so ANY VR holster/
+	// stowage system, for any weapon set, gets the same behaviour for free.
+	// Whatever puts a weapon away sets this true while it is stowed and
+	// false again the moment it comes back out; CheckAmmo below is the ONE
+	// place that needs to see it, since PickNextWeapon/PickPrevWeapon and
+	// the direct slot-select path (player.zs) already treat a CheckAmmo
+	// failure as "not a candidate, keep looking" -- piggybacking on that
+	// existing, already-correct loop logic instead of duplicating it.
+	bool bHolsterHidden;
 	bool GivenAsMorphWeapon;
 	bool bAltFire;							// Set when this weapon's alternate fire is used.
 	double UseRange;						// [NS] Distance at which player can +use
@@ -1052,6 +1063,12 @@ class Weapon : StateProvider
 
 	virtual bool CheckAmmo(int fireMode, bool autoSwitch, bool requireAmmo = false, int ammocount = -1)
 	{
+		// Stowed weapons are never a valid switch candidate, full stop --
+		// checked first and unconditionally so none of the ammo-optional/
+		// dehacked/EitherFire branches below get a chance to override it.
+		if (bHolsterHidden)
+			return false;
+
 		int count1, count2;
 		int enough, enoughmask;
 		int lAmmoUse1;
