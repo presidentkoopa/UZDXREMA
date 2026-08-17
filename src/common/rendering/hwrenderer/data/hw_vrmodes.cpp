@@ -955,12 +955,21 @@ CVAR(Float, vr_momentum_threshold, 1.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_crouch_use_button, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, use_action_spawn_yzoffset, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-// Draw a rigged hand model at each controller. Read from vr_hands.zs, which
-// owns the psprite layers the models ride on -- nothing in C++ consults these.
-CVAR(Bool, vr_hands, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-// Fine tune on top of the models' own MODELDEF Scale, applied through the
-// psprite scale channel rather than by re-exporting the asset.
-CVAR(Float, vr_hand_scale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// Live placement for hand models, applied on top of their own MODELDEF Offset
+// and angle/pitch/roll offsets, for any model that opts in with the MODELDEF
+// keyword 'usehandoffsets'.
+//
+// These exist because MODELDEF is parsed once at load: every trial value costs a
+// repack and a restart, which is a miserable way to find six numbers by eye in a
+// headset. Units match MODELDEF's own -- model units for the offsets, degrees
+// for the rotations -- so once a value looks right it can be folded straight
+// back into the MODELDEF and the CVAR returned to zero.
+CVAR(Float, vr_hand_ofs_x, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_hand_ofs_y, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_hand_ofs_z, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_hand_yaw,   0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_hand_pitch, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_hand_roll,  0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Bool, vr_enable_haptics, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_pickup_haptic_level, 0.2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)

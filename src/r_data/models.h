@@ -57,6 +57,7 @@ enum
 	MDL_FORCECULLBACKFACES			= 1<<14,
 	MDL_FIXROTATING					= 1<<15,
 	MDL_NOAUTOREVERSE				= 1<<16,	// model ships explicit left/right variants, so never apply the VR non-dominant-hand mirror
+	MDL_USEHANDOFFSETS				= 1<<17,	// apply the live vr_hand_* placement CVARs on top of this model's own MODELDEF offsets
 };
 
 FSpriteModelFrame * FindModelFrame(AActor * thing, int sprite, int frame, bool dropped);

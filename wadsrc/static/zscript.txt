@@ -48,7 +48,6 @@ version "5.0.0"
 #include "zscript/visualthinker.zs"
 #include "zscript/otherplayertags.zs"
 #include "zscript/vr_stabilizesync.zs"
-#include "zscript/vr_hands.zs"
 
 #include "zscript/actors/actor.zs"
 #include "zscript/actors/checks.zs"

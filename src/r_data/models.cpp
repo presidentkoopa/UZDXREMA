@@ -50,6 +50,12 @@ EXTERN_CVAR(Float, vr_weaponScale)
 EXTERN_CVAR(Float, vr_3dweaponOffsetX);
 EXTERN_CVAR(Float, vr_3dweaponOffsetY);
 EXTERN_CVAR(Float, vr_3dweaponOffsetZ);
+EXTERN_CVAR(Float, vr_hand_ofs_x);
+EXTERN_CVAR(Float, vr_hand_ofs_y);
+EXTERN_CVAR(Float, vr_hand_ofs_z);
+EXTERN_CVAR(Float, vr_hand_yaw);
+EXTERN_CVAR(Float, vr_hand_pitch);
+EXTERN_CVAR(Float, vr_hand_roll);
 
 extern TDeletingArray<FVoxel *> Voxels;
 extern TDeletingArray<FVoxelDef *> VoxelDefs;
@@ -338,7 +344,20 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	objectToWorldMatrix.scale(smf->xscale * pspScale, smf->zscale * pspScale, (smf->yscale / fovscale) * pspScale);
 
 	// Aplying model offsets (model offsets do not depend on model scalings).
-	objectToWorldMatrix.translate(smf->xoffset / smf->xscale, smf->zoffset / smf->zscale, smf->yoffset / smf->yscale);
+	//
+	// MDL_USEHANDOFFSETS adds the live vr_hand_ofs_* CVARs into the same
+	// translate rather than a second one. Summing inside the single call is what
+	// makes a CVAR value and a MODELDEF value genuinely interchangeable, so a
+	// number found on a slider can be folded into MODELDEF and the slider zeroed
+	// with nothing moving.
+	const bool useHandOfs = !!(smf_flags & MDL_USEHANDOFFSETS);
+	const float handOfsX = useHandOfs ? (float)vr_hand_ofs_x : 0.0f;
+	const float handOfsY = useHandOfs ? (float)vr_hand_ofs_y : 0.0f;
+	const float handOfsZ = useHandOfs ? (float)vr_hand_ofs_z : 0.0f;
+
+	objectToWorldMatrix.translate((smf->xoffset + handOfsX) / smf->xscale,
+		(smf->zoffset + handOfsZ) / smf->zscale,
+		(smf->yoffset + handOfsY) / smf->yscale);
 
 	// Applying player custom offsets
 	objectToWorldMatrix.translate(-vr_3dweaponOffsetX, vr_3dweaponOffsetY, vr_3dweaponOffsetZ);
@@ -362,9 +381,20 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	objectToWorldMatrix.rotate(90.f, 0, 1, 0);
 
 	// Applying angleoffset, pitchoffset, rolloffset.
-	objectToWorldMatrix.rotate(-smf->angleoffset, 0, 1, 0);
-	objectToWorldMatrix.rotate(smf->pitchoffset, 0, 0, 1);
-	objectToWorldMatrix.rotate(-smf->rolloffset, 1, 0, 0);
+	//
+	// The live vr_hand_* rotations are summed into these three calls rather than
+	// applied as three more afterwards. That distinction matters: rotations do
+	// not commute, so a yaw applied after this pitch and roll turns about an
+	// already-rotated axis and is NOT the same as the same number added to
+	// angleoffset. Summing here is what makes the slider and the MODELDEF
+	// keyword interchangeable.
+	const float handYaw   = useHandOfs ? (float)vr_hand_yaw   : 0.0f;
+	const float handPitch = useHandOfs ? (float)vr_hand_pitch : 0.0f;
+	const float handRoll  = useHandOfs ? (float)vr_hand_roll  : 0.0f;
+
+	objectToWorldMatrix.rotate(-(smf->angleoffset + handYaw), 0, 1, 0);
+	objectToWorldMatrix.rotate(smf->pitchoffset + handPitch, 0, 0, 1);
+	objectToWorldMatrix.rotate(-(smf->rolloffset + handRoll), 1, 0, 0);
 
 	//Scale weapon
 	objectToWorldMatrix.scale(vr_weaponScale, vr_weaponScale, vr_weaponScale);
@@ -1344,6 +1374,10 @@ void ParseModelDefLump(int Lump)
 				else if (sc.Compare("forcecullbackfaces"))
 				{
 					smf.flags |= MDL_FORCECULLBACKFACES;
+				}
+				else if (sc.Compare("usehandoffsets"))
+				{
+					smf.flags |= MDL_USEHANDOFFSETS;
 				}
 				else if (sc.Compare("noautoreverse"))
 				{

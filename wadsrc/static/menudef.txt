@@ -1760,17 +1760,6 @@ OptionMenu VRHUDOptions protected
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_automap_use_hud vr_automap_scale vr_automap_stereo vr_automap_distance vr_automap_rotate vr_automap_fixed_pitch vr_automap_fixed_roll vr_automap_border vr_automap_border_color vr_automap_mount vr_automap_mount_pos vr_automap_mount_scale vr_automap_mount_yoffset vr_automap_mount_xoffset vr_automap_mount_zoffset vr_automap_mount_pitch vr_automap_mount_yaw vr_automap_mount_roll"
 }
 
-OptionMenu VRHandOptions protected
-{
-	Title "$VRHANDMNU_TITLE"
-
-	StaticText ""
-	Option "$VRHANDMNU_SHOW",			"vr_hands", "OnOff"
-	Slider "$VRHANDMNU_SCALE",			"vr_hand_scale", 0.1, 3.0, 0.1, 2
-
-	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_hands vr_hand_scale"
-}
 
 OptionMenu VRWeaponOptions protected
 {
@@ -2040,7 +2029,6 @@ OptionMenu VROptionsMenu protected
 	}
 	Submenu "$VRHUDMNU_HUDAUTOMAPOPTIONS",  "VRHUDOptions"
 	Submenu "$VRWEAPONMNU_TITLE",			"VRWeaponOptions"
-	Submenu "$VRHANDMNU_TITLE",				"VRHandOptions"
 	StaticText ""
 	StaticText "$VRPREFMNU_MISC", gold
 	ifOption(OpenXR)
