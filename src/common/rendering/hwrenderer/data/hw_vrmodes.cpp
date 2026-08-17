@@ -955,6 +955,13 @@ CVAR(Float, vr_momentum_threshold, 1.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_crouch_use_button, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, use_action_spawn_yzoffset, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
+// Draw a rigged hand model at each controller. Read from vr_hands.zs, which
+// owns the psprite layers the models ride on -- nothing in C++ consults these.
+CVAR(Bool, vr_hands, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// Fine tune on top of the models' own MODELDEF Scale, applied through the
+// psprite scale channel rather than by re-exporting the asset.
+CVAR(Float, vr_hand_scale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
 CVAR(Bool, vr_enable_haptics, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_pickup_haptic_level, 0.2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_quake_haptic_level, 0.8, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -1420,12 +1427,20 @@ void VRMode::SetUp() const
 // The parameter hand_weapon is 0 for mainhand and 1 for offhand
 // you can use the enum VR_MAINHAND and VR_OFFHAND
 //
+// allowAutoReverse lets a caller opt out of the non-dominant-hand mirror
+// entirely. The mirror exists so that one weapon model can serve both hands,
+// and it is normally suppressed only by +Weapon.NoAutoReverse on the weapon
+// occupying the relevant slot -- which means a model drawn by anything that is
+// not a Weapon cannot reach that flag at all, and would be mirrored whether or
+// not that is correct for it. Pass false when the model supplies its own left
+// and right variants.
+//
 //---------------------------------------------------------------------------
-bool VRMode::GetWeaponTransform(VSMatrix* out, int hand_weapon) const
+bool VRMode::GetWeaponTransform(VSMatrix* out, int hand_weapon, bool allowAutoReverse) const
 {
 	player_t* player = &players[consoleplayer];
-	bool autoReverse = true;
-	if (player)
+	bool autoReverse = allowAutoReverse;
+	if (allowAutoReverse && player)
 	{
 		AActor *weap = (hand_weapon == VR_OFFHAND) ? player->OffhandWeapon : player->ReadyWeapon;
 		autoReverse = weap == nullptr || !(weap->IntVar(NAME_WeaponFlags) & WIF_NO_AUTO_REVERSE);

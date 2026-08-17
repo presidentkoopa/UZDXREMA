@@ -193,7 +193,7 @@ struct VRMode
 	virtual bool SubmitFrame() const { return true; }
 
 	virtual bool GetHandTransform(int hand, VSMatrix* out) const { return false; }
-	virtual bool GetWeaponTransform(VSMatrix* out, int hand = 0) const;
+	virtual bool GetWeaponTransform(VSMatrix* out, int hand = 0, bool allowAutoReverse = true) const;
 	virtual bool RenderPlayerSpritesInScene() const;
 	virtual bool GetTeleportLocation(DVector3 &out) const { return false; }
 	virtual bool IsInitialized() const { return true; }

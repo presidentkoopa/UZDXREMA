@@ -264,9 +264,28 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	// The model position and orientation has to be drawn independently from the position of the player,
 	// but we need to position it correctly in the world for light to work properly.
 	VSMatrix objectToWorldMatrix = renderer->GetViewToWorldMatrix();
-	int hand = psp->GetCaller() == playermo->player->OffhandWeapon ? 1 : 0;
+
+	// [BB] Which controller this psprite rides on.
+	//
+	// The caller test comes first and is the original one: both hands' muzzle
+	// flashes share PSP_FLASH, so a flash layer's ID says nothing about its
+	// side and only the caller identifies it.
+	//
+	// The ID test is the addition. Hand selection used to be derived purely
+	// from the player's weapon slots, so any psprite whose caller was not
+	// literally player->OffhandWeapon -- i.e. anything that is not a weapon,
+	// such as a hand model -- silently fell through to the mainhand pose, with
+	// no way to say otherwise from script. Layers at or above
+	// PSP_OFFHANDWEAPON now name the offhand explicitly. That range includes
+	// PSP_OFFHANDWEAPON itself, so this also keeps the offhand weapon on the
+	// correct hand during the frames where its slot is momentarily null.
+	int hand = (psp->GetCaller() == playermo->player->OffhandWeapon
+		|| psp->GetID() >= PSP_OFFHANDWEAPON) ? 1 : 0;
 	auto vrmode = VRMode::GetVRModeCached(true);
-	if (vrmode->GetWeaponTransform(&objectToWorldMatrix, hand))
+
+	// MDL_NOAUTOREVERSE: the model supplies its own left and right variants, so
+	// the non-dominant-hand mirror would flip an already-correct mesh.
+	if (vrmode->GetWeaponTransform(&objectToWorldMatrix, hand, !(smf_flags & MDL_NOAUTOREVERSE)))
 	{
 		float scale = 0.01f;
 		objectToWorldMatrix.scale(scale, scale, scale);
@@ -1325,6 +1344,10 @@ void ParseModelDefLump(int Lump)
 				else if (sc.Compare("forcecullbackfaces"))
 				{
 					smf.flags |= MDL_FORCECULLBACKFACES;
+				}
+				else if (sc.Compare("noautoreverse"))
+				{
+					smf.flags |= MDL_NOAUTOREVERSE;
 				}
 				else
 				{

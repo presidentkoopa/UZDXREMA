@@ -1530,8 +1530,17 @@ static bool WeaponSpriteMatches(AActor* equippedWeapon, AActor* spriteCaller)
 		return true;
 	}
 
-	auto equippedSister = equippedWeapon->PointerVar<AActor>(NAME_SisterWeapon);
-	auto callerSister = spriteCaller->PointerVar<AActor>(NAME_SisterWeapon);
+	// A psprite's caller is not necessarily a Weapon any more. Hand models ride
+	// their own psprite layers with a plain Inventory caller, and SisterWeapon is
+	// declared on Weapon -- reading it off anything else is not a null return,
+	// it is a fatal "Variable SisterWeapon not found in <class>" from ScriptVar.
+	// Anything that is not a Weapon simply has no sister.
+	auto sisterOf = [](AActor* a) -> AActor*
+	{
+		return (a != nullptr && a->IsKindOf(NAME_Weapon)) ? a->PointerVar<AActor>(NAME_SisterWeapon) : nullptr;
+	};
+	auto equippedSister = sisterOf(equippedWeapon);
+	auto callerSister = sisterOf(spriteCaller);
 	if (equippedSister == spriteCaller || callerSister == equippedWeapon)
 	{
 		return true;
