@@ -33,21 +33,28 @@ vec4 ApplyGamma(vec4 c)
 {
 	c.rgb = clamp(c.rgb, vec3(0.0), vec3(2.0)); // for HDR mode - prevents stacked translucent sprites (such as plasma) producing way too bright light
 
-	vec3 val = pow(c.rgb, vec3(2.2));
+	// UZDXREMA: Contrast and Brightness run here, on the gamma-encoded value,
+	// matching where the fork has always applied them -- the pre-5.0.0
+	// present.fp had no linearize step at all, so this is not new behaviour,
+	// just restored placement. Running them after upstream's pow(c, 2.2)
+	// below instead pivots contrast around 0.5 in LINEAR light (roughly 73%
+	// perceptual brightness once re-encoded), which reads as visibly wrong
+	// rather than merely different, and no gamma-bias cvar can undo it: the
+	// distortion happens here, not at the final pow(InvGamma).
+	c.rgb = c.rgb * Contrast - (Contrast - 1.0) * 0.5;
+	c.rgb += Brightness * 0.5;
+
+	// max(): the ops above can now push a channel negative (low contrast,
+	// negative brightness); pow() of a negative base is undefined in GLSL.
+	// The pre-linearize shader never needed this because nothing upstream of
+	// its single pow(InvGamma) could go negative.
+	vec3 val = pow(max(c.rgb, vec3(0.0)), vec3(2.2));
 
 	vec3 weights = (GrayFormula == 2) ? rec709Weights
 	             : (GrayFormula == 1) ? oldWeights
 	                                  : averageWeights;
 	float lum = dot(val, weights);
 	val = mix(vec3(lum), val, Saturation);
-
-	val = val * Contrast - (Contrast - 1.0) * 0.5;
-
-	// UZDXREMA: additive brightness lift from vid_brightness plus the per-eye
-	// vr_openxr_present_brightness_bias. Applied straight after contrast, where
-	// the fork has always applied it. Upstream's WhitePoint/BlackPoint remap
-	// below is a separate stage, not a replacement.
-	val += Brightness * 0.5;
 
 	val = val * (WhitePoint - BlackPoint) + BlackPoint;
 	val = pow(max(val, vec3(0.0)), vec3(InvGamma));
