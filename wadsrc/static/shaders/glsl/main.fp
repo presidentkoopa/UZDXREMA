@@ -1504,7 +1504,7 @@ float GlowTextureAt(float seedOff)
 	if (uGlowTex4.x > 0.0)
 	{
 		float pulse = 0.0;
-		for (int di = 0; di < 8; di++)
+		for (int di = 0; di < 32; di++)
 		{
 			float stren = uFogDisturbB[di].y;
 			if (stren <= 0.0) continue;
@@ -2402,7 +2402,7 @@ vec4 FogSlabAt(vec3 fragPos)
 	// gathered separately, further down, because a burning cloud is brighter
 	// mist and not more of it.
 	vec3 ignite = vec3(0.0);
-	for (int di = 0; di < 8; di++)
+	for (int di = 0; di < 32; di++)
 	{
 		float stren = uFogDisturbB[di].y;
 		if (stren <= 0.0) continue;

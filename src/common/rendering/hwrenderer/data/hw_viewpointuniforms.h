@@ -248,8 +248,8 @@ struct HWViewpointUniforms
 	//   mode 1 RIPPLE    a ring at r = age*speed, oscillating, decaying
 	//   mode 2 IGNITE    expanding sphere that adds LIGHT, not density
 	//   mode 3 GOUT      expanding disc that ADDS density -- a vent
-	FVector4 mFogDisturbA[8];
-	FVector4 mFogDisturbB[8];
+	FVector4 mFogDisturbA[32];
+	FVector4 mFogDisturbB[32];
 
 	// DENSITY IS NOT ONE NUMBER ANY MORE. Real mist pools: thick in corners,
 	// thin in the open. A noise field over the horizontal plane scaling the

@@ -260,8 +260,8 @@ static const char *shaderBindings = R"(
 		vec4 uTornado2;
 		vec4 uTornado3;
 		vec4 uTornadoCol;
-		vec4 uFogDisturbA[8];
-		vec4 uFogDisturbB[8];
+		vec4 uFogDisturbA[32];
+		vec4 uFogDisturbB[32];
 		vec4 uFogNoise;
 		vec4 uFogTendril;
 		vec4 uFogTendril2;

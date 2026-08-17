@@ -1540,8 +1540,16 @@ public:
 	// [BB] DISTURBANCES. One primitive, five effects -- see the note beside
 	// mFogDisturbA in hw_viewpointuniforms.h. A ring buffer rather than an
 	// allocation: a disturbance is a short-lived event, and the oldest slot is
-	// always the right one to reuse when a ninth arrives.
-	static const int MAX_FOG_DISTURB = 8;
+	// always the right one to reuse when the array is already full.
+	//
+	// RAISED FROM 8 TO 32, deliberately not matched to MAX_SHAPES/MAX_BEAMS'
+	// 128: both loops that read this array (main.fp, the glow feed and the
+	// density calc) run over every fragment inside the fog volume, which on a
+	// screen-filling bank of mist is a much bigger multiplier per slot than a
+	// sparse decal or a segment test. 32 clears a busy firefight's worth of
+	// simultaneous gunfire, deaths and explosions without quietly turning the
+	// fog pass into a 16x-heavier one for slots that are usually empty.
+	static const int MAX_FOG_DISTURB = 32;
 	DVector3 FogDisturbPos[MAX_FOG_DISTURB];
 	double   FogDisturbRadius[MAX_FOG_DISTURB] = {};
 	double   FogDisturbBirth[MAX_FOG_DISTURB] = {};   // level time in seconds
