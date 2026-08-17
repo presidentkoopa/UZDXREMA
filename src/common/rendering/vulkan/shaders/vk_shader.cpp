@@ -369,6 +369,11 @@ static const char *shaderBindings = R"(
 	#define uFogFollow viewpoints[HW_VIEWPOINT_INDEX].uFogFollow
 	#define uThickFogDistance viewpoints[HW_VIEWPOINT_INDEX].uThickFogDistance
 	#define uThickFogMultiplier viewpoints[HW_VIEWPOINT_INDEX].uThickFogMultiplier
+	// [BB] uShapeE's struct member exists (see ViewpointData above) but, unlike
+	// GL's bare anonymous block, this Vulkan block is instanced as viewpoints[2]
+	// and every member needs its own indirection macro or shader code referencing
+	// the bare name compiles nowhere - exactly what was missing here.
+	#define uShapeE viewpoints[HW_VIEWPOINT_INDEX].uShapeE
 
 	layout(set = 1, binding = 1, std140) uniform readonly MatricesUBO {
 		mat4 ModelMatrix;
