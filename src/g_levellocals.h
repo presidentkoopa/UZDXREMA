@@ -1307,8 +1307,8 @@ public:
 	DVector3 ShapePos[MAX_SHAPES];
 	double   ShapeSize[MAX_SHAPES] = {};      // 0 = the slot is free
 	int      ShapeKind[MAX_SHAPES] = {};      // 0 off, see hw_viewpointuniforms.h
-	int      ShapeOrient[MAX_SHAPES] = {};    // 0 floor, 1 wall, 2 any
-	double   ShapeAngle[MAX_SHAPES] = {};
+	int      ShapeOrient[MAX_SHAPES] = {};    // 0 floor, 1 wall, 2 any, 3 standing (StandingShapesAt() in main.fp)
+	double   ShapeAngle[MAX_SHAPES] = {};     // in-plane rotation for 0-2; plane-facing rotation around world-up for 3
 	double   ShapeThick[MAX_SHAPES] = {};
 	double   ShapeSeam[MAX_SHAPES] = {};      // 0 closed, 1 fully split
 	PalEntry ShapeColor[MAX_SHAPES] = {};
@@ -1325,6 +1325,47 @@ public:
 	double   ShapeRepCount[MAX_SHAPES] = {};   // radial: how many. grid: extent
 	double   ShapeRepSpace[MAX_SHAPES] = {};   // radial: orbit. grid: spacing
 	double   ShapeRepSpin[MAX_SHAPES] = {};    // deg/sec, or drift units/sec
+
+	// FULL 3D ORIENTATION AND LINKING, for orient 3 (standing) shapes only --
+	// see StandingShapesAt() in main.fp. ShapeAngle above is the base YAW;
+	// these add pitch and roll, and a rate for all three so a shape can spin
+	// or tumble without a per-tic ZScript call, resolved the same way
+	// ShapeGrow/ShapeSeamRate already are (base + rate * age, once per frame,
+	// natively -- the shader only ever sees the final resolved values).
+	double   ShapePitch[MAX_SHAPES] = {};
+	double   ShapeRoll[MAX_SHAPES] = {};
+	double   ShapeYawRate[MAX_SHAPES] = {};    // deg/sec
+	double   ShapePitchRate[MAX_SHAPES] = {};  // deg/sec
+	double   ShapeRollRate[MAX_SHAPES] = {};   // deg/sec
+
+	// LINKING: a shape's world position and orientation compose with its
+	// parent's, so moving or rotating the parent carries every shape linked
+	// to it -- how a compound 3D object gets built out of flat panels.
+	//
+	// CALLER-MANAGED, LIKE THE BEAM INDEX SPACE: ShapeParent MUST name a
+	// slot with a SMALLER index than its own, so a single forward pass over
+	// the array resolves every parent before the child that reads it. There
+	// is no cycle check and no topological sort -- a parent index >= your
+	// own, or a cycle, is undefined and will not be caught.
+	//
+	// Local offset composes along the PARENT's resolved basis, not world
+	// axes: X along the parent's own facing, Y along its right, Z along its
+	// up -- so "64 units out, turned 90 degrees" means the same thing
+	// however the parent itself is currently oriented.
+	//
+	// Local yaw/pitch/roll ADD to the parent's resolved yaw/pitch/roll.
+	// This is Euler addition, not true rotation composition -- exact for a
+	// pure-yaw chain (a fan of panels around one vertical hinge, which is
+	// most of what "build a box or a fan out of panels" needs), and an
+	// approximation once pitch and roll are combined at the same joint.
+	// Documented rather than hidden: a wrong answer that says so is a
+	// starting point, a silently wrong one is the bug this project keeps
+	// finding.
+	int      ShapeParent[MAX_SHAPES] = {};     // -1 = no parent
+	DVector3 ShapeLocalPos[MAX_SHAPES] = {};
+	double   ShapeLocalYaw[MAX_SHAPES] = {};
+	double   ShapeLocalPitch[MAX_SHAPES] = {};
+	double   ShapeLocalRoll[MAX_SHAPES] = {};
 
 	double   ShapeSoft = 2.0;
 	double   ShapeHeightFade = 24.0;

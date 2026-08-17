@@ -1151,11 +1151,22 @@ struct LevelLocals native
 	//
 	//   kind    1 disc, 2 ring, 3 square, 4 square outline,
 	//           5 cross, 6 hexagon, 7 triangle
-	//   orient  0 floors, 1 walls, 2 any surface
+	//   orient  0 floors, 1 walls, 2 any surface, 3 standing (freestanding
+	//           in open air, not painted on anything -- see below)
+	//   angle   in-plane rotation for orient 0-2; for orient 3, the
+	//           direction the standing plane FACES instead (rotation
+	//           around world-up -- it stands, it does not tilt)
 	//   life    seconds; 0 never expires
 	//
 	// A seam SPLITS a shape down its middle and shows the under colour
 	// through the gap -- subtraction, masked by the shape it came out of.
+	//
+	// ORIENT 3 IS A DIFFERENT KIND OF THING FROM 0-2. Those three are decals:
+	// they only ever draw where a surface the game already rendered passes
+	// through them. A standing shape has no surface to borrow -- it defines
+	// its own vertical plane and is visible in open air, tested against the
+	// eye's own view ray the same way a beam is, and correctly hidden behind
+	// real geometry in front of it. See StandingShapesAt() in main.fp.
 	native int AddShape(int kind, int orient, double x, double y, double z, double size, double angle, double thick, color col, double intensity, double life);
 	native void SetShapeMotion(int slot, double seam, double seamRate, double grow);
 	// One slot, many copies. mode 1 radial (count around a circle of radius
@@ -1165,6 +1176,31 @@ struct LevelLocals native
 	// does not replace a slot per distinct event.
 	native void SetShapeRepeat(int slot, int mode, double count, double space, double spin);
 	native void MoveShape(int slot, double x, double y, double z);
+
+	// [BB] STANDING SHAPES ONLY (orient 3) -- full 3D orientation and
+	// linking. Base yaw is still AddShape's own angle; these add pitch and
+	// roll, plus a rate for all three so a shape can spin or tumble without
+	// polling it every tic (resolved the same way SetShapeMotion's seamRate
+	// and grow already are: base + rate * age, once per frame, natively).
+	native void SetShapeOrient(int slot, double pitch, double roll, double yawRate, double pitchRate, double rollRate);
+
+	// One shape's world transform composed with its parent's -- move or
+	// rotate the parent and everything linked to it comes with it, which is
+	// how a compound 3D object gets built out of flat panels.
+	//
+	// parentSlot MUST be a smaller index than slot -- there is no cycle
+	// check and no topological sort, only a single forward pass that
+	// assumes every parent was already resolved before its children. -1
+	// clears the link.
+	//
+	// The local offset composes along the PARENT's own resolved facing/
+	// right/up, not world axes, so "64 units out, turned 90 degrees" means
+	// the same thing whichever way the parent itself is currently turned.
+	// Local yaw/pitch/roll ADD to the parent's resolved orientation -- exact
+	// for a pure-yaw chain (a fan of panels around one vertical hinge),
+	// an approximation once pitch and roll combine at the same joint.
+	native void LinkShape(int slot, int parentSlot, double lx, double ly, double lz, double lyaw, double lpitch, double lroll);
+
 	native void RemoveShape(int slot);
 	native void ClearShapes();
 	native clearscope void SetShapeLook(double soft, double heightFade, double reach, color under);

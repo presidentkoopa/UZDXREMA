@@ -1116,6 +1116,7 @@ vec3 ShapesAt(vec3 fragPos, vec3 nrm)
 		if (kind <= 0) continue;
 
 		int orient = packed_kind >> 4;
+		if (orient == 3) continue;               // standing -- StandingShapesAt() owns these
 		if (orient == 0 && !isFlat) continue;    // floors only
 		if (orient == 1 && isFlat) continue;     // walls only
 
@@ -1207,6 +1208,181 @@ vec3 ShapesAt(vec3 fragPos, vec3 nrm)
 			     * uShapeParams.z * 0.02;
 
 		sum += col * max(cov, 0.0) * fade * patFade;
+	}
+	return sum;
+}
+
+//
+// [BB] STANDING SHAPES -- the same shape library, freestanding in open air
+// instead of painted on whatever surface happens to be nearby.
+//
+// ShapesAt() decals an EXISTING surface: it only ever runs where the
+// G-buffer already has a normal, and it borrows that surface's own plane to
+// work in. A standing shape has no surface to borrow -- it defines its OWN
+// plane, an anchor point plus a full yaw/pitch/roll orientation (resolved
+// natively, once a frame, from CPU-side g_levellocals.h -- see ShapePitch/
+// ShapeRoll/the rate fields there, and hw_drawinfo.cpp's resolve loop for
+// where rate * age and parent linking both apply before this ever runs),
+// and asks where the EYE'S OWN VIEW RAY crosses that plane. That is the
+// exact question BeamAirGlow already asks of a line segment; this asks it
+// of a plane instead, and that ray-vs-plane solve is the only genuinely new
+// maths in this whole feature. Every SDF, the seam split and both repeat
+// modes below are the identical code ShapesAt() already runs, just fed a
+// different uv -- reused, not reimplemented.
+//
+// ORIENT 3 IS THE ONLY ROW THIS FUNCTION EVER SEES. ShapesAt()'s own loop
+// skips orient 3 (see the "standing" continue there), so nothing is ever
+// evaluated by both functions.
+//
+// CALLED UNCONDITIONALLY, like BeamAirGlow and for the same reason: a
+// standing shape has to be visible against open air or the sky, not only
+// where the camera happens to already be looking at a floor or wall -- so it
+// cannot live behind ShapesAt()'s "does this fragment have a world normal"
+// gate.
+//
+vec3 StandingShapesAt(vec3 fragPos)
+{
+	vec3 sum = vec3(0.0);
+	if (uShapeParams.x <= 0.0) return sum;
+
+	float soft = max(uShapeParams.x, 0.01);
+
+	int nshapes = int(uShapeParams.w);
+	if (nshapes <= 0) return sum;
+
+	vec3 eye = uCameraPos.xyz;
+	vec3 toFrag = fragPos - eye;
+	float fragDist = length(toFrag);
+	if (fragDist < 0.001) return sum;
+	vec3 dir = toFrag / fragDist;
+
+	for (int i = 0; i < 128; i++)
+	{
+		if (i >= nshapes) break;
+
+		float size = uShapeA[i].w;
+		if (size <= 0.0) continue;
+
+		int packed_kind = int(uShapeB[i].x);
+		int kind = packed_kind & 15;
+		if (kind <= 0) continue;
+
+		int orient = packed_kind >> 4;
+		if (orient != 3) continue;    // everything else is ShapesAt()'s
+
+		vec3 c = uShapeA[i].xyz;
+
+		// CHEAP REJECT, AGAINST THE RAY -- NOT AGAINST fragPos. fragPos is
+		// wherever THIS PIXEL'S OWN surface is, which for a standing shape
+		// can be a wall far behind it, or off to one side entirely; testing
+		// distance to fragPos would reject shapes that are plainly on
+		// screen. Testing the ray's own closest approach to the anchor is
+		// what BeamAirGlow's cull step does against a segment's midpoint,
+		// for the identical reason.
+		float rmode = uShapeD[i].x;
+		float spread = (rmode >= 1.0) ? max(uShapeD[i].y, uShapeD[i].z) : 0.0;
+		float reach = size + spread + soft + uShapeParams.z + 1.0;
+
+		vec3 ec = c - eye;
+		float alongC = dot(ec, dir);
+		vec3 perpC = ec - dir * alongC;
+		if (dot(perpC, perpC) > reach * reach) continue;
+
+		// THE PLANE. Full yaw/pitch/roll -- pitch tilts the facing normal
+		// up or down, roll spins the panel around that normal once tilted.
+		// Built from cross() rather than a hand-simplified closed form: the
+		// cost is trivial next to the solve below, and a shader is a bad
+		// place to debug a sign error in hand algebra.
+		float ang  = radians(uShapeB[i].y);   // yaw
+		float pit  = radians(uShapeE[i].x);   // pitch
+		float rol  = radians(uShapeE[i].y);   // roll
+
+		vec3 pnrm = vec3(cos(pit) * cos(ang), sin(pit), cos(pit) * sin(ang));
+		vec3 worldUp = vec3(0.0, 1.0, 0.0);
+
+		// DEGENERATE CASE: pitched to face straight up or down, where the
+		// facing normal is parallel to world-up and cross() collapses to a
+		// zero-length vector -- "right" would be undefined. Falls back to
+		// world +X as the reference instead. Yaw-only shapes can never hit
+		// this (pnrm.y is always exactly 0), which is why the earlier,
+		// yaw-only version of this function never needed the guard.
+		vec3 right0 = (abs(pnrm.y) > 0.999)
+			? cross(vec3(1.0, 0.0, 0.0), pnrm)
+			: cross(worldUp, pnrm);
+		right0 = normalize(right0);
+		vec3 up0 = cross(pnrm, right0);
+
+		float cr = cos(rol), sr = sin(rol);
+		vec3 right = right0 * cr + up0 * sr;
+		vec3 up2   = up0 * cr - right0 * sr;
+
+		// RAY VERSUS PLANE. Standard t = dot(N, planePoint - rayOrigin) /
+		// dot(N, rayDir). A ray running parallel to the plane never crosses
+		// it -- denom near zero -- and is skipped rather than divided by.
+		float denom = dot(pnrm, dir);
+		if (abs(denom) < 0.0001) continue;
+
+		float t = dot(pnrm, c - eye) / denom;
+
+		// BEHIND THE EYE, OR BEHIND REAL GEOMETRY. A crossing further away
+		// than this pixel's own surface is occluded BY that surface. This is
+		// an explicit branch rather than BeamAirGlow's clamp-the-solve trick,
+		// on purpose: a plane has no segment to clamp the solve into, and
+		// getting this one wrong the clever way means a standing shape
+		// ghosts through the wall in front of it instead of just not
+		// drawing -- the failure mode a depth test exists to prevent.
+		if (t <= 0.0 || t >= fragDist) continue;
+
+		vec3 hit = eye + dir * t;
+		vec2 uv = vec2(dot(hit - c, right), dot(hit - c, up2));
+
+		// ---- REPEAT: identical to ShapesAt(), same two modes -------------
+		float patFade = 1.0;
+		if (rmode >= 0.5 && rmode < 1.5)
+		{
+			float cnt = max(floor(uShapeD[i].y), 1.0);
+			float orbit = uShapeD[i].z;
+			float rang = atan(uv.y, uv.x) + radians(uShapeD[i].w * timer);
+			float sector = 6.2831853 / cnt;
+			rang = mod(rang + sector * 0.5, sector) - sector * 0.5;
+			uv = vec2(cos(rang), sin(rang)) * length(uv) - vec2(orbit, 0.0);
+		}
+		else if (rmode >= 1.5)
+		{
+			float ext = max(uShapeD[i].y, 1.0);
+			float sp = max(uShapeD[i].z, 1.0);
+			patFade = 1.0 - smoothstep(ext * 0.6, ext, length(uv));
+			if (patFade <= 0.0) continue;
+			uv += uShapeD[i].w * timer;
+			uv = mod(uv + sp * 0.5, sp) - sp * 0.5;
+		}
+
+		float thick = max(uShapeB[i].z, 0.01);
+		float d;
+		if      (kind == 1) d = sdCircle(uv, size);
+		else if (kind == 2) d = opOutline(sdCircle(uv, size), thick);
+		else if (kind == 3) d = sdBox(uv, vec2(size));
+		else if (kind == 4) d = opOutline(sdBox(uv, vec2(size)), thick);
+		else if (kind == 5) d = sdCross(uv, vec2(size, thick));
+		else if (kind == 6) d = sdHexagon(uv, size);
+		else                d = sdTriangle(uv, size);
+
+		float cov = 1.0 - smoothstep(0.0, soft, d);
+		if (cov <= 0.0) continue;
+
+		// SPLIT: identical to ShapesAt() -- the seam is what a portal opens
+		// along.
+		vec3 col = uShapeCol[i].rgb * uShapeCol[i].w;
+		float seam = uShapeB[i].w;
+		if (seam > 0.0)
+		{
+			float gap = abs(uv.x) - seam * size;
+			float gcov = (1.0 - smoothstep(0.0, soft, gap)) * cov;
+			cov -= gcov;
+			sum += uShapeUnder.rgb * gcov * patFade;
+		}
+
+		sum += col * max(cov, 0.0) * patFade;
 	}
 	return sum;
 }
@@ -3186,6 +3362,10 @@ void main()
 		// read as a rendering fault, and the floor beneath is drawn anyway.
 		if (dot(vWorldNormal.xyz, vWorldNormal.xyz) > 0.5)
 			frag.rgb += ShapesAt(pixelpos.xyz, normalize(vWorldNormal.xyz));
+
+		// [BB] Standing shapes, unconditionally -- see StandingShapesAt()'s
+		// own header for why this cannot live behind the normal check above.
+		frag.rgb += StandingShapesAt(pixelpos.xyz);
 
 		frag.rgb += BeamAirGlow(pixelpos.xyz);
 	}

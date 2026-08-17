@@ -392,6 +392,14 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 			// ViewpointData puts them -- a uniform block is matched by OFFSET.
 			float uThickFogDistance;
 			float uThickFogMultiplier;
+
+			// [BB] Standing shape pitch/roll -- appended after the thick-fog
+			// pair for the identical reason THEY are appended after
+			// uFogFollow: matched to hw_viewpointuniforms.h by offset, and
+			// this is where that header's mShapeE actually sits (past its
+			// std140 padding). std140 supplies this array's own leading
+			// padding implicitly; nothing to declare by hand here.
+			vec4 uShapeE[128];
 		};
 
 		uniform int uTextureMode;

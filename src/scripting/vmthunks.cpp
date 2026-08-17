@@ -4398,7 +4398,7 @@ static int AddShape(FLevelLocals *self, int kind, int orient,
 	self->ShapePos[i] = DVector3(x, y, z);
 	self->ShapeSize[i] = size;
 	self->ShapeKind[i] = clamp(kind, 0, 7);
-	self->ShapeOrient[i] = clamp(orient, 0, 2);
+	self->ShapeOrient[i] = clamp(orient, 0, 3);   // 3 = standing; see StandingShapesAt() in main.fp
 	self->ShapeAngle[i] = angle;
 	self->ShapeThick[i] = thick;
 	self->ShapeColor[i] = color;
@@ -4409,6 +4409,16 @@ static int AddShape(FLevelLocals *self, int kind, int orient,
 	self->ShapeSeamRate[i] = 0;
 	self->ShapeGrow[i] = 0;
 	self->ShapeRepeat[i] = 0;
+	self->ShapePitch[i] = 0;
+	self->ShapeRoll[i] = 0;
+	self->ShapeYawRate[i] = 0;
+	self->ShapePitchRate[i] = 0;
+	self->ShapeRollRate[i] = 0;
+	self->ShapeParent[i] = -1;    // explicit: int arrays zero-init, and 0 is a real slot
+	self->ShapeLocalPos[i] = DVector3(0, 0, 0);
+	self->ShapeLocalYaw[i] = 0;
+	self->ShapeLocalPitch[i] = 0;
+	self->ShapeLocalRoll[i] = 0;
 	return i;
 }
 
@@ -4489,6 +4499,67 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, MoveShape, MoveShape)
 	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
 	PARAM_INT(slot); PARAM_FLOAT(x); PARAM_FLOAT(y); PARAM_FLOAT(z);
 	MoveShape(self, slot, x, y, z);
+	return 0;
+}
+
+// [BB] Pitch, roll, and a rate for yaw/pitch/roll alike -- standing shapes
+// only (orient 3; see StandingShapesAt() in main.fp). Base yaw stays on
+// AddShape's own angle parameter, unchanged, so this does not touch the
+// decal orientations (0-2) at all.
+//
+// RESOLVED THE SAME WAY GROW AND SEAMRATE ALREADY ARE: base plus rate times
+// age, once per frame, natively -- not stepped per tic from script. A
+// caller that wants a panel spinning in place sets a rate once and is done;
+// nothing has to poll it.
+static void SetShapeOrient(FLevelLocals *self, int slot, double pitch,
+	double roll, double yawRate, double pitchRate, double rollRate)
+{
+	if (slot < 0 || slot >= FLevelLocals::MAX_SHAPES) return;
+	self->ShapePitch[slot] = pitch;
+	self->ShapeRoll[slot] = roll;
+	self->ShapeYawRate[slot] = yawRate;
+	self->ShapePitchRate[slot] = pitchRate;
+	self->ShapeRollRate[slot] = rollRate;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetShapeOrient, SetShapeOrient)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(slot); PARAM_FLOAT(pitch); PARAM_FLOAT(roll);
+	PARAM_FLOAT(yawRate); PARAM_FLOAT(pitchRate); PARAM_FLOAT(rollRate);
+	SetShapeOrient(self, slot, pitch, roll, yawRate, pitchRate, rollRate);
+	return 0;
+}
+
+// [BB] LINKING -- one shape's world transform composes with its parent's.
+// See the long comment on ShapeParent in g_levellocals.h for the two rules
+// this depends on the caller keeping: parent index < child index (so one
+// forward pass resolves parents before children read them), and local
+// yaw/pitch/roll is Euler ADDITION onto the parent's resolved orientation,
+// exact for a pure-yaw chain and an approximation once pitch and roll are
+// combined at the same joint.
+//
+// parentSlot -1 clears the link -- the shape goes back to its own authored
+// position and orientation, resolved with no parent at all.
+static void LinkShape(FLevelLocals *self, int slot, int parentSlot,
+	double lx, double ly, double lz, double lyaw, double lpitch, double lroll)
+{
+	if (slot < 0 || slot >= FLevelLocals::MAX_SHAPES) return;
+	if (parentSlot < -1 || parentSlot >= FLevelLocals::MAX_SHAPES) return;
+	self->ShapeParent[slot] = parentSlot;
+	self->ShapeLocalPos[slot] = DVector3(lx, ly, lz);
+	self->ShapeLocalYaw[slot] = lyaw;
+	self->ShapeLocalPitch[slot] = lpitch;
+	self->ShapeLocalRoll[slot] = lroll;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, LinkShape, LinkShape)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(slot); PARAM_INT(parentSlot);
+	PARAM_FLOAT(lx); PARAM_FLOAT(ly); PARAM_FLOAT(lz);
+	PARAM_FLOAT(lyaw); PARAM_FLOAT(lpitch); PARAM_FLOAT(lroll);
+	LinkShape(self, slot, parentSlot, lx, ly, lz, lyaw, lpitch, lroll);
 	return 0;
 }
 

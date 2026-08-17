@@ -291,6 +291,14 @@ static const char *shaderBindings = R"(
 		// would otherwise read from the wrong offset.
 		float uThickFogDistance;
 		float uThickFogMultiplier;
+
+		// [BB] Standing shape pitch/roll -- appended after the thick-fog
+		// pair for the identical reason THEY are appended after
+		// uFogFollow: matched to hw_viewpointuniforms.h by offset, and
+		// this is where that header's mShapeE actually sits (past its
+		// std140 padding). std140 supplies this array's own leading
+		// padding implicitly; nothing to declare by hand here.
+		vec4 uShapeE[128];
 	};
 
 	layout(set = 1, binding = 0, std140) uniform readonly ViewpointUBO {

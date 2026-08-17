@@ -4968,20 +4968,27 @@ void D_Cleanup()
 	}
 	PClassActor::AllActorClasses.Clear();
 	ScriptUtil::Clear();
-	PClass::StaticShutdown();
-
-	GC::FullGC();					// perform one final garbage collection after shutdown
 
 	// UZDXREMA TEMPORARY DIAGNOSTIC - remove once the GC::Root leak is found.
 	// GC::Root is the head of the linked list of every allocated DObject; a
-	// survivor here means something is still reachable after a full teardown
-	// and final sweep. Dump what, instead of guessing from a 60k-line diff.
+	// survivor past this point means something is still reachable after a
+	// full teardown. Dump what, instead of guessing from a 60k-line diff.
+	//
+	// MUST run before PClass::StaticShutdown() below: that call tears down
+	// class metadata for every PClass, including ones instances here still
+	// point at, so obj->GetClass()->TypeName is only safe to read before it
+	// runs (first attempt read it after, and calling .GetChars() on a
+	// TypeName backed by already-freed table storage is exactly what threw
+	// "vector subscript out of range" out of FName::GetChars). This is a
+	// straight-line, non-branching shutdown sequence - nothing here
+	// constructs new DObjects - so what survives to this point is the same
+	// set that would survive the final GC::FullGC() below.
 	if (GC::Root != nullptr)
 	{
 		FILE *leakLog = fopen("E:/UZDXREMA/gcroot_leak.log", "a");
 		if (leakLog != nullptr)
 		{
-			fprintf(leakLog, "\n=== GC::Root survivors ===\n");
+			fprintf(leakLog, "\n=== GC::Root survivors (pre-StaticShutdown) ===\n");
 			int n = 0;
 			for (DObject *obj = GC::Root; obj != nullptr; obj = obj->ObjNext, ++n)
 			{
@@ -4993,6 +5000,10 @@ void D_Cleanup()
 			fclose(leakLog);
 		}
 	}
+
+	PClass::StaticShutdown();
+
+	GC::FullGC();					// perform one final garbage collection after shutdown
 
 	assert(GC::Root == nullptr);
 

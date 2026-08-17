@@ -471,6 +471,18 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 			// empty know about is a counter that drifts.
 			int live = 0;
 
+			// [BB] Resolved once per slot, IN SLOT ORDER, so a linked child
+			// can read its parent's ALREADY-RESOLVED world transform within
+			// this same forward pass -- see the contract on ShapeParent in
+			// g_levellocals.h (parent index must be smaller than the
+			// child's, there is no cycle check and no topological sort).
+			// Zero-initialized so a parent reference to a dead or
+			// not-yet-valid slot reads a defined zero rather than garbage.
+			DVector3 resolvedPos[FLevelLocals::MAX_SHAPES] = {};
+			double resolvedYaw[FLevelLocals::MAX_SHAPES] = {};
+			double resolvedPitch[FLevelLocals::MAX_SHAPES] = {};
+			double resolvedRoll[FLevelLocals::MAX_SHAPES] = {};
+
 			for (int i = 0; i < FLevelLocals::MAX_SHAPES; i++)
 			{
 				double base = Level->ShapeSize[i];
@@ -484,22 +496,88 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 					VPUniforms.mShapeB[i] = { 0.f, 0.f, 0.f, 0.f };
 					VPUniforms.mShapeCol[i] = { 0.f, 0.f, 0.f, 0.f };
 					VPUniforms.mShapeD[i] = { 0.f, 0.f, 0.f, 0.f };
+					VPUniforms.mShapeE[i] = { 0.f, 0.f, 0.f, 0.f };
 					continue;
 				}
 
 				live = i + 1;
+
+				// [BB] YAW/PITCH/ROLL, resolved from base + rate * age --
+				// the identical shape grow/seamRate already use, just three
+				// of them. Orient 0-2 (decals) never set a rate, so this is
+				// a no-op arithmetic pass for every shape that isn't
+				// standing -- yaw comes out exactly as authored.
+				double yaw = Level->ShapeAngle[i] + Level->ShapeYawRate[i] * age;
+				double pitch = Level->ShapePitch[i] + Level->ShapePitchRate[i] * age;
+				double roll = Level->ShapeRoll[i] + Level->ShapeRollRate[i] * age;
+				DVector3 pos = Level->ShapePos[i];
+
+				// [BB] LINKING. A valid parent (an earlier, already-resolved
+				// slot) replaces this shape's own authored position and
+				// orientation with one composed onto the parent's.
+				// Anything else -- no parent, or a parent index that is not
+				// actually earlier -- leaves pos/yaw/pitch/roll exactly as
+				// authored, which is also correct behaviour for an
+				// unparented shape.
+				int parent = Level->ShapeParent[i];
+				if (parent >= 0 && parent < i)
+				{
+					double pyaw = resolvedYaw[parent];
+					double ppitch = resolvedPitch[parent];
+					double proll = resolvedRoll[parent];
+
+					double pyawR = pyaw * M_PI / 180.0;
+					double ppitchR = ppitch * M_PI / 180.0;
+					double prollR = proll * M_PI / 180.0;
+
+					// The parent's own facing/right/up, built the identical
+					// way StandingShapesAt() builds it in main.fp -- Doom
+					// space (Z up) here instead of shader space (Y up).
+					// Guarded for the parent facing straight up or down,
+					// where "right" would otherwise divide by a
+					// near-zero-length cross product: fall back to world
+					// +X as the reference instead of world-up.
+					DVector3 fwd(cos(ppitchR) * cos(pyawR),
+						cos(ppitchR) * sin(pyawR), sin(ppitchR));
+					DVector3 worldUp(0.0, 0.0, 1.0);
+					DVector3 right0 = (fabs(fwd.Z) > 0.999)
+						? DVector3(1.0, 0.0, 0.0) ^ fwd
+						: worldUp ^ fwd;
+					if (right0.Length() > 0.0001) right0 = right0.Unit();
+					DVector3 up0 = fwd ^ right0;
+
+					double cr = cos(prollR), sr = sin(prollR);
+					DVector3 right = right0 * cr + up0 * sr;
+					DVector3 up = up0 * cr - right0 * sr;
+
+					DVector3 local = Level->ShapeLocalPos[i];
+					pos = resolvedPos[parent]
+						+ fwd * local.X + right * local.Y + up * local.Z;
+
+					// Euler addition onto the parent's resolved orientation
+					// -- see the long comment on ShapeParent for why this
+					// is exact for a pure-yaw chain and an approximation
+					// once pitch and roll combine at the same joint.
+					yaw = pyaw + Level->ShapeLocalYaw[i];
+					pitch = ppitch + Level->ShapeLocalPitch[i];
+					roll = proll + Level->ShapeLocalRoll[i];
+				}
+
+				resolvedPos[i] = pos;
+				resolvedYaw[i] = yaw;
+				resolvedPitch[i] = pitch;
+				resolvedRoll[i] = roll;
 
 				float fade = (life > 0.0) ? (float)(1.0 - age / life) : 1.0f;
 				float size = (float)(base + Level->ShapeGrow[i] * age);
 				float seam = (float)clamp(Level->ShapeSeam[i]
 					+ Level->ShapeSeamRate[i] * age, 0.0, 1.0);
 
-				VPUniforms.mShapeA[i] = { (float)Level->ShapePos[i].X,
-					(float)Level->ShapePos[i].Z, (float)Level->ShapePos[i].Y,
+				VPUniforms.mShapeA[i] = { (float)pos.X, (float)pos.Z, (float)pos.Y,
 					size };
 				VPUniforms.mShapeB[i] = {
 					(float)(Level->ShapeKind[i] + 16 * Level->ShapeOrient[i]),
-					(float)Level->ShapeAngle[i], (float)Level->ShapeThick[i],
+					(float)yaw, (float)Level->ShapeThick[i],
 					seam };
 				VPUniforms.mShapeCol[i] = {
 					Level->ShapeColor[i].r / 255.f, Level->ShapeColor[i].g / 255.f,
@@ -508,6 +586,9 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 				VPUniforms.mShapeD[i] = { (float)Level->ShapeRepeat[i],
 					(float)Level->ShapeRepCount[i], (float)Level->ShapeRepSpace[i],
 					(float)Level->ShapeRepSpin[i] };
+				// [BB] Resolved pitch/roll for StandingShapesAt() in main.fp.
+				// z/w spare.
+				VPUniforms.mShapeE[i] = { (float)pitch, (float)roll, 0.f, 0.f };
 			}
 
 			VPUniforms.mShapeParams = { (float)Level->ShapeSoft,

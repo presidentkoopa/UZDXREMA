@@ -602,9 +602,77 @@ int wmain()
 	return wWinMain(GetModuleHandle(0), 0, GetCommandLineW(), SW_SHOW);
 }
 
+// UZDXREMA TEMPORARY DIAGNOSTIC - remove once the Alt+F4 vector-subscript
+// crash is found. STL's debug bounds check (_STL_VERIFY) reports through the
+// same _CRT_ASSERT path as assert(), so this catches it too.
+#if defined(_DEBUG) && defined(_MSC_VER)
+#include <crtdbg.h>
+#include <dbghelp.h>
+
+static void UZDXREMA_TraceWrite(const char *text)
+{
+	HANDLE h = CreateFileA("E:\\UZDXREMA\\assert_trace.log",
+		FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+		OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (h == INVALID_HANDLE_VALUE) return;
+	DWORD written = 0;
+	WriteFile(h, text, (DWORD)strlen(text), &written, nullptr);
+	CloseHandle(h);
+}
+
+static int UZDXREMA_AssertBacktrace(int reportType, wchar_t *message, int *returnValue)
+{
+	if (reportType != _CRT_ASSERT) return FALSE;
+
+	char buf[2048];
+	_snprintf_s(buf, sizeof(buf), _TRUNCATE,
+		"\n=== ASSERTION FAILED (thread %lu) ===\n%ls\n",
+		GetCurrentThreadId(), message ? message : L"(no message)");
+	UZDXREMA_TraceWrite(buf);
+
+	HANDLE proc = GetCurrentProcess();
+	SymSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
+	SymInitialize(proc, nullptr, TRUE);
+
+	void *frames[62];
+	USHORT n = CaptureStackBackTrace(0, 62, frames, nullptr);
+
+	char symbuf[sizeof(SYMBOL_INFO) + 512];
+	SYMBOL_INFO *sym = (SYMBOL_INFO *)symbuf;
+	memset(symbuf, 0, sizeof(symbuf));
+	sym->SizeOfStruct = sizeof(SYMBOL_INFO);
+	sym->MaxNameLen = 500;
+
+	for (USHORT i = 0; i < n; ++i)
+	{
+		DWORD64 addr = (DWORD64)frames[i];
+		DWORD64 disp = 0;
+		const char *name = SymFromAddr(proc, addr, &disp, sym) ? sym->Name : "???";
+
+		IMAGEHLP_LINE64 li = {};
+		li.SizeOfStruct = sizeof(li);
+		DWORD lineDisp = 0;
+		if (SymGetLineFromAddr64(proc, addr, &lineDisp, &li))
+			_snprintf_s(buf, sizeof(buf), _TRUNCATE, "  [%2d] %s  (%s:%lu)\n",
+				i, name, li.FileName, li.LineNumber);
+		else
+			_snprintf_s(buf, sizeof(buf), _TRUNCATE, "  [%2d] %s\n", i, name);
+		UZDXREMA_TraceWrite(buf);
+	}
+	UZDXREMA_TraceWrite("=== END BACKTRACE ===\n");
+
+	*returnValue = 0;	// do not break into the debugger
+	return TRUE;		// handled - suppress the dialog
+}
+#endif
+
 int WINAPI wWinMain (HINSTANCE hInstance, HINSTANCE nothing, LPWSTR cmdline, int nCmdShow)
 {
 	g_hInst = hInstance;
+
+#if defined(_DEBUG) && defined(_MSC_VER)
+	_CrtSetReportHookW2(_CRT_RPTHOOK_INSTALL, UZDXREMA_AssertBacktrace);
+#endif
 
 	InitCommonControls ();			// Load some needed controls and be pretty under XP
 

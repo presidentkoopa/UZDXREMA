@@ -318,14 +318,23 @@ struct HWViewpointUniforms
 	// shape is a couple of ALU and an early reject, so the old cap was being
 	// copied rather than reasoned about.
 	//
-	//   mShapeA[i]    xyz world centre (shader space), w size
-	//   mShapeB[i]    x kind + 16*orientation, y rotation (deg),
+	//   mShapeA[i]    xyz world centre (shader space), w size -- RESOLVED,
+	//                 not the raw authored position: composed onto a parent
+	//                 if linked, see hw_drawinfo.cpp's resolve loop
+	//   mShapeB[i]    x kind + 16*orientation, y yaw (deg, resolved),
 	//                 z thickness (ring/outline), w seam 0..1
 	//   mShapeCol[i]  rgb colour, w intensity
+	//   mShapeE[i]    x pitch (deg, resolved), y roll (deg, resolved) --
+	//                 orient 3 only; z/w spare. See below.
 	//
 	//   kind  0 off, 1 disc, 2 ring, 3 square, 4 square outline,
 	//         5 cross, 6 hexagon, 7 triangle
-	//   orient 0 floor (upward faces), 1 walls (vertical faces), 2 any
+	//   orient 0 floor (upward faces), 1 walls (vertical faces), 2 any,
+	//          3 STANDING -- freestanding in open air, not painted onto
+	//          anything; full yaw/pitch/roll instead of a floor/wall
+	//          decal's single in-plane rotation. See StandingShapesAt() in
+	//          main.fp and the orientation/linking fields on ShapePos's
+	//          neighbours in g_levellocals.h.
 	//
 	// The distance functions themselves are named and separate in main.fp
 	// rather than inlined, so a later ZScript mirror is a transcription
@@ -403,6 +412,22 @@ struct HWViewpointUniforms
 	// in any of the GLSL copies -- std140 supplies the same padding implicitly.
 	float mPadding1 = 0.f;
 	float mPadding2 = 0.f;
+
+	// [BB] STANDING SHAPE ORIENTATION -- resolved pitch/roll, once per frame,
+	// same as mShapeD is for the repeat pattern. APPENDED HERE, after the
+	// padding above rather than beside mShapeD, on purpose: mShapeD sits in
+	// the middle of a block matched to the GLSL copies by OFFSET, and every
+	// field after it (mShapeParams, mShapeUnder, mFogFollow, the thick-fog
+	// pair, the padding) would shift if anything were inserted there. Adding
+	// only at the true tail changes no existing offset at all. See
+	// StandingShapesAt() in main.fp for what x/y hold; z/w are spare.
+	//
+	// Base yaw and world position for a standing shape do NOT get a new
+	// field -- they are the resolved values already written into mShapeB.y
+	// and mShapeA.xyz, which now carry rate and parent-link composition
+	// baked in rather than the raw authored value. The shader was already
+	// reading those two fields; nothing there had to change.
+	FVector4 mShapeE[128];
 
 	void CalcDependencies()
 	{
