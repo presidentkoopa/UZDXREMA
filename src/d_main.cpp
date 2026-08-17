@@ -4972,6 +4972,28 @@ void D_Cleanup()
 
 	GC::FullGC();					// perform one final garbage collection after shutdown
 
+	// UZDXREMA TEMPORARY DIAGNOSTIC - remove once the GC::Root leak is found.
+	// GC::Root is the head of the linked list of every allocated DObject; a
+	// survivor here means something is still reachable after a full teardown
+	// and final sweep. Dump what, instead of guessing from a 60k-line diff.
+	if (GC::Root != nullptr)
+	{
+		FILE *leakLog = fopen("E:/UZDXREMA/gcroot_leak.log", "a");
+		if (leakLog != nullptr)
+		{
+			fprintf(leakLog, "\n=== GC::Root survivors ===\n");
+			int n = 0;
+			for (DObject *obj = GC::Root; obj != nullptr; obj = obj->ObjNext, ++n)
+			{
+				PClass *cls = obj->GetClass();
+				fprintf(leakLog, "  [%3d] %p  class=%s\n", n, (void*)obj,
+					cls != nullptr ? cls->TypeName.GetChars() : "(null class)");
+				if (n > 200) { fprintf(leakLog, "  ... truncated\n"); break; }
+			}
+			fclose(leakLog);
+		}
+	}
+
 	assert(GC::Root == nullptr);
 
 	restart++;
