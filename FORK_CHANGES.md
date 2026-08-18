@@ -2156,3 +2156,97 @@ stays upright as the gun turns over. That reads as a bug in the mod, and the
 mod cannot fix it.
 
 Both build targets, as §25/§26 note.
+
+---
+
+## 32. Standing shapes — the same glyphs, freestanding in open air
+
+§21b describes a shape as *painted onto whatever surface passes through it*,
+and main.fp's own comment was blunt about it: "Flat decals, not solids... makes
+it lie ON the floor rather than hang in the air." `orient` (0 floor, 1 wall,
+2 any) only filtered which already-rendered surface a shape was allowed to
+paint, by its normal. It never lifted one into space.
+
+**`orient == 3` is a shape that stands.** Anchor point plus a full
+yaw/pitch/roll orientation, intersected against the view ray — not projected
+onto anything. Everything below the coordinate solve is the identical
+`sdBox`/`opOutline`/seam-split colour code §21b already documents, fed a
+different `uv`.
+
+**It cost no new capacity, and that was the point.** `orient` had four bits in
+the existing `mShapeB.x` packing (`kind | orient << 4`) and was using three
+values out of sixteen. So standing shapes reuse the same 128 slots, the same
+copy loop, the same `AddShape` signature — no new `MAX_*`, no new uniform
+array, and none of the four-file sync a new array demands. `ShapesAt()` skips
+`orient == 3` and a new `StandingShapesAt()` claims them; neither sees the
+other's rows.
+
+**Depth is the beam trick, not a new one.** `BeamAirGlow` already resolves a
+world position from the depth buffer and refuses to draw past it. A standing
+shape solves where the eye→fragment ray crosses its plane and applies the same
+comparison: `t <= 0.0 || t >= fragDist` and it is behind real geometry.
+
+### The traps, all four of them real
+
+**`angle` means two different things now.** For a decal it rotates the pattern
+*in* its plane (`opRotate(uv, uShapeB[i].y)`). For a standing shape it orients
+the plane *itself* around world-up. Same field, different reading, gated on
+`orient` — deliberately, rather than spending a new parameter on it.
+
+**Facing straight up or down collapses the basis.** `cross(worldUp, facing)`
+degenerates to zero when the two are parallel, which a pitch of ±90° reaches
+exactly. Guarded with a fallback to world +X in *both* places that build the
+basis — `StandingShapesAt()` in main.fp and the parent-composition block in
+`hw_drawinfo.cpp`. Two implementations of one rule is a thing to keep in step.
+
+**Rates resolve natively, like `grow` and `seamRate` already did.**
+`SetShapeOrient` takes yaw/pitch/roll rates, resolved once per frame as
+`base + rate * age`. A caller that wants a panel spinning sets a rate once;
+nothing polls it, and it does not step in 35Hz staircases.
+
+**Linking is a single forward pass with a stated contract.** `LinkShape` gives
+a shape a parent whose resolved transform it composes onto. The resolve loop
+walks slots in order and a child reads its parent's *already-resolved* world
+transform in that same pass — which works only because **a parent's index must
+be lower than its child's**. There is no cycle check and no topological sort;
+an out-of-order parent is ignored and the shape resolves as unparented, which
+is at least a defined answer. Orientation composes by Euler addition: exact for
+a pure-yaw chain, an approximation once pitch and roll combine at one joint.
+Good enough to build a box out of panels, not a substitute for quaternions.
+
+`mShapeE` carries the resolved pitch/roll and was appended at the **true tail**
+of `HWViewpointUniforms`, past the existing explicit padding — never mid-struct,
+per the invariant at the top of CHANGES.md: a uniform block is matched by
+offset, not by name.
+
+**And it failed on Vulkan first, exactly as invariant 2 warns.** `uShapeE` was
+declared correctly in both `gl_shader.cpp` and `vk_shader.cpp`, and still threw
+"undeclared identifier" on Vulkan only. Vulkan instances `ViewpointData` as
+`viewpoints[2]` for stereo, so every member needs a
+`#define uShapeE viewpoints[HW_VIEWPOINT_INDEX].uShapeE` alias next to its
+declaration. Miss the alias and GL compiles, Vulkan does not, and nothing about
+the error names the real cause. **Adding a viewpoint member is four edits, not
+three.**
+
+## 33. Fog disturbance capacity — 8 to 32, and why not 128
+
+`MAX_BEAMS` and `MAX_SHAPES` are both 128. `MAX_FOG_DISTURB` went to **32**,
+and the asymmetry is deliberate rather than an oversight.
+
+A shape's cost per fragment is a squared-distance reject that usually misses;
+a beam's is a segment-distance test. Both are cheap and both are skipped early
+for most pixels. A disturbance is read by *two* loops in main.fp — the glow
+feed and the fog density calculation — and those run across **every fragment
+inside the fog volume**, which on a screen-filling bank of mist is most of the
+screen. The per-slot multiplier is simply larger here than anywhere else the
+fork raised a cap.
+
+32 covers a busy firefight's worth of simultaneous gunfire, deaths and
+explosions without making the fog pass four times heavier for slots that are
+empty most of the time.
+
+Four sync points, the same four any uniform array resize needs:
+`g_levellocals.h`, `hw_viewpointuniforms.h`, both shader-side struct mirrors
+(`gl_shader.cpp` and `vk_shader.cpp`), plus — easy to miss — the two
+**hardcoded loop bounds** in `main.fp`, which are literals rather than a
+constant and will silently keep reading only the first 8 if left behind.

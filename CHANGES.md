@@ -37,7 +37,7 @@ The practical consequence for porting: taking a feature to another tree means ta
 C++ *and* the native declaration *and* keeping the signature stable, because content
 outside this repo is compiled against it.
 
-The bridge is 111 natives on `Level` added to
+The bridge is 119 natives on `Level` added to
 `wadsrc/static/zscript/doombase.zs`, plus a smaller set on `Actor`. That file is the
 contract: if it changes shape, external content stops compiling.
 
@@ -282,7 +282,7 @@ primary and secondary ownership: every file a feature touches.
 - `wadsrc/static/shaders/pp/heatmap.fp` *(92)*
 - `src/rendering/hwrenderer/scene/hw_drawinfo.h` *(23)*
 
-**Shapes** — 11 files
+**Shapes** (including standing shapes, §32) — 11 files
 
 - `src/scripting/vmthunks.cpp` *(3546)*
 - `wadsrc/static/shaders/glsl/main.fp` *(2522)*
@@ -295,6 +295,11 @@ primary and secondary ownership: every file a feature touches.
 - `src/common/rendering/gl/gl_shader.cpp` *(140)*
 - `wadsrc/static/graphics/sdfmono.png` *(0)*
 - `wadsrc/static/graphics/bbwhite.png` *(0)*
+
+Standing shapes (`orient == 3`) add no files and no capacity — they reuse the
+same 128 slots and the same natives, plus `SetShapeOrient` and `LinkShape`.
+The one new uniform member, `mShapeE`, needs its Vulkan `#define` alias as
+well as its declaration; see invariant 2 and §32.
 
 **Native state remap** — 4 files
 
