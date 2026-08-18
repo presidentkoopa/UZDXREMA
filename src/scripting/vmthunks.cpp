@@ -5386,6 +5386,34 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SuppressVRInput, SuppressVRInput)
 	return 0;
 }
 
+// [BB] The raw locomotion stick, for a mod that just suppressed it above.
+//
+// SuppressVRInput stops the stick from walking or turning the player by
+// zeroing it at the exact point g_game.cpp would otherwise have fed it into
+// the ticcmd -- which also zeroes the ONE channel script had for reading
+// stick deflection at all (cmd.sidemove/forwardmove). A mod that wants to
+// suppress movement AND still read "which way is it pushed" (a wheel doing
+// stick-select) had no way to have both.
+//
+// g_wheelStickForward/Side are filled unconditionally, every VR tic, right
+// where g_game.cpp already calls VR_GetMove() for the locomotion stick --
+// before the suppression check, so this reads the real deflection whether
+// or not the caller is currently suppressing it.
+extern float g_wheelStickForward, g_wheelStickSide;
+
+static void GetRawStickMove(FLevelLocals *self, DVector2 *result)
+{
+	*result = DVector2(g_wheelStickForward, g_wheelStickSide);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, GetRawStickMove, GetRawStickMove)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	DVector2 result;
+	GetRawStickMove(self, &result);
+	ACTION_RETURN_VEC2(result);
+}
+
 // [BB] Let a mod turn the laser sight on for as long as its own menu is open.
 //
 // vr_laser_sight and vr_laser_beam are CVAR_ARCHIVE|CVAR_GLOBALCONFIG, and the

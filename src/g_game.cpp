@@ -550,6 +550,15 @@ static int      side = 0;
 static int      fly = 0;
 static uint32_t buttons = 0;
 
+// [BB] The locomotion stick's raw deflection, captured every VR tic
+// regardless of SuppressVRInput -- see the matching native,
+// FLevelLocals::GetRawStickMove (scripting/vmthunks.cpp). Deliberately NOT
+// static: vmthunks.cpp reads these via extern, so a mod that suppresses the
+// stick to stop it walking/turning the player can still read which way it's
+// pushed for its own in-world selection.
+float g_wheelStickForward = 0.0f;
+float g_wheelStickSide    = 0.0f;
+
 // CODE --------------------------------------------------------------------
 
 CCMD (turnspeeds)
@@ -1280,6 +1289,14 @@ void G_BuildTiccmd (usercmd_t *cmd)
 		float pitch = 0;
 		float roll = 0;
 		VR_GetMove(&joyforward, &joyside, &hmdforward, &hmdside, &dummy, &yaw, &pitch, &roll);
+
+		// [BB] Captured HERE, before the suppression check below, and
+		// unconditionally -- so GetRawStickMove() (vmthunks.cpp) still
+		// reports real deflection while VR_IsScriptInputSuppressed() is
+		// stopping this same value from reaching forward/side beneath it.
+		g_wheelStickForward = joyforward;
+		g_wheelStickSide    = joyside;
+
 		// [BB] A stick driving a wheel must not also drive the legs. Suppressing
 		// the buttons was never enough: the locomotion stick keeps feeding this
 		// path while a wheel is open, so selecting with the thumb would walk the

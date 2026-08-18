@@ -886,6 +886,16 @@ struct LevelLocals native
 	// nothing else will, and a stuck flag is a player who cannot turn.
 	native void SuppressVRInput(bool suppressed);
 
+	// [BB] The locomotion stick's raw deflection -- (forward, side) -- read
+	// straight from the VR input path, NOT gated by SuppressVRInput above.
+	// That call zeroes the one other channel script has for stick
+	// deflection (cmd.sidemove/forwardmove) at the exact same source, so a
+	// mod that suppresses the stick to stop it walking/turning the player
+	// had no way to also read which way it's being pushed. This is that way
+	// out: call it after SuppressVRInput(true) and it still reports the
+	// real value.
+	native Vector2 GetRawStickMove();
+
 	// Force the laser sight on for as long as a script-side menu is up. An
 	// override, not a settings change -- the archived cvars are untouched and the
 	// player gets their own preference back the moment it is dropped.
