@@ -44,6 +44,12 @@
 #endif
 
 CVAR(Bool, gl_interpolate_model_frames, true, CVAR_ARCHIVE)
+
+// RS FORK -- pose pipeline diagnostics. Traces an explicitly addressed model
+// frame from the psprite through to the bone calculation, which is otherwise
+// invisible: a pose that never applies looks exactly like a pose that was
+// never set. Prints only on change, so a held pose reports once.
+CVAR(Bool, vr_pose_debug, true, 0)
 EXTERN_CVAR(Bool, r_drawvoxels)
 EXTERN_CVAR(Int, vr_control_scheme)
 EXTERN_CVAR(Float, vr_weaponScale)
@@ -618,6 +624,7 @@ bool CalcModelOverrides(int i, const FSpriteModelFrame *smf, DActorModelData* da
 	out.animationid = -1;
 	out.modelframe = -1;
 	out.modelframenext = -1;
+	out.modelframe_explicit = false;
 	out.skinid.SetNull();
 	out.surfaceskinids.Clear();
 
@@ -742,6 +749,24 @@ bool CalcModelOverrides(int i, const FSpriteModelFrame *smf, DActorModelData* da
 	{
 		out.modelframe     = psp->ModelFrame;
 		out.modelframenext = (psp->ModelFrameNext >= 0) ? psp->ModelFrameNext : psp->ModelFrame;
+		out.modelframe_explicit = true;
+	}
+
+	if (vr_pose_debug && psp)
+	{
+		// Separate slots per hand so the two do not mask each other's changes.
+		const bool offhand = (psp->GetID() >= PSP_OFFHANDWEAPON);
+		static int lastMain = -0x7fffffff, lastOff = -0x7fffffff;
+		int &last = offhand ? lastOff : lastMain;
+		int key = (psp->ModelFrame * 4) + (out.modelframe_explicit ? 1 : 0) + (out.modelframe << 12);
+		if (key != last)
+		{
+			last = key;
+			Printf("[POSE/in ] %s layer=%d psp.ModelFrame=%d -> drawinfo.modelframe=%d next=%d explicit=%s\n",
+				offhand ? "OFF " : "MAIN", psp->GetID(), psp->ModelFrame,
+				out.modelframe, out.modelframenext,
+				out.modelframe_explicit ? "yes" : "NO");
+		}
 	}
 
 	// RS FORK -- NATIVE STATE REMAP frame resolution (FORK_CHANGES.md,
@@ -762,6 +787,7 @@ bool CalcModelOverrides(int i, const FSpriteModelFrame *smf, DActorModelData* da
 			{
 				out.modelframe     = int(uint32_t(*v >> 32));
 				out.modelframenext = int(uint32_t(*v & 0xffffffff));
+				out.modelframe_explicit = true;
 			}
 		}
 	}
@@ -782,6 +808,22 @@ const TArray<VSMatrix> * ProcessModelFrame(FModel * animation, bool nextFrame, i
 
 	const TArray<VSMatrix> *boneData = nullptr;
 
+	if (vr_pose_debug && is_decoupled)
+	{
+		static int last = -0x7fffffff;
+		const int branch = (frameinfo.decoupled_frame.frame1 >= 0) ? 0
+		                 : (drawinfo.modelframe_explicit ? 1 : 2);
+		int key = branch + (drawinfo.modelframe << 4);
+		if (key != last)
+		{
+			last = key;
+			static const char *names[3] = { "ANIM (SetAnimation wins)", "STATIC (our pose)", "REST (pose discarded)" };
+			Printf("[POSE/out] decoupled -> %s  frame=%d next=%d  decoupled_frame1=%d\n",
+				names[branch], drawinfo.modelframe, drawinfo.modelframenext,
+				frameinfo.decoupled_frame.frame1);
+		}
+	}
+
 	if(is_decoupled)
 	{
 		if(frameinfo.decoupled_frame.frame1 >= 0)
@@ -790,6 +832,42 @@ const TArray<VSMatrix> * ProcessModelFrame(FModel * animation, bool nextFrame, i
 				frameinfo.decoupled_frame_prev ? *frameinfo.decoupled_frame_prev : nullptr,
 				frameinfo.decoupled_frame,
 				frameinfo.inter,
+				animationData,
+				(modelData && modelData->modelBoneOverrides.SSize() > i)
+				? &modelData->modelBoneOverrides[i]
+				: nullptr,
+				out,
+				tic);
+		}
+		else if(drawinfo.modelframe_explicit)
+		{
+			// RS FORK -- STATIC POSE ON THE DECOUPLED PATH.
+			//
+			// A +DECOUPLEDANIMATIONS model has only two states here: playing an
+			// animation (above), or the rest pose (below). Neither consults
+			// drawinfo.modelframe, which is read only on the non-decoupled
+			// branch -- so a decoupled model could not be pinned to a single
+			// authored frame at all.
+			//
+			// That is exactly what hand posing needs. The poses are baked as
+			// frames of one clip and ZScript picks one per tic from controller
+			// input; there is no animation to play, just a pose to hold. Doing
+			// it through SetAnimation instead would mean running a clip at zero
+			// framerate to keep it still, i.e. fighting the animation clock to
+			// get a static result.
+			//
+			// Same construction as the non-decoupled branch below, so an
+			// explicitly addressed frame means the same thing on both paths.
+			// Bone overrides still compose on top, so a posed hand can still be
+			// adjusted procedurally afterwards.
+			boneData = animation->CalculateBones(
+				nullptr,
+				{
+					nextFrame ? frameinfo.inter : -1.0f,
+					drawinfo.modelframe,
+					drawinfo.modelframenext
+				},
+				-1.0f,
 				animationData,
 				(modelData && modelData->modelBoneOverrides.SSize() > i)
 				? &modelData->modelBoneOverrides[i]

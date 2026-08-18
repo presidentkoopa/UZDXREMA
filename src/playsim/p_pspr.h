@@ -271,6 +271,22 @@ public:
 	int   ModelFrameNext = -1;   // frame to blend toward
 	float ModelFrameLerp = -1.f; // 0..1 blend factor; <0 = use stock timing
 
+	// RS FORK -- SCRIPT-SUPPRESSED LAYER.
+	//
+	// Hides this layer in both psprite passes while leaving the weapon itself
+	// completely intact -- it keeps its states, damage, ammo and slot, it just
+	// is not drawn. That split is what lets a rigged hand stand in for a mod's
+	// fist: the fist weapon still does the hitting, the hand is what you see.
+	//
+	// Alpha cannot do this job. psp->alpha is discarded by
+	// DPSprite::GetRenderStyle unless the layer carries PSPF_ALPHA or
+	// PSPF_FORCEALPHA, and the draw decision is a `continue` in a render loop
+	// no script participates in -- the same wall the flat-overlay fix ran into.
+	//
+	// In-class initialiser for the same reason as the fields above: the private
+	// savegame constructor runs no constructor body.
+	bool  NoDraw         = false;
+
 private:
 	DPSprite () {}
 

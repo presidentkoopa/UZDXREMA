@@ -2241,6 +2241,7 @@ void HWDrawInfo::PreparePlayerSprites2D(sector_t * viewsector, area_t in_area)
 		{
 			continue;
 		}
+		if (psp->NoDraw) continue;   // RS FORK -- see the 3D pass
 		if (!psp->GetState()) continue;
 
 		FSpriteModelFrame *smf = FindModelFrame(psp->Caller, psp->GetSprite(), psp->GetFrame(), false);
@@ -2380,6 +2381,11 @@ void HWDrawInfo::PreparePlayerSprites3D(sector_t * viewsector, area_t in_area)
 		{
 			continue;
 		}
+		// RS FORK -- a layer the script has hidden. Checked in BOTH passes, so
+		// a suppressed weapon disappears whether it draws as a model or a
+		// sprite; hiding it in one pass only would make the result depend on
+		// whether the mod happened to ship a mesh.
+		if (psp->NoDraw) continue;
 		if (!psp->GetState()) continue;
 		FSpriteModelFrame *smf = FindModelFrame(psp->Caller, psp->GetSprite(), psp->GetFrame(), false);
 

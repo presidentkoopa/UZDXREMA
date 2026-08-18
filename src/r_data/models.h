@@ -134,6 +134,12 @@ struct ModelDrawInfo
 	int modelframe;
 	int modelframenext;
 	FTextureID skinid;
+
+	// RS FORK -- set when the frame above was chosen deliberately from ZScript
+	// (the psprite's ModelFrame, or the native state remap) rather than falling
+	// out of the sprite table. Only a deliberate frame is allowed to override a
+	// decoupled model's rest pose -- see ProcessModelFrame.
+	bool modelframe_explicit = false;
 };
 
 class DActorModelData;
