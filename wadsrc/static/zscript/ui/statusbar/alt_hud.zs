@@ -575,6 +575,11 @@ class AltHud ui
 		if (weapon.bPOWERED_UP) return;
 		let SisterWeapon = weapon.SisterWeapon;
 		if (SisterWeapon && (weapon is SisterWeapon.GetClass())) return;
+		// A weapon stowed in a VR holster (bHolsterHidden) does not belong
+		// in a weapon-switch strip either -- same reasoning as CheckAmmo's
+		// own guard, just applied to this HUD's list instead of the actual
+		// switch logic.
+		if (weapon.bHolsterHidden) return;
 
 		trans=0.4;
 		if ( weapon && (weapon == CPlayer.ReadyWeapon || weapon == CPlayer.OffhandWeapon))

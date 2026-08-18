@@ -768,6 +768,18 @@ namespace
 			return false;
 		}
 
+		// Stowed in a VR holster -- same rule CheckAmmo already enforces for
+		// weapnext/weapprev/slot-select (weapons.zs), applied here too. This
+		// path calls PlayerPawn::MoveWeaponToHand directly rather than going
+		// through CheckAmmo at all, so without this the wheel could select a
+		// holstered weapon straight into a hand and leave it permanently
+		// stuck (bHolsterHidden never gets cleared outside the holster
+		// mod's own draw path).
+		if (weapon->BoolVar("bHolsterHidden"))
+		{
+			return false;
+		}
+
 		auto sisterWeapon = weapon->PointerVar<AActor>(NAME_SisterWeapon);
 		if (sisterWeapon != nullptr && weapon->GetClass()->IsDescendantOf(sisterWeapon->GetClass()))
 		{
