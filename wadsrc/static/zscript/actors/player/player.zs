@@ -585,45 +585,6 @@ class PlayerPawn : Actor
 	//
 	//------------------------------------------------------------------------
 
-	// ===== TEMPORARY DIAGNOSTICS =====
-	private static String RS_W(Weapon w)
-	{
-		if (w == null) return "null";
-		String f = "(main)";
-		if (w.bOffhandWeapon) f = "(off)";
-		return w.GetClassName() .. f;
-	}
-
-	static void RS_Tag(String where, PlayerInfo p)
-	{
-		String pend = "NOCHANGE";
-		if (p.PendingWeapon != WP_NOCHANGE) pend = RS_W(p.PendingWeapon);
-		Console.Printf("   [SET %s] ready=%s off=%s pending=%s", where,
-			RS_W(p.ReadyWeapon), RS_W(p.OffhandWeapon), pend);
-	}
-
-	transient Weapon rs_lr, rs_lo, rs_lp;
-	transient bool rs_init;
-
-	void RS_Watch()
-	{
-		let rw = player.ReadyWeapon;
-		let ow = player.OffhandWeapon;
-		let pw = player.PendingWeapon;
-		if (!rs_init) { rs_init = true; rs_lr = rw; rs_lo = ow; rs_lp = pw; return; }
-		if (rw == rs_lr && ow == rs_lo && pw == rs_lp) return;
-
-		String pend = "NOCHANGE";
-		if (pw != WP_NOCHANGE) pend = RS_W(pw);
-		Console.Printf("[WATCH t=%d] ready=%s off=%s pending=%s", level.maptime,
-			RS_W(rw), RS_W(ow), pend);
-		if (rw != null && rw.bOffhandWeapon)
-			Console.Printf("   !! BROKEN: ReadyWeapon %s flagged offhand", rw.GetClassName());
-		if (ow != null && !ow.bOffhandWeapon)
-			Console.Printf("   !! BROKEN: OffhandWeapon %s flagged mainhand", ow.GetClassName());
-		rs_lr = rw; rs_lo = ow; rs_lp = pw;
-	}
-	// ===== END DIAGNOSTICS =====
 
 	virtual void TickPSprites()
 	{
@@ -639,14 +600,6 @@ class PlayerPawn : Actor
 				(pspr.ID == PSP_WEAPON && pspr.Caller != pspr.Owner.ReadyWeapon) ||
 				(pspr.ID == PSP_OFFHANDWEAPON && pspr.Caller != pspr.Owner.OffhandWeapon))
 			{
-				{
-					String why = "caller-not-in-either-slot";
-					if (pspr.Caller == null) why = "caller-null";
-					else if (pspr.ID == PSP_WEAPON && pspr.Caller != pspr.Owner.ReadyWeapon) why = "PSP_WEAPON caller != ReadyWeapon";
-					else if (pspr.ID == PSP_OFFHANDWEAPON && pspr.Caller != pspr.Owner.OffhandWeapon) why = "PSP_OFFHAND caller != OffhandWeapon";
-					String cn = "null"; if (pspr.Caller) cn = pspr.Caller.GetClassName();
-					Console.Printf("[KILL t=%d] layer=%d caller=%s reason=%s", level.maptime, pspr.ID, cn, why);
-				}
 				pspr.Destroy();
 			}
 			else
@@ -1818,7 +1771,6 @@ class PlayerPawn : Actor
 	{
 		let player = self.player;
 		UserCmd cmd = player.cmd;
-		RS_Watch();
 
 		// [RL0] Mark players that became zombies (this stays even if they 'revive' by healing, until a level change)
 		if((Level.compatflags2 & COMPATF2_VOODOO_ZOMBIES) && player.health <= 0 && player.mo.health > 0)
@@ -2085,7 +2037,6 @@ class PlayerPawn : Actor
 					player.ReadyWeapon = null;
 				}
 				player.OffhandWeapon = weapon;
-				RS_Tag("BringUp->OFF", player);
 				weapon.bOffhandWeapon = true;
 				if (weapon.SisterWeapon) weapon.SisterWeapon.bOffhandWeapon = true;
 				if (weapon.bTwoHanded || (player.ReadyWeapon && player.ReadyWeapon.bTwoHanded))
@@ -2102,7 +2053,6 @@ class PlayerPawn : Actor
 					player.OffhandWeapon = null;
 				}
 				player.ReadyWeapon = weapon;
-				RS_Tag("BringUp->READY", player);
 				weapon.bOffhandWeapon = false;
 				if (weapon.SisterWeapon) weapon.SisterWeapon.bOffhandWeapon = false;
 				if (weapon.bTwoHanded || (player.OffhandWeapon && player.OffhandWeapon.bTwoHanded))

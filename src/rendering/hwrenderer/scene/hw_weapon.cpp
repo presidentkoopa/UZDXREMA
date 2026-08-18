@@ -121,6 +121,7 @@ extern float doomYaw;
 CVAR(Bool, r_transparentPlayerSprites, true, CVAR_ARCHIVE)
 
 EXTERN_CVAR(Int, r_PlayerSprites3DMode)
+EXTERN_CVAR(Float, r_hudflatoverlay)
 EXTERN_CVAR(Float, gl_fatItemWidth)
 
 enum PlayerSprites3DMode
@@ -2247,12 +2248,62 @@ void HWDrawInfo::PreparePlayerSprites2D(sector_t * viewsector, area_t in_area)
 		// This is an 'either-or' proposition. This maybe needs some work to allow overlays with weapon models but as originally implemented this just won't work.
 		if (smf) continue;
 
+		// RS FORK -- FLAT OVERLAYS ON A WEAPON THAT IS ITSELF A MODEL.
+		//
+		// VR runs two passes over this same psprite list: PreparePlayerSprites3D
+		// keeps the layers that resolve a model, this one keeps the layers that
+		// do not. A muzzle flash is its own layer, owned by the same weapon,
+		// and it has no model of its own -- so when the gun is a mesh, the 3D
+		// pass draws the gun and this pass draws the flash, and you get a flat
+		// billboard hanging in front of a 3D weapon.
+		//
+		// This cannot be fixed from ZScript. psp->alpha is discarded by
+		// DPSprite::GetRenderStyle unless the layer carries PSPF_ALPHA or
+		// PSPF_FORCEALPHA, which a plain A_GunFlash overlay does not set, and
+		// the decision itself is a `continue` in a render loop that no script
+		// participates in.
+		//
+		// Deliberately scoped to "the weapon owning this layer is drawn as a
+		// model" rather than "hide flashes". A sprite weapon keeps its flash:
+		// the lookup below returns null for it and nothing is suppressed. With
+		// the cvar at its 1.0 default nothing is suppressed either way, so
+		// stock behaviour is untouched until someone opts in.
+		float flatOverlayAlpha = 1.0f;
+		if (r_hudflatoverlay < 1.0f && psp->Caller != nullptr
+			&& psp->GetID() != PSP_WEAPON && psp->GetID() != PSP_OFFHANDWEAPON)
+		{
+			bool ownerDrawsAsModel = false;
+			for (DPSprite *own = player->psprites;
+				 own != nullptr && own->GetID() < PSP_TARGETCENTER;
+				 own = own->GetNext())
+			{
+				if (own == psp || own->Caller != psp->Caller) continue;
+				if (own->GetID() != PSP_WEAPON && own->GetID() != PSP_OFFHANDWEAPON) continue;
+				if (!own->GetState()) continue;
+				if (FindModelFrame(own->Caller, own->GetSprite(), own->GetFrame(), false))
+				{
+					ownerDrawsAsModel = true;
+					break;
+				}
+			}
+			if (ownerDrawsAsModel)
+			{
+				if (r_hudflatoverlay <= 0.0f) continue;   // fully hidden
+				flatOverlayAlpha = r_hudflatoverlay;      // dimmed
+			}
+		}
+
 		HUDSprite hudsprite;
 		hudsprite.owner = playermo;
 		hudsprite.mframe = smf;
 		hudsprite.weapon = psp;
 
 		if (!hudsprite.GetWeaponRenderStyle(psp, camera, viewsector, light, vp.TicFrac)) continue;
+
+		// RS fork -- dim rather than hide, when the cvar sits between 0 and 1.
+		// Applied after the render style, which is what establishes the layer's
+		// own alpha in the first place.
+		if (flatOverlayAlpha < 1.0f) hudsprite.alpha *= flatOverlayAlpha;
 
 		WeaponPosition2D weap = GetWeaponPosition2D(camera->player, vp.TicFrac, psp);
 

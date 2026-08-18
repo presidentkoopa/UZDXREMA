@@ -595,21 +595,28 @@ CCMD (switchhand)
 		auto mo = players[consoleplayer].mo;
 		if (mo)
 		{
-			if (multiplayer)
-			{
-				Net_WriteInt8(DEM_ZSC_CMD);
-				Net_WriteString("vr_switchhand");
-				Net_WriteInt16(1);
-				Net_WriteInt8(hand != 0 ? 1 : 0);
-			}
-			else
-			{
-				IFVIRTUALPTRNAME(mo, NAME_PlayerPawn, SwitchWeaponHand)
-				{
-					VMValue param[] = { mo, hand };
-					VMCall(func, param, 2, nullptr, 0);
-				}
-			}
+			// Always queue it, singleplayer included.
+			//
+			// A CCMD runs from the console handler, NOT from P_Ticker. Calling
+			// SwitchWeaponHand straight from here ran it at an arbitrary point
+			// relative to the game tick -- and it nulls BOTH weapon slots before
+			// repopulating them. When the psprite tick landed inside that window,
+			// TickPSprites destroyed both layers, because a psprite whose Caller
+			// does not match its slot is deleted on sight. That is the weapons
+			// flashing and vanishing, and the one-tic flag/slot disagreement that
+			// sent the shot to one hand while the model drew in the other.
+			//
+			// The multiplayer branch was already correct: DEM_ZSC_CMD is consumed
+			// inside the tick, so the whole swap completes between psprite ticks
+			// and is never observed half-applied. Taking that path unconditionally
+			// makes singleplayer behave the same.
+			//
+			// QuestZDoom has no switchhand CCMD -- its hand switching runs inside
+			// the tick -- which is why this bug is ours and not upstream's.
+			Net_WriteInt8(DEM_ZSC_CMD);
+			Net_WriteString("vr_switchhand");
+			Net_WriteInt16(1);
+			Net_WriteInt8(hand != 0 ? 1 : 0);
 		}
 	}
 }

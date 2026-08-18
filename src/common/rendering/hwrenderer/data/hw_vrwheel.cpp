@@ -1229,18 +1229,19 @@ namespace
 			if (weapon != nullptr)
 			{
 				const bool targetOffhand = wheel.Type == EVRWheelType::OffhandWeapon;
-				if (multiplayer)
-				{
-					Net_WriteInt8(DEM_ZSC_CMD);
-					Net_WriteString("vr_moveweaphand");
-					Net_WriteInt16(5);
-					Net_WriteInt32(weapon->InventoryID);
-					Net_WriteInt8(targetOffhand ? 1 : 0);
-				}
-				else
-				{
-					MoveWeaponToHand(player, weapon, targetOffhand);
-				}
+				// Always queue it, singleplayer included -- same reason as the
+				// switchhand CCMD in g_game.cpp. This runs from the wheel's close
+				// handler, off the game tick, and MoveWeaponToHand mutates the
+				// weapon-hand slots. Applied outside P_Ticker, the psprite tick
+				// can observe the slots half-updated and destroy both layers,
+				// because TickPSprites deletes any psprite whose Caller does not
+				// match its slot. DEM_ZSC_CMD is consumed inside the tick, so the
+				// change is never seen half-applied.
+				Net_WriteInt8(DEM_ZSC_CMD);
+				Net_WriteString("vr_moveweaphand");
+				Net_WriteInt16(5);
+				Net_WriteInt32(weapon->InventoryID);
+				Net_WriteInt8(targetOffhand ? 1 : 0);
 			}
 		}
 		else if (wheel.Type == EVRWheelType::Inventory)

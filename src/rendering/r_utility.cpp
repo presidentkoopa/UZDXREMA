@@ -99,6 +99,10 @@ CVAR (Bool, r_drawvoxels, true, 0)
 CVAR (Bool, r_drawplayersprites, true, 0)	// [RH] Draw player sprites?
 CVAR(Int, r_PlayerSprites3DMode, 1, CVAR_ARCHIVE); // Back only as default
 CVAR(Float, gl_fatItemWidth, 0.5f, CVAR_ARCHIVE);
+// RS fork -- opacity of FLAT psprite overlays belonging to a weapon that is
+// itself being drawn as a 3D model. 1.0 is stock behaviour and changes
+// nothing; 0.0 hides them. See PreparePlayerSprites2D in hw_weapon.cpp.
+CVAR(Float, r_hudflatoverlay, 1.0f, CVAR_ARCHIVE);
 CVARD (Bool, r_radarclipper, false, CVAR_ARCHIVE | CVAR_SERVERINFO | CVAR_CHEAT, "Use the horizontal clipper from camera->tracer's perspective")
 CVARD (Bool, r_dithertransparency, false, CVAR_ARCHIVE | CVAR_SERVERINFO | CVAR_CHEAT, "Use dithered-transparency shading for actor-occluding level geometry")
 CUSTOM_CVAR(Float, r_quakeintensity, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // Defaulted to 0 for VR
