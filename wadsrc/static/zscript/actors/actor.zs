@@ -411,6 +411,11 @@ class Actor : Thinker native
 	// 0 none, 1 holster, 2 stabilize, 3 modifier, 4 plain (EGripContext).
 	// Engine-owned and the mirror of HolsterClaim* above: script says what it
 	// wants to claim, this reports what actually won.
+	// Capacitive finger contact. Bit 0 = thumb resting on a surface, bit 1 =
+	// index resting on the trigger. Contact, not press -- an index can rest on
+	// the trigger without firing, which is the pose that reads as gun handling.
+	native readonly int FingerTouchMain;
+	native readonly int FingerTouchOff;
 	native readonly int GripContextMain;
 	native readonly int GripContextOff;
 

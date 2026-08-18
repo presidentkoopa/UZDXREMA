@@ -1794,6 +1794,11 @@ public:
 	int GripContextMain;
 	int GripContextOff;
 
+	// Capacitive finger contact, FINGERTOUCH_* bits. Contact is not a press:
+	// this says where a finger RESTS, which is what a hand pose needs.
+	int FingerTouchMain;
+	int FingerTouchOff;
+
 	// Accumulated CONTROLLER-driven yaw (snap turn and stick turn), in degrees.
 	// HmdYaw is physical head yaw PLUS this, and separating them matters: a
 	// body-relative anchor must follow controller rotation exactly, because

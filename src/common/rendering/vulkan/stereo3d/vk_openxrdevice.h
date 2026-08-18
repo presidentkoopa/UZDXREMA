@@ -78,6 +78,17 @@ enum EGripContext
 	GRIPCTX_Plain,      // ordinary grip, whatever it is bound to
 };
 
+// Capacitive touch reports skin CONTACT without a press, which is what says
+// where a finger is resting rather than what it is doing -- a thumb lying on
+// the stick versus lifted clear, an index along the frame versus on the
+// trigger. Published to ZScript as a bitfield so more sensors (Index reads
+// all four fingers) can be added later without changing the field.
+enum
+{
+	FINGERTOUCH_THUMB = 1 << 0,
+	FINGERTOUCH_INDEX = 1 << 1,
+};
+
 class VKOpenXRDeviceMode : public VRMode
 {
 public:
@@ -199,6 +210,8 @@ protected:
 	mutable XrAction xrYAction = XR_NULL_HANDLE;
 	mutable XrAction xrPrimaryAction = XR_NULL_HANDLE;
 	mutable XrAction xrSecondaryAction = XR_NULL_HANDLE;
+	mutable XrAction xrThumbTouchAction = XR_NULL_HANDLE;
+	mutable XrAction xrTriggerTouchAction = XR_NULL_HANDLE;
 	mutable XrPath xrLeftHandPath = XR_NULL_PATH;
 	mutable XrPath xrRightHandPath = XR_NULL_PATH;
 	mutable XrPosef xrHandPoses[2] = { { {0,0,0,1}, {0,0,0} }, { {0,0,0,1}, {0,0,0} } };
@@ -212,6 +225,9 @@ protected:
 	// re-deriving intent from the raw button, which is how two of them used
 	// to fire at once.
 	mutable int xrGripContext[2] = { 0, 0 };
+
+	// Capacitive finger contact per hand, as FINGERTOUCH_* bits.
+	mutable int xrFingerTouch[2] = { 0, 0 };
 	// Tap-vs-combo resolution for grip. A grip press that STARTS inside a
 	// holster arms a pending store; if any other button joins it before
 	// release then it was a modifier combo and the store is cancelled. So the

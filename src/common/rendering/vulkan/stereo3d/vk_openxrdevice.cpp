@@ -97,6 +97,11 @@ EXTERN_CVAR(Bool, vr_teleport);
 EXTERN_CVAR(Float, vr_weaponRotate);
 EXTERN_CVAR(Float, vr_weaponScale);
 EXTERN_CVAR(Bool, vr_enable_haptics);
+
+// Traces the haptic path end to end. A pulse that never reaches the runtime
+// and a pulse the controller ignores are indistinguishable from inside the
+// headset, so each stage says whether it ran.
+CVAR(Bool, vr_haptic_debug, true, 0)
 EXTERN_CVAR(Float, vr_2dweaponScale);
 EXTERN_CVAR(Float, vr_2dweaponOffsetX);
 EXTERN_CVAR(Float, vr_2dweaponOffsetY);
@@ -961,6 +966,8 @@ struct OpenXRHandInputState
 	bool b = false;
 	bool x = false;
 	bool y = false;
+	bool thumbTouch = false;
+	bool triggerTouch = false;
 	XrVector2f thumbstick = { 0.0f, 0.0f };
 	XrVector2f trackpad = { 0.0f, 0.0f };
 };
@@ -2035,6 +2042,8 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	createAction("button_y", "Button Y", XR_ACTION_TYPE_BOOLEAN_INPUT, xrYAction);
 	createAction("primary", "Primary", XR_ACTION_TYPE_BOOLEAN_INPUT, xrPrimaryAction);
 	createAction("secondary", "Secondary", XR_ACTION_TYPE_BOOLEAN_INPUT, xrSecondaryAction);
+	createAction("thumb_touch", "Thumb Touch", XR_ACTION_TYPE_BOOLEAN_INPUT, xrThumbTouchAction);
+	createAction("trigger_touch", "Trigger Touch", XR_ACTION_TYPE_BOOLEAN_INPUT, xrTriggerTouchAction);
 	createAction("haptic", "Haptic", XR_ACTION_TYPE_VIBRATION_OUTPUT, xrHapticAction);
 
 	XrPath leftTriggerClickPath = XR_NULL_PATH;
@@ -2107,6 +2116,35 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	xrStringToPath(xrInstance, "/user/hand/left/input/b/click", &leftSecondaryClickPath);
 	xrStringToPath(xrInstance, "/user/hand/right/input/b/click", &rightSecondaryClickPath);
 
+	// Capacitive touch paths.
+	//
+	// Suggested ONLY for the Oculus Touch profile below. A suggested binding
+	// naming a path the profile does not define makes
+	// xrSuggestInteractionProfileBindings reject the ENTIRE profile rather than
+	// the single binding, which presents as the controller losing all input --
+	// so these are withheld from Vive, WMR and the simple profile, none of
+	// which define them.
+	XrPath leftThumbrestTouchPath = XR_NULL_PATH;
+	XrPath rightThumbrestTouchPath = XR_NULL_PATH;
+	XrPath leftThumbstickTouchPath = XR_NULL_PATH;
+	XrPath rightThumbstickTouchPath = XR_NULL_PATH;
+	XrPath leftXTouchPath = XR_NULL_PATH;
+	XrPath leftYTouchPath = XR_NULL_PATH;
+	XrPath rightATouchPath = XR_NULL_PATH;
+	XrPath rightBTouchPath = XR_NULL_PATH;
+	XrPath leftTriggerTouchPath = XR_NULL_PATH;
+	XrPath rightTriggerTouchPath = XR_NULL_PATH;
+	xrStringToPath(xrInstance, "/user/hand/left/input/thumbrest/touch", &leftThumbrestTouchPath);
+	xrStringToPath(xrInstance, "/user/hand/right/input/thumbrest/touch", &rightThumbrestTouchPath);
+	xrStringToPath(xrInstance, "/user/hand/left/input/thumbstick/touch", &leftThumbstickTouchPath);
+	xrStringToPath(xrInstance, "/user/hand/right/input/thumbstick/touch", &rightThumbstickTouchPath);
+	xrStringToPath(xrInstance, "/user/hand/left/input/x/touch", &leftXTouchPath);
+	xrStringToPath(xrInstance, "/user/hand/left/input/y/touch", &leftYTouchPath);
+	xrStringToPath(xrInstance, "/user/hand/right/input/a/touch", &rightATouchPath);
+	xrStringToPath(xrInstance, "/user/hand/right/input/b/touch", &rightBTouchPath);
+	xrStringToPath(xrInstance, "/user/hand/left/input/trigger/touch", &leftTriggerTouchPath);
+	xrStringToPath(xrInstance, "/user/hand/right/input/trigger/touch", &rightTriggerTouchPath);
+
 	XrPath simpleProfile = XR_NULL_PATH;
 	XrPath viveProfile = XR_NULL_PATH;
 	XrPath touchProfile = XR_NULL_PATH;
@@ -2164,6 +2202,19 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	AddBinding(touchBindings, xrPoseAction, rightAimPosePath);
 	AddBinding(touchBindings, xrHapticAction, leftHapticPath);
 	AddBinding(touchBindings, xrHapticAction, rightHapticPath);
+	// One action bound to several paths: a boolean action is true when ANY
+	// bound source is, so "the thumb is resting on something" needs no
+	// per-surface logic here -- the runtime does the OR.
+	AddBinding(touchBindings, xrThumbTouchAction, leftThumbrestTouchPath);
+	AddBinding(touchBindings, xrThumbTouchAction, rightThumbrestTouchPath);
+	AddBinding(touchBindings, xrThumbTouchAction, leftThumbstickTouchPath);
+	AddBinding(touchBindings, xrThumbTouchAction, rightThumbstickTouchPath);
+	AddBinding(touchBindings, xrThumbTouchAction, leftXTouchPath);
+	AddBinding(touchBindings, xrThumbTouchAction, leftYTouchPath);
+	AddBinding(touchBindings, xrThumbTouchAction, rightATouchPath);
+	AddBinding(touchBindings, xrThumbTouchAction, rightBTouchPath);
+	AddBinding(touchBindings, xrTriggerTouchAction, leftTriggerTouchPath);
+	AddBinding(touchBindings, xrTriggerTouchAction, rightTriggerTouchPath);
 	SuggestBindingsForProfile(xrInstance, touchProfile, "Oculus Touch", touchBindings);
 
 	std::vector<XrActionSuggestedBinding> indexBindings;
@@ -2745,6 +2796,8 @@ void VKOpenXRDeviceMode::DestroyOpenXR() const
 	xrSelectAction = XR_NULL_HANDLE;
 	xrMenuAction = XR_NULL_HANDLE;
 	xrGripAction = XR_NULL_HANDLE;
+	xrThumbTouchAction = XR_NULL_HANDLE;
+	xrTriggerTouchAction = XR_NULL_HANDLE;
 	xrThumbClickAction = XR_NULL_HANDLE;
 	xrThumbstickAction = XR_NULL_HANDLE;
 	xrAAction = XR_NULL_HANDLE;
@@ -3134,6 +3187,11 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		input.y = GetActionBoolean(xrSession, xrYAction, handPath);
 		input.trackpad = GetActionVector2f(xrSession, xrTrackpadAction, handPath);
 		input.thumbstick = GetActionVector2f(xrSession, xrThumbstickAction, handPath);
+		input.thumbTouch = GetActionBoolean(xrSession, xrThumbTouchAction, handPath);
+		input.triggerTouch = GetActionBoolean(xrSession, xrTriggerTouchAction, handPath);
+
+		xrFingerTouch[hand] = (input.thumbTouch ? FINGERTOUCH_THUMB : 0)
+		                    | (input.triggerTouch ? FINGERTOUCH_INDEX : 0);
 	}
 
 	static bool lastMenuMode = false;
@@ -3443,6 +3501,8 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		{
 			consolePawn->GripContextMain = xrGripContext[mainHand];
 			consolePawn->GripContextOff  = xrGripContext[offHand];
+			consolePawn->FingerTouchMain = xrFingerTouch[mainHand];
+			consolePawn->FingerTouchOff  = xrFingerTouch[offHand];
 			consolePawn->VRTurnYaw = snapTurn;
 		}
 
@@ -3908,6 +3968,12 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 	{
 		emitGameplayHandButtons(0, true);
 		emitGameplayHandButtons(1, menuactive == MENU_WaitKey);
+		// Haptics still need servicing here. This returns before the
+		// ProcessHaptics() at the end of the function, so without this call a
+		// pulse in flight when a menu opens is never advanced and never
+		// stopped -- the sibling early return above does the same thing for
+		// exactly this reason.
+		ProcessHaptics();
 		return;
 	}
 
@@ -5578,6 +5644,23 @@ void VKOpenXRDeviceMode::ProcessHaptics() const
 {
 	if (!vr_enable_haptics || xrSession == XR_NULL_HANDLE || xrHapticAction == XR_NULL_HANDLE || !isSessionRunning)
 	{
+		if (vr_haptic_debug)
+		{
+			const int reason = !vr_enable_haptics ? 0
+			                 : (xrSession == XR_NULL_HANDLE) ? 1
+			                 : (xrHapticAction == XR_NULL_HANDLE) ? 2 : 3;
+			static int lastReason = -1;
+			if (reason != lastReason)
+			{
+				lastReason = reason;
+				static const char *why[4] = {
+					"vr_enable_haptics is off",
+					"no XR session",
+					"haptic action was never created",
+					"XR session is not running" };
+				Printf("[HAPTIC] not processing: %s\n", why[reason]);
+			}
+		}
 		StopHaptics();
 		return;
 	}
@@ -5615,6 +5698,16 @@ void VKOpenXRDeviceMode::ProcessHaptics() const
 		XrResult result = xrApplyHapticFeedback(xrSession, &actionInfo, (XrHapticBaseHeader*)&vibration);
 		if (XR_SUCCEEDED(result))
 		{
+			// Only on the leading edge: this re-issues every frame for the life
+			// of the pulse, and logging all of them would bury everything else.
+			if (vr_haptic_debug && !xrHapticActive[hand])
+			{
+				Printf("[HAPTIC] runtime accepted %s pulse amp=%.2f dur=%lldns remaining=%.0fms\n",
+					hand == 0 ? "left" : "right",
+					(double)vibration.amplitude,
+					(long long)vibration.duration,
+					xrHapticDuration[hand]);
+			}
 			xrHapticActive[hand] = true;
 			lastHapticError[hand] = XR_SUCCESS;
 		}
@@ -5657,6 +5750,15 @@ void VKOpenXRDeviceMode::Vibrate(float duration, int channel, float intensity) c
 
 	if (!vr_enable_haptics)
 		return;
+
+	if (vr_haptic_debug)
+	{
+		// If this line never appears, nothing is asking for haptics at all and
+		// the fault is upstream of OpenXR -- most likely the active VRMode is
+		// not this one, so Vibrate is landing on a different implementation.
+		Printf("[HAPTIC] Vibrate ch=%d (%s) dur=%.0fms amp=%.2f\n",
+			channel, channel == 0 ? "left" : "right", (double)duration, (double)intensity);
+	}
 
 	xrHapticDuration[channel] = duration;
 	xrHapticIntensity[channel] = intensity;

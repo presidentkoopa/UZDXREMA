@@ -1674,6 +1674,22 @@ double VR_GetScriptLaserRange()
 	return g_scriptLaserRange;
 }
 
+// Fires a pulse directly, bypassing every gameplay trigger. This separates
+// "the haptic pipeline is broken" from "nothing is calling it", which is
+// otherwise guesswork -- both present as a silent controller.
+CCMD(vr_haptictest)
+{
+	const VRMode *vrmode = VRMode::GetVRModeCached();
+	if (vrmode == nullptr)
+	{
+		Printf("[HAPTIC] no VR mode active -- nothing to pulse\n");
+		return;
+	}
+	Printf("[HAPTIC] test: 300ms at 0.8 on both hands, vr_enable_haptics=%d\n", *vr_enable_haptics ? 1 : 0);
+	vrmode->Vibrate(300.0f, 0, 0.8f);
+	vrmode->Vibrate(300.0f, 1, 0.8f);
+}
+
 // [BB] Script-requested haptic pulse -- see the note in hw_vrmodes.h.
 //
 // The handedness swap is the whole reason this exists rather than exposing
