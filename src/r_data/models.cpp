@@ -56,6 +56,12 @@ EXTERN_CVAR(Float, vr_hand_ofs_z);
 EXTERN_CVAR(Float, vr_hand_yaw);
 EXTERN_CVAR(Float, vr_hand_pitch);
 EXTERN_CVAR(Float, vr_hand_roll);
+EXTERN_CVAR(Float, vr_offhand_ofs_x);
+EXTERN_CVAR(Float, vr_offhand_ofs_y);
+EXTERN_CVAR(Float, vr_offhand_ofs_z);
+EXTERN_CVAR(Float, vr_offhand_yaw);
+EXTERN_CVAR(Float, vr_offhand_pitch);
+EXTERN_CVAR(Float, vr_offhand_roll);
 
 extern TDeletingArray<FVoxel *> Voxels;
 extern TDeletingArray<FVoxelDef *> VoxelDefs;
@@ -351,9 +357,14 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	// number found on a slider can be folded into MODELDEF and the slider zeroed
 	// with nothing moving.
 	const bool useHandOfs = !!(smf_flags & MDL_USEHANDOFFSETS);
-	const float handOfsX = useHandOfs ? (float)vr_hand_ofs_x : 0.0f;
-	const float handOfsY = useHandOfs ? (float)vr_hand_ofs_y : 0.0f;
-	const float handOfsZ = useHandOfs ? (float)vr_hand_ofs_z : 0.0f;
+	// Which set of sliders this model listens to. The two hands are one mesh
+	// mirrored by a negative X scale, so a shared value pushes them in opposite
+	// directions and no single number can place both -- they each need their own.
+	// hand was resolved above from the psprite, so it is already known here.
+	const bool isOffhand = (hand == 1);
+	const float handOfsX = useHandOfs ? (float)(isOffhand ? vr_offhand_ofs_x : vr_hand_ofs_x) : 0.0f;
+	const float handOfsY = useHandOfs ? (float)(isOffhand ? vr_offhand_ofs_y : vr_hand_ofs_y) : 0.0f;
+	const float handOfsZ = useHandOfs ? (float)(isOffhand ? vr_offhand_ofs_z : vr_hand_ofs_z) : 0.0f;
 
 	objectToWorldMatrix.translate((smf->xoffset + handOfsX) / smf->xscale,
 		(smf->zoffset + handOfsZ) / smf->zscale,
@@ -388,9 +399,9 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	// already-rotated axis and is NOT the same as the same number added to
 	// angleoffset. Summing here is what makes the slider and the MODELDEF
 	// keyword interchangeable.
-	const float handYaw   = useHandOfs ? (float)vr_hand_yaw   : 0.0f;
-	const float handPitch = useHandOfs ? (float)vr_hand_pitch : 0.0f;
-	const float handRoll  = useHandOfs ? (float)vr_hand_roll  : 0.0f;
+	const float handYaw   = useHandOfs ? (float)(isOffhand ? vr_offhand_yaw   : vr_hand_yaw)   : 0.0f;
+	const float handPitch = useHandOfs ? (float)(isOffhand ? vr_offhand_pitch : vr_hand_pitch) : 0.0f;
+	const float handRoll  = useHandOfs ? (float)(isOffhand ? vr_offhand_roll  : vr_hand_roll)  : 0.0f;
 
 	objectToWorldMatrix.rotate(-(smf->angleoffset + handYaw), 0, 1, 0);
 	objectToWorldMatrix.rotate(smf->pitchoffset + handPitch, 0, 0, 1);

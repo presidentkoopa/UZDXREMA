@@ -970,6 +970,15 @@ CVAR(Float, vr_hand_ofs_z, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_hand_yaw,   0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_hand_pitch, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_hand_roll,  0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// The off hand needs its own set. Both hands are the same mesh mirrored by a
+// negative X scale, so one shared value pushes them in opposite directions and
+// no single number can place both.
+CVAR(Float, vr_offhand_ofs_x, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_offhand_ofs_y, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_offhand_ofs_z, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_offhand_yaw,   0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_offhand_pitch, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_offhand_roll,  0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
 CVAR(Bool, vr_enable_haptics, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_pickup_haptic_level, 0.2, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
