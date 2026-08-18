@@ -78,6 +78,17 @@ class FMD3Model : public FModel
 	TArray<MD3Frame> Frames;
 	TArray<MD3Surface> Surfaces;
 
+	// Largest |X|/|Y|/|Z| across every surface's vertices, every frame,
+	// computed once in LoadGeometry() while MD3Surface::Vertices still
+	// exists. BuildVertexBuffer() calls surf->UnloadGeometry() right after
+	// uploading to the GPU, which Resets those TArrays for good -- by the
+	// time a script-side query could ask for the model's size, the raw
+	// vertex data is long gone. Caching three floats here (same idea as
+	// MD3Frame::origin already caching a per-frame summary instead of
+	// keeping the frame's full geometry around) survives that free.
+	float cachedMaxAbsX = 0.f, cachedMaxAbsY = 0.f, cachedMaxAbsZ = 0.f;
+	bool hasCachedExtent = false;
+
 public:
 	FMD3Model() = default;
 
@@ -88,4 +99,5 @@ public:
 	void LoadGeometry(FileSys::FileData* lumpData) override;
 	void BuildVertexBuffer(FModelRenderer *renderer);
 	virtual void AddSkins(uint8_t *hitlist, const FTextureID* surfaceskinids) override;
+	bool GetLocalExtent(float* outMaxAbsX, float* outMaxAbsY, float* outMaxAbsZ) override;
 };

@@ -235,8 +235,36 @@ void FMD3Model::LoadGeometry(FileSys::FileData* lumpData)
 			s->Vertices[ii].y = LittleShort(vt[ii].y) / 64.f;
 			s->Vertices[ii].z = LittleShort(vt[ii].z) / 64.f;
 			UnpackVector(LittleShort(vt[ii].n), s->Vertices[ii].nx, s->Vertices[ii].ny, s->Vertices[ii].nz);
+
+			// See cachedMaxAbsX/Y/Z's declaration: this data is gone once
+			// BuildVertexBuffer's surf->UnloadGeometry() runs, so the summary
+			// has to be taken now, while it still exists. Largest per-axis
+			// magnitude across every surface AND every frame -- conservative
+			// (may slightly overstate the specific frame a holster shows),
+			// same tradeoff FOBJModel::GetLocalExtent already makes.
+			float ax = (s->Vertices[ii].x < 0.f) ? -s->Vertices[ii].x : s->Vertices[ii].x;
+			float ay = (s->Vertices[ii].y < 0.f) ? -s->Vertices[ii].y : s->Vertices[ii].y;
+			float az = (s->Vertices[ii].z < 0.f) ? -s->Vertices[ii].z : s->Vertices[ii].z;
+			if (ax > cachedMaxAbsX) cachedMaxAbsX = ax;
+			if (ay > cachedMaxAbsY) cachedMaxAbsY = ay;
+			if (az > cachedMaxAbsZ) cachedMaxAbsZ = az;
+			hasCachedExtent = true;
 		}
 	}
+}
+
+/**
+ * Largest |X|/|Y|/|Z| across every vertex this model ever had, cached in
+ * LoadGeometry() before BuildVertexBuffer() frees the raw data. See the
+ * field declarations in model_md3.h for why this can't read Vertices
+ * directly the way FOBJModel::GetLocalExtent does.
+ */
+bool FMD3Model::GetLocalExtent(float* outMaxAbsX, float* outMaxAbsY, float* outMaxAbsZ)
+{
+	*outMaxAbsX = cachedMaxAbsX;
+	*outMaxAbsY = cachedMaxAbsY;
+	*outMaxAbsZ = cachedMaxAbsZ;
+	return hasCachedExtent;
 }
 
 //===========================================================================

@@ -110,6 +110,14 @@ protected:
 	DMDLoDInfo		lodInfo[MAX_LODS];
 	DMDLoD			lods[MAX_LODS];
 
+	// Largest |X|/|Y|/|Z| across every frame's vertices, computed once in
+	// LoadGeometry() while framevtx still exists -- UnloadGeometry() (called
+	// from BuildVertexBuffer once the GPU buffer is built) deletes it for
+	// good, same reason FMD3Model caches this instead of reading its own
+	// per-frame vertex arrays on demand.
+	float cachedMaxAbsX = 0.f, cachedMaxAbsY = 0.f, cachedMaxAbsZ = 0.f;
+	bool hasCachedExtent = false;
+
 public:
 	FDMDModel()
 	{
@@ -134,6 +142,7 @@ public:
 
 	void UnloadGeometry();
 	void BuildVertexBuffer(FModelRenderer *renderer);
+	bool GetLocalExtent(float* outMaxAbsX, float* outMaxAbsY, float* outMaxAbsZ) override;
 
 };
 

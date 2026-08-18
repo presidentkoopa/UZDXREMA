@@ -204,6 +204,21 @@ void FDMDModel::LoadGeometry(FileSys::FileData* lumpData)
 				framev->vertices[k].xyz[axis[c]] =
 					(pVtx->vertex[c] * float(pfr->scale[c]) + float(pfr->translate[c]));
 			}
+
+			// See cachedMaxAbsX/Y/Z's declaration in model_md2.h: framevtx
+			// is deleted by UnloadGeometry() once BuildVertexBuffer has
+			// uploaded it, so this summary has to be taken now. Largest
+			// per-axis magnitude across every frame -- same conservative
+			// tradeoff FMD3Model/FOBJModel's GetLocalExtent already make.
+			for (c = 0; c < 3; c++)
+			{
+				float a = framev->vertices[k].xyz[c];
+				if (a < 0.f) a = -a;
+				if (c == 0 && a > cachedMaxAbsX) cachedMaxAbsX = a;
+				else if (c == 1 && a > cachedMaxAbsY) cachedMaxAbsY = a;
+				else if (c == 2 && a > cachedMaxAbsZ) cachedMaxAbsZ = a;
+			}
+			hasCachedExtent = true;
 		}
 	}
 
@@ -261,6 +276,19 @@ void FDMDModel::UnloadGeometry()
 
 	if (texCoords != NULL) delete[] texCoords;
 	texCoords = NULL;
+}
+
+/**
+ * Largest |X|/|Y|/|Z| across every vertex this model ever had, cached in
+ * LoadGeometry() before UnloadGeometry() frees framevtx. See the field
+ * declarations in model_md2.h.
+ */
+bool FDMDModel::GetLocalExtent(float* outMaxAbsX, float* outMaxAbsY, float* outMaxAbsZ)
+{
+	*outMaxAbsX = cachedMaxAbsX;
+	*outMaxAbsY = cachedMaxAbsY;
+	*outMaxAbsZ = cachedMaxAbsZ;
+	return hasCachedExtent;
 }
 
 //===========================================================================
@@ -541,6 +569,21 @@ void FMD2Model::LoadGeometry(FileSys::FileData* lumpData)
 				framev->vertices[k].xyz[axis[c]] =
 					(pVtx->vertex[c] * pfr->scale[c] + pfr->translate[c]);
 			}
+
+			// FMD2Model has its own LoadGeometry, separate from
+			// FDMDModel::LoadGeometry (the DMD-format one) -- this cache
+			// has to be filled here too, not just there, or an actual
+			// .md2 file (as opposed to a .dmd one) never gets one. See
+			// cachedMaxAbsX/Y/Z's declaration in model_md2.h.
+			for (c = 0; c < 3; c++)
+			{
+				float a = framev->vertices[k].xyz[c];
+				if (a < 0.f) a = -a;
+				if (c == 0 && a > cachedMaxAbsX) cachedMaxAbsX = a;
+				else if (c == 1 && a > cachedMaxAbsY) cachedMaxAbsY = a;
+				else if (c == 2 && a > cachedMaxAbsZ) cachedMaxAbsZ = a;
+			}
+			hasCachedExtent = true;
 		}
 	}
 
