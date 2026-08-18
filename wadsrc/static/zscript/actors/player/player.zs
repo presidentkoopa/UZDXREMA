@@ -585,6 +585,46 @@ class PlayerPawn : Actor
 	//
 	//------------------------------------------------------------------------
 
+	// ===== TEMPORARY DIAGNOSTICS =====
+	private static String RS_W(Weapon w)
+	{
+		if (w == null) return "null";
+		String f = "(main)";
+		if (w.bOffhandWeapon) f = "(off)";
+		return w.GetClassName() .. f;
+	}
+
+	static void RS_Tag(String where, PlayerInfo p)
+	{
+		String pend = "NOCHANGE";
+		if (p.PendingWeapon != WP_NOCHANGE) pend = RS_W(p.PendingWeapon);
+		Console.Printf("   [SET %s] ready=%s off=%s pending=%s", where,
+			RS_W(p.ReadyWeapon), RS_W(p.OffhandWeapon), pend);
+	}
+
+	transient Weapon rs_lr, rs_lo, rs_lp;
+	transient bool rs_init;
+
+	void RS_Watch()
+	{
+		let rw = player.ReadyWeapon;
+		let ow = player.OffhandWeapon;
+		let pw = player.PendingWeapon;
+		if (!rs_init) { rs_init = true; rs_lr = rw; rs_lo = ow; rs_lp = pw; return; }
+		if (rw == rs_lr && ow == rs_lo && pw == rs_lp) return;
+
+		String pend = "NOCHANGE";
+		if (pw != WP_NOCHANGE) pend = RS_W(pw);
+		Console.Printf("[WATCH t=%d] ready=%s off=%s pending=%s", level.maptime,
+			RS_W(rw), RS_W(ow), pend);
+		if (rw != null && rw.bOffhandWeapon)
+			Console.Printf("   !! BROKEN: ReadyWeapon %s flagged offhand", rw.GetClassName());
+		if (ow != null && !ow.bOffhandWeapon)
+			Console.Printf("   !! BROKEN: OffhandWeapon %s flagged mainhand", ow.GetClassName());
+		rs_lr = rw; rs_lo = ow; rs_lp = pw;
+	}
+	// ===== END DIAGNOSTICS =====
+
 	virtual void TickPSprites()
 	{
 		let player = self.player;
@@ -599,6 +639,14 @@ class PlayerPawn : Actor
 				(pspr.ID == PSP_WEAPON && pspr.Caller != pspr.Owner.ReadyWeapon) ||
 				(pspr.ID == PSP_OFFHANDWEAPON && pspr.Caller != pspr.Owner.OffhandWeapon))
 			{
+				{
+					String why = "caller-not-in-either-slot";
+					if (pspr.Caller == null) why = "caller-null";
+					else if (pspr.ID == PSP_WEAPON && pspr.Caller != pspr.Owner.ReadyWeapon) why = "PSP_WEAPON caller != ReadyWeapon";
+					else if (pspr.ID == PSP_OFFHANDWEAPON && pspr.Caller != pspr.Owner.OffhandWeapon) why = "PSP_OFFHAND caller != OffhandWeapon";
+					String cn = "null"; if (pspr.Caller) cn = pspr.Caller.GetClassName();
+					Console.Printf("[KILL t=%d] layer=%d caller=%s reason=%s", level.maptime, pspr.ID, cn, why);
+				}
 				pspr.Destroy();
 			}
 			else
@@ -1770,6 +1818,7 @@ class PlayerPawn : Actor
 	{
 		let player = self.player;
 		UserCmd cmd = player.cmd;
+		RS_Watch();
 
 		// [RL0] Mark players that became zombies (this stays even if they 'revive' by healing, until a level change)
 		if((Level.compatflags2 & COMPATF2_VOODOO_ZOMBIES) && player.health <= 0 && player.mo.health > 0)
@@ -2006,9 +2055,39 @@ class PlayerPawn : Actor
 		{
 			weapon.OnSelect();
 			player.SetPsprite(PSP_FLASH, null);
+			// Make the slot the single source of truth for which hand holds this
+			// weapon, and clear it out of the other one.
+			//
+			// The engine has two ways of asking "which hand is this weapon in":
+			// the Weapon.bOffhandWeapon flag (read by ~41 sites, including the
+			// LAF_ISOFFHAND/ALF_ISOFFHAND attack routing in stateprovider.zs) and
+			// slot membership (read by the psprite layer choice below and by the
+			// psprite-destroy rule in TickPSprites). QuestZDoom survives that
+			// split because SwitchWeaponHand is its only writer of the flag. This
+			// fork added a second writer, MoveWeaponToHand, reachable from the VR
+			// wheel on the RENDER thread -- outside P_Ticker -- so the two can
+			// end up disagreeing.
+			//
+			// When they disagree the weapon sits in ReadyWeapon while still
+			// flagged offhand: TickPSprites then destroys BOTH layers (neither
+			// psprite's Caller matches its slot), which is the flash-then-vanish,
+			// and the shot is traced from the offhand controller while the model
+			// draws in the main hand.
+			//
+			// Assigning the flag here, rather than only reading it, makes the
+			// invariant self-healing: whatever hand a weapon is actually raised
+			// into, its flag now agrees before anything else can read it.
 			if (weapon.bOffhandWeapon)
 			{
+				if (player.ReadyWeapon == weapon)
+				{
+					player.SetPsprite(PSP_WEAPON, null);
+					player.ReadyWeapon = null;
+				}
 				player.OffhandWeapon = weapon;
+				RS_Tag("BringUp->OFF", player);
+				weapon.bOffhandWeapon = true;
+				if (weapon.SisterWeapon) weapon.SisterWeapon.bOffhandWeapon = true;
 				if (weapon.bTwoHanded || (player.ReadyWeapon && player.ReadyWeapon.bTwoHanded))
 				{
 					player.SetPsprite(PSP_WEAPON, null);
@@ -2017,7 +2096,15 @@ class PlayerPawn : Actor
 			}
 			else
 			{
+				if (player.OffhandWeapon == weapon)
+				{
+					player.SetPsprite(PSP_OFFHANDWEAPON, null);
+					player.OffhandWeapon = null;
+				}
 				player.ReadyWeapon = weapon;
+				RS_Tag("BringUp->READY", player);
+				weapon.bOffhandWeapon = false;
+				if (weapon.SisterWeapon) weapon.SisterWeapon.bOffhandWeapon = false;
 				if (weapon.bTwoHanded || (player.OffhandWeapon && player.OffhandWeapon.bTwoHanded))
 				{
 					player.SetPsprite(PSP_OFFHANDWEAPON, null);
@@ -2517,7 +2604,25 @@ class PlayerPawn : Actor
 			weap.bOffhandWeapon = hand == 1;
 			player.PendingWeapon = weap;
 			player.mo.BringUpWeapon();
-			if (nextweap != weap && !weap.bTwoHanded && !nextweap.bTwoHanded) {
+			// nextweap must be told which hand it is going to.
+			//
+			// BringUpWeapon picks the slot from bOffhandWeapon, and nothing
+			// sets it on nextweap -- so it lands wherever its STALE flag
+			// points, frequently the hand we just filled. That overwrites the
+			// weapon we moved and leaves the other hand null, and because the
+			// flag now disagrees with the slot, TickPSprites destroys BOTH
+			// layers on the next tic. Observed live as
+			//   ready=Pistol(off) off=VR_OffhandFist(main)
+			// -- each weapon in the opposite slot from its own flag.
+			//
+			// The null check matters too: `nextweap != weap` passes when
+			// nextweap is null, so nextweap.bTwoHanded was an unguarded read.
+			//
+			// This is identical to QuestZDoom, which carries the same latent
+			// bug -- it only shows on a small loadout, where PickNextWeapon
+			// returns something already in a hand.
+			if (nextweap != null && nextweap != weap && !weap.bTwoHanded && !nextweap.bTwoHanded) {
+				nextweap.bOffhandWeapon = (hand != 1);
 				player.PendingWeapon = nextweap;
 				player.mo.BringUpWeapon();
 			}

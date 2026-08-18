@@ -1468,26 +1468,48 @@ void HWDrawInfo::DrawPlayerSprites(bool hudModelStep, FRenderState &state)
 	{
 		if (!vrmode->IsVR() && (!!hudsprite.mframe) != hudModelStep) continue;
 		if (!hudsprite.mframe && isSoftwareLighting(oldlightmode)) SetFallbackLightMode();	// Software lighting cannot handle 2D content.
-		if (hudsprite.weapon != nullptr && hudsprite.owner != nullptr && hudsprite.owner->player != nullptr)
+
+		// Which hand this sprite belongs to, decided by the psprite LAYER rather
+		// than by matching weapon classes.
+		//
+		// WeaponSpriteMatches returns true on GetClass() equality, so it cannot
+		// tell one hand's pistol from the other's -- with the same weapon class
+		// in both hands it matched BOTH, which meant one hand's wheel
+		// suppression skipped both hands' sprites, and the mainhand sprite was
+		// handed the offhand's controller transform and drawn off where you
+		// could not see it. The muzzle flash kept working because it is a
+		// different layer with a different caller, which is why a weapon that
+		// had gone invisible reappeared the moment it fired.
+		//
+		// Layer ids cannot cross hands: PSP_WEAPON is 1, PSP_OFFHANDWEAPON is
+		// 1000000, and the chain is kept sorted and unique. The one case the id
+		// cannot answer is PSP_FLASH (1000), which both hands share -- for that
+		// the caller is checked, by pointer identity rather than by class.
+		int spriteHand = VR_MAINHAND;
+		if (hudsprite.weapon != nullptr)
 		{
-			AActor* caller = hudsprite.weapon->GetCaller();
-			player_t* spritePlayer = hudsprite.owner->player;
-			if (WeaponSpriteMatches(spritePlayer->ReadyWeapon, caller) && VRWheel_ShouldSuppressWeaponHand(VR_MAINHAND))
+			if (hudsprite.weapon->GetID() >= PSP_OFFHANDWEAPON)
 			{
-				continue;
+				spriteHand = VR_OFFHAND;
 			}
-			if (WeaponSpriteMatches(spritePlayer->OffhandWeapon, caller) && VRWheel_ShouldSuppressWeaponHand(VR_OFFHAND))
+			else if (hudsprite.owner != nullptr && hudsprite.owner->player != nullptr)
 			{
-				continue;
+				AActor* caller = hudsprite.weapon->GetCaller();
+				AActor* offhand = hudsprite.owner->player->OffhandWeapon;
+				if (caller != nullptr && caller == offhand)
+				{
+					spriteHand = VR_OFFHAND;
+				}
 			}
+		}
+
+		if (hudsprite.weapon != nullptr && VRWheel_ShouldSuppressWeaponHand(spriteHand))
+		{
+			continue;
 		}
 		if (!hudsprite.mframe)
 		{
-			const bool isOffhandSprite = hudsprite.weapon != nullptr &&
-				hudsprite.owner != nullptr &&
-				hudsprite.owner->player != nullptr &&
-				WeaponSpriteMatches(hudsprite.owner->player->OffhandWeapon, hudsprite.weapon->GetCaller());
-			vrmode->AdjustPlayerSprites(state, isOffhandSprite);
+			vrmode->AdjustPlayerSprites(state, spriteHand == VR_OFFHAND);
 		}
 		DrawPSprite(&hudsprite, state);
 		if (!hudsprite.mframe) vrmode->UnAdjustPlayerSprites(state);
