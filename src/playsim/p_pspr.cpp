@@ -1477,6 +1477,7 @@ void DPSprite::Serialize(FSerializer &arc)
 		("modelframe", ModelFrame)          // RS fork
 		("modelframenext", ModelFrameNext)  // RS fork
 		("modelframelerp", ModelFrameLerp)  // RS fork
+		("nodraw", NoDraw)                  // RS fork
 		("pivot", pivot)
 		("scale", scale)
 		("rotation", rotation)

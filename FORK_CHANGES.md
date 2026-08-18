@@ -2250,3 +2250,323 @@ Four sync points, the same four any uniform array resize needs:
 (`gl_shader.cpp` and `vk_shader.cpp`), plus — easy to miss — the two
 **hardcoded loop bounds** in `main.fp`, which are literals rather than a
 constant and will silently keep reading only the first 8 if left behind.
+
+---
+
+## 34. Mod-owned placement — per-weapon offset sliders without an engine change
+
+`src/common/models/model.h:78`, `src/r_data/models.cpp:365` (`RenderHUDModel`), MODELDEF
+keyword `placementcvars` (`models.cpp:1238`).
+
+The engine already had one way to nudge a HUD model live: `MDL_USEHANDOFFSETS`
+pulls `vr_hand_ofs_x/y/z` and `vr_hand_yaw/pitch/roll` (and the `vr_offhand_*`
+pair for the other hand) into the same translate/rotate calls that apply
+`MODELDEF`'s `offset`/`angleoffset`. That works because those six CVARs are
+declared by the *engine*, so every model that opts in shares the same slider.
+Fine for "move the whole VR grip a bit," useless for a mod that wants one
+specific weapon's model sitting wrong relative to its own sprite frame and
+needs a knob to fix just that one — a hand-scanner prop riding two centimetres
+low, a rifle a mod author wants tilted five degrees for its idle pose. Six new
+engine CVARs and a menu entry per misbehaving weapon is not a fix, it is a
+standing liability: it means every mod that ships a slightly-off model needs
+an engine PR, and the engine's own option tree grows a slider for content the
+engine has never seen.
+
+`placementcvars <prefix>` in `MODELDEF` sidesteps that by naming CVARs instead
+of holding values. `FSpriteModelFrame::placementCVars` (`model.h:86`) is just
+an `FName` — a prefix, not a set of floats — and `RenderHUDModel` resolves it
+to real numbers on every frame it draws that model:
+
+```cpp
+static const char *sufOfs[3] = { "_ofs_x", "_ofs_y", "_ofs_z" };
+static const char *sufRot[3] = { "_yaw", "_pitch", "_roll" };
+for (int i = 0; i < 3; ++i)
+{
+    nm.Format("%s%s", smf->placementCVars.GetChars(), sufOfs[i]);
+    if (FBaseCVar *cv = FindCVar(nm.GetChars(), nullptr))
+        placeOfs[i] = (float)cv->GetGenericRep(CVAR_Float).Float;
+    nm.Format("%s%s", smf->placementCVars.GetChars(), sufRot[i]);
+    if (FBaseCVar *cv = FindCVar(nm.GetChars(), nullptr))
+        placeRot[i] = (float)cv->GetGenericRep(CVAR_Float).Float;
+}
+```
+
+Six `FindCVar` calls by string, keyed off `<prefix>_ofs_x`, `_ofs_y`, `_ofs_z`,
+`_yaw`, `_pitch`, `_roll`. Nothing here reaches into engine state — the CVARs
+being looked up are declared wherever the mod that wrote the `MODELDEF` entry
+put its own `CVARINFO`, with its own `MENUDEF` page to expose them as sliders.
+The engine supplies the plumbing (a name, a lookup, a place to add the result)
+and the mod supplies everything else: the six CVAR declarations, their
+defaults, and the UI a player actually touches. Adding a tunable weapon is
+therefore a content-only change — a `MODELDEF` line plus a `CVARINFO`/`MENUDEF`
+pair — and never touches engine source or the engine's own options menu.
+
+**Looked up live, not cached.** The comment at `models.cpp:367` gives the
+reason directly: `MODELDEF` is parsed well before a mod's `CVARINFO` is
+guaranteed to have loaded, so resolving the `FBaseCVar*` once at parse time and
+caching it would frequently cache a null — permanently, since nothing revisits
+that cache later. Re-resolving by name every draw call costs six hash lookups
+per drawn model per frame, which the comment dismisses outright ("not worth
+optimising away") because the number of on-screen HUD models with this flag
+set is always small.
+
+**Composes with the engine's own hand offsets, not instead of them.** The
+resolved `placeOfs`/`placeRot` are summed into the *same* translate and rotate
+calls as `MDL_USEHANDOFFSETS`'s `handOfs*`/`hand*` values and the raw
+`MODELDEF` `offset`/`angleoffset`/`pitchoffset`/`rolloffset` fields
+(`models.cpp:399-401`, `439-441`), not applied as extra transforms afterward.
+That matters for rotation specifically: rotations don't commute, so a
+mod-declared yaw applied as a fourth `rotate()` call after the engine's pitch
+and roll would spin around an already-tilted axis and produce a different pose
+than the same number folded into the sum before rotating. Summing first is
+what makes a value that started life as a `MODELDEF` constant, a value from
+the engine's hand-offset slider, and a value from a mod's own CVAR all
+genuinely interchangeable — any of the three can move to either of the other
+two with nothing visibly moving on screen.
+
+**A missing or half-declared CVAR degrades silently, by design.** The MODELDEF
+parser comment says it plainly: "a missing CVAR reads as zero, so a
+half-finished set degrades to the MODELDEF values instead of failing"
+(`models.cpp:1240-1242`). `FindCVar` returning null just leaves that slot at
+its `0.0f` initializer — there's no error, no console warning, no failed load.
+A mod that declares `placementcvars myweapon` but only adds `myweapon_ofs_x` to
+its `CVARINFO` gets exactly one working axis and five that behave as if the
+keyword were never used, rather than a startup failure over five unrelated
+axes it hasn't gotten around to wiring up yet.
+
+**Gotcha:** the prefix is resolved by string concatenation with a fixed
+suffix list, so `placementcvars myweapon` requires the CVARs to be named
+*exactly* `myweapon_ofs_x`, `myweapon_ofs_y`, `myweapon_ofs_z`, `myweapon_yaw`,
+`myweapon_pitch`, `myweapon_roll` — no partial sets with different suffixes,
+no case variation beyond what `FindCVar`'s own lookup tolerates, and any typo
+in either the `MODELDEF` prefix or the `CVARINFO` name fails the same silent
+way a genuinely absent CVAR does: that axis just sits at zero forever, with
+nothing in the log to say why.
+
+---
+
+## 35. Skin alpha that is not opacity
+
+`src/rendering/hwrenderer/scene/hw_weapon.cpp`, `DrawPSprite`; `src/common/models/model.h`;
+`src/r_data/models.cpp`, `ParseModelDefLump`; `src/r_data/models.h`.
+
+A model-drawn HUD weapon is alpha-tested unconditionally:
+
+```cpp
+state.AlphaFunc(Alpha_GEqual, gl_mask_threshold);
+```
+
+That is correct for a skin whose alpha channel means transparency, and
+catastrophic for one where it does not. Ripped or converted weapon models
+routinely arrive with a PBR-style texture set, and PBR alpha channels are
+conventionally used to carry roughness or a gloss mask, not opacity — a
+channel that is mostly dark by design, since most of a gun's surface is not
+supposed to be glossy. Alpha-tested against `gl_mask_threshold`, most of the
+skin fails the test and is discarded outright. The result is a weapon that is
+largely invisible with a few solid patches where the roughness data happened
+to read bright, which presents as a broken mesh or a broken export and is
+neither — the geometry and the real color data are both fine, only the
+alpha-as-opacity assumption is wrong for this particular skin.
+
+The fix is a per-model opt-out, not a global change — most skins DO use alpha
+for real transparency (scopes, vents, grates) and alpha-testing them is
+correct. A new `MODELDEF` flag marks the exception:
+
+```
+Model SomeWeapon
+{
+    ...
+    IgnoreSkinAlpha
+}
+```
+
+which sets `MDL_IGNORESKINALPHA` (`models.h`, bit `1<<18`, the flag word's
+next free bit after `MDL_USEHANDOFFSETS`). `FSpriteModelFrame` exposes it as
+`ignoresSkinAlpha()` (`model.h`) — read straight off the parsed `MODELDEF`
+flags, with no per-actor override, since the draw path needs the answer
+before it has resolved an actor's model data at all, and nothing about
+whether a texture's alpha channel means opacity is a per-actor question
+anyway. `DrawPSprite` reads it once per draw and drops the threshold to zero
+for that model instead of the usual `gl_mask_threshold`:
+
+```cpp
+state.AlphaFunc(Alpha_GEqual, huds->mframe->ignoresSkinAlpha() ? 0.f : gl_mask_threshold);
+```
+
+Nothing is discarded, and the alpha channel is simply left unread for
+transparency purposes — which is exactly correct, since for this model it was
+never encoding transparency in the first place.
+
+**The alternative was stripping the alpha channel out of every texture of
+every ripped weapon by hand, forever** — a per-asset fix repeated for every
+future import, instead of a one-line flag set once per model that needs it.
+
+**Only affects the model draw path.** A weapon still drawn as a flat 2D
+sprite is untouched; `gl_mask_threshold` there behaves exactly as before.
+
+---
+
+## 36. Per-psprite model tint
+
+`p_pspr.h:213`, `hw_weapon.cpp:1926`, `player.zs:3127` (`native Color Tint`, `native Color Glow`).
+
+Stock GZDoom's only colour input for a weapon was `playermo->fillcolor`, read in `HUDSprite::GetWeaponRenderStyle` and gated behind `STYLEF_ColorIsFixed` — a render-style flag whose actual job is forcing a flat stencil silhouette (the ice-death palette, `A_SetBlend`'s solid-fill mode, that family). So the only way to put a colour on a weapon was to also throw its texture away, and even that one colour was the *player's*, shared across every psprite the player owned — a mainhand pistol and an offhand shotgun could not be tinted differently, because there was exactly one `fillcolor` and no per-layer channel to read instead. For a mod that wants a rarity-coloured glow on a held weapon, or two hands carrying visibly different elemental infusions, stock had nothing to reach for short of baking separate skins per colour.
+
+Two fields fix that, added directly to `DPSprite` rather than the weapon actor:
+
+```cpp
+PalEntry Tint = 0xffffffff;   // multiply, 0xffffffff = untinted
+PalEntry Glow = 0;            // additive, 0x00000000 = none
+```
+
+`Tint` multiplies the model's own skin texture, so surface detail survives instead of being flattened to a silhouette. `Glow` adds on top, for a rim-light or emissive effect that doesn't depend on the skin's own brightness. Both live on the psprite, not the actor, specifically so mainhand and offhand tint independently — `PSP_WEAPON` and `PSP_OFFHANDWEAPON` are separate `DPSprite` instances, and `AActor::modelData` (where a per-actor colour would have had to live instead) is shared by the one actor holding both.
+
+**In-class initialisers, not constructor-body ones, and that is load-bearing.** `DPSprite` has a second, private, argument-less constructor (`DPSprite() {}`, further down in `p_pspr.h`) used only by savegame deserialisation, and it runs none of the public constructor's body. `p_pspr.cpp`'s public constructor *also* sets `Tint = 0xffffffff; Glow = 0;` explicitly at line 215-216, which is redundant there but is the detail that would have mattered if the field defaults had been left to the constructor body alone: the private deserialisation constructor would skip it, and `PSerializer::Serialize` (`p_pspr.cpp:1475-1476`, `arc("tint", Tint)` / `arc("glow", Glow)`) leaves a field alone when the save file being read predates it. Loading a pre-2026-08-08 save would then resume every psprite with whatever bytes happened to be sitting in that memory — and garbage near zero multiplies the weapon's texture by black, i.e. every old save's weapons would render as flat silhouettes for no reason a player could explain. The in-class default is what makes an old save resume at the correct identity value instead.
+
+**Where it's read.** `HUDSprite::GetWeaponRenderStyle` (`hw_weapon.cpp:1862`) computes `ThingColor` exactly the way stock did — `playermo->fillcolor` if `STYLEF_ColorIsFixed` is set, otherwise white — and then, new at line 1938, unconditionally folds the psprite's own tint in on top:
+
+```cpp
+ThingColor = ThingColor.Modulate(psp->Tint);
+ThingColor.a = 255;
+```
+
+This runs regardless of `STYLEF_ColorIsFixed`, which is the actual fix: `Tint` no longer needs the stencil flag to have an effect, so a normally-textured weapon can be coloured without losing its texture. It also means the two inputs *compose* rather than one replacing the other — an actor genuinely rendering under `STYLEF_ColorIsFixed` (frozen, for instance) will show its `fillcolor` multiplied by the psprite's `Tint`, not one or the other. `ThingColor.a` is forced back to 255 immediately after the modulate, so a script that puts anything in `Tint`'s alpha channel has no effect — opacity is controlled elsewhere (`psp.alpha`, `A_SetTranslucent`), and `Tint` is colour-only by design.
+
+`Glow` is simpler — `AddColor = psp->Glow;` at line 1943, unconditional, no gating at all. It is then combined, not overwritten, with the sector's own ambient additive term in `HWDrawInfo::DrawPSprite` (`hw_weapon.cpp:163-175`): the sector's `AdditiveColors[sector_t::sprites]` and the psprite's `Glow` are summed per-channel and clamped to 255, so a weapon's own glow rides on top of whatever ambient sector glow (see §2, "Two colours per glow") is already present rather than fighting it.
+
+One more branch worth knowing: `bright = isBright(psp)` (`hw_weapon.cpp:1543`, true when the psprite's current state is fullbright and its sprite frame isn't flagged to disable that). When bright, `ObjectColor` is `ThingColor` as-is; when not, it's further modulated by `viewsector->SpecialColors[sector_t::sprites]` — the sector's own sprite tint. So `Tint` always applies, but whether the *sector's* colour also applies depends on the weapon's own fullbright state, exactly mirroring how stock sprite colouring already worked; this fork didn't change that half, only added `Tint` into the chain ahead of it.
+
+**How it reaches the 3D model and not just the flat sprite.** `GetWeaponRenderStyle` only computes `ObjectColor`/`AddColor` on the `HUDSprite`; the values still have to reach the actual draw call. `HWDrawInfo::DrawPSprite` calls `state.SetObjectColor(huds->ObjectColor)` and `state.SetAddColor(add)` (the sector-combined value above) *before* branching on whether this psprite draws as a 2D sprite or, when `huds->mframe` is set, as a 3D model via `RenderHUDModel` (`hw_weapon.cpp:200`). Neither `hw_models.cpp` nor `modelrenderer.h` touch object or add colour anywhere in the model path — they were written assuming a caller had already set the draw state's colour, which was true for monsters and decorations but had never been wired up for the HUD weapon model specifically. Setting both before the `if (huds->mframe)` branch, rather than inside either arm of it, is what makes a tinted weapon look the same whether MODELDEF gives it a model or not, and is the entire reason this feature needed to touch `hw_weapon.cpp` at all rather than stopping at `p_pspr.h`.
+
+**Gotcha for a future reader:** this is invisible by default, deliberately — `0xffffffff` and `0` are both true identities, so no existing mod, no existing save, and no weapon that never touches `Tint`/`Glow` changes appearance at all. If a weapon looks tinted and nothing in that weapon's own script sets `Tint`, check whether its actor also carries `STYLEF_ColorIsFixed` (ice death, `A_SetBlend` solid fill, a status-effect palette swap) — the multiply in `GetWeaponRenderStyle` stacks with `fillcolor` rather than being overridden by it, so a frozen player wielding a weapon with a custom `Tint` set will show both colours combined, which reads as a bug the first time someone hits it but is exactly what line 1938 does on purpose.
+
+---
+
+## 37. Script-suppressed psprite layers: hiding the weapon without hiding what it does
+
+A VR hand-swap wants to show a rigged fist model in place of a mod's stock fist weapon, while leaving that weapon completely operational — same states, same damage, same ammo and slot, same `A_Punch` firing on the same tic. The obvious way to do that from ZScript is to zero the layer's alpha or flip its render style, and both of those turn out to be dead ends for reasons the fork had already run into twice before this feature: `DPSprite::GetRenderStyle` discards `psp->alpha` unless the layer explicitly carries `PSPF_ALPHA` or `PSPF_FORCEALPHA` (most weapons set neither), and `RenderStyle` itself is one of the few `DPSprite` fields the fork deliberately blocks from script — `player.zs:3106` still carries `//native readonly int RenderStyle; had to be blocked because the internal representation was not ok`. Even granting both of those, the actual draw/skip decision for a psprite layer is a bare `continue` inside `HWDrawInfo::PreparePlayerSprites`/`PreparePlayerSprites3D`'s render loop in `hw_weapon.cpp` — code no script participates in at all. So "hide this layer, script-triggered, without touching the actor it belongs to" had no legal path in, the same wall the flat-overlay dimming fix (see below) had already documented.
+
+**The field.** `p_pspr.h:288` adds `bool NoDraw = false;` to `DPSprite`, in the block headed `RS FORK -- SCRIPT-SUPPRESSED LAYER` at `p_pspr.h:274`. Like `Tint`/`Glow`/`ModelFrame` before it, this is an in-class initialiser rather than one set in the public constructor's body, and for the same load-bearing reason documented alongside them: `DPSprite` has a second, private, argument-less constructor (`DPSprite () {}`, `p_pspr.h:291`) used only by savegame deserialisation, which runs none of the public constructor's body. Without the `= false` on the declaration itself, a psprite resurrected from a save predating this field would carry whatever garbage sat in that memory rather than a defined "not suppressed" state. It's exported to script as a plain field — `DEFINE_FIELD(DPSprite, NoDraw)` at `p_pspr.cpp:147` — and declared `native bool NoDraw;` at `player.zs:3105`, with its own two-line comment restating the contract: *"Hide this layer without touching the weapon behind it. The weapon keeps its states, damage and slot; only the drawing stops."* No dedicated action function wraps it — a mod just writes `psp.NoDraw = true` on whichever `PSprite` layer it wants gone.
+
+**Checked in both passes, on purpose.** The gate is `if (psp->NoDraw) continue;`, and it appears twice: once in the 2D/flat path at `hw_weapon.cpp:2259` (commented tersely, `// RS FORK -- see the 3D pass`, since the real explanation lives at the other site), and once in the 3D model path at `hw_weapon.cpp:2403`, where the comment spells out why both copies exist: *"Checked in BOTH passes, so a suppressed weapon disappears whether it draws as a model or a sprite; hiding it in one pass only would make the result depend on whether the mod happened to ship a mesh."* That's a real failure mode the fork clearly anticipated rather than found by accident — VR runs these two loops over the same `player->psprites` list, one keeping layers whose sprite/frame resolves a `FSpriteModelFrame` and one keeping the layers that don't, and a check placed in only one of them would make suppression silently conditional on whether `FindModelFrame` happened to succeed for that particular weapon.
+
+**This is not the flat-overlay fix, despite sitting four lines away and quoting the same wall.** `hw_weapon.cpp:2267`'s `RS FORK -- FLAT OVERLAYS ON A WEAPON THAT IS ITSELF A MODEL` block is a separate mechanism solving a separate problem: when a weapon renders as a 3D model but one of its psprite layers (a muzzle flash from `A_GunFlash`, typically) has no model of its own, that layer falls through to the flat 2D pass and draws as a billboard hanging in front of the mesh. That block's fix is driven entirely by the `r_hudflatoverlay` cvar and an ownership walk (`ownerDrawsAsModel`, `hw_weapon.cpp:2291`-2304) that asks *"does the weapon owning this layer draw as a model?"* — script never sets anything on the layer itself, and a sprite-drawn weapon's flash is untouched regardless of the cvar. It reuses the *same justification* — `psp->alpha` being discarded absent `PSPF_ALPHA`/`PSPF_FORCEALPHA`, and the decision being a `continue` no script reaches — because both features hit that wall independently, not because they're one feature. `NoDraw` is script-driven and binary, applies to any layer regardless of what it owns, and is checked before the model-vs-sprite branch even splits (`hw_weapon.cpp:2260`/2265 for the 2D pass, `2404`/2408 for the 3D pass — the `NoDraw` check sits above both). Treat them as two independent fixes that happen to share a paragraph of reasoning; this entry is about `NoDraw` only.
+
+**Was unserialised; fixed same day.** `DPSprite::Serialize` (`p_pspr.cpp:1456`-1487) writes `tint`, `glow`, `modelframe`, `modelframenext` and `modelframelerp` through its chained `(...)` builder right next to each other — `NoDraw` was left out when it was added, so a game saved while a layer was actively suppressed reloaded with the layer visible again: the in-class initialiser correctly gives an *old* save (predating this field) a defined `NoDraw == false`, but the same default silently overwrote a *deliberately-set* `true` on any save/reload, since nothing had ever written it to the archive in the first place. As of the bug being found, no shipped script actually set `.NoDraw` yet (a repo-wide search of `wadsrc/` turned up zero assignments, only the field declaration), so this had not visibly bitten anything — caught by documentation review, not by a report. Fixed by adding `("nodraw", NoDraw)` to the chain (`p_pspr.cpp:1479`), the same one-line pattern every other RS-fork `DPSprite` field already used.
+
+---
+
+## 38. Flat overlays on a weapon that is itself a model
+
+`src/rendering/hwrenderer/scene/hw_weapon.cpp:2267` (`PreparePlayerSprites`),
+cvar `r_hudflatoverlay` (`r_utility.cpp:105`, default `1.0`).
+
+VR runs two passes over the same `player->psprites` list: `PreparePlayerSprites3D`
+keeps whichever layers resolve a `FindModelFrame` (drawn as a mesh), and
+`PreparePlayerSprites` — the flat 2D pass — keeps the layers that don't
+(`smf` null, `hw_weapon.cpp:2265`, `if (smf) continue;`). A muzzle flash from
+`A_GunFlash` is its own psprite layer, owned by the same weapon, and it
+almost never has a model of its own — MODELDEF entries are written for the
+gun, not for every one-frame flash state it can jump to. So when the gun
+itself IS a model, the 3D pass draws the mesh and the 2D pass still draws the
+flash, and the flash lands as a flat billboard hanging in space in front of a
+3D weapon: it never got smaller, closer, or better integrated just because
+its owner did.
+
+**Not fixable from the mod side, which is why this is a fork change and not a
+ZScript one.** `DPSprite::GetRenderStyle` discards `psp->alpha` unless the
+layer explicitly carries `PSPF_ALPHA` or `PSPF_FORCEALPHA` — a plain
+`A_GunFlash` overlay sets neither — and the actual draw/skip decision is a
+bare `continue` inside a render loop no script participates in at all. A mod
+wanting to dim or hide its own flash overlay when the gun is a model has
+nothing to reach for.
+
+The fix is scoped as narrowly as the problem: *this weapon's owner is drawn
+as a model*, not *this is a flash* or *hide all overlays*. Before building the
+`HUDSprite`, the 2D pass walks the player's other psprite layers looking for
+the one that actually owns the weapon slot (`PSP_WEAPON`/`PSP_OFFHANDWEAPON`)
+with the same `Caller`, and checks whether THAT layer resolves a model:
+
+```cpp
+bool ownerDrawsAsModel = false;
+for (DPSprite *own = player->psprites; own != nullptr && ...; own = own->GetNext())
+{
+    if (own == psp || own->Caller != psp->Caller) continue;
+    if (own->GetID() != PSP_WEAPON && own->GetID() != PSP_OFFHANDWEAPON) continue;
+    if (!own->GetState()) continue;
+    if (FindModelFrame(own->Caller, own->GetSprite(), own->GetFrame(), false))
+    {
+        ownerDrawsAsModel = true;
+        break;
+    }
+}
+```
+
+Only if that's true does `r_hudflatoverlay` do anything at all. A sprite-drawn
+weapon's flash is completely untouched regardless of the cvar's value, because
+the lookup above returns false for it and nothing downstream even checks the
+cvar.
+
+**Dimmed, not just hidden — and the cvar is a fader, not a switch.**
+`r_hudflatoverlay` runs 0 to 1. At `<= 0` the overlay is skipped outright
+(`continue`, before a `HUDSprite` is even built). Between 0 and 1 it survives
+but is scaled down: `hudsprite.alpha *= flatOverlayAlpha`, applied *after*
+`GetWeaponRenderStyle` runs, since that call is what establishes the layer's
+base alpha in the first place — multiplying before it ran would just get
+overwritten. At the `1.0` default nothing is touched either way, so stock
+behaviour is exactly preserved until a mod or a player opts in by lowering the
+cvar; this is off by default in the same sense most of this fork's rendering
+opt-ins are.
+
+**Distinct from `NoDraw` (script-suppressed layers, previous entry), despite
+living four lines away and citing the identical wall.** Both hit the same
+`psp->alpha`-is-discarded, `continue`-in-an-unreachable-loop problem
+independently, but `NoDraw` is script-driven, binary, and applies to any
+layer for any reason a mod chooses; this fix is cvar-driven, continuous, and
+applies specifically to non-weapon-slot overlays whose owning weapon draws as
+a model. The `NoDraw` check sits above this one in the same loop and is
+checked first — a layer a script has explicitly hidden never reaches the
+`ownerDrawsAsModel` walk at all.
+
+**Gotcha:** the ownership walk excludes `PSP_WEAPON`/`PSP_OFFHANDWEAPON`
+themselves (`psp->GetID() != PSP_WEAPON && psp->GetID() != PSP_OFFHANDWEAPON`,
+`hw_weapon.cpp:2289`) — it only ever dims layers that are NOT the main weapon
+slot, since the main weapon slot is what the walk is searching FOR, not a
+candidate for its own dimming. A mod that adds a flash as a third, independent
+`PSP_WEAPON`-slot layer rather than a genuine overlay layer would sit outside
+this mechanism entirely and always draw at full opacity.
+
+---
+
+## 39. Static poses on decoupled models, and the trace built to find them missing
+
+`+DECOUPLEDANIMATIONS` (`MF9_DECOUPLEDANIMATIONS`) is the flag that switches a model from legacy MD3 frame-morphing to true bone animation — `SetAnimation`, per-bone get/set, the whole `CalculateBones` machinery in `p_actionfunctions.cpp:6450` onward is gated on it, and it throws `X_OTHER` on anything that isn't decoupled. It's the mesh type this fork's hand and weapon models use. Two other sections in this file exist specifically to let ZScript pin a HUD model to one authored frame: §19 (`DPSprite::ModelFrame`/`ModelFrameNext`, models.cpp:757) and §21 (native state remap, `CalcModelOverrides`'s `stateRemap` table, models.cpp:799-820). Both write their answer into the same two fields — `drawinfo.modelframe` / `drawinfo.modelframenext` — and both set `drawinfo.modelframe_explicit = true` (`ModelDrawInfo::modelframe_explicit`, models.h:143) to say "this number was chosen on purpose, not fallen into." Both landed, both compiled, and both were **entirely inert on a decoupled model**, because nothing downstream of `CalcModelOverrides` ever consulted `modelframe` for that model type. A pose that never applies looks exactly like a pose that was never set — nothing throws, nothing logs, the hand just sits in whatever the animation system last put it in.
+
+### Where it actually broke
+
+`ProcessModelFrame` (models.cpp:826) is where a model's frame number turns into bone matrices. Before this fix, the `is_decoupled` branch (models.cpp:854) had exactly two outcomes: `frameinfo.decoupled_frame.frame1 >= 0` — an animation clip is actively playing via `SetAnimation`, so `CalculateBones` runs against `frameinfo.decoupled_frame` (models.cpp:856-868) — or nothing is playing, so `CalculateBonesOnlyOffsets` returns the rest pose plus whatever bone overrides are active (the old final `else`, now at models.cpp:905-913). Neither branch read `drawinfo.modelframe` at all — that field is consulted only on the *non-decoupled* branch further down (models.cpp:915-931). So `ModelFrame = 42` set by a controller-driven hand-pose script, or a `stateRemap` table hit, would resolve correctly, get written into `drawinfo.modelframe`, get flagged `modelframe_explicit = true` — and then get silently discarded by `ProcessModelFrame`, which would render either whatever animation clip happened to be active or the bind-pose rest frame instead. A decoupled model could not be pinned to a single authored frame at all; the entire apparatus §19 and §21 built for exactly this purpose was a no-op the moment a mesh switched to bones.
+
+### The fix: a third branch, gated on `modelframe_explicit`
+
+models.cpp:869-904 inserts a middle branch between "animation playing" and "nothing at all": `else if (drawinfo.modelframe_explicit)`. It calls the same `CalculateBones` the animation branch uses, but builds the frame argument by hand — `ModelAnimFrameInterp{ nextFrame ? frameinfo.inter : -1.0f, drawinfo.modelframe, drawinfo.modelframenext }`, `prev = nullptr`, `prevInter = -1.0f` — which is, deliberately, **the identical call the ordinary non-decoupled branch makes** a few dozen lines later (models.cpp:917-931). The in-code comment says as much: "Same construction as the non-decoupled branch below, so an explicitly addressed frame means the same thing on both paths." Bone overrides (`modelData->modelBoneOverrides`) still compose on top afterward, same as both other branches, so a posed hand remains proceduarally adjustable — finger-curl offsets etc. — after the baked pose is applied.
+
+This is exactly what hand posing needs: the poses are baked as frames of one clip, and ZScript picks one per tic from controller input (trigger pull, grip state) — there's no clip to *play*, just one of N discrete poses to *hold*. The alternative — driving it through `SetAnimation` at zero framerate to fake stillness — means fighting the animation clock (`calcFrames`, `SetAnimationFrameRateInternal`) every tic just to make it produce a static result, instead of reusing the frame-pinning path that already existed and was already correct for MD3 models.
+
+### Branch order is the priority order
+
+The three cases are checked in this order: **playing animation wins over a held static pose, which wins over the rest-pose fallback.** So if a script calls `SetAnimation` on a hand actor while a static `ModelFrame` pose is also set, the animation always overrides the pose — the static branch only ever fires when `decoupled_frame.frame1 < 0`, i.e. nothing is actively animating (`curAnim.flags & MODELANIM_NONE`, or no `SetAnimation` call has ever landed). This is presumably intentional — a hand that's mid-reload-animation shouldn't be yanked into a grip pose — but it's a real trap: a stale `SetAnimation` call left active (or an `AnimInfo` that never got flagged `MODELANIM_NONE`) will silently outrank a `ModelFrame` poke, with the exact same "looks unset" failure signature this whole fix exists to cure. Worth checking first if a pose still won't stick after this section's mechanism is confirmed present.
+
+### `vr_pose_debug`: the trace that this was built and verified with
+
+`CVAR(Bool, vr_pose_debug, true, 0)` (models.cpp:52) — default **on**, no `CVAR_ARCHIVE`, so it never persists to config and starts live on every launch. That's deliberate for a print that only fires on state change (see below), not continuously, so leaving it on by default costs nothing in the common case but means an unrelated session chasing console spam should check this cvar first.
+
+Two probes, one on each side of the frame-resolution boundary:
+
+- **`[POSE/in ]`** — models.cpp:782-797, inside `CalcModelOverrides`, placed right after the §19 direct-addressing block (models.cpp:775-779) but *before* the §21 native-remap block (models.cpp:799-820) runs. It logs `psp->ModelFrame` (the raw script input) against the `out.modelframe`/`modelframenext`/`explicit` that resulted — i.e. the state after §19, before §21 has a chance to overwrite it. Each hand gets its own static `last` slot (`lastMain`/`lastOff`, keyed off `psp->GetID() >= PSP_OFFHANDWEAPON`) specifically "so the two do not mask each other's changes" — with one shared slot, an offhand update would update `last` and suppress the next genuine mainhand change from printing.
+- **`[POSE/out]`** — models.cpp:838-852, inside `ProcessModelFrame`, only when `is_decoupled`. It names the exact three-way branch this section documents: `names[3] = { "ANIM (SetAnimation wins)", "STATIC (our pose)", "REST (pose discarded)" }`, selected by the same `frame1 >= 0` / `modelframe_explicit` check the real code branches on. This is the probe that actually exposed the bug — before the STATIC branch existed, this classification would only ever have had two real outcomes, and "our pose" landing in "REST (pose discarded)" is precisely what a silently-dropped `ModelFrame` looks like from here.
+
+Both prints key on a packed integer and only print when that key changes ("in": `psp.ModelFrame*4 + explicit-bit + modelframe<<12`; "out": `branch + drawinfo.modelframe<<4`), so a held pose reports once instead of spamming every rendered frame — relevant given `CalcModelOverrides`/`ProcessModelFrame` run per hand, per frame, at VR framerates.
+
+### Gotcha: the two probes don't describe the same instant
+
+Because `[POSE/in ]` is placed *before* the §21 state-remap block and `[POSE/out]` is read *after* it, a weapon using a `stateRemap` table can show a `[POSE/in ]` line reporting the pre-remap frame while `[POSE/out]` (and the actual render) reflects the remap-supplied frame instead. Trust `/out` for what actually rendered; `/in` is only useful for confirming what the psprite fields themselves carried before the table had a chance to win. And if a fourth branch is ever added to the decoupled `if/else if/else` in `ProcessModelFrame`, the `names[3]` array and the `branch` ternary at models.cpp:841-842 have to grow together, or the debug line will print the wrong label for a real, correctly-rendered branch.
