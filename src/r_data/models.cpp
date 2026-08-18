@@ -362,6 +362,30 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	// makes a CVAR value and a MODELDEF value genuinely interchangeable, so a
 	// number found on a slider can be folded into MODELDEF and the slider zeroed
 	// with nothing moving.
+	// RS FORK -- MOD-OWNED PLACEMENT, read live from CVARs the MOD declares.
+	//
+	// Looked up by name every frame rather than resolved once at parse time,
+	// because MODELDEF is parsed before a mod's CVARINFO is guaranteed to have
+	// run, and a cached null would be permanent. Six hash lookups for a handful
+	// of drawn models is not worth optimising away.
+	float placeOfs[3] = { 0.0f, 0.0f, 0.0f };
+	float placeRot[3] = { 0.0f, 0.0f, 0.0f };
+	if (smf->placementCVars != NAME_None)
+	{
+		static const char *sufOfs[3] = { "_ofs_x", "_ofs_y", "_ofs_z" };
+		static const char *sufRot[3] = { "_yaw", "_pitch", "_roll" };
+		FString nm;
+		for (int i = 0; i < 3; ++i)
+		{
+			nm.Format("%s%s", smf->placementCVars.GetChars(), sufOfs[i]);
+			if (FBaseCVar *cv = FindCVar(nm.GetChars(), nullptr))
+				placeOfs[i] = (float)cv->GetGenericRep(CVAR_Float).Float;
+			nm.Format("%s%s", smf->placementCVars.GetChars(), sufRot[i]);
+			if (FBaseCVar *cv = FindCVar(nm.GetChars(), nullptr))
+				placeRot[i] = (float)cv->GetGenericRep(CVAR_Float).Float;
+		}
+	}
+
 	const bool useHandOfs = !!(smf_flags & MDL_USEHANDOFFSETS);
 	// Which set of sliders this model listens to. The two hands are one mesh
 	// mirrored by a negative X scale, so a shared value pushes them in opposite
@@ -372,9 +396,9 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	const float handOfsY = useHandOfs ? (float)(isOffhand ? vr_offhand_ofs_y : vr_hand_ofs_y) : 0.0f;
 	const float handOfsZ = useHandOfs ? (float)(isOffhand ? vr_offhand_ofs_z : vr_hand_ofs_z) : 0.0f;
 
-	objectToWorldMatrix.translate((smf->xoffset + handOfsX) / smf->xscale,
-		(smf->zoffset + handOfsZ) / smf->zscale,
-		(smf->yoffset + handOfsY) / smf->yscale);
+	objectToWorldMatrix.translate((smf->xoffset + handOfsX + placeOfs[0]) / smf->xscale,
+		(smf->zoffset + handOfsZ + placeOfs[2]) / smf->zscale,
+		(smf->yoffset + handOfsY + placeOfs[1]) / smf->yscale);
 
 	// Applying player custom offsets
 	objectToWorldMatrix.translate(-vr_3dweaponOffsetX, vr_3dweaponOffsetY, vr_3dweaponOffsetZ);
@@ -409,9 +433,12 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	const float handPitch = useHandOfs ? (float)(isOffhand ? vr_offhand_pitch : vr_hand_pitch) : 0.0f;
 	const float handRoll  = useHandOfs ? (float)(isOffhand ? vr_offhand_roll  : vr_hand_roll)  : 0.0f;
 
-	objectToWorldMatrix.rotate(-(smf->angleoffset + handYaw), 0, 1, 0);
-	objectToWorldMatrix.rotate(smf->pitchoffset + handPitch, 0, 0, 1);
-	objectToWorldMatrix.rotate(-(smf->rolloffset + handRoll), 1, 0, 0);
+	// Summed into the same three calls, for the reason above: rotations do not
+	// commute, so a slider value only equals a MODELDEF value if it is added
+	// here rather than applied afterwards.
+	objectToWorldMatrix.rotate(-(smf->angleoffset + handYaw + placeRot[0]), 0, 1, 0);
+	objectToWorldMatrix.rotate(smf->pitchoffset + handPitch + placeRot[1], 0, 0, 1);
+	objectToWorldMatrix.rotate(-(smf->rolloffset + handRoll + placeRot[2]), 1, 0, 0);
 
 	//Scale weapon
 	objectToWorldMatrix.scale(vr_weaponScale, vr_weaponScale, vr_weaponScale);
@@ -1207,6 +1234,14 @@ void ParseModelDefLump(int Lump)
 				{
 					sc.MustGetFloat();
 					smf.angleoffset = sc.Float;
+				}
+				else if (sc.Compare("placementcvars"))
+				{
+					// One prefix, six CVARs by convention. Declaring them is the
+					// mod's job -- a missing CVAR reads as zero, so a half-finished
+					// set degrades to the MODELDEF values instead of failing.
+					sc.MustGetString();
+					smf.placementCVars = sc.String;
 				}
 				else if (sc.Compare("pitchoffset"))
 				{

@@ -74,6 +74,16 @@ public:
 	short frame;
 	int hashnext;
 	float angleoffset;
+
+	// RS FORK -- MOD-OWNED PLACEMENT.
+	//
+	// Names a CVAR prefix. The six placement values are then read live from
+	// <prefix>_ofs_x/_ofs_y/_ofs_z and <prefix>_yaw/_pitch/_roll.
+	//
+	// The point is WHERE those CVARs live: in the mod's own CVARINFO, with the
+	// mod's own MENUDEF page, so adding a tunable weapon needs nothing in the
+	// engine and does not put a per-weapon slider in the engine's option tree.
+	FName placementCVars = NAME_None;
 	// added pithoffset, rolloffset.
 	float pitchoffset, rolloffset; // I don't want to bother with type transformations, so I made this variables float.
 	bool isVoxel;
