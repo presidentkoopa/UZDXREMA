@@ -2825,3 +2825,121 @@ mirrors) — plus the Vulkan per-eye `#define` aliases, which is exactly where
 this class of change has failed silently before (§32): declared correctly in
 both `gl_shader.cpp` and `vk_shader.cpp` is not sufficient on its own if a
 member is missing its `viewpoints[HW_VIEWPOINT_INDEX].` alias next to it.
+
+## 44. Capacitive finger contact — where a finger RESTS, not what it presses
+
+Touch controllers report skin contact on the thumbrest, thumbstick and face
+buttons without a press. That distinction is the whole point: a thumb lying on
+the stick and a thumb lifted clear are the same button state, and so are a
+finger indexed along the frame and a finger sitting on the trigger. Buttons
+cannot tell those apart, so a hand posed from buttons alone can never show the
+difference.
+
+Published to script as `FingerTouchMain` / `FingerTouchOff`, a bitfield rather
+than two booleans so Index-style per-finger sensing can be added later without
+changing the field:
+
+```
+FINGERTOUCH_THUMB = 1 << 0
+FINGERTOUCH_INDEX = 1 << 1
+```
+
+Thumb contact is **one boolean action bound to six surfaces** — thumbrest,
+thumbstick, A, B, X, Y. A boolean action is true when any bound source is, so
+the runtime does the OR and "the thumb is resting on something" needs no
+per-surface logic on our side.
+
+**Suggested only for the Oculus Touch profile.** A suggested binding naming a
+path a profile does not define makes `xrSuggestInteractionProfileBindings`
+reject the *entire profile* rather than the one binding — which presents as the
+controller losing all input, not as a binding failing. Vive, WMR and the simple
+profile define none of these paths, so they are not offered them.
+
+## 45. Haptics: serviced on the menu path, and a way to see them
+
+`UpdateControllerState` returned early when a menu was open, before reaching the
+`ProcessHaptics()` at the end of the function. A pulse in flight when a menu
+opened was therefore never advanced and never stopped. The sibling early return
+immediately above it already called `ProcessHaptics` for exactly this reason;
+this one did not.
+
+Also adds `vr_haptic_debug` and a `vr_haptictest` command that fires a pulse
+directly, bypassing every gameplay trigger. A pipeline that drops pulses and a
+game that never requests them both present as a silent controller, and nothing
+in the existing logging separated the two.
+
+Worth recording for whoever chases haptics next: `MakeOpenXRHapticDuration`
+caps every pulse at 10ms and re-issues it per frame. At 90Hz the frame interval
+is 11.1ms, so there is a gap in every pulse — which, combined with
+`vr_pickup_haptic_level` defaulting to 0.2, can read as haptics not working at
+all while every stage reports success.
+
+## 46. The engine always writes a log
+
+Written to the current working directory — wherever the launcher started the
+game — as `doomxr-log.txt`, on every launch, with no argument required. An
+explicit `-logfile` still wins; this only fills in when nothing was asked for.
+
+Unconditional on purpose. Console scrollback dies with the process, so a hard
+crash otherwise leaves nothing behind, and a log that depends on having
+remembered a flag is exactly the log you do not have when you need one.
+
+**Not routed through `execLogfile()`.** That helper prefixes `log-`, runs
+`C_SanitizeFileName` — which replaces every `.` and `:` with `-` — and then
+appends `.txt` regardless. So `+logfile E:/rslog.txt` never wrote to
+`E:\rslog.txt`; it wrote `log-E-/rslog-txt.txt` into the working directory.
+Hours were lost to logs that were being written correctly under names nobody
+would look for. A predictable name needs a plain `fopen`, with a fallback
+beside the exe if the launch directory is not writable.
+
+## 47. Per-hand reload keys freed for physical reloading
+
+`BT_MAINHANDRELOAD` and `BT_OFFHANDRELOAD` were wired into `ButtonChecks`
+alongside the generic `BT_RELOAD`, so all three jumped a weapon to its `Reload`
+state.
+
+That is wrong once reloading is physical. The per-hand keys now mean *drop that
+hand's magazine*, or *rack that hand's pump* — and leaving them also bound to
+the Reload state meant one press both ejected the magazine and instantly
+refilled it, which cancels out and looks like the button doing nothing.
+
+The two per-hand rows are commented out. The generic `BT_RELOAD` rows for both
+hands are untouched, so the plain reload key still performs the classic instant
+reload for either hand, which is the intended fallback when physical reloading
+is switched off.
+
+The controls menu was reordered to match: per-hand reload sits with Attack and
+Alt Attack where it is now a primary action, and the generic Reload moved down
+under Advanced Reloading where it is now the legacy path.
+
+## 48. `bKeepWhenEmpty` — an empty weapon stays in your hand
+
+`CheckAmmo` calls `PickNewWeapon` the moment ammo reaches zero. Under manual
+reloading that is fatal: ejecting a magazine empties the weapon, so the weapon
+leaves your hand before a fresh magazine can go into it. Manual reloading is
+impossible by construction while that happens.
+
+A `bool bKeepWhenEmpty` on `Weapon`, checked at both `PickNewWeapon` sites.
+Firing is unaffected — the return value still reports the true ammo state, so an
+empty weapon still refuses to fire. It simply is not confiscated.
+
+**A plain field, deliberately not a flagdef**, and the reason is worth writing
+down because it cost most of a session:
+
+ZScript `flagdef`s reach the flag parser through `@flagdef@`-prefixed symbols
+that `CompileFlagDefs` adds to the class symbol table — and, per the comment
+there, removes again once the compiler finishes. Flags defined in **C++**
+`FlagLists` persist; flags defined as ZScript flagdefs do not survive to mod
+compile time. The observable result is that `+WEAPON.NOAUTOAIM` works from a
+pk3 while `+WEAPON.AMMO_OPTIONAL` and `+WEAPON.NOAUTOSWITCHTO` both fail with
+"Unknown flag", despite all three being valid and all three working in the
+engine's own scripts.
+
+That asymmetry is a real bug and is *not* fixed here — this section only routes
+around it. Anyone fixing it properly should start at
+`ZCCDoomCompiler::CompileFlagDefs` in `zcc_compile_doom.cpp` and at
+`FindFlag`'s `strict` handling in `thingdef_data.cpp`, where the bare-name
+lookup is additionally marked `decorateOnly` whenever a prefix exists.
+
+A field is set by plain assignment from `BeginPlay` and cannot be broken by any
+of it.

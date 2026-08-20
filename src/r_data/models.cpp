@@ -604,7 +604,16 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	// "Tiny and far away" and "correctly sized but mispositioned" look identical
 	// through a headset and are entirely different bugs. The transform says
 	// which: position is the last column, scale is the length of the first.
-	ValidateHudModel(smf, Models[smf->modelIDs.Size() ? smf->modelIDs[0] : 0], psp, smf_flags);
+	// Resolved defensively: a frame's model id is -1 when it has no model, and
+	// Models[-1] is an out-of-bounds read -- a silent crash at the first weapon
+	// draw, which is to say the instant a map starts.
+	FModel *validateModel = nullptr;
+	if (smf->modelIDs.Size() > 0)
+	{
+		const int vid = smf->modelIDs[0];
+		if (vid >= 0 && vid < Models.SSize()) validateModel = Models[vid];
+	}
+	ValidateHudModel(smf, validateModel, psp, smf_flags);
 
 	if (vr_spatialreport && psp)
 	{

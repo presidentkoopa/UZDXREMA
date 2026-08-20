@@ -73,6 +73,21 @@ class Weapon : StateProvider
 	bool GivenAsMorphWeapon;
 	bool bAltFire;							// Set when this weapon's alternate fire is used.
 	double UseRange;						// [NS] Distance at which player can +use
+
+	// RS FORK -- KEEP AN EMPTY WEAPON IN HAND.
+	//
+	// Stock behaviour hands the weapon back the moment ammo hits zero: CheckAmmo
+	// calls PickNewWeapon and suddenly you are holding something else. That makes
+	// MANUAL reloading impossible -- ejecting a magazine empties the gun, so the
+	// gun leaves your hand before you can put a new magazine into it.
+	//
+	// A plain field, deliberately not a flagdef. Flagdefs reach script through
+	// the @flagdef@ symbol table, and in this fork that namespace does not
+	// resolve for mod ZScript at all: +WEAPON.AMMO_OPTIONAL and even
+	// +WEAPON.NOAUTOSWITCHTO both fail from a pk3 while working fine in the
+	// engine's own scripts. A field is set by plain assignment and cannot be
+	// broken by that.
+	bool bKeepWhenEmpty;
 	readonly bool bDehAmmo;					// Uses Doom's original amount of ammo for the respective attack functions so that old DEHACKED patches work as intended.
 											// AmmoUse1 will be set to the first attack's ammo use so that checking for empty weapons still works
 	meta int SlotNumber;
@@ -1081,7 +1096,7 @@ class Weapon : StateProvider
 		if (fireMode == EitherFire)
 		{
 			bool gotSome = CheckAmmo (PrimaryFire, false) || CheckAmmo (AltFire, false);
-			if (!gotSome && autoSwitch)
+			if (!gotSome && autoSwitch && !bKeepWhenEmpty)
 			{
 				PlayerPawn(Owner).PickNewWeapon (null, bOffhandWeapon);
 			}
@@ -1129,8 +1144,9 @@ class Weapon : StateProvider
 		{
 			return true;
 		}
-		// out of ammo, pick a weapon to change to
-		if (autoSwitch)
+		// out of ammo, pick a weapon to change to -- unless the weapon wants to
+		// stay put so it can be reloaded by hand.
+		if (autoSwitch && !bKeepWhenEmpty)
 		{
 			PlayerPawn(Owner).PickNewWeapon (null, bOffhandWeapon);
 		}

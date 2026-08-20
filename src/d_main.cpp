@@ -4662,6 +4662,37 @@ static int D_DoomMain_Internal (void)
 		Printf("\n");
 	}
 
+extern FILE *Logfile;   // RS fork -- owned by c_console.cpp
+
+	// RS FORK -- ALWAYS WRITE A LOG.
+	//
+	// Written to the CURRENT WORKING DIRECTORY, which is wherever the launcher
+	// started the game from, so it lands somewhere the person who launched it
+	// will actually look for it.
+	//
+	// Unconditional on purpose. A crash log that depends on having remembered
+	// to pass +logfile is a log you do not have precisely when you need one --
+	// and console scrollback dies with the process, so a hard crash otherwise
+	// leaves nothing behind at all. An explicit -logfile still wins: this only
+	// runs when nothing was asked for.
+	if (Logfile == nullptr)
+	{
+		// Opened directly rather than through execLogfile(). That helper
+		// prefixes "log-", runs C_SanitizeFileName -- which turns every "." and
+		// ":" into "-" -- and then appends ".txt" regardless. So any name handed
+		// to it comes out mangled and any path is flattened into the filename.
+		// A predictable name in the launch directory needs a plain fopen.
+		Logfile = fopen("doomxr-log.txt", "w");
+		if (Logfile == nullptr)
+		{
+			// Launched from somewhere unwritable; fall back beside the exe so
+			// there is still a log rather than none.
+			FString beside = progdir + "doomxr-log.txt";
+			Logfile = fopen(beside.GetChars(), "w");
+		}
+		if (Logfile != nullptr) Printf("Log started\n");
+	}
+
 	// [UZDXREMA] The anonymous-stats confirmation prompt stays disabled in the
 	// fork; there is no usable modal dialog while a headset is on the user.
 	//extern void D_ConfirmSendStats();

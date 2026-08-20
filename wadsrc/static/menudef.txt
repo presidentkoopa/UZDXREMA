@@ -604,7 +604,8 @@ OptionMenu "ActionControlsMenu" protected
 	Control    "$CNTRLMNU_ALTATTACK"        , "+altattack"
 	Control    "$CNTRLMNU_OH_ATTACK"        , "+oh_attack"
 	Control    "$CNTRLMNU_OH_ALTATTACK"     , "+oh_altatk"
-	Control    "$CNTRLMNU_RELOAD"           , "+reload"
+	Control    "$CNTRLMNU_MAINHANDRELOAD"   , "+mh_reload"
+	Control    "$CNTRLMNU_OFFHANDRELOAD"    , "+oh_reload"
 	Control    "$CNTRLMNU_ZOOM"             , "+zoom"
 
 	StaticText ""
@@ -645,8 +646,7 @@ OptionMenu "ActionControlsMenu" protected
 
 	StaticText ""
 	StaticText "$CNTRLMNU_ADVANCED_RELOADING", gold
-	Control    "$CNTRLMNU_MAINHANDRELOAD"    , "+mh_reload"
-	Control    "$CNTRLMNU_OFFHANDRELOAD"     , "+oh_reload"
+	Control    "$CNTRLMNU_RELOAD"           , "+reload"
 }
 
 OptionMenu "ActionDoubleControlsMenu" protected
