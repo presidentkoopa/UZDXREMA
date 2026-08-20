@@ -76,6 +76,44 @@ enum EGripContext
 	GRIPCTX_Stabilize,  // off hand supporting the main hand's weapon
 	GRIPCTX_Modifier,   // dominant grip acting as the shift layer
 	GRIPCTX_Plain,      // ordinary grip, whatever it is bound to
+	// Appended rather than inserted at its priority position. These values are
+	// published to ZScript and mods already read them, so the numbering is API
+	// and renumbering it would silently change what every existing test means.
+	// Priority lives in the branch order of ResolveGripContexts, not here.
+	GRIPCTX_Object,     // hand is closed on a physical thing that script claimed
+};
+
+// WHAT a hand is closed on, as distinct from what its grip MEANS.
+//
+// Deliberately a separate field from EGripContext, because they answer
+// different questions: "the off hand spent its grip on an object" is a
+// priority question, and "that object is a shotgun forend" is a pose question.
+// Folding both into one enum would force every consumer of one to care about
+// the other.
+//
+// The engine cannot work any of this out for itself -- there is no shell in
+// the world for it to test against -- so script CLAIMS a subject and the
+// engine arbitrates, exactly the split HolsterClaim* already uses. The one
+// subject the engine does know is Holster, and it fills that in itself.
+//
+// The values are pose-shaped rather than object-shaped: a hand does not care
+// whether it is on an SMG or a shotgun, it cares whether it is wrapping a fat
+// cylinder or squeezing a vertical grip. Two guns held the same way should
+// claim the same subject.
+enum EGripSubject
+{
+	GRIPSUBJ_None = 0,
+	GRIPSUBJ_Round,      // one pistol or rifle cartridge -- fingertip pinch
+	GRIPSUBJ_Shell,      // a shotgun shell -- fatter, and a fuller grip
+	GRIPSUBJ_Inserting,  // that round being pushed home, thumb driving it
+	GRIPSUBJ_Magazine,   // magazine, clip or speedloader -- wrapped in the palm
+	GRIPSUBJ_Grip,       // a pistol grip: a one-handed gun, or a longarm's firing hand
+	GRIPSUBJ_Forend,     // pump or handguard -- a fat cylinder across the palm
+	GRIPSUBJ_Foregrip,   // vertical foregrip, as on an SMG
+	GRIPSUBJ_Slide,      // slide or charging handle -- pinched from the sides
+	GRIPSUBJ_Support,    // supporting the OTHER hand's weapon, wrapped round its fist
+	GRIPSUBJ_Holster,    // inside a holster volume: reaching, not yet holding
+	GRIPSUBJ_MAX
 };
 
 // Capacitive touch reports skin CONTACT without a press, which is what says
@@ -225,6 +263,10 @@ protected:
 	// re-deriving intent from the raw button, which is how two of them used
 	// to fire at once.
 	mutable int xrGripContext[2] = { 0, 0 };
+
+	// What each hand is closed on this frame, EGripSubject. Resolved beside the
+	// context above and published to the pawn.
+	mutable int xrGripSubject[2] = { 0, 0 };
 
 	// Capacitive finger contact per hand, as FINGERTOUCH_* bits.
 	mutable int xrFingerTouch[2] = { 0, 0 };

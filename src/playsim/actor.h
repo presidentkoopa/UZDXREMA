@@ -1794,6 +1794,21 @@ public:
 	int GripContextMain;
 	int GripContextOff;
 
+	// What each hand is closed on, EGripSubject. Same script-claims /
+	// engine-arbitrates split as the pair above: script writes GripClaim*,
+	// because only script can know that a shell is being held, and the engine
+	// writes GripSubject* with whatever actually won -- which is the claim,
+	// unless the hand is in a holster, which the engine resolves itself.
+	//
+	// A claim also stands two-hand stabilize down for that hand. That matters
+	// more than it sounds: stabilize is a bare proximity test between the two
+	// controllers, and reloading puts the hands together, so without this every
+	// reload gesture reads as a two-hand grip on the weapon.
+	int GripClaimMain;
+	int GripClaimOff;
+	int GripSubjectMain;
+	int GripSubjectOff;
+
 	// Capacitive finger contact, FINGERTOUCH_* bits. Contact is not a press:
 	// this says where a finger RESTS, which is what a hand pose needs.
 	int FingerTouchMain;

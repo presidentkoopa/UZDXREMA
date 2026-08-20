@@ -942,6 +942,18 @@ CVAR(Bool, vr_two_handed_weapons, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // Fallback two-hand stabilize reach in real-world inches, used by any weapon
 // that does not set Weapon.StabilizeDistance (0, the ZScript default).
 CVAR(Float, vr_stabilize_distance_inches, 8.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+// Require the off hand to actually GRAB the weapon before it stabilises,
+// instead of inferring it from the two controllers being close together.
+//
+// The proximity test predates being able to hold anything: with no hands in
+// the world there was nothing to grab, so nearness was the only signal
+// available. A weapon that publishes a forend or foregrip (Actor.GripClaimOff,
+// GRIPSUBJ_Forend / GRIPSUBJ_Foregrip) no longer needs the guess.
+//
+// Off by default, because a weapon that claims nothing would otherwise lose
+// two-handed aim altogether, and most weapons claim nothing.
+CVAR(Bool, vr_stabilize_requires_grab, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // Should a holster claim take over that hand's GRIP button?
 //
 // Off (default): a claim still suppresses two-hand stabilize for that hand,

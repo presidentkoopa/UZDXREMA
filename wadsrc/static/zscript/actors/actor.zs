@@ -419,6 +419,29 @@ class Actor : Thinker native
 	native readonly int GripContextMain;
 	native readonly int GripContextOff;
 
+	// What each hand is closed ON, as opposed to what its grip MEANS above.
+	// EGripSubject, declared in constants.zs so every mod can name the values
+	// rather than writing bare integers.
+	//
+	// Claim / result, the same pair as HolsterClaim* and GripContext*. Write
+	// GripClaim* to say what this hand has taken hold of -- only script can
+	// know that -- and read GripSubject* for what the arbiter settled on, which
+	// is the claim unless the hand is inside a holster.
+	//
+	// A non-zero claim also stands two-hand stabilize down for that hand.
+	// Stabilize is proximity between the controllers and nothing more, and
+	// reloading is exactly the gesture that brings the hands together, so
+	// without this every reload reads as gripping the weapon two-handed.
+	// More than one mod can write these, so the convention is: SET your subject
+	// while you hold it, and CLEAR it only when the current value is one of
+	// yours. A mod that blanks the field whenever it has nothing to say erases
+	// everyone else's claim, and handler order is not something any of them
+	// controls.
+	native int GripClaimMain;
+	native int GripClaimOff;
+	native readonly int GripSubjectMain;
+	native readonly int GripSubjectOff;
+
 	// Accumulated CONTROLLER-driven yaw (snap + stick turn), degrees. HmdYaw is
 	// physical head yaw PLUS this. Body-relative anchors must follow this part
 	// 1:1 -- it rotates the whole virtual body -- while only the physical

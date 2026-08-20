@@ -2943,3 +2943,103 @@ lookup is additionally marked `decorateOnly` whenever a prefix exists.
 
 A field is set by plain assignment from `BeginPlay` and cannot be broken by any
 of it.
+
+## 49. Grip subjects: what a hand is closed ON
+
+`EGripContext` answers what a hand's grip *means* this frame — holster,
+stabilize, modifier, plain. It cannot answer what the hand is *holding*, and
+those are different questions with different consumers: priority arbitration
+wants the first, hand posing wants the second. Folding them into one enum would
+force every consumer of either to care about the other.
+
+So `EGripSubject`, published as `Actor.GripSubjectMain` / `GripSubjectOff`
+alongside `GripContext*`, with `Actor.GripClaimMain` / `GripClaimOff` as the
+script-writable input. Same claim/result split `HolsterClaim*` already uses, and
+for the same reason: the engine cannot possibly know there is a shotgun shell in
+your hand, because there is no shell in the world to test against. Script names
+it, the engine arbitrates.
+
+The values are **pose-shaped, not object-shaped**:
+
+```
+GRIPSUBJ_None, Round, Shell, Inserting, Magazine,
+Grip, Forend, Foregrip, Slide, Holster
+```
+
+A hand does not care whether it is on an SMG or a shotgun; it cares whether it
+is wrapping a fat cylinder or squeezing a vertical grip. Two guns held the same
+way claim the same subject, and a mod adding a third weapon usually adds no new
+values at all.
+
+Declared in `constants.zs` rather than in any one mod, so every mod can name
+`GRIPSUBJ_Forend` instead of writing `4` and hoping.
+
+**Multiple writers, one field.** `GripClaim*` has more than one writer by
+design — a reloading mod owns ammo, a weapon mod owns its own furniture — and
+handler order is not something either controls. The convention is therefore:
+*set* your subject while you hold it, *clear* it only when the current value is
+one of yours. A mod that blanks the field whenever it has nothing to say erases
+everyone else's claim on alternating tics, and the pose flickers between them.
+
+**A claim beats the holster the engine infers.** `GripSubject*` resolves to the
+script claim when there is one, and only falls back to `GRIPSUBJ_Holster` from
+`HolsterClaim*` when there is not. Script naming what the hand holds is more
+specific than the engine noticing where the hand is: a hand that came out of the
+pouch *with* a magazine, still inside the volume, should be shown holding the
+magazine rather than still reaching for it.
+
+## 50. Two-hand stabilize becomes something you earn
+
+Stabilize was a bare proximity test — the off hand within
+`vr_stabilize_distance_inches` of the main hand is assumed to be supporting the
+weapon. That was the only option available while hands were invisible: with
+nothing in the world to grab, nearness was the only signal there was.
+
+It has two problems now. It cannot tell a hand supporting the weapon from a hand
+that merely drifted close, and **reloading is precisely the gesture that brings
+the hands together** — so every reload read as a two-hand grip on the gun.
+
+Rather than delete the mechanic, which is the only two-point aim in the build and
+is exactly right for a longarm, it is now *claimable*:
+
+- `GRIPSUBJ_Forend` and `GRIPSUBJ_Foregrip` are **supporting** subjects. A hand
+  claiming one keeps stabilize, and gets it without the distance test — the
+  player deliberately grabbed the gun there, which is strictly better evidence
+  than two controllers being near each other.
+- Every other subject — magazine, shell, slide, a round being inserted — resolves
+  to the new `GRIPCTX_Object`, which sits above stabilize in the arbiter and
+  stands it down. A hand doing something else is not supporting the weapon.
+- `vr_stabilize_requires_grab` (default off) removes the proximity guess
+  entirely, leaving only the claim. Off by default because a weapon that claims
+  nothing would otherwise lose two-handed aim altogether, and most weapons claim
+  nothing.
+
+`GRIPCTX_Object` is **appended** to `EGripContext` rather than inserted at its
+priority position. Those values are published to ZScript and mods already read
+them, so the numbering is API; priority lives in the branch order of
+`ResolveGripContexts`, which is where the header already said it lived.
+
+`RS_Shotgun` is the first weapon to claim: off hand gripping while a shotgun is
+in the main hand publishes `GRIPSUBJ_Forend`, which both poses the hand round a
+4.5cm cylinder and earns the two-handed hold.
+
+### `GRIPSUBJ_Support` — the engine's own claim
+
+Stabilize was a grab **in the code only**. The aim went two-handed while the off
+hand still hung beside the weapon posed as an empty fist, because nothing
+existed to say the hand was on anything. Now that a hand can be posed on a
+thing, the thing has to be named — and for stabilize the engine can name it
+itself, without knowing anything about the weapon: a stabilizing hand with
+nothing else claimed is supporting the other hand's weapon. That is what
+stabilize *means*.
+
+So `GripSubject*` resolves in the order: script claim, then holster, then
+`GRIPSUBJ_Support` if the arbiter landed on `GRIPCTX_Stabilize`, then None.
+Every weapon in every mod gets a correct support hand without cooperating, and a
+weapon that knows better overrides it by claiming.
+
+One guard, and it belongs on the script side: a hand with its own weapon in it
+is not supporting anything, whatever the arbiter concluded. Only ZScript knows
+what is in the other hand, so `RS_Hands` drops the support pose when the hand is
+holding a weapon — laid over a gun it would show fingers wrapped round thin air
+beside it.

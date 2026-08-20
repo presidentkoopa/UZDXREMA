@@ -141,6 +141,7 @@ EXTERN_CVAR(Float, vr_overlayscreen_vpos);
 EXTERN_CVAR(Int, vr_overlayscreen_bg);
 EXTERN_CVAR(Int, vr_control_scheme);
 EXTERN_CVAR(Bool, vr_two_handed_weapons);
+EXTERN_CVAR(Bool, vr_stabilize_requires_grab);
 EXTERN_CVAR(Float, vr_stabilize_distance_inches);
 EXTERN_CVAR(Bool, vr_holster_use_grip);
 CVAR(Bool, vr_menu_pointer, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
@@ -3405,7 +3406,18 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		if (reachInches == 0.0) reachInches = vr_stabilize_distance_inches;
 		const float stabilizeRangeMeters = (reachInches > 0.0) ? (float)(reachInches * 0.0254) : -1.0f;
 
+		// Proximity stabilize: the off hand within reach of the main hand is
+		// assumed to be supporting the weapon. It is a guess, and it was the
+		// only option while hands were invisible -- there was nothing in the
+		// world to grab.
+		//
+		// vr_stabilize_requires_grab turns the guess off and leaves only the
+		// claim, so the weapon goes two-handed when you actually take hold of
+		// its forend and not merely when your hands are close. Off by default:
+		// a weapon that claims nothing would otherwise lose two-handed aim
+		// entirely, and most weapons claim nothing.
 		const bool stabilizeGeometryOk = vr_two_handed_weapons
+			&& !vr_stabilize_requires_grab
 			&& stabilizeRangeMeters >= 0.0f && distance < stabilizeRangeMeters;
 
 		for (int h = 0; h < 2; ++h)
@@ -3414,6 +3426,26 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			const bool isMain = (h == mainHand);
 			const bool holsterHere = consolePawn
 				&& (isMain ? consolePawn->HolsterClaimMain : consolePawn->HolsterClaimOff);
+
+			// What script says this hand is closed on. Anything non-zero means
+			// the hand is busy with a physical object, which is what stands
+			// stabilize down -- see GripClaim* in actor.h.
+			const int claimed = consolePawn
+				? (isMain ? consolePawn->GripClaimMain : consolePawn->GripClaimOff) : 0;
+
+			// A hand on the forend or a foregrip is still SUPPORTING the
+			// weapon, so it keeps stabilize -- that is what two-handed hold
+			// is, and claiming it means the player deliberately grabbed the
+			// gun there rather than the engine inferring it from two
+			// controllers happening to be near each other.
+			//
+			// Every other subject -- a magazine, a shell, the slide -- is a
+			// hand doing something ELSE, and must stand stabilize down.
+			// Reloading is precisely the gesture that brings the hands
+			// together, so without this every reload reads as gripping the
+			// weapon two-handed.
+			const bool supporting = (claimed == GRIPSUBJ_Forend || claimed == GRIPSUBJ_Foregrip);
+			const bool objectHere = (claimed > 0) && !supporting;
 
 			// ---- tap vs combo -------------------------------------------
 			// Grip alone does nothing as a modifier -- the shift layer only
@@ -3484,7 +3516,16 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			{
 				ctx = GRIPCTX_Modifier;
 			}
-			else if (!isMain && stabilizeGeometryOk)
+			else if (objectHere)
+			{
+				// Above stabilize on purpose. Stabilize is proximity alone: it
+				// cannot tell a hand supporting the weapon from a hand that
+				// merely happens to be near it, and a hand that has closed on a
+				// named object is the one case where we know for certain which
+				// of the two it is.
+				ctx = GRIPCTX_Object;
+			}
+			else if (!isMain && (supporting || stabilizeGeometryOk))
 			{
 				ctx = GRIPCTX_Stabilize;
 			}
@@ -3493,6 +3534,30 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 				ctx = GRIPCTX_Plain;
 			}
 			xrGripContext[h] = ctx;
+
+			// Published whatever the context resolved to, including when the
+			// grip is not held at all. A hand keeps holding a magazine while
+			// the player relaxes the squeeze, and the pose has to keep showing
+			// that -- what a grip MEANS is decided per frame, what a hand is ON
+			// is not.
+			// A claim beats the inferred holster subject. Script naming what
+			// the hand holds is more specific than the engine noticing where
+			// the hand is, and a hand that came out of the pouch WITH a
+			// magazine, still inside the volume, should be shown holding the
+			// magazine rather than still reaching for it.
+			//
+			// A stabilizing hand with nothing claimed is SUPPORTING the other
+			// hand's weapon, and the engine can say so itself -- that is what
+			// stabilize means, and it is the one subject derivable without
+			// knowing anything about the weapon. It matters because stabilize
+			// used to be a grab in the code only: the aim went two-handed
+			// while the hand still hung there posed as an empty fist. Filling
+			// this in means every weapon in every mod gets a support hand
+			// without cooperating, and a weapon that knows better -- a shotgun
+			// with a pump to grab -- overrides it by claiming.
+			xrGripSubject[h] = (claimed > 0) ? claimed
+				: (holsterHere ? GRIPSUBJ_Holster
+				: (ctx == GRIPCTX_Stabilize ? GRIPSUBJ_Support : GRIPSUBJ_None));
 		}
 
 		// Publish to ZScript so a mod can see what grip is doing rather than
@@ -3501,6 +3566,8 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		{
 			consolePawn->GripContextMain = xrGripContext[mainHand];
 			consolePawn->GripContextOff  = xrGripContext[offHand];
+			consolePawn->GripSubjectMain = xrGripSubject[mainHand];
+			consolePawn->GripSubjectOff  = xrGripSubject[offHand];
 			consolePawn->FingerTouchMain = xrFingerTouch[mainHand];
 			consolePawn->FingerTouchOff  = xrFingerTouch[offHand];
 			consolePawn->VRTurnYaw = snapTurn;

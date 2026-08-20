@@ -1616,6 +1616,31 @@ enum EParticleStyle
 	PT_SMOOTH	= 2,
 };
 
+// What a VR hand is closed ON, as distinct from what its grip MEANS (see
+// EGripContext / GripContext* on Actor). Written to Actor.GripClaimMain/Off by
+// whichever mod knows -- only script can tell that a shell is in your hand --
+// and read back arbitrated from GripSubjectMain/Off.
+//
+// Pose-shaped rather than object-shaped on purpose: a hand does not care
+// whether it is on an SMG or a shotgun, it cares whether it is wrapping a fat
+// cylinder or squeezing a vertical grip, so two guns held the same way claim
+// the same subject. Mirrors EGripSubject in vk_openxrdevice.h.
+enum EGripSubject
+{
+	GRIPSUBJ_None = 0,
+	GRIPSUBJ_Round,      // one pistol or rifle cartridge -- fingertip pinch
+	GRIPSUBJ_Shell,      // a shotgun shell -- fatter, and a fuller grip
+	GRIPSUBJ_Inserting,  // that round being pushed home, thumb driving it
+	GRIPSUBJ_Magazine,   // magazine, clip or speedloader -- wrapped in the palm
+	GRIPSUBJ_Grip,       // a pistol grip: a one-handed gun, or a longarm's firing hand
+	GRIPSUBJ_Forend,     // pump or handguard -- a fat cylinder across the palm
+	GRIPSUBJ_Foregrip,   // vertical foregrip, as on an SMG
+	GRIPSUBJ_Slide,      // slide or charging handle -- pinched from the sides
+	GRIPSUBJ_Support,    // supporting the OTHER hand's weapon, wrapped round its fist
+	GRIPSUBJ_Holster,    // inside a holster volume: reaching, not yet holding
+	GRIPSUBJ_MAX
+}
+
 enum ESetBoneMode
 {
 	SB_CLEAR = 0,

@@ -2012,10 +2012,51 @@ vec3 SweepAirLattice(vec3 fragPos)
 			uv = vec2(uv.x * cs - uv.y * sn, uv.x * sn + uv.y * cs);
 		}
 
-		float lu = SweepLineAxis(uv.x, uSweepFill.x, uSweepFill.z, uSweepFill.w, tt);
-		float lv = SweepLineAxis(uv.y, uSweepFill.y, uSweepFill.z, uSweepFill.w, tt);
-		float cov = (bfill == 2) ? min(lu, lv) : max(lu, lv);
-		if (bfill == 3) cov = 1.0;
+		float cov;
+		if (bfill == 4)
+		{
+			// [BB] PICKETS -- bars floor to ceiling, measured by the room.
+			//
+			// The other fill modes are a pattern in absolute world space that
+			// the room is then cut out of, which is why they read as wallpaper
+			// laid over a corridor rather than as something standing in it.
+			// This one takes its spacing FROM the room, so a narrow corridor
+			// gets a tight ladder and a hall gets a wide one, and neither can
+			// look like the same grid at a different crop.
+			//
+			// No vertical term at all. A bar unbroken from floor to ceiling
+			// gets its height from the geometry for free and can never be
+			// mistaken for a grid.
+			float across = uSweepFill.x;
+			if (uSweepRoomMax.w > 0.0)
+			{
+				// The extent along whichever axis uv.x is reading, in the same
+				// shader space the box was uploaded in.
+				float span;
+				if (shape == 2)      span = uSweepRoomMax.z - uSweepRoomMin.z;
+				else if (shape == 3) span = uSweepRoomMax.x - uSweepRoomMin.x;
+				else                 span = uSweepRoomMax.x - uSweepRoomMin.x;
+
+				// SNAPPED TO A WHOLE NUMBER OF BARS. The spacing cvar stays
+				// the spacing you asked for; this only nudges it so the run
+				// divides the room exactly, which is the difference between
+				// bars that belong to the wall they end at and a pattern with
+				// a half-bar sliced off at the edge.
+				if (span > 1.0)
+				{
+					float n = max(floor(span / max(across, 1.0) + 0.5), 1.0);
+					across = span / n;
+				}
+			}
+			cov = SweepLineAxis(uv.x, across, uSweepFill.z, uSweepFill.w, tt);
+		}
+		else
+		{
+			float lu = SweepLineAxis(uv.x, uSweepFill.x, uSweepFill.z, uSweepFill.w, tt);
+			float lv = SweepLineAxis(uv.y, uSweepFill.y, uSweepFill.z, uSweepFill.w, tt);
+			cov = (bfill == 2) ? min(lu, lv) : max(lu, lv);
+			if (bfill == 3) cov = 1.0;
+		}
 
 		sum += uSweepFillCol.rgb * cov * slab * uSweepColors[sb].a
 		     * uSweepAir.x * roomFade;
