@@ -222,39 +222,15 @@ half, and not mine at all.
 ### iAmErmac — [DoomXR](https://github.com/iAmErmac/DoomXR)
 
 The port this forks directly, and a great deal more of what you are running
-than the tables above imply. The VR shell is his: dual tracked hands, the
-OpenXR path, the weapon wheel, the portable HUD, the controller menus.
+than the tables above imply. 
 
-So is nearly all of the performance work — and none of it had been written down
-anywhere until this fork was audited against itself. The wall and flat surface
-**light budget** and its culling, decorative sprite culling, the dynlight
-portal, spotlight and model-dedupe caches, **BSP multithreading** and its
-refined wall dispatch, threaded texture upload, and the performance tweak menu
-that exposes them. Around thirty cvars under `gl_light_*`, `gl_bsp_*` and
-`gl_texture_thread_*` are his, and they are the reason this runs at framerate
-in a headset at all.
-
-And the multiplayer layer on top: the host and join menus, name tags, visible
-IP address, laser sight drawn for other players, and the netplay fixes
-underneath all of it.
 
 ### Emanuele Disco — [QuestZDoom](https://github.com/emawind84/QuestZDoom)
 
 Over 1,300 commits in this tree's history, and the reason VR here feels like a
 game instead of a demo.
 
-The long, unglamorous campaign against **yaw desync** is his. Teleporting. The
-ironlich whirlwind. The strife dagger. Every Hexen and Heretic weapon whose
-action turned the player and left the headset pointing somewhere else. Each one
-found separately and fixed separately, and none of them the kind of thing
-anyone thanks you for.
 
-Also the VR movement model — `vr_move_speed`, `vr_run_multiplier` and
-`vr_walk_multiplier` scaling against `normforwardmove` rather than replacing it
-— instant 180° turns, weapon bob restored on flat screen, the `PlayInVR`
-property mods branch on, dual wielding, the integrated mod loader, and the
-Android and CI maintenance that kept the whole thing compiling across years of
-upstream merges.
 
 ### And upstream of both
 
