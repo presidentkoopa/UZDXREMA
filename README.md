@@ -1,4 +1,3 @@
-i have not verified the credits but i have verified the claims
 ![Doom XR Edition](https://github.com/iAmErmac/DoomXR/blob/doomxr/branding/banner.png)
 
 # UZDXREMA — a rendering fork of DoomXR
@@ -17,11 +16,16 @@ The name is the lineage, in order:
 **EMA** for [emawind](https://github.com/emawind84/QuestZDoom)'s QuestZDoom.
 Two thirds of it is theirs, and that is about the right ratio.
 
-Branch: `model-remap`. Engine base: **UZDoom 5.0.0-rc.2**.
+The capability claims in this document and in `FORK_CHANGES.md` have been
+checked against source. The credit above is attribution, not a verified
+history — what DoomXR and QuestZDoom actually went through to get here is
+not something this repo can confirm.
+
+Branch: `main`. Engine base: **UZDoom 5.0.0-rc.2**.
 
 Three documents, for three questions:
 
-- **[`CHANGES.md`](CHANGES.md)** — *where* the changes are. Every one of the 398
+- **[`CHANGES.md`](CHANGES.md)** — *where* the changes are. Every one of the 400
   files this fork touches, what owns it, and what it does there.
 - **[`FORK_CHANGES.md`](FORK_CHANGES.md)** — *why*, in full. The engineering
   write-up, with file references and the reasoning behind each decision.
@@ -64,7 +68,7 @@ built for.
 
 | | |
 | --- | --- |
-| **Billboards** | Oriented world quads with hit testing — an in-world UI primitive. Real depth-tested geometry, occluded by walls, pointable and touchable. Eleven payload types including panels, digits, segment displays and a glowing seam that opens. |
+| **Billboards** | Oriented world quads with hit testing — an in-world UI primitive. Real depth-tested geometry, occluded by walls, pointable and touchable. Twelve payload types including panels, digits, segment displays and a glowing seam that opens. |
 | **Surface glow** | Floors and ceilings glow on their **own face**, not just spilling onto a nearby wall. Wall glow gains falloff curves and intensity. Each glow carries **two colours** and ramps between them, so a corner can be a continuous gradient instead of a hard edge. |
 | **Sweep** | World-space bands of light that wrap floor, wall and ceiling as one unbroken line. Eight at once, five shapes, each with its own origin, speed and colour, and four things a band can do to what it crosses: add, lift, crush, re-colour. |
 | **Sweep band fill** | A band can carry a **lattice**, a field of dots or a solid slab instead of a wash, and the lattice can stand **in the air** inside the band rather than being painted on what it lands on — a wall of lasers filling a corridor. It is a pattern rather than a set of objects, so four lines and four hundred cost the same. |

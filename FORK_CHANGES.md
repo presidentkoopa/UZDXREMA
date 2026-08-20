@@ -3,7 +3,7 @@
 Everything this fork adds on top of upstream, in one place, so another
 engine developer can see what was touched and why without reading the log.
 
-Branch: `doomxr`. Each area below is self-contained; nothing here depends on
+Branch: `main`. Each area below is self-contained; nothing here depends on
 anything else here.
 
 | Area | What it is | Detail doc |
@@ -38,6 +38,20 @@ anything else here.
 | [Billboard roll](#27-billboard-roll) | the third angle — and it lives in the shared basis, so a rolled quad is hittable where it is drawn | — |
 | [A panel as a field](#28-a-panel-as-a-field) | `BB_SDFPANEL` — the rounded rect solved per pixel, so a plate can finally glow | — |
 | [Everything else this fork adds](#29-everything-else-this-fork-adds) | the laser sight itself, tracers, the psprite recursion guard, and every native with no API entry | — |
+| [Field reflection](#30-field-reflection--reading-another-mods-data-without-linking-to-it) | read another mod's field by name — no shared header, no hard dependency | — |
+| [`MainHandRoll`](#31-mainhandroll--the-main-hands-real-wrist-roll) | the main hand's real wrist roll, since the network-safe field is zeroed every tic | — |
+| [Standing shapes](#32-standing-shapes--the-same-glyphs-freestanding-in-open-air) | the same SDF glyphs, freestanding in open air instead of painted onto a surface | — |
+| [Fog disturbance capacity](#33-fog-disturbance-capacity--8-to-32-and-why-not-128) | 8 to 32 live disturbance slots, and why not 128 | — |
+| [Mod-owned placement](#34-mod-owned-placement--per-weapon-offset-sliders-without-an-engine-change) | per-weapon offset (and scale) sliders a mod declares itself, no engine change | — |
+| [Skin alpha that is not opacity](#35-skin-alpha-that-is-not-opacity) | a model skin whose alpha is packed data, not opacity, stops being alpha-tested away | — |
+| [Per-psprite model tint](#36-per-psprite-model-tint) | `Tint`/`Glow` — a held weapon's model finally takes colour, independently per hand | — |
+| [Script-suppressed psprite layers](#37-script-suppressed-psprite-layers-hiding-the-weapon-without-hiding-what-it-does) | `NoDraw` — hide a layer without touching the weapon it belongs to | — |
+| [Flat overlays on a modeled weapon](#38-flat-overlays-on-a-weapon-that-is-itself-a-model) | a flash overlay dims to match the 3D gun it's stapled to, instead of floating over it | — |
+| [Static poses on decoupled models](#39-static-poses-on-decoupled-models-and-the-trace-built-to-find-them-missing) | a bone-animated hand can hold one authored frame instead of only ever playing a clip | — |
+| [Array-element field reflection](#40-array-element-field-reflection) | §30's reflection, extended to read one element out of another mod's array | — |
+| [HUD bone anchoring](#41-hud-bone-anchoring--a-psprite-layer-drawn-at-another-layers-bone) | a psprite layer draws at a named bone of another layer's model | — |
+| [Model diagnostics](#42-model-diagnostics-vr_validate--vr_spatialreport-and-a-crash-one-step-behind-them) | catch a collapsed mesh or a mispositioned model on sight — and the crash found one step behind them | — |
+| [Sweep room bound](#43-sweep-room-bound--the-air-lattice-gets-a-room-instead-of-an-infinite-plane) | the lattice fades outside a script-published box, instead of standing in every room its plane reaches | — |
 
 ---
 
@@ -57,14 +71,20 @@ Level.TouchBillboard(point, r)  -> hit id, UV, distance
 Level.SweepBillboard(from,to,r) -> hit id, UV, fraction along the segment
 ```
 
-**Ten payloads**, not the six this paragraph claimed until the fork was audited
-against itself: `BB_PANEL`, `BB_TEXTURE`, `BB_DIGITS`, `BB_GLYPH`, `BB_RING`,
-`BB_BAR`, then `BB_SEGMENT` (a 16-segment display drawn procedurally, no atlas),
+**Twelve payloads** — not the six this paragraph originally claimed, and not
+the ten a later audit corrected it to, either: that audit missed that index 6
+was already `BB_TEXT`, not unused, and predates §28 adding a twelfth. In enum
+order (`g_levellocals.h`, `EBillboardPayload`): `BB_PANEL`, `BB_TEXTURE`,
+`BB_DIGITS`, `BB_GLYPH`, `BB_RING`, `BB_BAR`, `BB_TEXT` (an arbitrary string —
+reads the billboard's own text field and ignores `data`), `BB_SEGMENT` (that
+same kind of string drawn as a 16-segment display, procedurally — no atlas),
 `BB_SEGLCD` (its inverse — a lit plate with the digits punched out of it),
-`BB_SEAM` (a glowing slit you open with `ResizeBillboard`; with the void flag the
-opening is a *hole* with a bright rim rather than a lit slab), and `BB_WG13` (a
-transcribed kill badge, plate and digits in one pass). Index 6 is unused, so the
-enum runs 0–10. All ten draw. `BILLBOARDS.md:81` documents them properly.
+`BB_SEAM` (a glowing slit you open with `ResizeBillboard`; with the void flag
+the opening is a *hole* with a bright rim rather than a lit slab), `BB_WG13`
+(a transcribed kill badge, plate and digits in one pass), and `BB_SDFPANEL`
+(§28 — `BB_PANEL`'s job solved as a distance field instead of a sampled
+texture, which is what lets it take a glow). The enum runs 0–11 with no gaps.
+All twelve draw. `BILLBOARDS.md`'s own payload table lists all twelve.
 
 Also: view-locking (resolved at *render* rate, not tic rate, which is what makes
 a head-locked panel not swim), per-billboard alpha, `BBFL_NODEPTH`,
@@ -2251,6 +2271,26 @@ Four sync points, the same four any uniform array resize needs:
 **hardcoded loop bounds** in `main.fp`, which are literals rather than a
 constant and will silently keep reading only the first 8 if left behind.
 
+### Regression fixed the same day: the shader walked every slot regardless
+
+Raising the cap to 32 did not add an early-out. Both disturbance loops in
+`main.fp` — the glow feed and the fog density calculation — walked all 32
+slots on every fragment inside the fog volume and `continue`d past the empty
+ones, which still costs the iteration and the uniform read. Shapes and beams
+already break on their live count; fog didn't, so idle fog went from paying
+for 8 wasted reads per fragment to paying for 32, on the loop that runs across
+every fragment the mist touches.
+
+Fixed by reading a live count (`uFogBow.w`, already uploaded, already used as
+a boolean) and breaking at it, the same way the shape and beam loops do.
+
+That forced a meaning change on the C++ side. `liveDisturb` was a running
+total, but disturbance slots are recycled out of order — `FogDisturb()` takes
+the first free slot or the oldest — so a live set can be sparse. With slots 0
+and 5 live, a *count* of 2 would make the shader break before it ever reached
+slot 5 and silently stop drawing it. `liveDisturb` is a **high-water mark**
+now (`i + 1`), the same shape the shape loop's own bound already used.
+
 ---
 
 ## 34. Mod-owned placement — per-weapon offset sliders without an engine change
@@ -2337,11 +2377,26 @@ axes it hasn't gotten around to wiring up yet.
 **Gotcha:** the prefix is resolved by string concatenation with a fixed
 suffix list, so `placementcvars myweapon` requires the CVARs to be named
 *exactly* `myweapon_ofs_x`, `myweapon_ofs_y`, `myweapon_ofs_z`, `myweapon_yaw`,
-`myweapon_pitch`, `myweapon_roll` — no partial sets with different suffixes,
-no case variation beyond what `FindCVar`'s own lookup tolerates, and any typo
-in either the `MODELDEF` prefix or the `CVARINFO` name fails the same silent
-way a genuinely absent CVAR does: that axis just sits at zero forever, with
-nothing in the log to say why.
+`myweapon_pitch`, `myweapon_roll`, `myweapon_scale` — no partial sets with
+different suffixes, no case variation beyond what `FindCVar`'s own lookup
+tolerates, and any typo in either the `MODELDEF` prefix or the `CVARINFO` name
+fails the same silent way a genuinely absent CVAR does: that axis just sits at
+its default forever, with nothing in the log to say why.
+
+### A seventh axis: `_scale`
+
+`placementcvars` originally resolved the six offset/rotation suffixes above.
+A `<prefix>_scale` lookup was added alongside them, read the same live,
+no-cache way and for the same reason (`MODELDEF` parses before a mod's
+`CVARINFO` is guaranteed loaded, so caching the `FBaseCVar*` would often cache
+a null). It multiplies onto `vr_weaponScale` rather than replacing it, so a
+per-weapon size fix composes with the existing global slider instead of
+fighting it: `objectToWorldMatrix.scale(vr_weaponScale * placeScale, ...)`.
+
+**Absent or non-positive reads as 1, not 0.** A missing or zeroed slider must
+leave the model's size alone, not collapse it to a point — the same "default
+that isn't the falsy value" trap the rest of this file's CVAR-reading code
+already avoids elsewhere.
 
 ---
 
@@ -2636,3 +2691,137 @@ bytecode with a confirmed mutating side effect (strips and regrants ammo
 capacity as normal control flow — traced by hand, see the wheel-side
 project memory on this), not behind a field at all. Field reflection, array
 or scalar, only ever reaches data a mod already stored as an object field.
+
+---
+
+## 41. HUD bone anchoring — a psprite layer drawn at another layer's bone
+
+psprite layers were completely independent — nothing could follow anything —
+so every "put this exactly there" problem (a hand on a grip, a magazine
+entering its well, a shell at a loading port) was solved by hand-tuning
+offsets per weapon, and re-tuned whenever either model moved. Those are all
+the same problem: one layer needs to sit at a measured point on another
+layer's mesh, not at a guessed offset from the controller.
+
+```zscript
+native int  PSprite.AnchorLayer;   // layer id to follow, -1 = not anchored
+native Name PSprite.AnchorBone;    // bone name on that layer's model
+```
+
+When a model's bones are resolved for the GPU (`RenderModelFrame`,
+`models.cpp`), any bone another layer has asked for is combined with that
+model's world transform and published into a small table keyed by
+`(layer id, bone name)` (`HudAnchor_Store`/`HudAnchor_Get`, `models.cpp`).
+The anchored layer reads that transform in `RenderHUDModel` instead of
+starting from the controller — driven by requests rather than storing every
+bone, since a rigged weapon has dozens and almost none are ever anchored to.
+
+**The anchored layer must have a higher id than its target.** Psprites draw
+in id order, and the target's bones aren't known until it has already been
+drawn — this is a same-frame dependency with no scheduling behind it, just an
+ordering constraint on the caller.
+
+Three things had to be right for it to work at all:
+
+**An anchored model skips the PLAYER-relative block entirely** — global
+weapon offset, bob, aim rotation, the viewmodel axis fix. The bone matrix was
+captured *after* its target had already been through all of that, so applying
+it again would add the weapon's position and rotation a second time and throw
+the attachment clear of the bone. Only the model's own `MODELDEF` offsets,
+rotations and scale survive for an anchored layer; they now apply relative to
+the bone instead of the controller, which is what lets `MODELDEF` still
+fine-tune the fit exactly as it does for an unanchored model.
+
+**Bones are published for every HUD model, not only decoupled ones.**
+Restricting publication to `MODELSAREATTACHMENTS`/decoupled models meant a
+plain (non-decoupled) weapon model silently published nothing, so anchoring
+to it did nothing and looked like a script bug rather than a missing feature.
+
+**Anchors are frame-stamped.** `HudAnchor_BeginFrame()` runs once per psprite
+render pass and ticks a counter; a stored anchor is only honoured if its stamp
+matches the current one. A target that stops being drawn — hidden, `NoDraw`d,
+switched away from — leaves no stale entry freezing an attachment where the
+weapon last was; the requesting layer simply falls back to its own placement.
+
+---
+
+## 42. Model diagnostics: `vr_validate` / `vr_spatialreport`, and a crash one step behind them
+
+Two CVars, on by default, that check a HUD model the first time it is drawn
+and print once — never every frame, and never a behaviour change:
+
+```
+vr_validate       // bool, default true
+vr_spatialreport  // bool, default true
+```
+
+`ValidateHudModel` (`models.cpp`) catches two things that each present as an
+unrelated bug and cost a full headset session to find by eye: a skinned model
+(bone count > 0) with **zero animation frames** — collapses on the GPU and
+reads as missing geometry or missing textures, never as a pose problem — and
+a skin with a translucent alpha channel where `IgnoreSkinAlpha` (§35) is
+**not** set, which reads as a half-transparent gun rather than as packed PBR
+data. Each check fires at most once per `FSpriteModelFrame`/slot
+(`ValidateOnce`), not once per frame.
+
+`vr_spatialreport` prints where a layer's model actually landed — position is
+the transform's translation column, scale is the length of its first column
+— because "tiny and far away" and "correctly sized but mispositioned" are
+indistinguishable through a headset and are entirely different bugs. The
+gate is a single shared timestamp (`static uint64_t lastReport` in
+`RenderHUDModel`, throttled to once per second), not one per layer, so with
+several layers drawing in the same frame only one line prints per second —
+whichever layer's draw happens to be current when the second ticks over —
+not a report for every layer every second.
+
+### The crash it was one step from causing
+
+`ValidateHudModel` was originally called as
+`Models[smf->modelIDs.Size() ? smf->modelIDs[0] : 0]` — the first model id in
+the frame's array, or index 0 if the array is empty. A model frame can have a
+non-empty `modelIDs` whose first entry is `-1` (declared, but with no model
+bound), and `-1` was passed straight through as an array index: `Models[-1]`,
+an out-of-bounds read on the first HUD weapon draw that hit it, on any map
+that used one. Fixed by resolving the index defensively — checked against
+both `0` and `Models.SSize()` — and passing `nullptr` through when it's out
+of range, which `ValidateHudModel` already early-outs on.
+
+---
+
+## 43. Sweep room bound — the air lattice gets a room, instead of an infinite plane
+
+The sweep's air lattice (§12) is built from a plane with no extent —
+"perpendicular to X at `o.x`" exists at every Y and Z on the map. The band
+had a radius; the plane defining the lattice did not. So this was never a
+leak to patch: the primitive had no concept of a room at all, and any window
+pointing anywhere near a lattice-filled sweep showed lasers hanging in a room
+the sweep had never entered.
+
+```
+Level.SetSweepRoom(min, max, soft)
+```
+
+Publishes a box (`SweepRoomMin`/`SweepRoomMax`/`SweepRoomSoft` on
+`FLevelLocals`) that the lattice fades out past. Tested at **the lattice's
+own hit point**, not at the fragment behind it — the question is where the
+grid is hanging in the air, not what surface happens to be drawn there, so a
+grid seen through a doorway reads as outside the room even though the wall
+beyond the doorway is inside one.
+
+`soft <= 0` removes the bound entirely, which is what every level that never
+calls this gets — bit-identical to the old unbounded behaviour, and why this
+needed no separate enable flag.
+
+**Why script decides the box, not the renderer.** "Which sectors are one
+room" is a judgement, not a fact the engine can derive: a Doom room is almost
+never one sector — steps, light panels, door tracks and alcoves are all their
+own — and whether a window or a step ends a room has no single right answer.
+The rule belongs in readable script where a mod author can argue with it, not
+welded into the renderer.
+
+Four sync points, the same four any `HWViewpointUniforms` addition needs
+(`g_levellocals.h`, `hw_viewpointuniforms.h`, both shader-side struct
+mirrors) — plus the Vulkan per-eye `#define` aliases, which is exactly where
+this class of change has failed silently before (§32): declared correctly in
+both `gl_shader.cpp` and `vk_shader.cpp` is not sufficient on its own if a
+member is missing its `viewpoints[HW_VIEWPOINT_INDEX].` alias next to it.

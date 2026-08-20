@@ -87,15 +87,28 @@ answers. Anything a player can point at, touch or shoot leaves it off.
 3  BB_GLYPH     a single glyph; data = id | palette
 4  BB_RING      progress ring
 5  BB_BAR       progress bar
+6  BB_TEXT      an arbitrary string; reads the billboard's own text, ignores data
+7  BB_SEGMENT   that string as a 16-segment display, drawn procedurally -- no atlas
+8  BB_SEGLCD    BB_SEGMENT inverted: a lit plate with the digits punched out
+9  BB_SEAM      a glowing slit; ResizeBillboard opens it; void flag = a bright-rimmed hole
+10 BB_WG13      GITD's kill badge -- plate and digits transcribed in one pass
+11 BB_SDFPANEL  BB_PANEL solved as a distance field instead of a sampled texture
 ```
 
-**All five draw.** They are not shaders and never needed to be: a payload
-emits as many textured quads as its shape wants -- a bar is a track and a
-fill, a number is a row of glyphs -- and the quad-building work was already
-done. Offsets are in half-extents of the parent, so 1.0 is its edge and a
-payload never needs to know where in the world it sits. Every sub-quad takes
-depth from the billboard's centre rather than its own, so one panel sorts as
-one object and a fill cannot land behind its own track.
+**All twelve draw.** The first six are not shaders and never needed to be: a
+payload emits as many textured quads as its shape wants -- a bar is a track
+and a fill, a number is a row of glyphs -- and the quad-building work was
+already done. Offsets are in half-extents of the parent, so 1.0 is its edge
+and a payload never needs to know where in the world it sits. Every sub-quad
+takes depth from the billboard's centre rather than its own, so one panel
+sorts as one object and a fill cannot land behind its own track.
+
+`BB_SEGMENT`/`BB_SEGLCD`/`BB_SEAM` and `BB_WG13` are procedural rather than
+atlas-driven, and `BB_SDFPANEL` is `BB_PANEL`'s rounded rect solved per pixel
+instead of sampled — the reason it exists is that only a field can take
+`SetBillboardGlow`, since a halo needs to read past an edge a sampled plate
+doesn't have. `FORK_CHANGES.md` §1 and §28 cover the reasoning behind each;
+this file lists what they are.
 
 The texture route is not a stopgap: point `data` at a canvas texture and paint
 it from ZScript, and the billboard is whatever you painted.

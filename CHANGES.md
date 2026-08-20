@@ -67,17 +67,30 @@ Full list: `git diff 5.0.0-rc.2 HEAD -- wadsrc/static/zscript/doombase.zs`
 
 | | |
 | --- | --- |
-| Files changed | **398** |
-| Lines | **+60,901 / −2,199** |
+| Files changed | **400** |
+| Lines | **+62,808 / −2,196** |
 | Files the fork created outright | 78 |
-| ZScript natives exposed | 111 |
-| `src/` | 281 |
-| ZScript | 69 |
-| Shaders | 19 |
+| ZScript natives exposed | 111† |
+| `src/` | 283 |
+| ZScript | 68 |
+| Shaders | 17 |
+
+† Unverified against the current tree — see the note below the table.
 
 The deletion count is the interesting one. This fork is overwhelmingly **additive** — it
 bolts on rather than rewriting, which is why it can be merged forward from upstream
 instead of re-ported onto it.
+
+**The natives-exposed count is unresolved, not just stale.** "119 natives on
+`Level`, plus a smaller set on `Actor`" (below, under "The engine is only half
+of it") is already larger than the "111" above it — the two were computed by
+different methods at different times and were never reconciled. A grep for
+added `native`-bearing lines across all of `wadsrc/static/zscript/` currently
+returns 218, but that counts native fields (`native int AnchorLayer;`) and
+every native line in every file, not distinct callable functions — the
+number this table actually means. Left marked rather than replaced with
+another guess; recount properly (functions only, one count per name, not per
+declaration line) before trusting either number.
 
 ---
 
@@ -409,8 +422,19 @@ well as its declaration; see invariant 2 and §32.
 
 ## Full manifest
 
-All 398 files, grouped by the area that primarily owns them, largest first. The number
+All 400 files, grouped by the area that primarily owns them, largest first. The number
 in brackets is total changed lines. **New** marks a file the fork created outright.
+
+**Not regenerated since `bce7a96c59`.** Three commits have landed after that —
+`bbd7a25bc0` (HUD bone anchoring + model diagnostics), `a716a3cd63` (fog
+disturbance loop fix), `1eb3f11be5` (sweep room bound), all written up in
+[`FORK_CHANGES.md`](FORK_CHANGES.md) §41–43 and the §33/§34 amendments — so
+the line counts below for the files those commits touch
+(`src/r_data/models.cpp`, `hw_weapon.cpp`, `p_pspr.h`/`.cpp`, `g_levellocals.h`,
+`hw_drawinfo.cpp`, `main.fp`, `vmthunks.cpp`, `doombase.zs`, and a few others)
+undercount by however much those commits added. Re-run the command above
+against the current tree for exact numbers; this table is for orientation,
+not for a byte-accurate diff.
 
 ### VR core — 101 files, ~20072 lines
 
@@ -936,8 +960,8 @@ in brackets is total changed lines. **New** marks a file the fork created outrig
 
 | Document | Covers |
 | --- | --- |
-| [`FORK_CHANGES.md`](FORK_CHANGES.md) | The engineering write-up. 33 sections, file references, and the reasoning behind each decision. |
-| [`BILLBOARDS.md`](BILLBOARDS.md) | The billboard system and its eleven payload types, in full. |
+| [`FORK_CHANGES.md`](FORK_CHANGES.md) | The engineering write-up. 43 sections, file references, and the reasoning behind each decision. |
+| [`BILLBOARDS.md`](BILLBOARDS.md) | The billboard system and its twelve payload types, in full. |
 | [`REFLECTION_SPEC.md`](REFLECTION_SPEC.md) | The field reflection API. |
 | [`HUD_STEREO_GATING.md`](HUD_STEREO_GATING.md) | One bug traced end to end — a fair example of how this fork documents itself. |
 | [`README.md`](README.md) | What the features are, for someone deciding whether they want them. |
