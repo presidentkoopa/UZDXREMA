@@ -187,6 +187,24 @@ void main()
 					vec3 worldP = (ViewToWorld * vec4(p, 1.0)).xyz;
 					worldP.y -= DustTime * DustDrift;   // slow settle
 					float d = dustNoise(worldP * DustScale);
+
+					// [FIX] CONTRAST BEFORE THE AVERAGE, or there is nothing
+					// left to see.
+					//
+					// accum is divided by `steps` further down, and averaging
+					// a noise field along a ray converges to its MEAN. At the
+					// default 24 steps that turned the dust into a flat ~15%
+					// dimming of the whole cone with almost no spatial
+					// structure -- the motes were being computed correctly
+					// and then averaged out of existence.
+					//
+					// Pushing the field toward its extremes first means the
+					// average still carries the difference between a thick
+					// patch and a thin one. This does not fight the divide,
+					// which the density accumulation needs; it gives the
+					// divide something that survives it.
+					d = smoothstep(0.22, 0.78, d);
+
 					// Never fully dark: dust thickens the beam in places, it
 					// does not punch holes through it.
 					contrib *= mix(1.0, d, clamp(DustAmount, 0.0, 1.0));
