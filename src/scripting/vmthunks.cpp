@@ -5746,6 +5746,56 @@ DEFINE_ACTION_FUNCTION(FLevelLocals, GetFieldInt)
 	ACTION_RETURN_BOOL(true);
 }
 
+// ARRAY-ELEMENT REFLECTION. GetFieldInt answers "what is field X", which is
+// silently wrong for a fixed DECORATE/ZScript array field -- `int
+// user_equippedDamage[N];` is ONE field whose Type is a PArray, not N
+// fields, and the plain scalar path above type-checks against
+// TypeSInt32/TypeUInt32 and correctly refuses it. Two real mods hit this in
+// the same session: Doomablo's currentStats[totalStatsCount] and
+// BorderDoom's user_equipped*[MAX_EQUIPPED_ITEMS] family -- both plain,
+// safe-to-read data with no way in.
+//
+// Bounds-checked against the array's OWN ElementCount, not trusted from the
+// caller: a caller guessing at another mod's array size and reading past
+// its end would read into whatever field happens to sit next in memory,
+// which is a wrong answer with no error rather than the honest "false"
+// every other getter here already returns for "cannot answer".
+DEFINE_ACTION_FUNCTION(FLevelLocals, GetFieldIntArray)
+{
+	// SELF_STRUCT, not bare PROLOGUE. These are declared as methods on
+	// LevelLocals rather than as statics, so the VM passes self as parameter
+	// zero -- a bare PARAM_PROLOGUE does not consume it and every argument
+	// after shifts by one, which reads the level itself as the target object.
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_OBJECT(o, DObject);
+	PARAM_STRING(name);
+	PARAM_INT(index);
+	PARAM_OUTPOINTER(out, int);
+
+	PField *f = WR_ResolveField(o, name);
+	if (f == nullptr) ACTION_RETURN_BOOL(false);
+
+	// PType's own hierarchy uses isArray()/static_cast, not dyn_cast --
+	// that overload set is for DObject's runtime-object hierarchy, a
+	// different type system than the reflection PType hierarchy this
+	// walks. Confirmed against codegen.cpp's own array-index handling
+	// (e.g. FxArrayElement::Emit), which does exactly this.
+	if (f->Type == nullptr || !f->Type->isArray()) ACTION_RETURN_BOOL(false);
+	PArray *arr = static_cast<PArray *>(f->Type);
+	if (index < 0 || (unsigned)index >= arr->ElementCount) ACTION_RETURN_BOOL(false);
+
+	// Same type discipline as the scalar getter: the element type is
+	// checked, not assumed, so an array of something else (a struct array,
+	// a string array) fails clean instead of reinterpreting its bytes as
+	// an int.
+	if (arr->ElementType != TypeSInt32 && arr->ElementType != TypeUInt32)
+		ACTION_RETURN_BOOL(false);
+
+	uint8_t *base = (uint8_t *)o + f->Offset + (size_t)index * arr->ElementSize;
+	if (out) *out = *(int *)base;
+	ACTION_RETURN_BOOL(true);
+}
+
 DEFINE_ACTION_FUNCTION(FLevelLocals, GetFieldFloat)
 {
 	// SELF_STRUCT, not bare PROLOGUE. These are declared as methods on

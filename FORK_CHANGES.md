@@ -2570,3 +2570,69 @@ Both prints key on a packed integer and only print when that key changes ("in": 
 ### Gotcha: the two probes don't describe the same instant
 
 Because `[POSE/in ]` is placed *before* the §21 state-remap block and `[POSE/out]` is read *after* it, a weapon using a `stateRemap` table can show a `[POSE/in ]` line reporting the pre-remap frame while `[POSE/out]` (and the actual render) reflects the remap-supplied frame instead. Trust `/out` for what actually rendered; `/in` is only useful for confirming what the psprite fields themselves carried before the table had a chance to win. And if a fourth branch is ever added to the decoupled `if/else if/else` in `ProcessModelFrame`, the `names[3]` array and the `branch` ternary at models.cpp:841-842 have to grow together, or the debug line will print the wrong label for a real, correctly-rendered branch.
+
+---
+
+## 40. Array-element field reflection
+
+```
+Level.GetFieldIntArray(Object o, string field, int index, out int value) -> bool
+```
+
+§30's field reflection reads a *scalar* by name — `GetFieldInt` type-checks a
+resolved `PField` against `TypeSInt32`/`TypeUInt32` and refuses anything
+else, which is exactly correct for a plain field and exactly wrong for a
+fixed array. `int user_equippedDamage[MAX_EQUIPPED_ITEMS];` is declared as
+ONE field whose `PField::Type` is a `PArray`, not `MAX_EQUIPPED_ITEMS`
+separate int fields — so the scalar getter's own type check, working as
+designed, said no to every element of it.
+
+Two real mods hit this wall in the same session doing the exact reading
+§30 was built for: Doomablo's `int currentStats[totalStatsCount]` (its
+Vitality/CritChance/CritDmg/Strength/RareFind rolls) and DECORATE-only
+BorderDoom's `user_equipped{Damage,Accuracy,Firerate,...}[MAX_EQUIPPED_ITEMS]`
+family, keyed by weapon slot. Both are plain, safe-to-read data with a
+correct getter refusing them for a type-system reason a caller has no way
+to work around from script.
+
+`GetFieldIntArray` reuses `WR_ResolveField` unchanged (same private/meta/
+static refusal, same inherited-field walk) and adds exactly what an array
+needs on top: confirm `f->Type->isArray()`, `static_cast` to `PArray`, and
+bounds-check the requested index against the array's OWN `ElementCount`
+(`vmthunks.cpp`, next to `GetFieldInt`) — a caller cannot read past the end
+of another mod's array by guessing a larger size than it actually has.
+Element type is checked too (`arr->ElementType != TypeSInt32 &&
+... != TypeUInt32` fails clean), so an array of structs or strings refuses
+rather than reinterpreting its bytes as an int. The element address is
+`f->Offset + index * arr->ElementSize` — `ElementSize` comes straight off
+the `PArray` itself, not recomputed from `ElementType->Size`, so it is
+correct even for element types with nonstandard padding.
+
+**`dyn_cast` does not work here, and cost a full build cycle finding out.**
+`PField`/`PSymbol` (used by `WR_ResolveField` for the field lookup itself)
+belong to the scripting *symbol* hierarchy, where `dyn_cast` is a real,
+working RTTI-checked cast. `PType`/`PArray` belong to a completely separate
+hierarchy — the *type system* — and `dyn_cast<PArray>(f->Type)` fails to
+compile outright (`C2672: no matching overloaded function`, the only
+overloads found being for `DObject*`, a third, unrelated hierarchy again).
+The actual idiom, confirmed against `codegen.cpp`'s own array-index handling
+(`FxArrayElement`, e.g. `codegen.cpp:13269-13270`): check the predicate
+`type->isArray()` first, then `static_cast<PArray*>(type)` once it's true.
+Three different "is this a subclass" mechanisms across three hierarchies in
+the same codebase — cast idiom is not a fact that generalises from one
+`Cast<T>` site to the next one in this engine; check what the *target*
+hierarchy actually uses before assuming.
+
+**Read-only, same as §30, for the same reason.** No `SetFieldIntArray`
+exists or is planned — writing into another mod's array is exactly the
+"corruption and crash in different mods" problem §30's own header already
+rules out for scalars, and an array write is the same problem with an added
+way to get the bounds check wrong.
+
+**Not itself an ACS reader.** This closes the specific "array of plain
+ints" gap, and only that gap — it does nothing for BorderDoom's real
+per-shot stats, which live behind live `CallACS` calls into compiled
+bytecode with a confirmed mutating side effect (strips and regrants ammo
+capacity as normal control flow — traced by hand, see the wheel-side
+project memory on this), not behind a field at all. Field reflection, array
+or scalar, only ever reaches data a mod already stored as an object field.

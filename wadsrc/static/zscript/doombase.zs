@@ -961,6 +961,12 @@ struct LevelLocals native
 	// its crash in different places with nothing tying them together.
 	native bool HasField(Object o, string field);
 	native bool GetFieldInt(Object o, string field, out int value);
+	// GetFieldInt refuses an array field outright -- its Type is a PArray,
+	// not TypeSInt32/TypeUInt32, so the scalar getter's own type check
+	// correctly says no. This is the array-element counterpart: same
+	// reflection, same read-only guarantee, plus an index bounds-checked
+	// against the array's own declared size.
+	native bool GetFieldIntArray(Object o, string field, int index, out int value);
 	// Separate from GetFieldInt on purpose. Handles both storage shapes: a
 	// standalone bool field, and a flagdef packed as a bit -- which is every
 	// +WEAPON.OFFHANDWEAPON and every actor flag, readable here by name.
