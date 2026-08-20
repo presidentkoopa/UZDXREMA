@@ -58,6 +58,7 @@ enum
 	MDL_FIXROTATING					= 1<<15,
 	MDL_NOAUTOREVERSE				= 1<<16,	// model ships explicit left/right variants, so never apply the VR non-dominant-hand mirror
 	MDL_USEHANDOFFSETS				= 1<<17,	// apply the live vr_hand_* placement CVARs on top of this model's own MODELDEF offsets
+	MDL_IGNORESKINALPHA				= 1<<18,	// skin alpha carries data, not opacity -- do not alpha-test against it
 };
 
 FSpriteModelFrame * FindModelFrame(AActor * thing, int sprite, int frame, bool dropped);
@@ -150,6 +151,11 @@ class DActorModelData;
 // model-frame addressing (ModelFrame / ModelFrameNext / ModelFrameLerp) and
 // the native state remap can reach the model path. Both are kept.
 // Default arguments live ONLY here - the definitions in models.cpp carry none.
+// RS FORK -- HUD bone anchoring. Ticks the frame stamp that decides whether a
+// stored anchor is still current; call once per psprite render pass.
+void HudAnchor_BeginFrame();
+bool HudAnchor_Get(int layer, FName bone, VSMatrix &out);
+
 CalcModelFrameInfo CalcModelFrame(FLevelLocals *Level, const FSpriteModelFrame *smf, const FState *curState, const int curTics, DActorModelData* modelData, AActor* actor, bool is_decoupled, double tic, double ticFrac, const DPSprite* psp = nullptr);
 
 // returns true if the model isn't removed

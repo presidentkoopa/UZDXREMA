@@ -287,6 +287,24 @@ public:
 	// savegame constructor runs no constructor body.
 	bool  NoDraw         = false;
 
+	// RS FORK -- HUD BONE ANCHORING.
+	//
+	// Draw this layer at a BONE of another layer's model: AnchorLayer names the
+	// layer to follow, AnchorBone the bone on it. The layer's own MODELDEF
+	// offsets and rotations then apply relative to that bone rather than to the
+	// controller.
+	//
+	// psprite layers are otherwise completely independent -- nothing can follow
+	// anything -- so every "put this exactly there" problem (a hand on a grip, a
+	// magazine entering its well, a shell at the loading port) had to be solved
+	// by hand-tuning offsets per weapon, and re-tuned whenever either model
+	// moved. Anchoring makes the target a measured position instead of a guess.
+	//
+	// The anchored layer must have a HIGHER id than its target: psprites draw in
+	// id order and the target's bones are only known once it has been drawn.
+	int   AnchorLayer    = -1;
+	FName AnchorBone     = NAME_None;
+
 private:
 	DPSprite () {}
 

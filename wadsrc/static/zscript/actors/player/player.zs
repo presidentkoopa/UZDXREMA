@@ -3103,6 +3103,14 @@ class PSprite : Object native play
 	// Hide this layer without touching the weapon behind it. The weapon keeps
 	// its states, damage and slot; only the drawing stops.
 	native bool NoDraw;
+
+	// Draw this layer at a bone of another layer's model. AnchorLayer is the
+	// layer id to follow, AnchorBone the bone name on it; this layer's own
+	// offsets then apply relative to that bone. The anchored layer must have a
+	// HIGHER id than its target, because psprites are drawn in id order and the
+	// target's bones are not known until it has been drawn.
+	native int AnchorLayer;
+	native Name AnchorBone;
 	//native readonly int RenderStyle;	had to be blocked because the internal representation was not ok. Renderstyle is still pending a proper solution.
 	native readonly int ID;
 	native Bool processPending;

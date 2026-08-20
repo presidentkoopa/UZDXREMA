@@ -45,11 +45,125 @@
 
 CVAR(Bool, gl_interpolate_model_frames, true, CVAR_ARCHIVE)
 
+// RS FORK -- HUD BONE ANCHORING.
+//
+// Where a psprite's model resolves each of its requested bones, so a later
+// layer can be drawn there. Keyed by (layer id, bone name) and stamped with a
+// frame counter: a target that stops being drawn must not leave an attachment
+// frozen at its last known position, so a stale stamp reads as "no anchor" and
+// the layer falls back to its own placement.
+struct HudAnchorEntry { VSMatrix mat; uint64_t frame; };
+static TMap<uint64_t, HudAnchorEntry> g_hudAnchors;
+static uint64_t g_hudAnchorFrame = 0;
+
+// The transform of the model currently being drawn, so a bone matrix -- which
+// is model-local -- can be combined into something the anchored layer can use
+// directly.
+static VSMatrix g_hudAnchorSource;
+
+static inline uint64_t HudAnchorKey(int layer, FName bone)
+{
+	return (uint64_t(uint32_t(layer)) << 32) | uint32_t(bone.GetIndex());
+}
+
+void HudAnchor_BeginFrame()
+{
+	g_hudAnchorFrame++;
+}
+
+bool HudAnchor_Get(int layer, FName bone, VSMatrix &out)
+{
+	auto *e = g_hudAnchors.CheckKey(HudAnchorKey(layer, bone));
+	if (!e || e->frame != g_hudAnchorFrame) return false;
+	out = e->mat;
+	return true;
+}
+
+// Publish whichever bones another layer has asked this one for. Driven by the
+// requests rather than storing every bone, because a rigged weapon has dozens
+// and almost none of them are ever anchored to.
+static void HudAnchor_Store(const DPSprite *psp, FModel *mdl, const TArray<VSMatrix> &bones)
+{
+	if (!psp || !psp->Owner || !mdl) return;
+
+	for (DPSprite *q = psp->Owner->psprites; q != nullptr; q = q->GetNext())
+	{
+		if (q->AnchorLayer != psp->GetID() || q->AnchorBone == NAME_None) continue;
+
+		int j = mdl->FindJoint(q->AnchorBone);
+		if (j < 0 || (unsigned)j >= bones.Size()) continue;
+
+		HudAnchorEntry e;
+		e.mat = g_hudAnchorSource;
+		e.mat.multMatrix(bones[j]);
+		e.frame = g_hudAnchorFrame;
+		g_hudAnchors.Insert(HudAnchorKey(psp->GetID(), q->AnchorBone), e);
+	}
+}
+
 // RS FORK -- pose pipeline diagnostics. Traces an explicitly addressed model
 // frame from the psprite through to the bone calculation, which is otherwise
 // invisible: a pose that never applies looks exactly like a pose that was
 // never set. Prints only on change, so a held pose reports once.
 CVAR(Bool, vr_pose_debug, true, 0)
+// RS FORK -- MODEL DIAGNOSTICS.
+//
+// Every check here cost a headset session to find by eye, and every one of them
+// presents as something misleading: a model with no frames renders as missing
+// textures, a packed alpha channel renders as a half-transparent gun. None of
+// them look like what they are, which is exactly why they are worth reporting.
+//
+// Checked as a model is first drawn, and reported once each.
+CVAR(Bool, vr_validate, true, 0)
+CVAR(Bool, vr_spatialreport, true, 0)
+
+static TMap<uint64_t, bool> g_validateSeen;
+
+static bool ValidateOnce(const void *key, int slot)
+{
+	uint64_t k = (uint64_t)(intptr_t)key * 16 + slot;
+	if (g_validateSeen.CheckKey(k)) return false;
+	g_validateSeen.Insert(k, true);
+	return true;
+}
+
+static void ValidateHudModel(const FSpriteModelFrame *smf, FModel *mdl, const DPSprite *psp, unsigned smf_flags)
+{
+	if (!vr_validate || !mdl || !smf) return;
+
+	const char *who = (psp && psp->Caller != nullptr)
+		? psp->Caller->GetClass()->TypeName.GetChars()
+		: "unknown";
+
+	// A bone-weighted mesh with no pose has nothing to evaluate its weights
+	// against, so most of it collapses. It reads as missing geometry or missing
+	// textures, never as an animation problem.
+	if (mdl->NumJoints() > 0 && mdl->NumFrames() == 0 && ValidateOnce(smf, 0))
+	{
+		Printf(TEXTCOLOR_ORANGE "[MODEL] %s: %d bones but ZERO frames. A skinned model with no pose collapses; "
+			"it looks like missing geometry or missing textures. Export a bind pose.\n",
+			who, mdl->NumJoints());
+	}
+
+	// Packed PBR maps carry roughness or gloss in alpha, not opacity. The model
+	// is alpha-tested against that channel and most of it is discarded.
+	if (!(smf_flags & MDL_IGNORESKINALPHA) && ValidateOnce(smf, 1))
+	{
+		FGameTexture *tex = nullptr;
+		if (smf->skinIDs.Size() > 0 && smf->skinIDs[0].isValid())
+			tex = TexMan.GetGameTexture(smf->skinIDs[0], true);
+		else if (smf->surfaceskinIDs.Size() > 0 && smf->surfaceskinIDs[0].isValid())
+			tex = TexMan.GetGameTexture(smf->surfaceskinIDs[0], true);
+
+		if (tex && tex->GetTranslucency())
+		{
+			Printf(TEXTCOLOR_ORANGE "[MODEL] %s: skin has an alpha channel and IgnoreSkinAlpha is not set. "
+				"If that alpha is packed data rather than opacity, most of the model is alpha-tested away "
+				"and reads as half transparent.\n", who);
+		}
+	}
+}
+
 EXTERN_CVAR(Bool, r_drawvoxels)
 EXTERN_CVAR(Int, vr_control_scheme)
 EXTERN_CVAR(Float, vr_weaponScale)
@@ -370,6 +484,7 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	// of drawn models is not worth optimising away.
 	float placeOfs[3] = { 0.0f, 0.0f, 0.0f };
 	float placeRot[3] = { 0.0f, 0.0f, 0.0f };
+	float placeScale = 1.0f;
 	if (smf->placementCVars != NAME_None)
 	{
 		static const char *sufOfs[3] = { "_ofs_x", "_ofs_y", "_ofs_z" };
@@ -383,6 +498,35 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 			nm.Format("%s%s", smf->placementCVars.GetChars(), sufRot[i]);
 			if (FBaseCVar *cv = FindCVar(nm.GetChars(), nullptr))
 				placeRot[i] = (float)cv->GetGenericRep(CVAR_Float).Float;
+		}
+
+		// Scale defaults to 1, NOT to the 0 an absent CVAR would read as -- a
+		// missing or zeroed slider must leave the model alone, not collapse it
+		// to a point.
+		nm.Format("%s_scale", smf->placementCVars.GetChars());
+		if (FBaseCVar *cv = FindCVar(nm.GetChars(), nullptr))
+		{
+			const float s = (float)cv->GetGenericRep(CVAR_Float).Float;
+			if (s > 0.0f) placeScale = s;
+		}
+	}
+
+	// RS FORK -- HUD BONE ANCHORING, applied.
+	//
+	// Everything above positioned this model at a controller. If it is anchored
+	// to a bone instead, that work is discarded here and the bone's transform
+	// becomes the base. Deliberately placed AFTER the controller maths rather
+	// than replacing it: the offsets, rotations and scale below then apply
+	// relative to the bone, so MODELDEF still fine-tunes the fit exactly as it
+	// does for an unanchored model, and one code path serves both.
+	bool isAnchored = false;
+	if (psp->AnchorLayer >= 0 && psp->AnchorBone != NAME_None)
+	{
+		VSMatrix anchored;
+		if (HudAnchor_Get(psp->AnchorLayer, psp->AnchorBone, anchored))
+		{
+			objectToWorldMatrix = anchored;
+			isAnchored = true;
 		}
 	}
 
@@ -400,26 +544,34 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 		(smf->zoffset + handOfsZ + placeOfs[2]) / smf->zscale,
 		(smf->yoffset + handOfsY + placeOfs[1]) / smf->yscale);
 
-	// Applying player custom offsets
-	objectToWorldMatrix.translate(-vr_3dweaponOffsetX, vr_3dweaponOffsetY, vr_3dweaponOffsetZ);
+	// Everything in this block places the model relative to the PLAYER: the
+	// global weapon offset, the bob, the aim rotation, the viewmodel axis fix.
+	//
+	// An anchored model must skip all of it. The bone matrix it started from was
+	// captured after its target had already been through these same steps, so
+	// applying them again would add the weapon's position and rotation a second
+	// time and throw the attachment well clear of the bone it is meant to sit on.
+	// What survives below is only the model's OWN offsets, rotations and scale,
+	// which is exactly what should still fine-tune the fit.
+	if (!isAnchored)
+	{
+		// Applying player custom offsets
+		objectToWorldMatrix.translate(-vr_3dweaponOffsetX, vr_3dweaponOffsetY, vr_3dweaponOffsetZ);
 
-	// [BB] Weapon bob, very similar to the normal Doom weapon bob.
+		// [BB] Weapon bob, very similar to the normal Doom weapon bob.
+		objectToWorldMatrix.translate(rotation_pivot.X, rotation_pivot.Y, rotation_pivot.Z);
 
+		objectToWorldMatrix.rotate(rotation.X, 0, 1, 0);
+		objectToWorldMatrix.rotate(rotation.Y, 1, 0, 0);
+		objectToWorldMatrix.rotate(rotation.Z, 0, 0, 1);
 
+		objectToWorldMatrix.translate(-rotation_pivot.X, -rotation_pivot.Y, -rotation_pivot.Z);
 
-	objectToWorldMatrix.translate(rotation_pivot.X, rotation_pivot.Y, rotation_pivot.Z);
+		objectToWorldMatrix.translate(translation.X, translation.Y, translation.Z);
 
-	objectToWorldMatrix.rotate(rotation.X, 0, 1, 0);
-	objectToWorldMatrix.rotate(rotation.Y, 1, 0, 0);
-	objectToWorldMatrix.rotate(rotation.Z, 0, 0, 1);
-
-	objectToWorldMatrix.translate(-rotation_pivot.X, -rotation_pivot.Y, -rotation_pivot.Z);
-
-	objectToWorldMatrix.translate(translation.X, translation.Y, translation.Z);
-
-
-	// [BB] For some reason the jDoom models need to be rotated.
-	objectToWorldMatrix.rotate(90.f, 0, 1, 0);
+		// [BB] For some reason the jDoom models need to be rotated.
+		objectToWorldMatrix.rotate(90.f, 0, 1, 0);
+	}
 
 	// Applying angleoffset, pitchoffset, rolloffset.
 	//
@@ -441,9 +593,39 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	objectToWorldMatrix.rotate(-(smf->rolloffset + handRoll + placeRot[2]), 1, 0, 0);
 
 	//Scale weapon
-	objectToWorldMatrix.scale(vr_weaponScale, vr_weaponScale, vr_weaponScale);
+	// placeScale is the mod's own live slider, multiplied onto the global one so
+	// a per-weapon size can be found without disturbing every other weapon.
+	objectToWorldMatrix.scale(vr_weaponScale * placeScale, vr_weaponScale * placeScale, vr_weaponScale * placeScale);
 
 	float orientation = smf->xscale * smf->yscale * smf->zscale;
+
+	// Where this layer actually ended up, in numbers.
+	//
+	// "Tiny and far away" and "correctly sized but mispositioned" look identical
+	// through a headset and are entirely different bugs. The transform says
+	// which: position is the last column, scale is the length of the first.
+	ValidateHudModel(smf, Models[smf->modelIDs.Size() ? smf->modelIDs[0] : 0], psp, smf_flags);
+
+	if (vr_spatialreport && psp)
+	{
+		static uint64_t lastReport = 0;
+		if (screen && (screen->FrameTime - lastReport) > 1000)
+		{
+			lastReport = screen->FrameTime;
+			const FLOATTYPE *m = objectToWorldMatrix.get();
+			float sx = (float)sqrt(m[0]*m[0] + m[1]*m[1] + m[2]*m[2]);
+			Printf("[SPATIAL] layer %-8d %-22s pos(%.1f %.1f %.1f) scale %.3f frame %d %s\n",
+				psp->GetID(),
+				(psp->Caller != nullptr) ? psp->Caller->GetClass()->TypeName.GetChars() : "unknown",
+				(float)m[12], (float)m[13], (float)m[14], sx,
+				psp->ModelFrame,
+				isAnchored ? "ANCHORED" : "");
+		}
+	}
+
+	// Kept for HudAnchor_Store: a bone matrix is model-local, so publishing a
+	// usable anchor needs the transform that puts this model in the world.
+	g_hudAnchorSource = objectToWorldMatrix;
 
 	renderer->BeginDrawHUDModel(playermo->RenderStyle, objectToWorldMatrix, orientation < 0, smf_flags);
 	auto trans = psp->GetTranslation();
@@ -933,7 +1115,7 @@ const TArray<VSMatrix> * ProcessModelFrame(FModel * animation, bool nextFrame, i
 	return boneData;
 }
 
-static inline void RenderModelFrame(FModelRenderer *renderer, int i, const FSpriteModelFrame *smf, DActorModelData* modelData, const CalcModelFrameInfo &frameinfo, ModelDrawInfo &drawinfo, bool is_decoupled, double tic, FTranslationID translation, int &boneStartingPosition, bool &evaluatedSingle)
+static inline void RenderModelFrame(FModelRenderer *renderer, int i, const FSpriteModelFrame *smf, DActorModelData* modelData, const CalcModelFrameInfo &frameinfo, ModelDrawInfo &drawinfo, bool is_decoupled, double tic, FTranslationID translation, int &boneStartingPosition, bool &evaluatedSingle, const DPSprite *psp = nullptr)
 {
 	FModel * mdl = Models[drawinfo.modelid];
 	auto tex = drawinfo.skinid.isValid() ? TexMan.GetGameTexture(drawinfo.skinid, true) : nullptr;
@@ -968,7 +1150,18 @@ static inline void RenderModelFrame(FModelRenderer *renderer, int i, const FSpri
 
 			boneStartingPosition = boneData ? screen->mBones->UploadBones(*boneData) : -1;
 			evaluatedSingle = true;
+
 		}
+
+		// Publish this model's bones for anything anchored to this layer.
+		//
+		// Outside the branch above on purpose. That branch only runs for
+		// attachment sets and decoupled models, and anchoring has no reason to
+		// require either -- a plain weapon model resolves perfectly good bones and
+		// something should be able to hang off them. Keeping the store inside it
+		// meant a non-decoupled weapon silently published nothing, so anchoring to
+		// it did nothing and looked like a script bug.
+		if (psp && boneData) HudAnchor_Store(psp, mdl, *boneData);
 	}
 
 	mdl->RenderFrame(renderer, tex, drawinfo.modelframe, nextFrame ? drawinfo.modelframenext : drawinfo.modelframe, nextFrame ? frameinfo.inter : -1.f, translation, ssidp, boneStartingPosition);
@@ -996,7 +1189,7 @@ void RenderFrameModels(FModelRenderer *renderer, FLevelLocals *Level, const FSpr
 	{
 		if (CalcModelOverrides(i, smf, modelData, frameinfo, drawinfo, is_decoupled, psp))
 		{
-			RenderModelFrame(renderer, i, smf, modelData, frameinfo, drawinfo, is_decoupled, tic, translation, boneStartingPosition, evaluatedSingle);
+			RenderModelFrame(renderer, i, smf, modelData, frameinfo, drawinfo, is_decoupled, tic, translation, boneStartingPosition, evaluatedSingle, psp);
 		}
 	}
 }
@@ -1502,6 +1695,10 @@ void ParseModelDefLump(int Lump)
 				else if (sc.Compare("usehandoffsets"))
 				{
 					smf.flags |= MDL_USEHANDOFFSETS;
+				}
+				else if (sc.Compare("ignoreskinalpha"))
+				{
+					smf.flags |= MDL_IGNORESKINALPHA;
 				}
 				else if (sc.Compare("noautoreverse"))
 				{

@@ -179,7 +179,22 @@ void HWDrawInfo::DrawPSprite(HUDSprite *huds, FRenderState &state)
 
 	if (huds->mframe)
 	{
-		state.AlphaFunc(Alpha_GEqual, gl_mask_threshold);
+		// RS FORK -- SKIN ALPHA THAT IS NOT OPACITY.
+		//
+		// Model skins are alpha-tested here, so any texel below the mask
+		// threshold is discarded. That is correct for a skin whose alpha means
+		// transparency, and catastrophic for one where it does not: PBR texture
+		// sets routinely pack roughness or gloss into the alpha channel, and
+		// such a channel is mostly dark, so most of the weapon fails the test
+		// and is thrown away. It presents as a gun that is largely invisible
+		// with a few solid patches -- which reads as a broken mesh or a broken
+		// export, and is neither.
+		//
+		// IgnoreSkinAlpha drops the threshold to zero for that model, so
+		// nothing is discarded and the alpha channel is simply unused. The
+		// alternative is stripping the alpha channel out of every texture of
+		// every ripped weapon by hand, forever.
+		state.AlphaFunc(Alpha_GEqual, huds->mframe->ignoresSkinAlpha() ? 0.f : gl_mask_threshold);
 
 		FHWModelRenderer renderer(this, state, huds->lightindex);
 		RenderHUDModel(&renderer, huds->weapon, huds->translation, huds->rotation + FVector3(huds->mx / 4., (huds->my - WEAPONTOP) / -4., 0), huds->pivot, huds->mframe, Net_ModifyObjectFrac(huds->weapon, Viewpoint.TicFrac));
@@ -2350,6 +2365,11 @@ void HWDrawInfo::PreparePlayerSprites2D(sector_t * viewsector, area_t in_area)
 
 void HWDrawInfo::PreparePlayerSprites3D(sector_t * viewsector, area_t in_area)
 {
+	// RS FORK -- HUD bone anchoring: a new pass, so anchors stored last frame
+	// are no longer current. Anything whose target stops being drawn falls back
+	// to its own placement instead of freezing where the target last was.
+	HudAnchor_BeginFrame();
+
 	static PClass * wpCls = PClass::FindClass("Weapon");
 
 	static unsigned ModifyBobLayer3DVIndex = GetVirtualIndex(wpCls, "ModifyBobLayer3D");

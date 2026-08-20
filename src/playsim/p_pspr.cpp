@@ -145,6 +145,8 @@ DEFINE_FIELD(DPSprite, processPending)
 DEFINE_FIELD(DPSprite, Tint)             // RS fork
 DEFINE_FIELD(DPSprite, Glow)             // RS fork
 DEFINE_FIELD(DPSprite, NoDraw)           // RS fork
+DEFINE_FIELD(DPSprite, AnchorLayer)      // RS fork
+DEFINE_FIELD(DPSprite, AnchorBone)       // RS fork
 DEFINE_FIELD(DPSprite, ModelFrame)       // RS fork
 DEFINE_FIELD(DPSprite, ModelFrameNext)   // RS fork
 DEFINE_FIELD(DPSprite, ModelFrameLerp)   // RS fork

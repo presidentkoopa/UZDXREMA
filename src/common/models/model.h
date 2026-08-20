@@ -88,6 +88,11 @@ public:
 	float pitchoffset, rolloffset; // I don't want to bother with type transformations, so I made this variables float.
 	bool isVoxel;
 	unsigned int getFlags(class DActorModelData * defs) const;
+
+	// RS FORK -- read straight off the MODELDEF flags, with no per-actor
+	// override applied. The draw path needs this before it has resolved an
+	// actor's model data, and no actor overrides it anyway.
+	bool ignoresSkinAlpha() const { return !!(flags & (1 << 18)); }
 	friend void InitModels();
 	friend void ParseModelDefLump(int Lump);
 
