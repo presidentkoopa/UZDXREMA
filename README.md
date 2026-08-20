@@ -16,10 +16,16 @@ The name is the lineage, in order:
 **EMA** for [emawind](https://github.com/emawind84/QuestZDoom)'s QuestZDoom.
 Two thirds of it is theirs, and that is about the right ratio.
 
+The full chain runs one step further back: [Team Beef](https://github.com/Team-Beef-Studios)
+built the original Quest VR port, emawind forked it as QuestZDoom and carried
+it forward unofficially, iAmErmac brought that VR work into a UZDoom base as
+DoomXR, and this fork is what came after, on top of all three.
+
 The capability claims in this document and in `FORK_CHANGES.md` have been
-checked against source. The credit above is attribution, not a verified
-history — what DoomXR and QuestZDoom actually went through to get here is
-not something this repo can confirm.
+checked against source, and so has that chain — GitHub confirms
+`emawind84/QuestZDoom` forks `Team-Beef-Studios/QuestZDoom`. What each of them
+actually went through along the way — the hurdles, the decisions made and why
+— is still attribution, not a verified history this repo can tell.
 
 Branch: `main`. Engine base: **UZDoom 5.0.0-rc.2**.
 
@@ -244,8 +250,10 @@ underneath all of it.
 
 ### Emanuele Disco — [QuestZDoom](https://github.com/emawind84/QuestZDoom)
 
-Over 1,300 commits in this tree's history, and the reason VR here feels like a
-game instead of a demo.
+QuestZDoom itself started as Team Beef's original Quest VR port (see below);
+this is emawind's unofficial fork of it, carried forward and maintained on
+his own. Over 1,300 commits in this tree's history, and the reason VR here
+feels like a game instead of a demo.
 
 The long, unglamorous campaign against **yaw desync** is his. Teleporting. The
 ironlich whirlwind. The strife dagger. Every Hexen and Heretic weapon whose
@@ -264,7 +272,7 @@ upstream merges.
 
 - [ZDoom + GZDoom + UZDoom teams](https://zdoom.org/) — the engine this is based upon
 - [Emile Belanger](http://www.beloko.com/) — the developer behind the android port
-- [Team Beef](https://github.com/Team-Beef-Studios) — the VR port for the Oculus Quest device
+- [Team Beef](https://github.com/Team-Beef-Studios) — built the original VR port for the Oculus Quest device; QuestZDoom above is a fork of their work, not a from-scratch project
 
 Special thanks to Coraline of the EDGE team for allowing use of her
 [README.md](https://github.com/3dfxdev/EDGE/blob/master/README.md) as a
