@@ -3026,20 +3026,52 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 	//
 	if (uFlatGlowColor.a > 0.0 && uFlatGlowLineCount > 0)
 	{
+		// [PERF] ONE SQUARE ROOT, NOT SIXTY-FOUR.
+		//
+		// This loop runs on EVERY floor and ceiling fragment in the game --
+		// both flat glows default on, so uFlatGlowColor.a > 0 is the normal
+		// state, and floors and ceilings are most of the screen. It was doing
+		// a length() per segment: up to 64 sqrt and 64 divides per fragment,
+		// which made it the largest per-fragment cost this fork adds.
+		//
+		// minDist is only ever consumed as `minDist < reach` and
+		// `minDist / reach` below. Both comparisons order identically on
+		// SQUARED values, so the whole search runs squared and takes a single
+		// sqrt at the end. Bit-for-bit the same picture, 63 fewer roots.
+		//
+		// The bounding-box reject in front of each solve is the other half:
+		// four compares against ~15 ALU plus a divide, and in a large sector
+		// most linedefs are nowhere near the fragment.
 		vec2 pixXZ = pixelpos.xz;
-		float minDist = 999999.0;
+		float minDistSq = 999999.0 * 999999.0;
+		// The real `reach` is computed further down, because it rides a glow
+		// wave that has not been evaluated yet. So the reject uses the
+		// LARGEST reach that wave could ever produce -- abs() on the depth so
+		// the bound holds whichever way the wave swings, plus a unit of
+		// slack. Conservative on purpose: rejecting too little only costs
+		// speed, while rejecting too much would drop a glow that belongs.
+		float rejectR = uFlatGlowColor.a * (1.0 + abs(uGlowWaveDepth.x)) + 1.0;
 
 		for (int i = 0; i < uFlatGlowLineCount; i++)
 		{
 			vec4 seg = uFlatGlowLines[i];
 			vec2 a = seg.xy;
 			vec2 b = seg.zw;
+
+			// Cheap reject: the segment's own XZ box, grown by the reach.
+			vec2 lo = min(a, b) - rejectR;
+			vec2 hi = max(a, b) + rejectR;
+			if (pixXZ.x < lo.x || pixXZ.x > hi.x ||
+			    pixXZ.y < lo.y || pixXZ.y > hi.y) continue;
+
 			vec2 ab = b - a;
 			vec2 ap = pixXZ - a;
 			float t = clamp(dot(ap, ab) / max(dot(ab, ab), 0.001), 0.0, 1.0);
-			float d = length(ap - ab * t);
-			minDist = min(minDist, d);
+			vec2 d2 = ap - ab * t;
+			minDistSq = min(minDistSq, dot(d2, d2));
 		}
+
+		float minDist = sqrt(minDistSq);
 
 		// [BB] Floor and ceiling TIME-SHARE this uniform, because a draw only
 		// ever covers one of them -- so the shader cannot tell which it is
