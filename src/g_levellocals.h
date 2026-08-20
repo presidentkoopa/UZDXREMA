@@ -1270,6 +1270,16 @@ public:
 	                                   // you see the room between them, which
 	                                   // is what reads as actual lasers.
 	PalEntry SweepFillColor = 0xFFFFFF;
+
+	// [BB] THE ROOM THE LATTICE IS ALLOWED TO STAND IN. See the note beside
+	// mSweepRoomMin in hw_viewpointuniforms.h for why an infinite plane needed
+	// this at all. Caller-published from script, because "which sectors count
+	// as one room" is a judgement the renderer has no business making --
+	// SweepRoomSoft <= 0 means unbounded, which is what every map that never
+	// calls it gets.
+	DVector3 SweepRoomMin = DVector3(0, 0, 0);
+	DVector3 SweepRoomMax = DVector3(0, 0, 0);
+	double   SweepRoomSoft = 0;   // fade distance in units; 0 = no bound at all
 	// How strongly the lattice is drawn IN THE AIR inside the band, rather
 	// than only on the surfaces the band lands on. 0 = the old behaviour.
 	double   SweepFillAir = 0;

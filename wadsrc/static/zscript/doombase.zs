@@ -1231,6 +1231,22 @@ struct LevelLocals native
 
 	native void RemoveShape(int slot);
 	native void ClearShapes();
+
+	// [BB] The box the sweep's air lattice may exist inside, in world units.
+	//
+	// The lattice is an infinite plane, so without a room it stands wherever
+	// that plane reaches and a window shows lasers in a room the sweep never
+	// entered. Publish the extent of whatever you consider "the room" and it
+	// fades out past it.
+	//
+	// soft is the fade distance in units. soft <= 0 removes the bound
+	// entirely, which is the default and the behaviour of any map that never
+	// calls this.
+	//
+	// Deliberately script-side: which sectors make up one room is a
+	// judgement -- a Doom room is usually several, and whether a window or a
+	// step ends it has no single right answer -- so the caller decides.
+	native void SetSweepRoom(double minx, double miny, double minz, double maxx, double maxy, double maxz, double soft);
 	native clearscope void SetShapeLook(double soft, double heightFade, double reach, color under);
 
 	// [BB] TEXTURE INSIDE THE GLOW. The wave varies a glow's EDGE and has

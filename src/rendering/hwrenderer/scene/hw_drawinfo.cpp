@@ -608,6 +608,21 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 		VPUniforms.mShapeUnder = { Level->ShapeUnder.r / 255.f,
 			Level->ShapeUnder.g / 255.f, Level->ShapeUnder.b / 255.f, 0.f };
 
+		// [BB] The sweep's room box, in SHADER space -- Y and Z swapped, the
+		// same reordering every world position in this block gets. Doing it
+		// here rather than in the shader keeps the swap in one place instead
+		// of at every read.
+		//
+		// The soft distance rides on Min.w and the bound flag on Max.w, so a
+		// level that never publishes a room leaves both zero and the shader's
+		// test costs one compare.
+		VPUniforms.mSweepRoomMin = { (float)Level->SweepRoomMin.X,
+			(float)Level->SweepRoomMin.Z, (float)Level->SweepRoomMin.Y,
+			(float)Level->SweepRoomSoft };
+		VPUniforms.mSweepRoomMax = { (float)Level->SweepRoomMax.X,
+			(float)Level->SweepRoomMax.Z, (float)Level->SweepRoomMax.Y,
+			Level->SweepRoomSoft > 0 ? 1.f : 0.f };
+
 		// w was spare and is now the global drain. See FLevelLocals::DesatGlobal.
 		VPUniforms.mDesatKeep = { (float)Level->DesatKeep,
 			(float)Level->DesatKeepSoft, (float)Level->DesatKeepHue,

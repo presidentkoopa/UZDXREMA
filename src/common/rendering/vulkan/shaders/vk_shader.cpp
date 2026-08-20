@@ -299,6 +299,8 @@ static const char *shaderBindings = R"(
 		// std140 padding). std140 supplies this array's own leading
 		// padding implicitly; nothing to declare by hand here.
 		vec4 uShapeE[128];
+		vec4 uSweepRoomMin;
+		vec4 uSweepRoomMax;
 	};
 
 	layout(set = 1, binding = 0, std140) uniform readonly ViewpointUBO {
@@ -374,6 +376,8 @@ static const char *shaderBindings = R"(
 	// and every member needs its own indirection macro or shader code referencing
 	// the bare name compiles nowhere - exactly what was missing here.
 	#define uShapeE viewpoints[HW_VIEWPOINT_INDEX].uShapeE
+	#define uSweepRoomMin viewpoints[HW_VIEWPOINT_INDEX].uSweepRoomMin
+	#define uSweepRoomMax viewpoints[HW_VIEWPOINT_INDEX].uSweepRoomMax
 
 	layout(set = 1, binding = 1, std140) uniform readonly MatricesUBO {
 		mat4 ModelMatrix;

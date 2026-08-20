@@ -429,6 +429,29 @@ struct HWViewpointUniforms
 	// reading those two fields; nothing there had to change.
 	FVector4 mShapeE[128];
 
+	// [BB] THE ROOM THE SWEEP IS ALLOWED TO EXIST IN.
+	//
+	// The lattice is built from an INFINITE plane -- "perpendicular to X at
+	// o.x" is a plane that exists at every Y and Z on the map -- so a window
+	// looking anywhere toward it showed the grid standing in a room the sweep
+	// had never entered. There is a radius, but the plane itself had no
+	// extent, so this was not a leak to patch: the primitive had no concept
+	// of a room at all.
+	//
+	//   mSweepRoomMin  xyz world min (shader space), w soft edge in units
+	//   mSweepRoomMax  xyz world max (shader space), w 0 = unbounded
+	//
+	// w on Max is the switch rather than a separate flag: a room that was
+	// never published leaves this zeroed and the shader skips the test
+	// entirely, which is also the correct behaviour for every map that never
+	// calls it.
+	//
+	// Outdoors needs no special case. An open area floods to a big box and
+	// the grid fills it, which is what "if it is outdoor then it is outdoor"
+	// asks for.
+	FVector4 mSweepRoomMin;
+	FVector4 mSweepRoomMax;
+
 	void CalcDependencies()
 	{
 		mNormalViewMatrix.computeNormalMatrix(mViewMatrix);

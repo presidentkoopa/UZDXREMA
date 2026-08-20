@@ -4594,6 +4594,41 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearShapes, ClearShapes)
 	return 0;
 }
 
+// [BB] The box the sweep's air lattice is allowed to exist inside.
+//
+// The lattice is built from an INFINITE plane -- "perpendicular to X at o.x"
+// is a plane that exists at every Y and Z on the map -- so a window pointing
+// anywhere near one showed the grid standing in a room the sweep had never
+// entered. There was a radius, but the plane itself had no extent, so this
+// was never a leak to patch: the primitive had no concept of a room at all.
+//
+// WHY SCRIPT PUBLISHES THIS RATHER THAN THE RENDERER DERIVING IT: "which
+// sectors are one room" is a judgement, not a fact. A Doom room is usually
+// several sectors -- steps, light panels, door tracks, alcoves -- and where a
+// room stops (a window? a doorway? a rise in the floor?) has no single right
+// answer. The renderer has no business guessing, and a mod that wants a
+// different answer should be able to give one.
+//
+// soft <= 0 disables the bound entirely. That is what every map that never
+// calls this gets, and it is why this needed no separate enable flag.
+static void SetSweepRoom(FLevelLocals *self, double minx, double miny,
+	double minz, double maxx, double maxy, double maxz, double soft)
+{
+	self->SweepRoomMin = DVector3(minx, miny, minz);
+	self->SweepRoomMax = DVector3(maxx, maxy, maxz);
+	self->SweepRoomSoft = soft;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetSweepRoom, SetSweepRoom)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(minx); PARAM_FLOAT(miny); PARAM_FLOAT(minz);
+	PARAM_FLOAT(maxx); PARAM_FLOAT(maxy); PARAM_FLOAT(maxz);
+	PARAM_FLOAT(soft);
+	SetSweepRoom(self, minx, miny, minz, maxx, maxy, maxz, soft);
+	return 0;
+}
+
 // How they are drawn, shared by all sixteen.
 static void SetShapeLook(FLevelLocals *self, double soft, double heightFade,
 	double reach, int under)

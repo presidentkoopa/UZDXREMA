@@ -1966,6 +1966,35 @@ vec3 SweepAirLattice(vec3 fragPos)
 
 		vec3 hit = eye + dir * t;
 
+		// [BB] THE ROOM GATE.
+		//
+		// Everything above builds a plane with no extent -- perpendicular to
+		// one axis, infinite in the other two -- so without this the grid
+		// stood everywhere that plane reached, and a window looking toward it
+		// showed lasers in a room the sweep had never entered.
+		//
+		// Tested at the HIT rather than at fragPos: the question is where the
+		// lattice itself is hanging in the air, not what surface happens to be
+		// behind it. A grid seen through a doorway is outside the room even
+		// though the wall beyond it is inside one.
+		//
+		// Max.w is the switch. A level that never publishes a room leaves it
+		// zero and pays one compare per band.
+		float roomFade = 1.0;
+		if (uSweepRoomMax.w > 0.0)
+		{
+			float soft = max(uSweepRoomMin.w, 1.0);
+
+			// Distance OUTSIDE the box on each axis, zero when inside. The
+			// max of the three is how far out the point is overall, so a
+			// corner fades on its true distance rather than three times over.
+			vec3 outv = max(uSweepRoomMin.xyz - hit, hit - uSweepRoomMax.xyz);
+			float outside = max(max(outv.x, outv.y), max(outv.z, 0.0));
+
+			roomFade = 1.0 - smoothstep(0.0, soft, outside);
+			if (roomFade <= 0.0) continue;
+		}
+
 		// The same two tangent axes the surface fill uses, so the lattice in
 		// the air and the lattice on the wall line up exactly rather than
 		// being two grids that nearly agree.
@@ -1988,7 +2017,8 @@ vec3 SweepAirLattice(vec3 fragPos)
 		float cov = (bfill == 2) ? min(lu, lv) : max(lu, lv);
 		if (bfill == 3) cov = 1.0;
 
-		sum += uSweepFillCol.rgb * cov * slab * uSweepColors[sb].a * uSweepAir.x;
+		sum += uSweepFillCol.rgb * cov * slab * uSweepColors[sb].a
+		     * uSweepAir.x * roomFade;
 	}
 	return sum;
 }

@@ -400,6 +400,8 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 			// std140 padding). std140 supplies this array's own leading
 			// padding implicitly; nothing to declare by hand here.
 			vec4 uShapeE[128];
+			vec4 uSweepRoomMin;
+			vec4 uSweepRoomMax;
 		};
 
 		uniform int uTextureMode;
