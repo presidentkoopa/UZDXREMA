@@ -410,7 +410,17 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 					(float)Level->FogDisturbStrength[i] * fade * fade,
 					(float)Level->FogDisturbSpeed[i],
 					(float)Level->FogDisturbMode[i] };
-				liveDisturb++;
+
+				// HIGH-WATER MARK, NOT A COUNT, and the distinction is load
+				// bearing now that the shader breaks on this value. Slots are
+				// recycled out of order -- FogDisturb() takes the first free
+				// or the oldest -- so a live set can be sparse. With slots 0
+				// and 5 live, a count of 2 would stop the shader loop at 2 and
+				// slot 5 would silently stop being drawn.
+				//
+				// Same shape as the shape loop's own `live = i + 1` a few
+				// hundred lines below, for the same reason.
+				liveDisturb = i + 1;
 			}
 		}
 

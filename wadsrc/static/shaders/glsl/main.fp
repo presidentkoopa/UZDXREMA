@@ -1504,8 +1504,16 @@ float GlowTextureAt(float seedOff)
 	if (uGlowTex4.x > 0.0)
 	{
 		float pulse = 0.0;
+		// STOP AT THE LIVE COUNT, the way ShapesAt() and the beam loops
+		// already do. Without this the loop walks all 32 slots on every
+		// fragment whether anything is live or not -- which cost 8 before
+		// the cap was raised and 32 after, for the same usually-empty
+		// array. uFogBow.w is the count the C++ side already uploads.
+		int ndist = int(uFogBow.w);
 		for (int di = 0; di < 32; di++)
 		{
+			if (di >= ndist) break;
+
 			float stren = uFogDisturbB[di].y;
 			if (stren <= 0.0) continue;
 
@@ -2401,9 +2409,15 @@ vec4 FogSlabAt(vec3 fragPos)
 	// to TRAVEL, before the exponential. Mode 2 adds light instead and is
 	// gathered separately, further down, because a burning cloud is brighter
 	// mist and not more of it.
+	// Same early break as the glow feed above -- this is the loop that runs
+	// over every fragment inside the fog volume, so walking empty slots here
+	// is the most expensive place in the shader to do it.
 	vec3 ignite = vec3(0.0);
+	int ndisturb = int(uFogBow.w);
 	for (int di = 0; di < 32; di++)
 	{
+		if (di >= ndisturb) break;
+
 		float stren = uFogDisturbB[di].y;
 		if (stren <= 0.0) continue;
 
