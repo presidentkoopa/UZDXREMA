@@ -109,6 +109,18 @@ CVAR(Float, vr_physics_angulardamp, 0.6f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // thrown object still tumbles freely through the air.
 CVAR(Float, vr_physics_contactspindamp, 4.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
+// Whether your hands are solid to physics objects.
+CVAR(Bool, vr_physics_hands, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+// How big the invisible collision shape on each hand is, as a multiplier. The
+// base is roughly a real palm; larger makes objects easier to bat around and
+// harder to reach past.
+CUSTOM_CVAR(Float, vr_physics_handsize, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.25f) self = 0.25f;
+	else if (self > 4.0f) self = 4.0f;
+}
+
 // Per-body trace to the log while awake, N times a second. 0 = off. This is the
 // only way to see what a body is doing without a console in the headset.
 CUSTOM_CVAR(Int, vr_physics_trace, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -221,7 +233,13 @@ struct Quat
 
 struct PhysBody
 {
+	// Null for the hands, which are bodies without actors: nothing in the
+	// playsim owns them, they are never drawn by this code, and they exist only
+	// to shove other bodies around.
 	AActor  *owner = nullptr;
+
+	// -1 for an ordinary body; 0 = main hand, 1 = off hand.
+	int      handIndex = -1;
 
 	FVector3 pos    = FVector3(0, 0, 0);   // metres, playsim axes, Z up
 	FVector3 vel    = FVector3(0, 0, 0);   // m/s
@@ -229,6 +247,19 @@ struct PhysBody
 	FVector3 angVel = FVector3(0, 0, 0);   // rad/s
 
 	FVector3 half   = FVector3(0.05f, 0.05f, 0.05f);  // box half-extents, metres
+
+	// Where the centre of mass sits relative to the ACTOR's origin, in body
+	// space, in metres.
+	//
+	// Almost never zero for a real model. A magazine exported with its origin at
+	// the base has its mass centred 5cm above that, and a box centred on the
+	// origin instead would cover only the bottom half of it -- which is exactly
+	// what a hand passing through the top half of a magazine looks like.
+	//
+	// The solver works entirely in centre-of-mass space, because that is the
+	// only point a rigid body actually rotates about. This offset exists solely
+	// to convert back and forth at the actor boundary.
+	FVector3 comOffset = FVector3(0, 0, 0);
 	float    invMass = 1.f;
 	FVector3 invInertia = FVector3(1, 1, 1);          // body-space diagonal
 
@@ -272,6 +303,12 @@ struct PhysBody
 };
 
 TArray<PhysBody> g_bodies;
+
+// Previous hand poses, for deriving how fast they are moving. Kept outside the
+// bodies because the bodies are created and destroyed as the hands come and go.
+FVector3 g_handPrevPos[2];
+Quat     g_handPrevRot[2];
+bool     g_handHavePrev[2] = { false, false };
 
 // --- clock / accumulator (slice 0) ---------------------------------------
 
@@ -1032,6 +1069,130 @@ void SolvePair(PhysBody &A, PhysBody &B, float dt)
 	// magazine meets a gun.
 }
 
+// ---------------------------------------------------------------------------
+// The hands
+//
+// Two kinematic bodies driven from the controllers. Infinite mass, so they push
+// everything and nothing pushes back -- which is what a hand should do, and is
+// the same arrangement a held weapon will use.
+//
+// Orientation comes from the pose angles the device layer publishes, NOT from
+// the hand transform matrix. That matrix applies a mirror and a non-uniform
+// pixelstretch scale BEFORE its rotations, so its basis is sheared whenever the
+// wrist is tilted and its determinant is negative for the off hand. No rotation
+// can be recovered from it honestly.
+//
+// They collide only with other bodies, never with level geometry: a hand that
+// could be blocked by a wall would either stop tracking your real hand or fight
+// it, and both are worse than letting it pass through.
+// ---------------------------------------------------------------------------
+
+void UpdateHands(float dt)
+{
+	if (consoleplayer < 0 || consoleplayer >= MAXPLAYERS) return;
+	player_t *pl = &players[consoleplayer];
+	AActor *pawn = pl->mo;
+
+	const bool wantHands = (pawn != nullptr) && *vr_physics_hands;
+
+	for (int hand = 0; hand < 2; hand++)
+	{
+		PhysBody *b = nullptr;
+		for (unsigned i = 0; i < g_bodies.Size(); i++)
+			if (g_bodies[i].handIndex == hand) { b = &g_bodies[i]; break; }
+
+		if (!wantHands)
+		{
+			if (b != nullptr)
+			{
+				for (unsigned i = 0; i < g_bodies.Size(); i++)
+					if (g_bodies[i].handIndex == hand) { g_bodies.Delete(i); break; }
+			}
+			continue;
+		}
+
+		if (b == nullptr)
+		{
+			PhysBody nb;
+			nb.handIndex = hand;
+			nb.owner = nullptr;
+			nb.kinematic = true;
+			nb.invMass = 0.f;                       // immovable
+			nb.invInertia = FVector3(0, 0, 0);
+			g_bodies.Push(nb);
+			b = &g_bodies[g_bodies.Size() - 1];
+		}
+
+		const float s = (float)*vr_physics_handsize;
+		b->half = FVector3(0.045f * s, 0.030f * s, 0.090f * s);
+
+		const DVector3 p = (hand == 0) ? pawn->AttackPos : pawn->OffhandPos;
+		const FVector3 newPos(MapToM(p.X), MapToM(p.Y), MapToM(p.Z));
+
+		const double yaw   = (hand == 0) ? pawn->Angles.Yaw.Degrees()   : pawn->OffhandAngle.Degrees();
+		const double pitch = (hand == 0) ? pawn->AttackPitch.Degrees()  : pawn->OffhandPitch.Degrees();
+		const double roll  = (hand == 0) ? pawn->MainHandRoll.Degrees() : pawn->OffhandRoll.Degrees();
+		const Quat newRot = Quat::FromEulerDeg(yaw, pitch, roll);
+
+		// A HAND MUST CARRY ITS VELOCITY, not just its position.
+		//
+		// Setting only the position gives a body that teleports each frame while
+		// reporting that it is standing perfectly still. Everything downstream
+		// then behaves accordingly: the contact solver sees no approach speed
+		// and produces only a feeble push from overlap, and a SLEEPING object is
+		// never woken at all, because waking requires a real impact. The visible
+		// result is a hand that passes through a magazine on the floor as though
+		// neither existed.
+		//
+		// Derived from how far it actually moved since the last frame, which is
+		// also exactly what makes a swat carry the force of a fast swing rather
+		// than a slow reach.
+		if (g_handHavePrev[hand] && dt > 1e-6f)
+		{
+			b->vel = (newPos - g_handPrevPos[hand]) / dt;
+
+			// Angular velocity from the rotation delta: axis and angle of the
+			// turn that gets from last frame's orientation to this one.
+			Quat prev = g_handPrevRot[hand];
+			Quat inv = prev.Inverse();
+			Quat d;
+			d.w = newRot.w*inv.w - newRot.x*inv.x - newRot.y*inv.y - newRot.z*inv.z;
+			d.x = newRot.w*inv.x + newRot.x*inv.w + newRot.y*inv.z - newRot.z*inv.y;
+			d.y = newRot.w*inv.y - newRot.x*inv.z + newRot.y*inv.w + newRot.z*inv.x;
+			d.z = newRot.w*inv.z + newRot.x*inv.y - newRot.y*inv.x + newRot.z*inv.w;
+			d.Normalize();
+
+			float w = d.w;
+			if (w < -1.f) w = -1.f; else if (w > 1.f) w = 1.f;
+			float angle = 2.f * acosf(fabsf(w));
+			FVector3 axis(d.x, d.y, d.z);
+			const float axisLen = axis.Length();
+			if (axisLen > 1e-6f && angle > 1e-6f)
+			{
+				if (w < 0.f) angle = -angle;
+				b->angVel = (axis / axisLen) * (angle / dt);
+			}
+			else
+			{
+				b->angVel = FVector3(0, 0, 0);
+			}
+		}
+		else
+		{
+			b->vel = FVector3(0, 0, 0);
+			b->angVel = FVector3(0, 0, 0);
+		}
+
+		g_handPrevPos[hand] = newPos;
+		g_handPrevRot[hand] = newRot;
+		g_handHavePrev[hand] = true;
+
+		b->pos = newPos;
+		b->rot = newRot;
+		b->asleep = false;
+	}
+}
+
 // Push the solver's transform back onto the actor.
 //
 // Done here rather than in AActor::Tick because in VR the playsim frequently
@@ -1043,7 +1204,9 @@ void WriteBack(PhysBody &b)
 	AActor *a = b.owner;
 	if (a == nullptr) return;
 
-	const DVector3 newPos(MToMap(b.pos.X), MToMap(b.pos.Y), MToMap(b.pos.Z));
+	// Back from centre-of-mass space to where the actor's origin belongs.
+	const FVector3 originPos = b.pos - b.rot.Rotate(b.comOffset);
+	const DVector3 newPos(MToMap(originPos.X), MToMap(originPos.Y), MToMap(originPos.Z));
 
 	FLinkContext ctx;
 	a->UnlinkFromWorld(&ctx);
@@ -1080,8 +1243,16 @@ void ReportLine(const char *why, double dt)
 	auto vrmode = VRMode::GetVRMode();
 	const bool isVR = (vrmode != nullptr) && vrmode->IsVR();
 
-	int awake = 0;
-	for (unsigned i = 0; i < g_bodies.Size(); i++) if (!g_bodies[i].asleep) awake++;
+	// Hands are excluded from both counts: they are always present and always
+	// "awake" by construction, and including them would mean the interesting
+	// number never reads zero.
+	int awake = 0, real = 0;
+	for (unsigned i = 0; i < g_bodies.Size(); i++)
+	{
+		if (g_bodies[i].handIndex >= 0) continue;
+		real++;
+		if (!g_bodies[i].asleep) awake++;
+	}
 
 	// WHY the quietest body is not asleep.
 	//
@@ -1096,7 +1267,7 @@ void ReportLine(const char *why, double dt)
 		for (unsigned i = 0; i < g_bodies.Size(); i++)
 		{
 			const PhysBody &b = g_bodies[i];
-			if (b.asleep) continue;
+			if (b.asleep || b.handIndex >= 0) continue;
 			const float m = b.velEMA.Length();
 			if (m < best) { best = m; quietest = &b; }
 		}
@@ -1122,7 +1293,7 @@ void ReportLine(const char *why, double dt)
 		GamestateName(gamestate),
 		paused ? 1 : 0, menuactive != MENU_Off ? 1 : 0,
 		isVR ? 1 : 0, *vid_preferbackend,
-		g_bodies.Size(), awake);
+		real, awake);
 
 	g_reportStartNs = nowNs;
 	g_frames = g_steps = g_dropped = 0;
@@ -1168,6 +1339,11 @@ void P_PhysicsFrame()
 	else
 	{
 		if (!g_running) g_accumulator = 0.0;
+
+		// Hands first: they are the one thing whose position comes from outside
+		// the simulation, and everything else this step reacts to where they
+		// are now rather than where they were last frame.
+		UpdateHands((float)dt);
 
 		const double step = 1.0 / (double)*vr_physics_hz;
 		g_accumulator += dt;
@@ -1255,6 +1431,11 @@ void P_PhysicsLevelStart()
 	g_bodies.Clear();
 	g_accumulator = 0.0;
 	g_running = false;
+
+	// Forget where the hands were. A level change teleports the player, and a
+	// stale previous pose would derive one enormous frame of hand velocity and
+	// fire everything nearby across the map.
+	g_handHavePrev[0] = g_handHavePrev[1] = false;
 	if (vr_physics_debug) Printf("[PHYS] level start -- bodies cleared\n");
 }
 
@@ -1263,11 +1444,19 @@ void P_PhysicsLevelEnd()
 	g_bodies.Clear();
 	g_accumulator = 0.0;
 	g_running = false;
+
+	// Forget where the hands were. A level change teleports the player, and a
+	// stale previous pose would derive one enormous frame of hand velocity and
+	// fire everything nearby across the map.
+	g_handHavePrev[0] = g_handHavePrev[1] = false;
 	if (vr_physics_debug) Printf("[PHYS] level end -- bodies cleared\n");
 }
 
 void P_PhysicsRemoveBody(AActor *a)
 {
+	// The hands are ownerless; a null actor must not match them.
+	if (a == nullptr) return;
+
 	for (unsigned i = 0; i < g_bodies.Size(); i++)
 	{
 		if (g_bodies[i].owner == a)
@@ -1288,7 +1477,8 @@ void P_PhysicsRemoveBody(AActor *a)
 //
 // Explicit rather than derived from Radius/Height: those are a Doom collision
 // cylinder in map units, which is neither the shape nor the scale wanted.
-static void PhysicsEnable(AActor *self, double massKg, double hx, double hy, double hz)
+static void PhysicsEnable(AActor *self, double massKg, double hx, double hy, double hz,
+	double comX, double comY, double comZ)
 {
 	if (self == nullptr) return;
 
@@ -1296,9 +1486,14 @@ static void PhysicsEnable(AActor *self, double massKg, double hx, double hy, dou
 
 	PhysBody b;
 	b.owner = self;
-	b.pos = FVector3(MapToM(self->X()), MapToM(self->Y()), MapToM(self->Z()));
-	b.vel = FVector3(MapToM(self->Vel.X * TICRATE), MapToM(self->Vel.Y * TICRATE), MapToM(self->Vel.Z * TICRATE));
+	b.comOffset = FVector3((float)comX, (float)comY, (float)comZ);
 	b.rot = Quat::FromEulerDeg(self->Angles.Yaw.Degrees(), self->Angles.Pitch.Degrees(), self->Angles.Roll.Degrees());
+
+	// The solver's position is the CENTRE OF MASS, not the actor's origin.
+	const FVector3 originPos(MapToM(self->X()), MapToM(self->Y()), MapToM(self->Z()));
+	b.pos = originPos + b.rot.Rotate(b.comOffset);
+
+	b.vel = FVector3(MapToM(self->Vel.X * TICRATE), MapToM(self->Vel.Y * TICRATE), MapToM(self->Vel.Z * TICRATE));
 	b.angVel = FVector3(0, 0, 0);
 
 	if (hx < 0.002) hx = 0.002;
@@ -1339,7 +1534,10 @@ DEFINE_ACTION_FUNCTION_NATIVE(AActor, PhysicsEnable, PhysicsEnable)
 	PARAM_FLOAT(hx);
 	PARAM_FLOAT(hy);
 	PARAM_FLOAT(hz);
-	PhysicsEnable(self, massKg, hx, hy, hz);
+	PARAM_FLOAT(comX);
+	PARAM_FLOAT(comY);
+	PARAM_FLOAT(comZ);
+	PhysicsEnable(self, massKg, hx, hy, hz, comX, comY, comZ);
 	return 0;
 }
 
@@ -1464,8 +1662,8 @@ static void PhysicsSetTransform(AActor *self, double x, double y, double z,
 	PhysBody *b = FindBody(self);
 	if (b == nullptr) return;
 
-	b->pos = FVector3(MapToM(x), MapToM(y), MapToM(z));
 	b->rot = Quat::FromEulerDeg(yaw, pitch, roll);
+	b->pos = FVector3(MapToM(x), MapToM(y), MapToM(z)) + b->rot.Rotate(b->comOffset);
 	b->asleep = false;
 	b->sleepTimer = 0.f;
 }

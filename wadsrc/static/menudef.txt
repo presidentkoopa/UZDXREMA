@@ -2580,6 +2580,12 @@ OptionMenu "VRPhysicsMenu" protected
 	StaticText " "
 	Slider "Simulation rate",   vr_physics_hz,           30, 240, 10, 0
 	StaticText " "
+	StaticText " "
+	StaticText "Your hands are solid to loose objects, so you", gold
+	StaticText "can knock them around. They pass through walls.", gold
+	Option "Hands are solid",   vr_physics_hands,        OnOff
+	Slider "Hand size",         vr_physics_handsize,     0.25, 4.0, 0.05, 2
+	StaticText " "
 	StaticText "Diagnostics -- written to the log file.", gold
 	Option "Log summary",       vr_physics_debug,        OnOff
 	Slider "Trace (per sec)",   vr_physics_trace,        0, 20, 1, 0

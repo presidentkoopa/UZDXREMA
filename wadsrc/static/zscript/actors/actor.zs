@@ -983,7 +983,13 @@ class Actor : Thinker native
 	// Mass is in KILOGRAMS and the half-extents of its collision box are in
 	// METRES -- real units, not map units, because that is what the simulation
 	// runs in. A pistol magazine is roughly 0.25kg and (0.015, 0.045, 0.06).
-	native void PhysicsEnable(double massKg, double halfX, double halfY, double halfZ);
+	// comX/Y/Z is where the centre of mass sits relative to the actor's ORIGIN,
+	// in metres, in the model's own axes. Rarely zero for a real model: a
+	// magazine exported with its origin at the base has its mass centred about
+	// 5cm above that, and leaving this at zero puts the collision box over the
+	// bottom half of the mesh only.
+	native void PhysicsEnable(double massKg, double halfX, double halfY, double halfZ,
+		double comX = 0, double comY = 0, double comZ = 0);
 	native void PhysicsDisable();
 	// kg*m/s at the centre of mass -- this is how a throw gets its speed.
 	native void PhysicsAddImpulse(double x, double y, double z);
