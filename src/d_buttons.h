@@ -36,7 +36,7 @@ enum
 	Button_MoveDown,
 	Button_AltAttack,
 	Button_MoveLeft,
-	Button_OH_Reload,
+	Button_OH_DropMag,
 	Button_MoveRight,
 	Button_AM_PanRight,
 	Button_AM_PanUp,
@@ -52,6 +52,6 @@ enum
 	Button_Speed,
 	Button_Use,
 	Button_MoveUp,
-	Button_MH_Reload,
+	Button_MH_DropMag,
 	NUM_ACTIONS
 };

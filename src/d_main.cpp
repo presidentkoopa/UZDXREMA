@@ -3447,7 +3447,7 @@ static const char *DoomButtons[] =
 	"movedown" ,
 	"altattack" ,
 	"moveleft" ,
-	"oh_reload",
+	"oh_dropmag",
 	"moveright" ,
 	"am_panright",
 	"am_panup" ,
@@ -3463,7 +3463,7 @@ static const char *DoomButtons[] =
 	"speed" ,
 	"use" ,
 	"moveup",
-	"mh_reload" };
+	"mh_dropmag" };
 
 CVAR(Bool, lookspring, true, CVAR_ARCHIVE);	// Generate centerview when -mlook encountered?
 EXTERN_CVAR(String, language)

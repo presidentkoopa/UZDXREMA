@@ -59,7 +59,11 @@ typedef enum
 	BT_LOOKDOWN		= 1<<17,
 	BT_MOVEUP		= 1<<18,
 	BT_MOVEDOWN		= 1<<19,
-	BT_SHOWSCORES	= 0,  // replaced with BT_MAINHANDRELOAD
+	// Bit 20 was BT_SHOWSCORES, and it was free to take: the scoreboard reads
+	// the button map directly (ct_chat.cpp), so this bit was written into the
+	// ticcmd and never read by anything. Zeroing it leaves the scoreboard
+	// working and hands the bit to BT_MAINHANDDROPMAG below.
+	BT_SHOWSCORES	= 0,
 
 	BT_USER1		= 1<<21,
 	BT_USER2		= 1<<22,
@@ -70,8 +74,12 @@ typedef enum
 
 	BT_OFFHANDATTACK    = 1<<26,
 	BT_OFFHANDALTATTACK = 1<<27,
-	BT_OFFHANDRELOAD    = 1<<28,
-	BT_MAINHANDRELOAD   = 1<<20,
+	// Drop the magazine from that hand's weapon. NOT a reload: these
+	// deliberately do not route into a weapon's Reload state, because dropping
+	// the magazine and refilling it are two separate acts and the player
+	// performs the second one physically.
+	BT_OFFHANDDROPMAG   = 1<<28,
+	BT_MAINHANDDROPMAG  = 1<<20,
 } buttoncode_t;
 
 // Called by IO functions when input is detected.

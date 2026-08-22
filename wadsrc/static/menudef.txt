@@ -604,8 +604,8 @@ OptionMenu "ActionControlsMenu" protected
 	Control    "$CNTRLMNU_ALTATTACK"        , "+altattack"
 	Control    "$CNTRLMNU_OH_ATTACK"        , "+oh_attack"
 	Control    "$CNTRLMNU_OH_ALTATTACK"     , "+oh_altatk"
-	Control    "$CNTRLMNU_MAINHANDRELOAD"   , "+mh_reload"
-	Control    "$CNTRLMNU_OFFHANDRELOAD"    , "+oh_reload"
+	Control    "$CNTRLMNU_MAINHANDDROPMAG"  , "+mh_dropmag"
+	Control    "$CNTRLMNU_OFFHANDDROPMAG"   , "+oh_dropmag"
 	Control    "$CNTRLMNU_ZOOM"             , "+zoom"
 
 	StaticText ""
@@ -712,8 +712,8 @@ OptionMenu "ActionDoubleControlsMenu" protected
 
 	StaticText ""
 	StaticText "$CNTRLMNU_ADVANCED_RELOADING", gold
-	DoubleControl    "$CNTRLMNU_MAINHANDRELOAD"    , "+mh_reload"
-	DoubleControl    "$CNTRLMNU_OFFHANDRELOAD"     , "+oh_reload"
+	DoubleControl    "$CNTRLMNU_MAINHANDDROPMAG"   , "+mh_dropmag"
+	DoubleControl    "$CNTRLMNU_OFFHANDDROPMAG"    , "+oh_dropmag"
 }
 
 OptionMenu "ActionDoubleControlsMenu" protected

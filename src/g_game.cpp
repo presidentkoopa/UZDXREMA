@@ -244,9 +244,9 @@ namespace
 		const bool hasOffhandWeapon = player->OffhandWeapon != nullptr;
 
 		const bool mainInputActive = hasMainWeapon &&
-			(buttons & (BT_ATTACK | BT_ALTATTACK | BT_RELOAD | BT_MAINHANDRELOAD)) != 0;
+			(buttons & (BT_ATTACK | BT_ALTATTACK | BT_RELOAD | BT_MAINHANDDROPMAG)) != 0;
 		const bool offhandInputActive = hasOffhandWeapon &&
-			(buttons & (BT_OFFHANDATTACK | BT_OFFHANDALTATTACK | BT_OFFHANDRELOAD)) != 0;
+			(buttons & (BT_OFFHANDATTACK | BT_OFFHANDALTATTACK | BT_OFFHANDDROPMAG)) != 0;
 
 		const bool mainSequenceActive = VR_HandHasActiveSequence(player, 0);
 		const bool offhandSequenceActive = VR_HandHasActiveSequence(player, 1);
@@ -1095,8 +1095,8 @@ void G_BuildTiccmd (usercmd_t *cmd)
 	if (buttonMap.ButtonDown(Button_Reload))     cmd->buttons |= BT_RELOAD;
 
 	// [UZDXREMA] Off-hand / main-hand dual-wield bits.
-	if (buttonMap.ButtonDown(Button_MH_Reload))   cmd->buttons |= BT_MAINHANDRELOAD;
-	if (buttonMap.ButtonDown(Button_OH_Reload))   cmd->buttons |= BT_OFFHANDRELOAD;
+	if (buttonMap.ButtonDown(Button_MH_DropMag))  cmd->buttons |= BT_MAINHANDDROPMAG;
+	if (buttonMap.ButtonDown(Button_OH_DropMag))  cmd->buttons |= BT_OFFHANDDROPMAG;
 	if (buttonMap.ButtonDown(Button_OH_Attack))   cmd->buttons |= BT_OFFHANDATTACK;
 	if (buttonMap.ButtonDown(Button_OH_AltAttack)) cmd->buttons |= BT_OFFHANDALTATTACK;
 
@@ -1127,11 +1127,11 @@ void G_BuildTiccmd (usercmd_t *cmd)
 	// to run after the whole button block above and before any HELD() test below.
 	if (VRWheel_ShouldSuppressHandInput(VR_MAINHAND))
 	{
-		cmd->buttons &= ~(BT_ATTACK | BT_ALTATTACK | BT_USE | BT_RELOAD | BT_MAINHANDRELOAD);
+		cmd->buttons &= ~(BT_ATTACK | BT_ALTATTACK | BT_USE | BT_RELOAD | BT_MAINHANDDROPMAG);
 	}
 	if (VRWheel_ShouldSuppressHandInput(VR_OFFHAND))
 	{
-		cmd->buttons &= ~(BT_OFFHANDRELOAD | BT_OFFHANDATTACK | BT_OFFHANDALTATTACK);
+		cmd->buttons &= ~(BT_OFFHANDDROPMAG | BT_OFFHANDATTACK | BT_OFFHANDALTATTACK);
 	}
 
 	forward = side = fly = 0;
