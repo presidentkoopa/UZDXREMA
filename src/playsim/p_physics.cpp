@@ -123,6 +123,13 @@ namespace
 {
 
 constexpr int   kSolverIterations = 8;
+// How far a body may drift and still count as settled. A resting box bobs by
+// roughly a millimetre as gravity and the contact take turns; anything actually
+// creeping covers far more than this in the sleep window.
+constexpr float kSleepDrift      = 0.004f;  // metres
+constexpr float kSleepDriftAngle = 0.05f;   // radians, ~3 degrees
+
+// Diagnostic thresholds only -- see the sleep block; velocity does not decide.
 constexpr float kSleepLinear      = 0.05f;   // m/s
 constexpr float kSleepAngular     = 0.4f;    // rad/s
 constexpr float kSleepTime        = 0.3f;    // seconds below both thresholds
@@ -141,6 +148,11 @@ constexpr float kRestitutionThreshold = 0.5f;   // m/s
 // comfortably longer than the gap between contacts on a resting body, which the
 // penetration bias creates by pushing it slightly clear.
 constexpr float kSupportGrace = 0.2f;   // seconds
+
+// How hard a sleeping body must be struck before it wakes. Above zero on
+// purpose: two objects merely leaning on each other would otherwise keep each
+// other awake indefinitely.
+constexpr float kWakeOnImpact = 0.15f;  // m/s
 
 // --- a minimal quaternion -------------------------------------------------
 //
@@ -241,10 +253,16 @@ struct PhysBody
 	// this, a body can never fall asleep at all.
 	float supportTimer = 0.f;
 
-	// Smoothed velocity, used ONLY for the sleep test. Averaging the vector
-	// rather than the speed is the point: see the sleep block.
+	// Smoothed velocity. Diagnostic only -- it is NOT what decides sleep; see
+	// the sleep block for why velocity is the wrong question entirely.
 	FVector3 velEMA = FVector3(0, 0, 0);
 	FVector3 angEMA = FVector3(0, 0, 0);
+
+	// Where this body was when it last looked like it might be settling. Sleep
+	// is decided by how far it has actually MOVED from here.
+	FVector3 sleepRefPos = FVector3(0, 0, 0);
+	Quat     sleepRefRot = Quat::Identity();
+
 
 	bool  asleep = false;
 
@@ -710,9 +728,36 @@ void StepBody(PhysBody &b, float dt)
 		b.angEMA = b.angEMA * (1.f - k) + b.angVel * k;
 	}
 
+	// SLEEP IS DECIDED BY DISPLACEMENT, NOT BY VELOCITY.
+	//
+	// This is the third attempt at it and the first correct one. The two before
+	// tested velocity, and velocity cannot answer the question: a body at rest
+	// on a floor is never at zero velocity. Gravity adds g/rate every step --
+	// 0.109 m/s at 90Hz -- and the contact only cancels it on the steps where
+	// the body has actually sunk far enough to overlap the surface again. In
+	// between it is genuinely falling. Measured on a magazine sitting
+	// motionless: a rock-steady 0.1090 m/s forever, which is exactly 9.81/90.
+	//
+	// Smoothing does not rescue it either. The signal is a sawtooth that never
+	// approaches zero, so no threshold separates "resting" from "creeping"
+	// without also being larger than a real slow drift.
+	//
+	// Displacement asks the question directly: has this thing actually gone
+	// anywhere. A resting body bobs by about a millimetre and stays put; a
+	// creeping one does not. That holds at any simulation rate, under any
+	// gravity, which velocity thresholds never did.
 	if (!b.asleep)
 	{
-		const bool slow = b.velEMA.Length() < kSleepLinear && b.angEMA.Length() < kSleepAngular;
+		const float driftLin = (b.pos - b.sleepRefPos).Length();
+
+		// Angle between two orientations, via the quaternion dot product.
+		float qd = b.rot.x * b.sleepRefRot.x + b.rot.y * b.sleepRefRot.y
+		         + b.rot.z * b.sleepRefRot.z + b.rot.w * b.sleepRefRot.w;
+		if (qd < 0.f) qd = -qd;
+		if (qd > 1.f) qd = 1.f;
+		const float driftAng = 2.f * acosf(qd);
+
+		const bool slow = (driftLin < kSleepDrift) && (driftAng < kSleepDriftAngle);
 		if (slow && b.supportTimer > 0.f)
 		{
 			b.sleepTimer += dt;
@@ -735,7 +780,10 @@ void StepBody(PhysBody &b, float dt)
 		}
 		else
 		{
+			// It moved. Start measuring again from where it is now.
 			b.sleepTimer = 0.f;
+			b.sleepRefPos = b.pos;
+			b.sleepRefRot = b.rot;
 		}
 	}
 
@@ -771,6 +819,217 @@ void StepBody(PhysBody &b, float dt)
 				numContacts, b.sleepTimer);
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Body against body
+//
+// Corner-in-box, both ways round. For every corner of A that lies inside B, the
+// contact normal is B's face that it is nearest to escaping through, and the
+// penetration is that distance.
+//
+// This misses pure edge-against-edge contact, where neither box has a corner
+// inside the other -- two boxes crossed like an X. That is deliberate: catching
+// it needs a full separating-axis test with face clipping, several hundred more
+// lines, and for the objects here (magazines, rounds, hands, a pistol) the
+// corner case dominates overwhelmingly. If two objects ever visibly pass
+// through each other at a crossed angle, this is why, and that is the fix.
+// ---------------------------------------------------------------------------
+
+// Deepest face of the box that this local-space point is inside, or false if it
+// is outside the box entirely.
+bool DeepestFace(const FVector3 &local, const FVector3 &half, FVector3 &axisOut, float &depthOut)
+{
+	const float dx = half.X - fabsf(local.X);
+	if (dx <= 0.f) return false;
+	const float dy = half.Y - fabsf(local.Y);
+	if (dy <= 0.f) return false;
+	const float dz = half.Z - fabsf(local.Z);
+	if (dz <= 0.f) return false;
+
+	// Smallest overlap is the cheapest way out, which is the contact normal.
+	if (dx <= dy && dx <= dz)
+	{
+		axisOut = FVector3(local.X >= 0.f ? 1.f : -1.f, 0.f, 0.f);
+		depthOut = dx;
+	}
+	else if (dy <= dz)
+	{
+		axisOut = FVector3(0.f, local.Y >= 0.f ? 1.f : -1.f, 0.f);
+		depthOut = dy;
+	}
+	else
+	{
+		axisOut = FVector3(0.f, 0.f, local.Z >= 0.f ? 1.f : -1.f);
+		depthOut = dz;
+	}
+	return true;
+}
+
+// Solve one pair. Impulses are shared according to inverse mass, so a kinematic
+// body (invMass 0) pushes without being pushed -- which is exactly what a hand
+// and a held weapon need.
+void SolvePair(PhysBody &A, PhysBody &B, float dt)
+{
+	if (A.invMass <= 0.f && B.invMass <= 0.f) return;      // nothing to move
+	if (A.kinematic && B.kinematic) return;
+
+	// Broadphase: bounding spheres.
+	const float rA = A.half.Length();
+	const float rB = B.half.Length();
+	FVector3 delta = B.pos - A.pos;
+	const float distSq = delta.LengthSquared();
+	if (distSq > (rA + rB) * (rA + rB)) return;
+
+	struct PairContact { FVector3 point, normal; float penetration, initialVn, impulse; };
+	PairContact pc[16];
+	int n = 0;
+
+	// Corners of one inside the other, both directions. The normal always
+	// points from A toward B, so the sign handling below stays uniform.
+	for (int pass = 0; pass < 2 && n < 16; pass++)
+	{
+		PhysBody &src = pass ? B : A;
+		PhysBody &dst = pass ? A : B;
+
+		for (int corner = 0; corner < 8 && n < 16; corner++)
+		{
+			FVector3 lc(
+				(corner & 1) ? src.half.X : -src.half.X,
+				(corner & 2) ? src.half.Y : -src.half.Y,
+				(corner & 4) ? src.half.Z : -src.half.Z);
+			FVector3 world = src.pos + src.rot.Rotate(lc);
+
+			FVector3 local = dst.rot.Inverse().Rotate(world - dst.pos);
+
+			FVector3 axis; float depth;
+			if (!DeepestFace(local, dst.half, axis, depth)) continue;
+
+			FVector3 nWorld = dst.rot.Rotate(axis);
+			// Normal must point from A to B.
+			if (pass == 0) nWorld = -nWorld;
+
+			FVector3 rA2 = world - A.pos;
+			FVector3 rB2 = world - B.pos;
+			FVector3 vA = A.vel + Cross(A.angVel, rA2);
+			FVector3 vB = B.vel + Cross(B.angVel, rB2);
+
+			PairContact &c = pc[n++];
+			c.point = world;
+			c.normal = nWorld;
+			c.penetration = depth;
+			c.initialVn = (vB - vA) | nWorld;
+			c.impulse = 0.f;
+		}
+	}
+
+	if (n == 0) return;
+
+	// Resting on ANOTHER BODY counts as being supported, exactly as resting on
+	// the floor does. Without this, a magazine that comes to rest on top of
+	// another one can never sleep: it registers no world contact at all, so its
+	// sleep timer would be reset every single step by something that is, from
+	// its point of view, holding it up perfectly well.
+	A.supportTimer = kSupportGrace;
+	B.supportTimer = kSupportGrace;
+
+	// Wake a sleeper that has just been hit. Without this a settled magazine
+	// would sit there while a thrown one passed straight through it -- the
+	// sleeping body is skipped by the integrator, so nothing would ever move it
+	// again no matter how hard it was struck.
+	//
+	// Only a real approach wakes it. Merely resting against something must not,
+	// or two touching objects keep each other awake forever.
+	for (int i = 0; i < n; i++)
+	{
+		if (-pc[i].initialVn <= kWakeOnImpact) continue;
+
+		if (A.asleep) { A.asleep = false; A.sleepTimer = 0.f; A.restReported = false; }
+		if (B.asleep) { B.asleep = false; B.sleepTimer = 0.f; B.restReported = false; }
+		break;
+	}
+
+	const float restitution = *vr_physics_restitution;
+	const float friction    = *vr_physics_friction;
+	const float invDt       = 1.f / dt;
+
+	for (int iter = 0; iter < kSolverIterations; iter++)
+	{
+		for (int i = 0; i < n; i++)
+		{
+			PairContact &c = pc[i];
+			FVector3 rA2 = c.point - A.pos;
+			FVector3 rB2 = c.point - B.pos;
+
+			FVector3 vA = A.vel + Cross(A.angVel, rA2);
+			FVector3 vB = B.vel + Cross(B.angVel, rB2);
+			float vn = (vB - vA) | c.normal;
+
+			// POSITIVE. The normal points from A toward B, so separating means
+			// driving the relative velocity along it upwards -- B away from A.
+			// This was negative, which drove the correction the wrong way: the
+			// overlap was never resolved, and the two bodies slid past each
+			// other under the velocity term alone instead of coming to rest in
+			// contact. The visible symptom was objects refusing to stack while
+			// still clearly avoiding each other.
+			float bias = 0.f;
+			if (c.penetration > kPenetrationSlop)
+				bias = kBaumgarte * invDt * (c.penetration - kPenetrationSlop);
+
+			float target = bias;
+			if (c.initialVn < -kRestitutionThreshold)
+				target += -restitution * c.initialVn;
+
+			float denom = EffectiveMass(A, rA2, c.normal) + EffectiveMass(B, rB2, c.normal);
+			if (denom < 1e-8f) continue;
+
+			float lambda = (target - vn) / denom;
+
+			float old = c.impulse;
+			c.impulse = old + lambda;
+			if (c.impulse < 0.f) c.impulse = 0.f;
+			lambda = c.impulse - old;
+			if (lambda == 0.f) continue;
+
+			FVector3 imp = c.normal * lambda;
+			if (!A.kinematic) ApplyImpulse(A, rA2, -imp);
+			if (!B.kinematic) ApplyImpulse(B, rB2,  imp);
+		}
+
+		for (int i = 0; i < n; i++)
+		{
+			PairContact &c = pc[i];
+			if (c.impulse <= 0.f) continue;
+
+			FVector3 rA2 = c.point - A.pos;
+			FVector3 rB2 = c.point - B.pos;
+			FVector3 vA = A.vel + Cross(A.angVel, rA2);
+			FVector3 vB = B.vel + Cross(B.angVel, rB2);
+			FVector3 vRel = vB - vA;
+
+			FVector3 vt = vRel - c.normal * (vRel | c.normal);
+			float vtLen = vt.Length();
+			if (vtLen < 1e-6f) continue;
+
+			FVector3 t = vt / vtLen;
+			float denomT = EffectiveMass(A, rA2, t) + EffectiveMass(B, rB2, t);
+			if (denomT < 1e-8f) continue;
+
+			float jt = -(vRel | t) / denomT;
+			const float maxF = friction * c.impulse;
+			if (jt >  maxF) jt =  maxF;
+			if (jt < -maxF) jt = -maxF;
+
+			FVector3 fimp = t * jt;
+			if (!A.kinematic) ApplyImpulse(A, rA2, -fimp);
+			if (!B.kinematic) ApplyImpulse(B, rB2,  fimp);
+		}
+	}
+
+	// TODO: objects hitting EACH OTHER are still silent -- impact sound is
+	// currently driven only by contacts against world geometry. Two magazines
+	// clacking together should be audible, and will matter more once a
+	// magazine meets a gun.
 }
 
 // Push the solver's transform back onto the actor.
@@ -823,6 +1082,37 @@ void ReportLine(const char *why, double dt)
 
 	int awake = 0;
 	for (unsigned i = 0; i < g_bodies.Size(); i++) if (!g_bodies[i].asleep) awake++;
+
+	// WHY the quietest body is not asleep.
+	//
+	// "Nothing ever sleeps" is not actionable on its own -- it has already had
+	// two different causes in this file, and guessing at a third would be worse
+	// than useless. Each of the four conditions is printed separately so the
+	// failing one names itself.
+	if (awake > 0)
+	{
+		const PhysBody *quietest = nullptr;
+		float best = 1e9f;
+		for (unsigned i = 0; i < g_bodies.Size(); i++)
+		{
+			const PhysBody &b = g_bodies[i];
+			if (b.asleep) continue;
+			const float m = b.velEMA.Length();
+			if (m < best) { best = m; quietest = &b; }
+		}
+
+		if (quietest != nullptr)
+		{
+			const float drift = (quietest->pos - quietest->sleepRefPos).Length();
+			Printf("[PHYS] quietest: drift=%.5f (need <%.4f)%s  support=%.2f%s  "
+				"sleepT=%.2f/%.2f  held=%d  rawvel=%.3f rawspin=%.3f\n",
+				drift, kSleepDrift, (drift < kSleepDrift) ? " ok" : " BLOCKS",
+				quietest->supportTimer, (quietest->supportTimer > 0.f) ? " ok" : " BLOCKS",
+				quietest->sleepTimer, kSleepTime,
+				quietest->kinematic ? 1 : 0,
+				quietest->vel.Length(), quietest->angVel.Length());
+		}
+	}
 
 	Printf("[PHYS] %-9s frames/s=%6.1f steps/s=%6.1f dropped=%d  dt=%.4f (min %.4f max %.4f)  "
 		"tics=%d  %s paused=%d menu=%d  vr=%d backend=%d  bodies=%u awake=%d\n",
@@ -916,6 +1206,16 @@ void P_PhysicsFrame()
 				for (int s = 0; s < sub; s++)
 					StepBody(b, subDt);
 			}
+
+			// Bodies against each other, after all of them have moved.
+			//
+			// Separate from the per-body pass because a pair cannot be resolved
+			// from one side: both bodies' inverse masses decide how the impulse
+			// is shared, and doing it inside each body's own step would apply it
+			// twice and roughly double the bounce.
+			for (unsigned i = 0; i + 1 < g_bodies.Size(); i++)
+				for (unsigned j = i + 1; j < g_bodies.Size(); j++)
+					SolvePair(g_bodies[i], g_bodies[j], (float)step);
 
 			g_accumulator -= step;
 			steps++;
