@@ -60,6 +60,7 @@
 #include "p_enemy.h"
 #include "p_lnspec.h"
 #include "p_local.h"
+#include "p_physics.h"
 #include "p_maputl.h"
 #include "p_spec.h"
 #include "p_terrain.h"
@@ -4603,7 +4604,29 @@ void AActor::Tick ()
 	if (!isFrozen())
 		TickBehaviors();
 
-	if (flags5 & MF5_NOINTERACTION)
+	if (flags9 & MF9_PHYSICSBODY)
+	{
+		// RS FORK -- the rigid-body solver owns this actor's transform.
+		//
+		// Everything Doom would normally do to move it is skipped: scroller and
+		// carry accumulation, the steep-slope push, P_XYMovement (and with it
+		// P_TryMove, friction, sliding and bouncing), P_ZMovement (gravity,
+		// floor and ceiling clamping, floatbob), P_CheckOnmobj and Crash().
+		// Position, orientation and velocity are written by P_PhysicsFrame at
+		// frame rate instead -- see p_physics.h.
+		//
+		// Deliberately NOT copying the MF5_NOINTERACTION branch's
+		// `flags |= MF_NOBLOCKMAP` below. That removes the actor from the
+		// blockmap permanently, which would make it invisible to hitscans,
+		// P_LineTrace and every other actor's collision checks. A physics body
+		// is a real object in the world and must stay findable.
+		//
+		// Falls through to the shared tail so state and animation still
+		// advance, sector specials still apply, and the render sector list
+		// stays current.
+		flags8 &= ~MF8_INSCROLLSEC;
+	}
+	else if (flags5 & MF5_NOINTERACTION)
 	{
 		// only do the minimally necessary things here to save time:
 		// Check the time freezer
@@ -5959,6 +5982,15 @@ void AActor::CallDeactivate(AActor *activator)
 
 void AActor::OnDestroy ()
 {
+	// RS FORK -- drop any rigid body before the actor goes.
+	//
+	// The physics registry holds a raw AActor*, which the collector cannot see;
+	// this is the point where the actor is still valid and is definitely going
+	// away, so it is the only correct place to sever that link. Unconditional
+	// rather than gated on the flag, because the flag can be cleared at runtime
+	// and a body must never outlive its actor.
+	P_PhysicsRemoveBody(this);
+
 	// If the Actor is leaving behind a premorph Actor, make sure it gets cleaned up as
 	// well so it's not stuck in the map.
 	if (alternative != nullptr && !(flags & MF_UNMORPHED))

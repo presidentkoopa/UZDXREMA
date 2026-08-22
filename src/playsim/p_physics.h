@@ -49,8 +49,13 @@
 void P_PhysicsFrame();
 
 // Called when a level's geometry is final, and when it is torn down.
-// Stubs during slice 0; the physics world's lifetime hangs off these.
 void P_PhysicsLevelStart();
 void P_PhysicsLevelEnd();
+
+// Drop an actor's body. MUST be called from AActor::OnDestroy: a body whose
+// actor has been freed is a dangling pointer, and the GC cannot see a raw
+// AActor* held in a physics registry.
+class AActor;
+void P_PhysicsRemoveBody(AActor *a);
 
 #endif // __P_PHYSICS_H__

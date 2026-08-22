@@ -972,6 +972,33 @@ class Actor : Thinker native
 	native clearscope double Distance3DSquared(Actor other) const;
 	native void SetOrigin(vector3 newpos, bool moving);
 	native void SetXYZ(vector3 newpos);
+
+	// RS FORK -- rigid-body physics. See src/playsim/p_physics.h.
+	//
+	// Once enabled, the SOLVER owns this actor's position, orientation and
+	// velocity: Doom's movement is skipped entirely for it, and writing pos or
+	// Vel from script will simply be overwritten on the next frame. Move it
+	// with impulses instead.
+	//
+	// Mass is in KILOGRAMS and the half-extents of its collision box are in
+	// METRES -- real units, not map units, because that is what the simulation
+	// runs in. A pistol magazine is roughly 0.25kg and (0.015, 0.045, 0.06).
+	native void PhysicsEnable(double massKg, double halfX, double halfY, double halfZ);
+	native void PhysicsDisable();
+	// kg*m/s at the centre of mass -- this is how a throw gets its speed.
+	native void PhysicsAddImpulse(double x, double y, double z);
+	// Spin, radians per second.
+	native void PhysicsAddSpin(double x, double y, double z);
+	// What it sounds like hitting something, and how hard it must hit (m/s)
+	// before it makes any noise at all.
+	native void PhysicsSetImpactSound(sound snd, double minSpeed = 0.6);
+	// True once it has come to rest and stopped simulating.
+	native clearscope bool PhysicsIsAsleep() const;
+	// Hold it (the solver stops moving it) or let it go. To throw: hold, drive
+	// it with PhysicsSetTransform each tic, then release and add an impulse.
+	native void PhysicsSetHeld(bool held);
+	// Place a held body. Position in MAP units, angles in degrees.
+	native void PhysicsSetTransform(double x, double y, double z, double yaw, double pitch, double roll);
 	native clearscope Actor GetPointer(int aaptr);
 	native double BulletSlope(out FTranslatedLineTarget pLineTarget = null, int aimflags = 0);
 	native void CheckFakeFloorTriggers (double oldz, bool oldz_has_viewheight = false);
