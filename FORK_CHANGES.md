@@ -3043,3 +3043,115 @@ is not supporting anything, whatever the arbiter concluded. Only ZScript knows
 what is in the other hand, so `RS_Hands` drops the support pose when the hand is
 holding a weapon — laid over a gun it would show fingers wrapped round thin air
 beside it.
+
+## 51. `PSprite.AnchorOfs` / `AnchorAngles` — where on the bone to sit
+
+Anchoring a layer to a bone put it at the bone's origin, in the bone's
+orientation. That is wherever the artist happened to drop the tag, which is
+almost never where a hand goes: the result is a gun through the palm rather than
+a gun in it.
+
+Two `DVector3`s on the psprite, summed into the *same* MODELDEF offset and
+rotation calls the placement sliders already use. Deliberately summed rather
+than applied as extra transforms afterwards, for the reason that block already
+documents: rotations do not commute, so a number here only means what the
+equivalent MODELDEF value means if it is added at the same point in the chain.
+
+Per LAYER rather than per model, because the same hand mesh sits on a pistol
+grip, a shotgun forend and a charging handle, and those are three different fits
+of one model. Ignored entirely unless the layer is actually anchored — the bone
+frame the numbers are expressed in does not otherwise exist.
+
+The consumer side is worth recording as a pattern. `RS_Hands` keeps a table of
+three bones per weapon — where the firing hand goes, where the supporting hand
+goes, and what you grab to work the action — and nothing else. The *fit* is
+keyed by role instead: one set of sliders for a grip, one for a support hand,
+one for a slide or a pump. A hand wrapped round a pistol grip sits the same way
+on every pistol grip, so a weapon added to the table inherits a fit that is
+already dialled in, and the same reasoning that made the grip subjects
+pose-shaped rather than object-shaped applies here unchanged.
+
+Also worth knowing, from the same work: a **world actor with a `TNT1` sprite is
+never drawn, model or not**. TNT1 is not an empty sprite, it is an instruction
+to skip the actor, checked before any model is considered. It is fine on the
+psprite props, whose model lookup goes through `BaseSpriteModelFrames`, and it
+silently deletes any world actor that copies the idiom from them — which is what
+had ejected magazines being spawned correctly and never appearing.
+
+### Anchors carry no scale
+
+A bone matrix carries the whole chain that produced it, scale included, so
+adopting one wholesale multiplies the anchored model by the target's size.
+Anchoring never means that: a magazine placed in a hand should be
+magazine-sized, not hand-times-magazine sized.
+
+The numbers are not small enough to shrug off. The hand rig carries a `0.01` at
+its root joint, so a magazine anchored to a knuckle rendered at a hundredth of
+its size -- well past what any scale slider could climb back out of, and looking
+exactly like a model that had been exported wrong. Chasing it in the exporter
+would have found nothing, because the model measured 13.5 units the whole time.
+
+The basis is orthonormalised on adoption: each of the three axes scaled back to
+unit length, which strips scale and leaves rotation and translation untouched.
+
+## 52. Stabilize removed; a two-handed hold buys accuracy instead
+
+Two-hand stabilize did two separable jobs welded together. It **repositioned the
+weapon** to point along the line between the two controllers, and as a side
+effect that also steadied the aim. Only the second was ever wanted.
+
+The repositioning is a lie. Nothing grabbed anything: the weapon snapped because
+two controllers came within a fixed distance of each other, whether or not the
+off hand had anything to do with it. And since reloading is the gesture that
+brings the hands together, it fired hardest during exactly the moment that least
+wanted it.
+
+- The proximity path is gone. `stabilizeGeometryOk` is now permanently false;
+  `GRIPCTX_Stabilize` is reachable only through a script claim on the grip or
+  the forend.
+- `vr_two_handed_weapons` now defaults **off**, so even a claimed hold does not
+  move the weapon unless the repositioning is explicitly asked for.
+- `AActor::TwoHandedHold` is published instead: true when the off hand is
+  genuinely ON the main hand's weapon (`GRIPSUBJ_Support`, `_Forend`,
+  `_Foregrip`). Weapons read it and tighten their spread.
+
+The whole point being that the gun stays where your hands are holding it, and
+being two-handed makes you shoot straighter rather than making the gun move by
+itself. `RS_Beretta` goes 2.4 to 0.7 degrees; `RS_Shotgun` 9.0 to 3.4, where the
+pattern IS the weapon.
+
+Racking a slide or working a pump needs none of this: the HAND goes to the gun,
+anchored to `j_slide` or `corncob` by the seating table, and the weapon never
+moves at all.
+
+## 53. Per-finger curl ceilings, and what measuring a rig cannot tell you
+
+Every pose names one curl angle and every finger obeys it -- but fingers are not
+the same length, so the same angle does not put their tips in the same place.
+Measured, the middle finger's tip travels 11.4cm at 90 degrees where the little
+finger's travels 7.3cm. The long ones drive through the palm; the short ones
+stop short of it.
+
+Each finger now has its own ceiling, solved by sweeping the curl and watching
+the tip against the palm. Poses below the ceiling are untouched, so only the
+deep end of the curl changes: 95, 95, 85 and 110 degrees respectively.
+
+Three failed measurements are worth recording, because each was wrong in an
+instructive way:
+
+- **Height above the palm PLANE.** Useless: a flat hand already has its
+  fingertips in that plane, so the test trips at zero degrees. Measured that
+  way, an open hand is already inside itself. Distance to the palm as a
+  *segment* behaves -- large when extended, falling steadily as it closes.
+- **Bone positions alone.** The skeleton says a fingertip at full curl sits
+  clear of the palm's centre line, and it does. The palm is simply thicker than
+  its centre line, so the tip is inside the geometry while the rig reports it
+  outside. That gap is the difference between measuring a rig and measuring a
+  hand.
+- **Palm thickness from the mesh.** Reports 7cm however it is filtered -- by
+  position along the palm, by lateral span, thumb excluded -- because this model
+  carries a forearm stub in the sampled stretch. A 7cm palm forbids every finger
+  from closing past sixty degrees, so the hand can never make a fist. The scan
+  stays as a printed diagnostic but no longer sets the number; the clearance is
+  bounded by something known instead, a palm being about as thick as a finger is
+  wide.
