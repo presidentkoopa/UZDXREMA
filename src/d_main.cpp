@@ -89,6 +89,7 @@
 #include "md5.h"
 #include "menu.h"
 #include "p_local.h"
+#include "p_physics.h"
 #include "p_setup.h"
 #include "po_man.h"
 #include "printf.h"
@@ -1876,6 +1877,21 @@ void D_DoomLoop ()
 			I_SetFrameTime();
 
 			TryRunTics (); // will run at least one tic
+
+			// RS FORK -- VR object physics, stepped at frame rate.
+			//
+			// Here rather than in P_Ticker because the playsim runs at 35Hz and
+			// a held object updated at 35Hz lags the hand by up to 28ms. In VR
+			// TryRunTics deliberately does not wait (the compositor owns
+			// pacing), so this loop free-runs at headset rate and frequently
+			// runs zero tics -- which is exactly the rate a held object needs.
+			//
+			// Here rather than in a render backend because vid_preferbackend
+			// defaults to OpenGL and falls back to it silently on Vulkan
+			// failure, and because screen wipes -- every level transition --
+			// never reach screen->BeginFrame() at all.
+			P_PhysicsFrame();
+
 			// Update display, next frame, with current state.
 			I_StartTic ();
 			D_ProcessEvents();
