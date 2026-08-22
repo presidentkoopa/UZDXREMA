@@ -52,7 +52,17 @@ CVAR(Bool, gl_interpolate_model_frames, true, CVAR_ARCHIVE)
 // frame counter: a target that stops being drawn must not leave an attachment
 // frozen at its last known position, so a stale stamp reads as "no anchor" and
 // the layer falls back to its own placement.
-struct HudAnchorEntry { VSMatrix mat; uint64_t frame; };
+// mat is what an anchored layer is drawn with. offset is the same bone
+// expressed as a displacement from the weapon's ORIGIN, in the model's own
+// axes, already multiplied by the scale the model is being drawn at -- which is
+// the form script can use.
+//
+// Script cannot see any of this otherwise, and the cost of that has been high:
+// every grab point in the mods is a hand-guessed distance ("the pump is about
+// sixteen units forward"), which is wrong the moment a weapon is rescaled or
+// repositioned, and wrong in a way that presents as the grab silently never
+// firing. The engine has always known exactly where the pump is.
+struct HudAnchorEntry { VSMatrix mat; DVector3 offset; uint64_t frame; };
 static TMap<uint64_t, HudAnchorEntry> g_hudAnchors;
 static uint64_t g_hudAnchorFrame = 0;
 
@@ -69,6 +79,17 @@ static inline uint64_t HudAnchorKey(int layer, FName bone)
 void HudAnchor_BeginFrame()
 {
 	g_hudAnchorFrame++;
+
+	// The shared table above guards staleness with the frame stamp, but the
+	// copies written onto the psprites themselves have no such guard, and a
+	// latched AnchorBoneLive is worse than none: a grab test would keep firing at
+	// a weapon that is no longer drawn, at wherever it was last seen. Cleared
+	// here, so only a bone actually published this frame reads as live.
+	player_t *player = &players[consoleplayer];
+	for (DPSprite *q = player->psprites; q != nullptr; q = q->GetNext())
+	{
+		q->AnchorBoneLive = false;
+	}
 }
 
 bool HudAnchor_Get(int layer, FName bone, VSMatrix &out)
@@ -76,6 +97,22 @@ bool HudAnchor_Get(int layer, FName bone, VSMatrix &out)
 	auto *e = g_hudAnchors.CheckKey(HudAnchorKey(layer, bone));
 	if (!e || e->frame != g_hudAnchorFrame) return false;
 	out = e->mat;
+	return true;
+}
+
+// Where a bone sits relative to the weapon's origin, in the model's own axes
+// and in map units. Zero if that bone was not drawn this frame -- a stale
+// answer is worse than no answer, because a grab test cannot tell the two
+// apart and would keep firing at a weapon that is no longer on screen.
+//
+// The requests drive what gets published: a bone nobody has asked for is never
+// stored, so a mod must anchor something to a bone (or ask for it) before this
+// returns anything for it.
+bool HudAnchor_GetOffset(int layer, FName bone, DVector3 &out)
+{
+	auto *e = g_hudAnchors.CheckKey(HudAnchorKey(layer, bone));
+	if (!e || e->frame != g_hudAnchorFrame) { out = DVector3(0, 0, 0); return false; }
+	out = e->offset;
 	return true;
 }
 
@@ -97,6 +134,122 @@ static void HudAnchor_Store(const DPSprite *psp, FModel *mdl, const TArray<VSMat
 		e.mat = g_hudAnchorSource;
 		e.mat.multMatrix(bones[j]);
 		e.frame = g_hudAnchorFrame;
+
+		// The bone's own translation is its position in MODEL space, and the
+		// model origin is where the weapon sits, so that translation is already
+		// the offset script wants -- it only needs the scale the model is drawn
+		// at, which is the length of a basis column of the model's transform.
+		//
+		// Taken from the matrix rather than recomputed from the cvars and the
+		// MODELDEF: several things multiply into that scale and reading it back
+		// off the result cannot drift out of step with them.
+		{
+			// THE BIND POSE MATTERS. bones[j] is a SKINNING matrix: it maps
+			// bind-pose space to posed space, so reading its translation column
+			// gives where the MODEL ORIGIN lands, not where the bone is. At
+			// rest every skinning matrix is identity, so every bone reported
+			// the same point -- the model origin -- and a magazine anchored to
+			// the magwell spawned wherever the model origin happened to sit
+			// (on the T77, right at the trigger).
+			//
+			// The bone's real position is that matrix applied to the joint's
+			// BIND position, which is what GetJointPosition returns (an
+			// absolute, parent-accumulated position, see models_iqm.cpp).
+			const FVector3 bindPos = mdl->GetJointPosition(j);
+			const FLOATTYPE bp[4] = { (FLOATTYPE)bindPos.X, (FLOATTYPE)bindPos.Y, (FLOATTYPE)bindPos.Z, (FLOATTYPE)1.0 };
+
+			// Copy: bones is a const reference and multMatrixPoint is non-const.
+			VSMatrix boneMat = bones[j];
+			FLOATTYPE posed[4];
+			boneMat.multMatrixPoint(bp, posed);
+
+			const FLOATTYPE *sm = g_hudAnchorSource.get();
+			const double sc = sqrt(sm[0]*sm[0] + sm[1]*sm[1] + sm[2]*sm[2]);
+			e.offset = DVector3(posed[0] * sc, posed[1] * sc, posed[2] * sc);
+
+			// Straight onto the psprite that asked. Script reads it from there,
+			// so nothing on the game side ever touches this table.
+			q->AnchorBonePos = e.offset;
+			q->AnchorBoneLive = true;
+
+			// The same bone as a world point, in the frame AttackPos and
+			// OffhandPos are taken from. e.mat carries the weapon's full
+			// object-to-world transform combined with the bone, and it is
+			// applied to the joint's BIND position for the reason above -- not
+			// read off the translation column, which would give the model
+			// origin. The Y/Z swap is the usual convention: the matrix is
+			// Y-up, the playsim is Z-up.
+			FLOATTYPE world[4];
+			e.mat.multMatrixPoint(bp, world);
+			q->AnchorBoneWorld = DVector3(world[0], world[2], world[1]);
+
+			// AND THE SAME CORRECTION ON THE MATRIX ITSELF.
+			//
+			// e.mat is what actually PLACES an anchored layer -- HudAnchor_Get
+			// hands it straight to the renderer, which orthonormalises the
+			// basis (stripping scale) and keeps the translation as-is. Its
+			// translation column has the identical skinning-matrix problem
+			// described above: at rest it is the MODEL ORIGIN, the same point
+			// for every bone. So a hand anchored to a pistol's grip bone and a
+			// hand anchored to its slide both landed at the model's origin --
+			// which on the T77 is nowhere near either, and reads in the headset
+			// as hands floating off the gun entirely.
+			//
+			// Fixing e.offset/AnchorBoneWorld earlier only fixed what SCRIPT
+			// reads. This fixes what the RENDERER draws, which is a separate
+			// consumer of the same wrong number -- and it fixes every anchored
+			// hand on every weapon, not just this one, since nothing about it
+			// is T77-specific.
+			//
+			// Rotation is deliberately untouched: only the translation was
+			// ever wrong, and orientation does not depend on which point of
+			// the bone is used.
+			{
+				FLOATTYPE fixed[16];
+				memcpy(fixed, e.mat.get(), sizeof(fixed));
+				fixed[12] = world[0];
+				fixed[13] = world[1];
+				fixed[14] = world[2];
+				e.mat.loadMatrix(fixed);
+			}
+
+			// The same matrix's ROTATION, decomposed to the playsim's
+			// yaw/pitch/roll. Read here rather than in script because the
+			// matrix is right here and ZScript's Quat cannot rotate a vector,
+			// so script has no honest way to derive this itself.
+			//
+			// Basis columns, with the same Y-up -> Z-up swap the translation
+			// above uses: the matrix's X axis is forward, its Z axis is the
+			// playsim's Y, and its Y axis is the playsim's Z. Scale is divided
+			// out first -- the model is drawn scaled and a scaled basis would
+			// give wrong angles.
+			{
+				// The rotation still comes from the matrix's basis columns --
+				// only the TRANSLATION needed the bind-pose correction above,
+				// since orientation does not depend on which point is used.
+				const FLOATTYPE *wm = e.mat.get();
+
+				DVector3 fwd  (wm[0], wm[2], wm[1]);
+				DVector3 side (wm[8], wm[10], wm[9]);
+				DVector3 up   (wm[4], wm[6], wm[5]);
+
+				const double flen = fwd.Length();
+				const double slen = side.Length();
+				const double ulen = up.Length();
+				if (flen > 0) fwd /= flen;
+				if (slen > 0) side /= slen;
+				if (ulen > 0) up /= ulen;
+
+				const double yaw   = atan2(fwd.Y, fwd.X);
+				const double pitch = asin(clamp(-fwd.Z, -1.0, 1.0));
+				const double roll  = atan2(side.Z, up.Z);
+
+				q->AnchorBoneAngles = DVector3(
+					yaw   * (180.0 / M_PI),
+					pitch * (180.0 / M_PI),
+					roll  * (180.0 / M_PI));
+			}
+		}
 		g_hudAnchors.Insert(HudAnchorKey(psp->GetID(), q->AnchorBone), e);
 	}
 }
@@ -417,11 +570,27 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 
 	// MDL_NOAUTOREVERSE: the model supplies its own left and right variants, so
 	// the non-dominant-hand mirror would flip an already-correct mesh.
+	// The HUD-model unit conversion, remembered rather than only applied.
+	//
+	// This 0.01 is not part of positioning the model at the controller -- it is
+	// the conversion from the model's own units into the units the rest of this
+	// function works in, and EVERY hud model needs it, anchored or not. The
+	// anchoring block below replaces the whole matrix (loadMatrix), which
+	// silently discarded it and drew anchored models at 100x size.
+	//
+	// It went unnoticed on weapons because a weapon cancels it: the T77 carries
+	// MODELDEF Scale 100, and 0.01 * 100 = 1. The VR hands carry Scale 1.0, so
+	// they have nothing to cancel with and take the full factor of 100 -- which
+	// is precisely the "absolutely massive" hands, and why only the ANCHORED
+	// ones were affected while a hand holding a magazine (deliberately
+	// unanchored by the hands mod) stayed correct.
+	float hudUnitScale = 1.0f;
 	if (vrmode->GetWeaponTransform(&objectToWorldMatrix, hand, !(smf_flags & MDL_NOAUTOREVERSE)))
 	{
 		float scale = 0.01f;
 		objectToWorldMatrix.scale(scale, scale, scale);
 		objectToWorldMatrix.translate(0, 5, 30);
+		hudUnitScale = scale;
 	}
 	else if (vrmode->IsVR())
 	{
@@ -525,7 +694,59 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 		VSMatrix anchored;
 		if (HudAnchor_Get(psp->AnchorLayer, psp->AnchorBone, anchored))
 		{
-			objectToWorldMatrix = anchored;
+			// Position and orientation only -- NEVER scale.
+			//
+			// A bone matrix carries the entire chain that produced it, and that
+			// chain includes whatever scale the target model was authored at.
+			// Adopting it wholesale multiplies THIS model by the other one's
+			// size, which is never what anchoring means: a magazine placed in a
+			// hand should be magazine-sized, not hand-times-magazine sized.
+			//
+			// It bites hard because the numbers involved are not small. The hand
+			// rig carries a 0.01 at its root joint, so a magazine anchored to a
+			// knuckle came out a hundredth of its size -- far past what any
+			// scale slider could climb back out of, and looking for all the
+			// world like a model exported wrong.
+			//
+			// So the basis is orthonormalised: each of the three axes is scaled
+			// back to unit length, which strips scale while leaving rotation and
+			// translation exactly as they were.
+			FLOATTYPE m[16];
+			memcpy(m, anchored.get(), sizeof(m));
+			for (int c = 0; c < 3; ++c)
+			{
+				FLOATTYPE *col = &m[c * 4];
+				FLOATTYPE len = (FLOATTYPE)sqrt(col[0]*col[0] + col[1]*col[1] + col[2]*col[2]);
+				if (len > (FLOATTYPE)1e-8)
+				{
+					col[0] /= len; col[1] /= len; col[2] /= len;
+				}
+			}
+			objectToWorldMatrix.loadMatrix(m);
+
+			// AND PUT THIS MODEL'S OWN SCALE BACK.
+			//
+			// loadMatrix REPLACES the matrix outright, which throws away the
+			// MODELDEF scale applied further up (the `objectToWorldMatrix.scale`
+			// on smf->xscale/zscale/yscale). Anchoring is only supposed to
+			// discard the target-relative POSITIONING done above it -- not the
+			// model's own size.
+			//
+			// It is not only magnitude. The VR hands are ONE mesh mirrored by a
+			// negative X scale (RS_HandIdleMain carries `Scale -1.0 1.0 1.0`),
+			// so dropping this silently un-mirrors the main hand: an anchored
+			// hand came out the wrong way round as well as the wrong size.
+			//
+			// Deliberately the identical expression used above, not a
+			// recalculation -- the two must not be able to drift apart.
+			objectToWorldMatrix.scale(smf->xscale * pspScale, smf->zscale * pspScale, (smf->yscale / fovscale) * pspScale);
+
+			// ...and the hud-model unit conversion the controller branch
+			// applied, which loadMatrix above also threw away. See the note
+			// where hudUnitScale is set: without this an anchored model is
+			// drawn 100x too large.
+			objectToWorldMatrix.scale(hudUnitScale, hudUnitScale, hudUnitScale);
+
 			isAnchored = true;
 		}
 	}
@@ -540,9 +761,17 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	const float handOfsY = useHandOfs ? (float)(isOffhand ? vr_offhand_ofs_y : vr_hand_ofs_y) : 0.0f;
 	const float handOfsZ = useHandOfs ? (float)(isOffhand ? vr_offhand_ofs_z : vr_hand_ofs_z) : 0.0f;
 
-	objectToWorldMatrix.translate((smf->xoffset + handOfsX + placeOfs[0]) / smf->xscale,
-		(smf->zoffset + handOfsZ + placeOfs[2]) / smf->zscale,
-		(smf->yoffset + handOfsY + placeOfs[1]) / smf->yscale);
+	// Seat offset. Only meaningful for an anchored layer -- for anything else
+	// the bone frame it is expressed in does not exist -- and summed in here
+	// rather than applied separately, for the same non-commuting reason the
+	// rotation block below spells out.
+	const float seatX = isAnchored ? (float)psp->AnchorOfs.X : 0.0f;
+	const float seatY = isAnchored ? (float)psp->AnchorOfs.Y : 0.0f;
+	const float seatZ = isAnchored ? (float)psp->AnchorOfs.Z : 0.0f;
+
+	objectToWorldMatrix.translate((smf->xoffset + handOfsX + placeOfs[0] + seatX) / smf->xscale,
+		(smf->zoffset + handOfsZ + placeOfs[2] + seatZ) / smf->zscale,
+		(smf->yoffset + handOfsY + placeOfs[1] + seatY) / smf->yscale);
 
 	// Everything in this block places the model relative to the PLAYER: the
 	// global weapon offset, the bob, the aim rotation, the viewmodel axis fix.
@@ -574,23 +803,59 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	}
 
 	// Applying angleoffset, pitchoffset, rolloffset.
-	//
-	// The live vr_hand_* rotations are summed into these three calls rather than
-	// applied as three more afterwards. That distinction matters: rotations do
-	// not commute, so a yaw applied after this pitch and roll turns about an
-	// already-rotated axis and is NOT the same as the same number added to
-	// angleoffset. Summing here is what makes the slider and the MODELDEF
-	// keyword interchangeable.
 	const float handYaw   = useHandOfs ? (float)(isOffhand ? vr_offhand_yaw   : vr_hand_yaw)   : 0.0f;
 	const float handPitch = useHandOfs ? (float)(isOffhand ? vr_offhand_pitch : vr_hand_pitch) : 0.0f;
 	const float handRoll  = useHandOfs ? (float)(isOffhand ? vr_offhand_roll  : vr_hand_roll)  : 0.0f;
 
-	// Summed into the same three calls, for the reason above: rotations do not
-	// commute, so a slider value only equals a MODELDEF value if it is added
-	// here rather than applied afterwards.
-	objectToWorldMatrix.rotate(-(smf->angleoffset + handYaw + placeRot[0]), 0, 1, 0);
-	objectToWorldMatrix.rotate(smf->pitchoffset + handPitch + placeRot[1], 0, 0, 1);
-	objectToWorldMatrix.rotate(-(smf->rolloffset + handRoll + placeRot[2]), 1, 0, 0);
+	// Summed into the same three calls: rotations do not commute, so a seat
+	// angle only equals a MODELDEF value if it is added here rather than
+	// applied afterwards. These are solved against a bone's own orientation,
+	// so they belong in the same frame the MODELDEF offsets establish.
+	const float seatYaw   = isAnchored ? (float)psp->AnchorAngles.X : 0.0f;
+	const float seatPitch = isAnchored ? (float)psp->AnchorAngles.Y : 0.0f;
+	const float seatRoll  = isAnchored ? (float)psp->AnchorAngles.Z : 0.0f;
+
+	objectToWorldMatrix.rotate(-(smf->angleoffset + placeRot[0] + seatYaw), 0, 1, 0);
+	objectToWorldMatrix.rotate(smf->pitchoffset + placeRot[1] + seatPitch, 0, 0, 1);
+	objectToWorldMatrix.rotate(-(smf->rolloffset + placeRot[2] + seatRoll), 1, 0, 0);
+
+	// THE HAND SLIDERS ARE APPLIED HERE, IN THE MODEL'S OWN ORIENTED FRAME,
+	// and NOT summed into the three calls above. They used to be summed, on
+	// the reasoning that a slider value should mean the same thing as the
+	// MODELDEF keyword of the same name. That equivalence is real, but it is
+	// what broke the sliders outright on any model carrying a 90 degree
+	// PitchOffset -- which the VR hands do.
+	//
+	// These rotations are intrinsic: each turns about the axis the previous
+	// ones left behind. Summing put the model's baked pitch BETWEEN the yaw
+	// and the roll, and a 90 degree turn about Z maps the X axis onto Y -- so
+	// by the time roll was applied, its axis had been rotated onto the exact
+	// axis yaw had already used. Two sliders, one axis: moving either one
+	// rolled the hand, and nothing at all turned it. Textbook gimbal lock,
+	// and not a fault in either slider.
+	//
+	// Applied after the model is oriented, the three are orthogonal again in
+	// the frame the player actually sees: roll turns the hand about its own
+	// long axis -- a cylinder roll, which is what the word means -- and yaw
+	// turns it about an axis genuinely across that, because the baked pitch is
+	// now behind all three rather than in the middle of them.
+	//
+	// THE EQUIVALENCE IS NOT LOST, it moved. HandAngleOffset/HandPitchOffset/
+	// HandRollOffset are summed in right here, in this frame and this order,
+	// so a value dialled in on a slider can be written into the matching
+	// MODELDEF keyword and mean EXACTLY the same thing. That is what makes a
+	// tuning pass permanent instead of something every user has to redo --
+	// dial it in live, then bake it, and the slider goes back to zero having
+	// changed nothing.
+	//
+	// What is NOT interchangeable is these three against angleoffset/
+	// pitchoffset/rolloffset, and that is the entire reason they are separate
+	// keywords rather than more of the same: those orient the model, these
+	// orient the hand holding it, and folding one into the other is what put
+	// a baked 90 degree pitch between the yaw and the roll in the first place.
+	objectToWorldMatrix.rotate(-(smf->handangleoffset + handYaw), 0, 1, 0);
+	objectToWorldMatrix.rotate(smf->handpitchoffset + handPitch, 0, 0, 1);
+	objectToWorldMatrix.rotate(-(smf->handrolloffset + handRoll), 1, 0, 0);
 
 	//Scale weapon
 	// placeScale is the mod's own live slider, multiplied onto the global one so
@@ -617,10 +882,23 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 
 	if (vr_spatialreport && psp)
 	{
-		static uint64_t lastReport = 0;
-		if (screen && (screen->FrameTime - lastReport) > 1000)
+		// PER LAYER, not one shared timer.
+		//
+		// This used to be a single `static uint64_t lastReport`, which made the
+		// report structurally unable to say anything about most of the scene:
+		// psprites are drawn in ascending layer order, so the WEAPON (layer 1)
+		// consumed the once-a-second slot every time and no other layer was
+		// ever printed. Hands (900000/1900000) never appeared at all, and their
+		// absence read as "not being drawn" when it only meant "never got the
+		// slot" -- the exact wrong conclusion to hand someone debugging a
+		// missing model.
+		static TMap<int, uint64_t> lastReportByLayer;
+		const int reportLayer = psp->GetID();
+		uint64_t *slot = lastReportByLayer.CheckKey(reportLayer);
+		const uint64_t last = slot ? *slot : 0;
+		if (screen && (screen->FrameTime - last) > 1000)
 		{
-			lastReport = screen->FrameTime;
+			lastReportByLayer.Insert(reportLayer, screen->FrameTime);
 			const FLOATTYPE *m = objectToWorldMatrix.get();
 			float sx = (float)sqrt(m[0]*m[0] + m[1]*m[1] + m[2]*m[2]);
 			Printf("[SPATIAL] layer %-8d %-22s pos(%.1f %.1f %.1f) scale %.3f frame %d %s\n",
@@ -1454,6 +1732,26 @@ void ParseModelDefLump(int Lump)
 				{
 					sc.MustGetFloat();
 					smf.rolloffset = sc.Float;
+				}
+				// RS FORK -- the bakeable twin of the vr_hand_* sliders. Same
+				// frame, same order, same sign, so a tuned slider value can be
+				// written here verbatim and mean exactly what it did live.
+				// See FSpriteModelFrame in model.h for why these cannot simply
+				// be folded into angleoffset/pitchoffset/rolloffset.
+				else if (sc.Compare("handangleoffset"))
+				{
+					sc.MustGetFloat();
+					smf.handangleoffset = sc.Float;
+				}
+				else if (sc.Compare("handpitchoffset"))
+				{
+					sc.MustGetFloat();
+					smf.handpitchoffset = sc.Float;
+				}
+				else if (sc.Compare("handrolloffset"))
+				{
+					sc.MustGetFloat();
+					smf.handrolloffset = sc.Float;
 				}
 				// [BB] Added model flags reading.
 				else if (sc.Compare("ignoretranslation"))

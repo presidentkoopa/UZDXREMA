@@ -938,7 +938,21 @@ CVAR(Float, vr_hitscan_ricochet_chance, 20.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_snapTurn, 45.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_switch_sticks, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_secondary_button_mappings, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-CVAR(Bool, vr_two_handed_weapons, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// Two-hand stabilize: the weapon is REPOSITIONED to point along the line
+// between the two controllers.
+//
+// Off, and it should stay off. It conflated two jobs that turned out to be
+// separable, and only one of them was ever wanted. Steadying the aim is worth
+// having; moving the gun is not, because nothing grabbed it -- the weapon
+// snapped because two controllers came within a fixed distance of each other,
+// whether or not the off hand had anything to do with the weapon at all.
+//
+// What replaces it is a real grab: a second hand on the pistol grip or on the
+// shotgun's forend, published as AActor::TwoHandedHold, which weapons read to
+// tighten their spread. The gun stays exactly where your hands are holding it,
+// and being two-handed makes you shoot straighter rather than making the gun
+// move by itself.
+CVAR(Bool, vr_two_handed_weapons, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // Fallback two-hand stabilize reach in real-world inches, used by any weapon
 // that does not set Weapon.StabilizeDistance (0, the ZScript default).
 CVAR(Float, vr_stabilize_distance_inches, 8.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)

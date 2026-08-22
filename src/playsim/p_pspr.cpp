@@ -108,24 +108,30 @@ static const FGenericButtons ButtonChecks[] =
 	{ 0, WRF_AllowUser2,	WF_USER2OK,			BT_USER2,	NAME_User2 },
 	{ 0, WRF_AllowUser3,	WF_USER3OK,			BT_USER3,	NAME_User3 },
 	{ 0, WRF_AllowUser4,	WF_USER4OK,			BT_USER4,	NAME_User4 },
-	// RS FORK -- the per-hand reload keys no longer trigger a weapon's Reload
-	// state.
+	// RS FORK -- BT_MAINHANDDROPMAG / BT_OFFHANDDROPMAG are deliberately absent
+	// from this table, and must stay absent.
 	//
-	// They are the PHYSICAL reload now: mainhand/offhand reload drops that
-	// hand's magazine, or racks a pump. Leaving them wired to the Reload state
-	// as well meant one press both ejected the magazine and instantly refilled
-	// it, which cancels out and looks like nothing happening.
+	// They do not reload. They release that hand's magazine, and the magazine
+	// then becomes a real object: it can be caught, it can be carried back to
+	// the ammo pouch, it can be left on the floor and walked over, and it keeps
+	// whatever rounds were still in it. Refilling the weapon is a separate
+	// physical act -- fetch a magazine and seat it -- with no button of its own.
 	//
-	// The generic BT_RELOAD rows above and below are untouched, so the plain
-	// reload key still does the classic instant reload for either hand.
-	//{ 0, WRF_AllowReload,	WF_WEAPONRELOADOK,	BT_MAINHANDRELOAD,	NAME_Reload },
+	// Routing either bit to NAME_Reload makes one press eject the magazine and
+	// instantly refill it, which cancels out and reads on screen as the button
+	// doing nothing at all. The rows are left here, commented, so that intent is
+	// visible at the place someone would otherwise add them.
+	//
+	// The generic BT_RELOAD rows above and below are untouched: the plain reload
+	// key still does the classic instant reload, which is the flatscreen path.
+	//{ 0, WRF_AllowReload,	WF_WEAPONRELOADOK,	BT_MAINHANDDROPMAG,	NAME_Reload },
 	{ 1, WRF_AllowZoom,		WF_OFFHANDZOOMOK,	BT_ZOOM,	NAME_Zoom },
 	{ 1, WRF_AllowReload,	WF_OFFHANDRELOADOK,	BT_RELOAD,	NAME_Reload },
 	{ 1, WRF_AllowUser1,	WF_OFFHANDUSER1OK,	BT_USER1,	NAME_User1 },
 	{ 1, WRF_AllowUser2,	WF_OFFHANDUSER2OK,	BT_USER2,	NAME_User2 },
 	{ 1, WRF_AllowUser3,	WF_OFFHANDUSER3OK,	BT_USER3,	NAME_User3 },
 	{ 1, WRF_AllowUser4,	WF_OFFHANDUSER4OK,	BT_USER4,	NAME_User4 },
-	//{ 1, WRF_AllowReload,	WF_OFFHANDRELOADOK,	BT_OFFHANDRELOAD,	NAME_Reload },   // RS FORK -- see above
+	//{ 1, WRF_AllowReload,	WF_OFFHANDRELOADOK,	BT_OFFHANDDROPMAG,	NAME_Reload },   // RS FORK -- see above
 };
 
 // CODE --------------------------------------------------------------------
@@ -157,6 +163,22 @@ DEFINE_FIELD(DPSprite, Glow)             // RS fork
 DEFINE_FIELD(DPSprite, NoDraw)           // RS fork
 DEFINE_FIELD(DPSprite, AnchorLayer)      // RS fork
 DEFINE_FIELD(DPSprite, AnchorBone)       // RS fork
+// Where a drawn weapon's bone actually is, as an offset from the weapon's own
+// origin in the model's axes, in map units. See HudAnchor_GetOffset.
+//
+// This is what a grab point should be measured against. Every one of them was a
+// guessed distance before -- "the pump is about sixteen units forward" -- which
+// is wrong as soon as a weapon is rescaled, and wrong in the worst way: the
+// grab silently never fires, and a shotgun that will not shoot until it is
+// pumped becomes a shotgun that will not shoot.
+DEFINE_FIELD(DPSprite, AnchorBonePos)    // RS fork
+DEFINE_FIELD(DPSprite, AnchorBoneLive)   // RS fork
+// The same bone in world coordinates, comparable directly against AttackPos and
+// OffhandPos. See the field comment in p_pspr.h.
+DEFINE_FIELD(DPSprite, AnchorBoneWorld)  // RS fork
+DEFINE_FIELD(DPSprite, AnchorBoneAngles) // RS fork
+DEFINE_FIELD(DPSprite, AnchorOfs)        // RS fork
+DEFINE_FIELD(DPSprite, AnchorAngles)     // RS fork
 DEFINE_FIELD(DPSprite, ModelFrame)       // RS fork
 DEFINE_FIELD(DPSprite, ModelFrameNext)   // RS fork
 DEFINE_FIELD(DPSprite, ModelFrameLerp)   // RS fork

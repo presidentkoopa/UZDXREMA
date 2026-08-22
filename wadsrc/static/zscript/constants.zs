@@ -878,7 +878,7 @@ enum EButtons
 	BT_LOOKDOWN		= 1<<17,
 	BT_MOVEUP		= 1<<18,
 	BT_MOVEDOWN		= 1<<19,
-	BT_SHOWSCORES	= 0,  // replaced with BT_MAINHANDRELOAD
+	BT_SHOWSCORES	= 0,  // bit 20 handed to BT_MAINHANDDROPMAG; nothing ever read this one
 
 	BT_USER1		= 1<<21,
 	BT_USER2		= 1<<22,
@@ -889,8 +889,8 @@ enum EButtons
 
 	BT_OFFHANDATTACK    = 1<<26,
 	BT_OFFHANDALTATTACK = 1<<27,
-	BT_OFFHANDRELOAD    = 1<<28,
-	BT_MAINHANDRELOAD   = 1<<20,
+	BT_OFFHANDDROPMAG   = 1<<28,
+	BT_MAINHANDDROPMAG  = 1<<20,
 };
 
 // Flags for GetAngle
@@ -1637,7 +1637,16 @@ enum EGripSubject
 	GRIPSUBJ_Foregrip,   // vertical foregrip, as on an SMG
 	GRIPSUBJ_Slide,      // slide or charging handle -- pinched from the sides
 	GRIPSUBJ_Support,    // supporting the OTHER hand's weapon, wrapped round its fist
-	GRIPSUBJ_Holster,    // inside a holster volume: reaching, not yet holding
+	GRIPSUBJ_Holster,    // inside a WEAPON holster volume: reaching, not yet holding
+	// Inside the AMMUNITION pouch on the chest. Separate from Holster because a
+	// hand in a holster is fetching a gun and a hand in the pouch is fetching a
+	// magazine, and whatever reads this has to decide which to hand over.
+	//
+	// The engine writes GRIPSUBJ_Holster on its own from HolsterClaimMain/Off,
+	// so sharing the value would make the two indistinguishable in play.
+	//
+	// Appended before MAX, so existing values keep their numbers.
+	GRIPSUBJ_Pouch,
 	GRIPSUBJ_MAX
 }
 

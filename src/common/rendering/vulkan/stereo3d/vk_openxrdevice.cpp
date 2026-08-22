@@ -3407,18 +3407,23 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		const float stabilizeRangeMeters = (reachInches > 0.0) ? (float)(reachInches * 0.0254) : -1.0f;
 
 		// Proximity stabilize: the off hand within reach of the main hand is
-		// assumed to be supporting the weapon. It is a guess, and it was the
-		// only option while hands were invisible -- there was nothing in the
-		// world to grab.
+		// ASSUMED to be supporting the weapon, and the weapon is repositioned
+		// to suit.
 		//
-		// vr_stabilize_requires_grab turns the guess off and leaves only the
-		// claim, so the weapon goes two-handed when you actually take hold of
-		// its forend and not merely when your hands are close. Off by default:
-		// a weapon that claims nothing would otherwise lose two-handed aim
-		// entirely, and most weapons claim nothing.
-		const bool stabilizeGeometryOk = vr_two_handed_weapons
-			&& !vr_stabilize_requires_grab
-			&& stabilizeRangeMeters >= 0.0f && distance < stabilizeRangeMeters;
+		// Retired. It was the only option while hands were invisible -- there
+		// was nothing in the world to grab, so nearness was the only signal
+		// available -- and it is a guess that cannot tell a hand supporting the
+		// weapon from a hand that drifted close. Reloading brings the hands
+		// together, so it fired constantly during exactly the gesture that
+		// least wanted it.
+		//
+		// It now requires a claim without exception: the off hand must actually
+		// be on the grip or the forend. vr_two_handed_weapons additionally
+		// defaults off, so even a claimed hold does not move the weapon unless
+		// the repositioning is explicitly asked for.
+		const bool stabilizeGeometryOk = false;
+		(void)stabilizeRangeMeters;
+		(void)vr_stabilize_requires_grab;
 
 		for (int h = 0; h < 2; ++h)
 		{
@@ -3555,9 +3560,24 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			// this in means every weapon in every mod gets a support hand
 			// without cooperating, and a weapon that knows better -- a shotgun
 			// with a pump to grab -- overrides it by claiming.
-			xrGripSubject[h] = (claimed > 0) ? claimed
-				: (holsterHere ? GRIPSUBJ_Holster
-				: (ctx == GRIPCTX_Stabilize ? GRIPSUBJ_Support : GRIPSUBJ_None));
+			// SUPPORT: the off hand is on the weapon but not on a named part.
+			//
+			// This used to be derived from ctx == GRIPCTX_Stabilize, which made
+			// it unreachable. Stabilize only wins when Forend or Foregrip has
+			// been claimed -- and if one of those IS claimed, that is the
+			// subject you get instead. So the two-handed pistol hold could
+			// never happen: a dead branch, and a pose baked for nothing.
+			//
+			// It is simply what an unclaimed off-hand grip MEANS while the
+			// other hand holds a weapon. Nothing else asked for that grip, so
+			// supporting the gun is the answer.
+			const bool holdingWeapon = consolePawn && consolePawn->player
+				&& consolePawn->player->ReadyWeapon != nullptr;
+			int subj = GRIPSUBJ_None;
+			if (claimed > 0)                            subj = claimed;
+			else if (holsterHere)                       subj = GRIPSUBJ_Holster;
+			else if (!isMain && held && holdingWeapon)  subj = GRIPSUBJ_Support;
+			xrGripSubject[h] = subj;
 		}
 
 		// Publish to ZScript so a mod can see what grip is doing rather than
@@ -3573,7 +3593,20 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			consolePawn->VRTurnYaw = snapTurn;
 		}
 
-		weaponStabilised = (xrGripContext[offHand] == GRIPCTX_Stabilize);
+		// A real two-handed hold: the off hand is ON the weapon, at the grip or
+		// the forend, because script said so. This is the thing worth knowing,
+		// and it is published rather than acted on -- weapons read it to
+		// tighten their spread, which is the benefit a second hand should
+		// actually buy.
+		const int offSubject = xrGripSubject[offHand];
+		const bool twoHanded = (offSubject == GRIPSUBJ_Support
+			|| offSubject == GRIPSUBJ_Forend || offSubject == GRIPSUBJ_Foregrip);
+		if (consolePawn)
+			consolePawn->TwoHandedHold = twoHanded;
+
+		// Moving the weapon is a separate, opt-in thing. Defaults off: your
+		// hands hold the gun where you are holding it.
+		weaponStabilised = twoHanded && vr_two_handed_weapons;
 
 		if (weaponStabilised)
 		{

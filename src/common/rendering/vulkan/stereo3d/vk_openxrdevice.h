@@ -112,7 +112,19 @@ enum EGripSubject
 	GRIPSUBJ_Foregrip,   // vertical foregrip, as on an SMG
 	GRIPSUBJ_Slide,      // slide or charging handle -- pinched from the sides
 	GRIPSUBJ_Support,    // supporting the OTHER hand's weapon, wrapped round its fist
-	GRIPSUBJ_Holster,    // inside a holster volume: reaching, not yet holding
+	GRIPSUBJ_Holster,    // inside a WEAPON holster volume: reaching, not yet holding
+	// Inside the AMMUNITION pouch on the chest, which is a different place with
+	// a different answer: a hand in a holster is fetching a gun, a hand in the
+	// pouch is fetching a magazine. They cannot share a value, because the mod
+	// reading this has to decide which of those two things to hand over.
+	//
+	// The engine itself writes GRIPSUBJ_Holster (see the arbitration below,
+	// driven by HolsterClaimMain/Off), so the two would otherwise be
+	// indistinguishable the moment both volumes exist.
+	//
+	// Appended before MAX rather than inserted, so every existing value keeps
+	// its number and nothing already compiled against them shifts.
+	GRIPSUBJ_Pouch,
 	GRIPSUBJ_MAX
 };
 

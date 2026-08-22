@@ -442,6 +442,12 @@ class Actor : Thinker native
 	native readonly int GripSubjectMain;
 	native readonly int GripSubjectOff;
 
+	// True while the off hand is actually ON the main hand's weapon -- its grip,
+	// forend or foregrip -- rather than merely near it. Read it to tighten a
+	// weapon's spread: that is what a second hand buys. It does not move the
+	// weapon, deliberately.
+	native readonly bool TwoHandedHold;
+
 	// Accumulated CONTROLLER-driven yaw (snap + stick turn), degrees. HmdYaw is
 	// physical head yaw PLUS this. Body-relative anchors must follow this part
 	// 1:1 -- it rotates the whole virtual body -- while only the physical
@@ -1514,6 +1520,17 @@ class Actor : Thinker native
 	deprecated("2.3", "User variables are deprecated in ZScript. Actor variables are directly accessible") native void A_SetUserArray(name varname, int index, int value);
 	deprecated("2.3", "User variables are deprecated in ZScript. Actor variables are directly accessible") native void A_SetUserVarFloat(name varname, double value);
 	deprecated("2.3", "User variables are deprecated in ZScript. Actor variables are directly accessible") native void A_SetUserArrayFloat(name varname, int index, double value);
+
+	// NOT deprecated, unlike its siblings above: those exist for old DECORATE
+	// code that predates being able to just cast to a known type and touch a
+	// field directly. This one solves a problem casting cannot: writing a
+	// Name-typed field on an actor whose CLASS is defined in a pk3 that is
+	// loaded (and therefore compiled) after the caller's own pk3, which is a
+	// direct cast can never resolve -- the class is not a known type yet at
+	// the point the caller's file is compiled, whatever order the two pk3s end
+	// up in relative to each other at runtime. Two independently-loaded mods
+	// naming a field to each other by string is the intended use.
+	native void A_SetUserVarName(name varname, name value);
 	native void A_Quake(double intensity, int duration, double damrad, double tremrad, sound sfx = "world/quake");
 	native void A_QuakeEx(double intensityX, double intensityY, double intensityZ, int duration, double damrad, double tremrad, sound sfx = "world/quake", int flags = 0, double mulWaveX = 1, double mulWaveY = 1, double mulWaveZ = 1, double falloff = 0, int highpoint = 0, double rollIntensity = 0, double rollWave = 0, double damageMultiplier = 1, double thrustMultiplier = 0.5, int damage = 0);
 	action native void A_SetTics(int tics);

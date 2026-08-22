@@ -1809,6 +1809,17 @@ public:
 	int GripSubjectMain;
 	int GripSubjectOff;
 
+	// The off hand is genuinely ON the main hand's weapon -- its grip, its
+	// forend, its foregrip -- as opposed to merely near it. Engine-owned,
+	// derived from the subject above.
+	//
+	// This is what a second hand should buy: weapons read it and tighten their
+	// spread. It deliberately does NOT move the weapon. The old stabilize did,
+	// and that was the half of it worth removing -- a gun that repositions
+	// itself because two controllers came close is a gun that is not where your
+	// hands are.
+	bool TwoHandedHold;
+
 	// Capacitive finger contact, FINGERTOUCH_* bits. Contact is not a press:
 	// this says where a finger RESTS, which is what a hand pose needs.
 	int FingerTouchMain;

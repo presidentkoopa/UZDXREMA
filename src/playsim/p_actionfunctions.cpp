@@ -3100,6 +3100,36 @@ DEFINE_ACTION_FUNCTION(AActor, A_SetUserVarFloat)
 	return 0;
 }
 
+// A_SetUserVarName
+//
+// Same shape as A_SetUserVar, for a Name-typed field. Exists so two mods that
+// are separate pk3s can hand a class name to each other by STRING without
+// either one needing a compile-time reference to the other's class -- which a
+// direct cast (`SomeClass(actor)`) requires, and which breaks the moment the
+// two pk3s load in an order where the referencing file compiles before the
+// referenced class has been parsed. RS_DroppedAmmo's own `Name ammoClass`
+// field exists specifically to avoid depending on any weapon mod; this is the
+// matching piece that lets a WEAPON mod fill that field in without depending
+// on RS_DroppedAmmo either.
+//
+// PName is a PInt (see types.h) storing an FName's raw index, so writing
+// through the existing int-typed SetValue is exactly correct -- no new
+// storage path, just the missing way to reach it from script with a Name
+// value instead of a bare int.
+DEFINE_ACTION_FUNCTION(AActor, A_SetUserVarName)
+{
+	PARAM_SELF_PROLOGUE(DObject);
+	PARAM_NAME	(varname);
+	PARAM_NAME	(value);
+
+	PField *var = GetVar(self, varname);
+	if (var != nullptr)
+	{
+		var->Type->SetValue(reinterpret_cast<uint8_t *>(self) + var->Offset, value.GetIndex());
+	}
+	return 0;
+}
+
 //===========================================================================
 //
 // A_SetUserArray

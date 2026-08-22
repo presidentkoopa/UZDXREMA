@@ -3111,6 +3111,57 @@ class PSprite : Object native play
 	// target's bones are not known until it has been drawn.
 	native int AnchorLayer;
 	native Name AnchorBone;
+
+	// Where on that bone to sit, and facing which way -- in the BONE's frame,
+	// so "an inch along the grip" stays an inch along the grip whichever way
+	// the weapon is pointing. Ignored unless the layer is actually anchored.
+	// AnchorAngles is (yaw, pitch, roll).
+	native Vector3 AnchorOfs;
+	native Vector3 AnchorAngles;
+
+	// Where a bone of a DRAWN weapon actually is, as an offset from that
+	// weapon's origin, in the model's own axes (+X along the barrel, +Z up) and
+	// in map units. Zero when that bone was not drawn this frame.
+	//
+	// Turn it into a world position by rotating it with the hand that holds the
+	// weapon: pos = AttackPos + fwd*x + right*y + up*z. That is what a grab
+	// point should be tested against, instead of a distance somebody guessed --
+	// a guess is wrong the moment the weapon is rescaled, and it fails silently.
+	//
+	// A bone is only published if something asked for it, so anchor a layer to
+	// it (or to any bone on that model) first.
+	// Where THIS layer's anchored bone resolved to: an offset from that weapon's
+	// origin, in the model's own axes (+X along the barrel, +Z up) and in map
+	// units. AnchorBoneLive is false until the renderer has answered.
+	//
+	// Turn it into a world position by rotating with the hand holding the
+	// weapon: pos = AttackPos + fwd*x + right*y + up*z.
+	//
+	// Read from the psprite, NOT from a shared lookup. The renderer writes this
+	// field on the layer that made the request; a script reaching into the
+	// renderer's own table instead is a cross-thread read while that table is
+	// being written, and it crashes with no message at the exact moment a hand
+	// reaches for the part.
+	native readonly Vector3 AnchorBonePos;
+	native readonly bool AnchorBoneLive;
+
+	// The same bone as a WORLD position, in the frame AttackPos and OffhandPos
+	// use. A grab test is then just:
+	//
+	//   if (psp.AnchorBoneLive &&
+	//       (psp.AnchorBoneWorld - player.mo.OffhandPos).Length() < grabRadius)
+	//
+	// with no basis to rebuild and nothing to rotate by hand. Zero, and
+	// AnchorBoneLive false, when the bone was not drawn this frame.
+	native readonly Vector3 AnchorBoneWorld;
+
+	// The same bone's orientation as (yaw, pitch, roll) in degrees, in the
+	// playsim's own convention -- so an actor spawned to replace a bone-driven
+	// part can be given the exact angle that part was drawn at, at any weapon
+	// tilt. Script cannot derive this itself: Quat exposes no vector-rotate,
+	// and rebuilding the weapon's basis by hand is the same trap
+	// AnchorBoneWorld exists to avoid.
+	native readonly Vector3 AnchorBoneAngles;
 	//native readonly int RenderStyle;	had to be blocked because the internal representation was not ok. Renderstyle is still pending a proper solution.
 	native readonly int ID;
 	native Bool processPending;

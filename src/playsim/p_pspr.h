@@ -305,6 +305,59 @@ public:
 	int   AnchorLayer    = -1;
 	FName AnchorBone     = NAME_None;
 
+	// WHERE on that bone to sit, and facing which way. Without these, anchoring
+	// puts a hand at the bone's origin in the bone's orientation, which is
+	// wherever the artist happened to place the tag -- so the gun ends up
+	// jammed through the palm rather than sitting in it.
+	//
+	// Summed into the same MODELDEF offset and rotation calls that the
+	// placement sliders use, deliberately rather than applied as extra
+	// transforms afterwards: rotations do not commute, so a number here only
+	// means the same thing as the equivalent MODELDEF value if it is added at
+	// the same point in the chain.
+	//
+	// Per LAYER rather than per model, because the same hand mesh sits on a
+	// pistol grip, a shotgun forend and a charging handle, and those are three
+	// different fits of one model.
+	DVector3 AnchorOfs    = { 0, 0, 0 };
+	DVector3 AnchorAngles = { 0, 0, 0 };   // yaw, pitch, roll
+
+	// Where the anchored bone actually resolved to, as an offset from its
+	// weapon's origin in the model's axes, in map units. Written by the
+	// renderer into THIS psprite, read by script from THIS psprite.
+	//
+	// It lands here rather than being looked up from a shared map because
+	// script asking the renderer's table directly is a cross-thread read of a
+	// TMap while the renderer is writing it -- which crashes, with no message,
+	// exactly when a hand reaches for the part. The psprite is already owned by
+	// the game side and already the thing that made the request.
+	DVector3 AnchorBonePos = { 0, 0, 0 };
+	bool     AnchorBoneLive = false;
+
+	// The same bone as a WORLD position, in the frame AttackPos and OffhandPos
+	// live in, so a grab test is a plain distance between two world points.
+	//
+	// AnchorBonePos alone cannot do that job: it is expressed in the weapon
+	// model's own axes, so comparing it to a hand position means rebuilding the
+	// weapon's basis in script and rotating it by hand -- which is easy to get
+	// subtly wrong, and a subtly wrong grab point presents as a grab that never
+	// fires rather than as a grab in the wrong place. The renderer already holds
+	// the matrix that answers this exactly, so it answers it here.
+	DVector3 AnchorBoneWorld = { 0, 0, 0 };
+
+	// The same bone's ORIENTATION, as yaw/pitch/roll in the playsim's own
+	// convention, so an actor spawned to replace a bone-driven part can be
+	// given the exact rotation that part was drawn at.
+	//
+	// Position alone is not enough for that: a magazine leaving a weapon has
+	// to continue from the angle it was actually at, and reconstructing that
+	// in script means rebuilding the weapon's basis by hand -- the same trap
+	// AnchorBoneWorld exists to avoid, and one with no good outcome, since
+	// ZScript's Quat exposes no vector-rotate to do it with. The renderer
+	// already holds the full matrix; it costs nothing to read the rotation
+	// out of it at the same moment it reads the translation.
+	DVector3 AnchorBoneAngles = { 0, 0, 0 };   // (yaw, pitch, roll), degrees
+
 private:
 	DPSprite () {}
 

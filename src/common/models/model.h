@@ -86,6 +86,24 @@ public:
 	FName placementCVars = NAME_None;
 	// added pithoffset, rolloffset.
 	float pitchoffset, rolloffset; // I don't want to bother with type transformations, so I made this variables float.
+
+	// RS FORK -- HAND-FRAME ORIENTATION, the bakeable twin of vr_hand_*.
+	//
+	// angleoffset/pitchoffset/rolloffset above are applied as one intrinsic
+	// triple that orients the model itself. These three are applied AFTER
+	// that, in the frame the oriented model leaves behind, and are summed
+	// with the live vr_hand_yaw/_pitch/_roll sliders -- the same position,
+	// the same order, the same sign.
+	//
+	// That is the whole point of them existing separately. A value dialled in
+	// on a slider can be written into the matching keyword here and mean
+	// EXACTLY the same thing, which is what makes a tuning pass permanent.
+	// Summing the sliders into pitchoffset instead cannot do that: a model
+	// carrying a 90 degree pitchoffset puts that rotation between the yaw and
+	// the roll, and a 90 degree turn about Z lands the roll axis on top of the
+	// yaw axis -- so both sliders drive one rotation and neither drives the
+	// other. Applied here, past the baked pitch, the three stay orthogonal.
+	float handangleoffset = 0.f, handpitchoffset = 0.f, handrolloffset = 0.f;
 	bool isVoxel;
 	unsigned int getFlags(class DActorModelData * defs) const;
 
