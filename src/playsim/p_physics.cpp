@@ -276,6 +276,19 @@ struct PhysBody
 	// just a matter of handing it a velocity and letting go.
 	bool kinematic = false;
 
+	// Which hand is holding it, and where it sits in that hand -- the offset
+	// captured at the moment it was grabbed, so an object keeps the pose it had
+	// rather than snapping to the hand's own.
+	//
+	// Driven from the ENGINE at physics rate rather than from script at tic
+	// rate. That is not a detail: the playsim runs at 35Hz, so a held object
+	// positioned from script updates a third as often as everything around it,
+	// and lags the hand by up to 28ms. Latency on the object in front of your
+	// face is the one thing this whole design exists to get right.
+	int   heldByHand = -1;
+	FVector3 grabPosOffset = FVector3(0, 0, 0);
+	Quat     grabRotOffset = Quat::Identity();
+
 	float sleepTimer = 0.f;
 	float traceTimer = 0.f;
 
@@ -744,7 +757,11 @@ void StepBody(PhysBody &b, float dt)
 	// dropped and 45 still awake -- which reads as endless low-energy wobbling
 	// and slow drift rather than as the sleep bug it actually is.
 	if (anyContact) b.supportTimer = kSupportGrace;
-	else if (b.supportTimer > 0.f) b.supportTimer -= dt;
+	else if (b.supportTimer > 0.f)
+	{
+		b.supportTimer -= dt;
+		if (b.supportTimer < 0.f) b.supportTimer = 0.f;
+	}
 
 	// Smoothed VELOCITY VECTORS, not smoothed speeds, and that distinction is
 	// the whole fix.
@@ -910,6 +927,10 @@ void SolvePair(PhysBody &A, PhysBody &B, float dt)
 {
 	if (A.invMass <= 0.f && B.invMass <= 0.f) return;      // nothing to move
 	if (A.kinematic && B.kinematic) return;
+
+	// Hands only PUSH things when they are set solid. They still exist and can
+	// still hold things when they are not.
+	if ((A.handIndex >= 0 || B.handIndex >= 0) && !*vr_physics_hands) return;
 
 	// Broadphase: bounding spheres.
 	const float rA = A.half.Length();
@@ -1093,7 +1114,12 @@ void UpdateHands(float dt)
 	player_t *pl = &players[consoleplayer];
 	AActor *pawn = pl->mo;
 
-	const bool wantHands = (pawn != nullptr) && *vr_physics_hands;
+	// The hand bodies exist whenever there is a player, REGARDLESS of whether
+	// hands are set solid. Solidity is about whether they shove objects around;
+	// grabbing needs a hand to attach things to either way, and tying both to
+	// one switch meant turning off "hands are solid" silently stopped you
+	// picking anything up. Two unrelated behaviours, one switch, no clue why.
+	const bool wantHands = (pawn != nullptr);
 
 	for (int hand = 0; hand < 2; hand++)
 	{
@@ -1190,6 +1216,50 @@ void UpdateHands(float dt)
 		b->pos = newPos;
 		b->rot = newRot;
 		b->asleep = false;
+	}
+
+	// Carry whatever the hands are holding, at physics rate.
+	for (unsigned i = 0; i < g_bodies.Size(); i++)
+	{
+		PhysBody &h = g_bodies[i];
+		if (h.heldByHand < 0) continue;
+
+		const PhysBody *hand = nullptr;
+		for (unsigned k = 0; k < g_bodies.Size(); k++)
+			if (g_bodies[k].handIndex == h.heldByHand) { hand = &g_bodies[k]; break; }
+
+		if (hand == nullptr)
+		{
+			// The hand went away underneath it -- drop it rather than leave it
+			// frozen in mid-air forever.
+			h.heldByHand = -1;
+			h.kinematic = false;
+			continue;
+		}
+
+		// Rebuild the pose it had relative to the hand when it was grabbed.
+		Quat q;
+		q.w = hand->rot.w*h.grabRotOffset.w - hand->rot.x*h.grabRotOffset.x
+		    - hand->rot.y*h.grabRotOffset.y - hand->rot.z*h.grabRotOffset.z;
+		q.x = hand->rot.w*h.grabRotOffset.x + hand->rot.x*h.grabRotOffset.w
+		    + hand->rot.y*h.grabRotOffset.z - hand->rot.z*h.grabRotOffset.y;
+		q.y = hand->rot.w*h.grabRotOffset.y - hand->rot.x*h.grabRotOffset.z
+		    + hand->rot.y*h.grabRotOffset.w + hand->rot.z*h.grabRotOffset.x;
+		q.z = hand->rot.w*h.grabRotOffset.z + hand->rot.x*h.grabRotOffset.y
+		    - hand->rot.y*h.grabRotOffset.x + hand->rot.z*h.grabRotOffset.w;
+		q.Normalize();
+
+		h.rot = q;
+		h.pos = hand->pos + hand->rot.Rotate(h.grabPosOffset);
+
+		// Inherit the hand's motion continuously, so letting go needs no
+		// separate "how fast was I moving" calculation -- the object already
+		// knows. Angular too, or a spun object would stop dead on release.
+		h.vel = hand->vel + Cross(hand->angVel, h.pos - hand->pos);
+		h.angVel = hand->angVel;
+
+		h.asleep = false;
+		h.sleepTimer = 0.f;
 	}
 }
 
@@ -1675,6 +1745,130 @@ DEFINE_ACTION_FUNCTION_NATIVE(AActor, PhysicsSetTransform, PhysicsSetTransform)
 	PARAM_FLOAT(yaw); PARAM_FLOAT(pitch); PARAM_FLOAT(roll);
 	PhysicsSetTransform(self, x, y, z, yaw, pitch, roll);
 	return 0;
+}
+
+// Take hold of this body with a hand (0 = main, 1 = off).
+//
+// The pose it currently has RELATIVE TO THE HAND is captured and maintained, so
+// picking something up does not snap it into a canonical grip -- you hold it
+// however you happened to grab it, which is what makes reaching for a specific
+// end of a thing meaningful.
+static void PhysicsGrab(AActor *self, int hand)
+{
+	if (self == nullptr) return;
+	if (hand < 0 || hand > 1) return;
+
+	PhysBody *b = FindBody(self);
+	if (b == nullptr) return;
+
+	const PhysBody *h = nullptr;
+	for (unsigned i = 0; i < g_bodies.Size(); i++)
+		if (g_bodies[i].handIndex == hand) { h = &g_bodies[i]; break; }
+	if (h == nullptr) return;      // hands disabled
+
+	// Offsets in the hand's frame.
+	b->grabPosOffset = h->rot.Inverse().Rotate(b->pos - h->pos);
+
+	Quat inv = h->rot.Inverse();
+	Quat rel;
+	rel.w = inv.w*b->rot.w - inv.x*b->rot.x - inv.y*b->rot.y - inv.z*b->rot.z;
+	rel.x = inv.w*b->rot.x + inv.x*b->rot.w + inv.y*b->rot.z - inv.z*b->rot.y;
+	rel.y = inv.w*b->rot.y - inv.x*b->rot.z + inv.y*b->rot.w + inv.z*b->rot.x;
+	rel.z = inv.w*b->rot.z + inv.x*b->rot.y - inv.y*b->rot.x + inv.z*b->rot.w;
+	rel.Normalize();
+	b->grabRotOffset = rel;
+
+	b->heldByHand = hand;
+	b->kinematic = true;
+	b->asleep = false;
+	b->sleepTimer = 0.f;
+	b->restReported = false;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(AActor, PhysicsGrab, PhysicsGrab)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_INT(hand);
+	PhysicsGrab(self, hand);
+	return 0;
+}
+
+// Let go. Velocity is already correct -- a held body has been inheriting the
+// hand's motion every step -- so a throw needs no separate calculation and
+// cannot disagree with what the hand was actually doing.
+static void PhysicsRelease(AActor *self)
+{
+	if (self == nullptr) return;
+	PhysBody *b = FindBody(self);
+	if (b == nullptr) return;
+
+	b->heldByHand = -1;
+	b->kinematic = false;
+	b->asleep = false;
+	b->sleepTimer = 0.f;
+	b->sleepRefPos = b->pos;
+	b->sleepRefRot = b->rot;
+
+	// A tracking spike can report an absurd single-frame lunge; without a cap
+	// the object simply leaves the map.
+	const float cap = 14.f;   // m/s, well past a human throw
+	const float s = b->vel.Length();
+	if (s > cap) b->vel *= cap / s;
+
+	// The same for SPIN, which is worse because it is derived from a single
+	// frame's rotation: a quick flick of the wrist -- or one jittery tracking
+	// sample -- produced a measured 77 rad/s, twelve revolutions a second, and
+	// the object left the hand spinning like a drill bit. A hard throw really
+	// does impart a fast tumble, so this is set well above anything a wrist can
+	// actually do rather than tuned for looks.
+	const float spinCap = 25.f;   // rad/s, ~4 turns a second
+	const float w = b->angVel.Length();
+	if (w > spinCap) b->angVel *= spinCap / w;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(AActor, PhysicsRelease, PhysicsRelease)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PhysicsRelease(self);
+	return 0;
+}
+
+static int PhysicsIsHeld(AActor *self)
+{
+	PhysBody *b = FindBody(self);
+	return (b != nullptr && b->heldByHand >= 0) ? 1 : 0;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(AActor, PhysicsIsHeld, PhysicsIsHeld)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	ACTION_RETURN_BOOL(PhysicsIsHeld(self) != 0);
+}
+
+// How far this body's surface is from a point, in METRES -- distance to the
+// collision box, not to the actor's origin. Reaching for a long object should
+// succeed when you touch its end, not only when you touch its middle.
+static double PhysicsDistanceTo(AActor *self, double x, double y, double z)
+{
+	PhysBody *b = FindBody(self);
+	if (b == nullptr) return 1e9;
+
+	const FVector3 p(MapToM(x), MapToM(y), MapToM(z));
+	FVector3 local = b->rot.Inverse().Rotate(p - b->pos);
+
+	FVector3 clamped(
+		local.X < -b->half.X ? -b->half.X : (local.X > b->half.X ? b->half.X : local.X),
+		local.Y < -b->half.Y ? -b->half.Y : (local.Y > b->half.Y ? b->half.Y : local.Y),
+		local.Z < -b->half.Z ? -b->half.Z : (local.Z > b->half.Z ? b->half.Z : local.Z));
+
+	return (local - clamped).Length();
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(AActor, PhysicsDistanceTo, PhysicsDistanceTo)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_FLOAT(x); PARAM_FLOAT(y); PARAM_FLOAT(z);
+	ACTION_RETURN_FLOAT(PhysicsDistanceTo(self, x, y, z));
 }
 
 static int PhysicsIsAsleep(AActor *self)

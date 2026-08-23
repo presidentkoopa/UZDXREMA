@@ -1005,6 +1005,19 @@ class Actor : Thinker native
 	native void PhysicsSetHeld(bool held);
 	// Place a held body. Position in MAP units, angles in degrees.
 	native void PhysicsSetTransform(double x, double y, double z, double yaw, double pitch, double roll);
+
+	// GRABBING. Prefer these to PhysicsSetHeld/SetTransform: the engine then
+	// carries the object at physics rate rather than at the 35Hz tic rate, and
+	// it keeps the pose it had when you grabbed it instead of snapping to the
+	// hand. Releasing needs no impulse -- a held object has been inheriting the
+	// hand's motion all along, so a throw is simply letting go.
+	// hand: 0 = main, 1 = off.
+	native void PhysicsGrab(int hand);
+	native void PhysicsRelease();
+	native clearscope bool PhysicsIsHeld() const;
+	// Distance in METRES from a map-space point to this body's collision SHAPE,
+	// not to its origin -- so reaching for the end of a long object works.
+	native clearscope double PhysicsDistanceTo(double x, double y, double z) const;
 	native clearscope Actor GetPointer(int aaptr);
 	native double BulletSlope(out FTranslatedLineTarget pLineTarget = null, int aimflags = 0);
 	native void CheckFakeFloorTriggers (double oldz, bool oldz_has_viewheight = false);
