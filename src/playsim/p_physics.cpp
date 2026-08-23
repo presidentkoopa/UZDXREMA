@@ -48,6 +48,7 @@
 #include "v_video.h"
 #include "vm.h"
 
+#include <float.h>
 #include <math.h>
 
 EXTERN_CVAR(Float, vr_vunits_per_meter)
@@ -272,6 +273,127 @@ struct Quat
 	}
 };
 
+// --- shape ----------------------------------------------------------------
+//
+// THE SHAPE IS THE MODEL. A body is a set of CONVEX HULLS, not a box.
+//
+// One hull is enough for a magazine, a casing or a slide -- those really are
+// convex. The set exists for the things that are not, and specifically for the
+// one that matters most here: a MAGWELL IS A CAVITY, and no convex shape has a
+// hole in it. A grip built from four convex slabs does, and a magazine can be
+// pushed up into the gap between them and be stopped by the walls if it is
+// crooked. That is the whole difference between geometry-accurate insertion
+// and two boxes overlapping.
+//
+// Both representations the solver needs are stored, because it asks two
+// different questions and each wants a different one:
+//   verts  -- "where does this shape touch the world", asked of the floor,
+//             the ceiling and every wall plane. Vertex against plane.
+//   planes -- "is that point inside me, and how deep", asked by the pair
+//             solver. Point against half-spaces.
+// Deriving either from the other every step would cost more than storing both.
+struct PhysHull
+{
+	// Body space, metres, relative to the CENTRE OF MASS -- the same space the
+	// solver integrates in, so no per-step conversion is needed.
+	TArray<FVector3> verts;
+
+	// Outward face planes. xyz is a unit normal, w is the offset, so a point p
+	// is inside this face when (n | p) - w <= 0.
+	TArray<FVector4> planes;
+
+	// Distance from the body origin to the furthest vertex. Broadphase only.
+	float radius = 0.f;
+
+	// Half the smallest face-to-face thickness. This is what decides how far a
+	// body may move in one substep before it can tunnel: a thin object needs
+	// finer steps than a fat one of the same overall size, and using the
+	// bounding radius instead would let a casing pass clean through a floor.
+	float thinHalf = 0.f;
+};
+
+// A box, as a hull. Every body starts as one of these, so a body that has never
+// been given real geometry behaves exactly as it did before hulls existed --
+// this generalisation cannot regress anything on its own.
+inline void HullMakeBox(PhysHull &h, const FVector3 &half)
+{
+	h.verts.Clear();
+	h.planes.Clear();
+	for (int c = 0; c < 8; c++)
+	{
+		h.verts.Push(FVector3(
+			(c & 1) ? half.X : -half.X,
+			(c & 2) ? half.Y : -half.Y,
+			(c & 4) ? half.Z : -half.Z));
+	}
+	h.planes.Push(FVector4( 1,  0,  0, half.X));
+	h.planes.Push(FVector4(-1,  0,  0, half.X));
+	h.planes.Push(FVector4( 0,  1,  0, half.Y));
+	h.planes.Push(FVector4( 0, -1,  0, half.Y));
+	h.planes.Push(FVector4( 0,  0,  1, half.Z));
+	h.planes.Push(FVector4( 0,  0, -1, half.Z));
+
+	h.radius = half.Length();
+	float t = half.X;
+	if (half.Y < t) t = half.Y;
+	if (half.Z < t) t = half.Z;
+	h.thinHalf = t;
+}
+
+// Recompute the cached scalars after verts/planes have been filled in from
+// real geometry.
+inline void HullFinish(PhysHull &h)
+{
+	h.radius = 0.f;
+	for (unsigned i = 0; i < h.verts.Size(); i++)
+	{
+		const float r = h.verts[i].Length();
+		if (r > h.radius) h.radius = r;
+	}
+
+	// Smallest distance from the hull's own origin to any face. For a convex
+	// hull containing its origin that is exactly the half-thickness across the
+	// narrowest direction.
+	h.thinHalf = h.radius;
+	for (unsigned i = 0; i < h.planes.Size(); i++)
+	{
+		const float d = h.planes[i].W;
+		if (d > 0.f && d < h.thinHalf) h.thinHalf = d;
+	}
+	if (h.thinHalf < 1e-4f) h.thinHalf = 1e-4f;
+}
+
+// The face of this hull that a local-space point is deepest inside, or false if
+// the point is outside it.
+//
+// The exact generalisation of the box version this replaced: a box asked which
+// of six axis-aligned slabs the point was least far inside, and the answer was
+// the contact normal. A hull asks the same question of N arbitrary half-spaces.
+// Smallest penetration is the cheapest way out, and that is the direction the
+// contact should push.
+inline bool HullDeepest(const FVector3 &local, const PhysHull &h,
+                        FVector3 &axisOut, float &depthOut)
+{
+	if (h.planes.Size() == 0) return false;
+
+	float best = FLT_MAX;
+	int   bestIdx = -1;
+
+	for (unsigned i = 0; i < h.planes.Size(); i++)
+	{
+		const FVector4 &p = h.planes[i];
+		const float dist = (local.X * p.X + local.Y * p.Y + local.Z * p.Z) - p.W;
+		if (dist > 0.f) return false;          // outside this face, so outside
+		const float depth = -dist;
+		if (depth < best) { best = depth; bestIdx = (int)i; }
+	}
+
+	const FVector4 &p = h.planes[bestIdx];
+	axisOut = FVector3(p.X, p.Y, p.Z);
+	depthOut = best;
+	return true;
+}
+
 // --- a body ---------------------------------------------------------------
 
 struct PhysBody
@@ -295,6 +417,45 @@ struct PhysBody
 	FVector3 angVel = FVector3(0, 0, 0);   // rad/s
 
 	FVector3 half   = FVector3(0.05f, 0.05f, 0.05f);  // box half-extents, metres
+
+	// THE ACTUAL COLLISION SHAPE. One entry is a convex body; several make a
+	// concave one, which is what a magwell needs. Always at least one -- a body
+	// given only half-extents gets a single box hull, so this is a
+	// generalisation of the old behaviour rather than a replacement for it.
+	TArray<PhysHull> hulls;
+
+	// Cached over every hull: furthest vertex from the body origin (broadphase)
+	// and the narrowest half-thickness in the set (substep sizing).
+	float boundRadius = 0.f;
+	float thinHalf    = 0.f;
+
+	// Rebuild the cached scalars. Call after touching hulls.
+	void ShapeFinish()
+	{
+		if (hulls.Size() == 0)
+		{
+			hulls.Reserve(1);
+			HullMakeBox(hulls[0], half);
+		}
+		boundRadius = 0.f;
+		thinHalf = FLT_MAX;
+		for (unsigned i = 0; i < hulls.Size(); i++)
+		{
+			// A hull sitting away from the body origin reaches further than its
+			// own radius -- the offset has to be counted, or the broadphase
+			// misses contacts on a compound shape.
+			float far_ = 0.f;
+			for (unsigned v = 0; v < hulls[i].verts.Size(); v++)
+			{
+				const float r = hulls[i].verts[v].Length();
+				if (r > far_) far_ = r;
+			}
+			if (far_ > boundRadius) boundRadius = far_;
+			if (hulls[i].thinHalf < thinHalf) thinHalf = hulls[i].thinHalf;
+		}
+		if (boundRadius < 1e-4f) boundRadius = 1e-4f;
+		if (thinHalf > boundRadius || thinHalf <= 0.f) thinHalf = boundRadius;
+	}
 
 	// Where the centre of mass sits relative to the ACTOR's origin, in body
 	// space, in metres.
@@ -537,21 +698,34 @@ void StepBody(PhysBody &b, float dt)
 	// wanted: slopes work with no extra code, and a body resting on a lift
 	// rides it -- when the plane rises, the next step simply finds the floor
 	// higher.
-	Contact contacts[32];
+	// Raised from 32 with hulls. A box could only ever present eight points to
+	// the world; a real magazine hull presents a few dozen, and a body landing
+	// flat on its side can legitimately have a dozen of them touching at once.
+	// Running out mid-face makes an object rock on the corners it happened to
+	// report first.
+	Contact contacts[96];
 	int numContacts = 0;
-	const int kMaxContacts = 32;
+	const int kMaxContacts = 96;
 
-	// Corner positions are reused by the wall pass below, so they are kept.
-	FVector3 cornerWorld[8];
-
-	for (int corner = 0; corner < 8 && numContacts < kMaxContacts; corner++)
+	// Every hull vertex, in world space. Computed once because the wall pass
+	// below tests the same points against the linedef planes.
+	//
+	// THIS IS WHERE THE SHAPE STOPS BEING A BOX. The eight corners this
+	// replaced were the whole of the old collision geometry -- floors, walls
+	// and everything else saw a rectangular block no matter what the model
+	// looked like. Now the points offered to the world are the model's own.
+	static TArray<FVector3> hullWorld;
+	hullWorld.Clear();
+	for (unsigned hi = 0; hi < b.hulls.Size(); hi++)
 	{
-		FVector3 local(
-			(corner & 1) ? b.half.X : -b.half.X,
-			(corner & 2) ? b.half.Y : -b.half.Y,
-			(corner & 4) ? b.half.Z : -b.half.Z);
-		FVector3 world = b.pos + b.rot.Rotate(local);
-		cornerWorld[corner] = world;
+		const PhysHull &h = b.hulls[hi];
+		for (unsigned vi = 0; vi < h.verts.Size(); vi++)
+			hullWorld.Push(b.pos + b.rot.Rotate(h.verts[vi]));
+	}
+
+	for (unsigned ci = 0; ci < hullWorld.Size() && numContacts < kMaxContacts; ci++)
+	{
+		const FVector3 world = hullWorld[ci];
 
 		const double mapX = MToMap(world.X);
 		const double mapY = MToMap(world.Y);
@@ -602,7 +776,7 @@ void StepBody(PhysBody &b, float dt)
 	// across cannot reach past them, and it avoids a blockmap query per body per
 	// step.
 	{
-		const double reachMap = MToMap(b.half.Length()) + 2.0;
+		const double reachMap = MToMap(b.boundRadius) + 2.0;
 
 		for (unsigned li = 0; li < sec->Lines.Size() && numContacts < kMaxContacts; li++)
 		{
@@ -629,9 +803,9 @@ void StepBody(PhysBody &b, float dt)
 			const bool oneSided = (ld->backsector == nullptr);
 			const bool blockAll = oneSided || (ld->flags & ML_BLOCKING);
 
-			for (int corner = 0; corner < 8 && numContacts < kMaxContacts; corner++)
+			for (unsigned ci = 0; ci < hullWorld.Size() && numContacts < kMaxContacts; ci++)
 			{
-				const FVector3 &w = cornerWorld[corner];
+				const FVector3 &w = hullWorld[ci];
 				const DVector2 pMap(MToMap(w.X), MToMap(w.Y));
 
 				// Past the wall plane, on the body's own side?
@@ -956,35 +1130,10 @@ void StepBody(PhysBody &b, float dt)
 // through each other at a crossed angle, this is why, and that is the fix.
 // ---------------------------------------------------------------------------
 
-// Deepest face of the box that this local-space point is inside, or false if it
-// is outside the box entirely.
-bool DeepestFace(const FVector3 &local, const FVector3 &half, FVector3 &axisOut, float &depthOut)
-{
-	const float dx = half.X - fabsf(local.X);
-	if (dx <= 0.f) return false;
-	const float dy = half.Y - fabsf(local.Y);
-	if (dy <= 0.f) return false;
-	const float dz = half.Z - fabsf(local.Z);
-	if (dz <= 0.f) return false;
-
-	// Smallest overlap is the cheapest way out, which is the contact normal.
-	if (dx <= dy && dx <= dz)
-	{
-		axisOut = FVector3(local.X >= 0.f ? 1.f : -1.f, 0.f, 0.f);
-		depthOut = dx;
-	}
-	else if (dy <= dz)
-	{
-		axisOut = FVector3(0.f, local.Y >= 0.f ? 1.f : -1.f, 0.f);
-		depthOut = dy;
-	}
-	else
-	{
-		axisOut = FVector3(0.f, 0.f, local.Z >= 0.f ? 1.f : -1.f);
-		depthOut = dz;
-	}
-	return true;
-}
+// The box version of the above lived here. It is gone rather than kept beside
+// HullDeepest: a box is now expressed AS a hull (HullMakeBox), so keeping a
+// second code path for the same question would be two things to keep in step
+// for no gain.
 
 // Solve one pair. Impulses are shared according to inverse mass, so a kinematic
 // body (invMass 0) pushes without being pushed -- which is exactly what a hand
@@ -1012,36 +1161,55 @@ void SolvePair(PhysBody &A, PhysBody &B, float dt)
 	// still hold things when they are not.
 	if ((A.handIndex >= 0 || B.handIndex >= 0) && !*vr_physics_hands) return;
 
-	// Broadphase: bounding spheres.
-	const float rA = A.half.Length();
-	const float rB = B.half.Length();
+	// Broadphase: bounding spheres, now sized from the real geometry rather
+	// than from a box nobody's model actually was.
+	const float rA = A.boundRadius;
+	const float rB = B.boundRadius;
 	FVector3 delta = B.pos - A.pos;
 	const float distSq = delta.LengthSquared();
 	if (distSq > (rA + rB) * (rA + rB)) return;
 
 	struct PairContact { FVector3 point, normal; float penetration, initialVn, impulse; };
-	PairContact pc[16];
+	// Raised with hulls, same reason as the world contact array: two real
+	// shapes meeting face-on present many more points than eight corners could.
+	PairContact pc[48];
+	const int kMaxPair = 48;
 	int n = 0;
 
-	// Corners of one inside the other, both directions. The normal always
+	// Vertices of one inside the other, both directions. The normal always
 	// points from A toward B, so the sign handling below stays uniform.
-	for (int pass = 0; pass < 2 && n < 16; pass++)
+	//
+	// TESTING EVERY HULL OF THE DESTINATION, not just one, is what makes a
+	// cavity work. A magwell is several convex slabs with a gap between them:
+	// a magazine vertex in the gap is inside NONE of them and is free to move,
+	// and the same vertex a few millimetres off-axis is inside a wall slab and
+	// gets pushed back. That behaviour is not written anywhere -- it falls out
+	// of asking each convex piece separately, which is exactly why the shape
+	// has to be a set and not a single volume.
+	for (int pass = 0; pass < 2 && n < kMaxPair; pass++)
 	{
 		PhysBody &src = pass ? B : A;
 		PhysBody &dst = pass ? A : B;
 
-		for (int corner = 0; corner < 8 && n < 16; corner++)
+		for (unsigned sh = 0; sh < src.hulls.Size() && n < kMaxPair; sh++)
+		for (unsigned vi = 0; vi < src.hulls[sh].verts.Size() && n < kMaxPair; vi++)
 		{
-			FVector3 lc(
-				(corner & 1) ? src.half.X : -src.half.X,
-				(corner & 2) ? src.half.Y : -src.half.Y,
-				(corner & 4) ? src.half.Z : -src.half.Z);
-			FVector3 world = src.pos + src.rot.Rotate(lc);
+			FVector3 world = src.pos + src.rot.Rotate(src.hulls[sh].verts[vi]);
 
 			FVector3 local = dst.rot.Inverse().Rotate(world - dst.pos);
 
-			FVector3 axis; float depth;
-			if (!DeepestFace(local, dst.half, axis, depth)) continue;
+			// Shallowest penetration across the destination's hulls. A point
+			// inside two overlapping slabs should be pushed out the near way,
+			// not the far one.
+			FVector3 axis(0, 0, 0); float depth = 0.f;
+			bool hit = false;
+			for (unsigned dh = 0; dh < dst.hulls.Size(); dh++)
+			{
+				FVector3 a2; float d2;
+				if (!HullDeepest(local, dst.hulls[dh], a2, d2)) continue;
+				if (!hit || d2 < depth) { axis = a2; depth = d2; hit = true; }
+			}
+			if (!hit) continue;
 
 			FVector3 nWorld = dst.rot.Rotate(axis);
 			// Normal must point from A to B.
@@ -1264,6 +1432,8 @@ void UpdateHands(float dt)
 
 		const float s = (float)*vr_physics_handsize;
 		b->half = FVector3(0.045f * s, 0.030f * s, 0.090f * s);
+		b->hulls.Clear();
+		b->ShapeFinish();
 
 		const DVector3 p = (hand == 0) ? pawn->AttackPos : pawn->OffhandPos;
 		const FVector3 newPos(MapToM(p.X), MapToM(p.Y), MapToM(p.Z));
@@ -1456,10 +1626,19 @@ void UpdateWeapons()
 			wb = &g_bodies[g_bodies.Size() - 1];
 		}
 
-		wb->half = FVector3(
+		const FVector3 wantHalf(
 			*vr_physics_weaponlen * 0.5f,
 			*vr_physics_weaponwidth * 0.5f,
 			*vr_physics_weaponheight * 0.5f);
+		// Rebuilt only when it actually changes -- these are live menu sliders,
+		// so a blind rebuild every frame would throw away real hull geometry
+		// the moment a weapon supplied any, and would do it 90 times a second.
+		if (wb->hulls.Size() != 1 || wb->half != wantHalf)
+		{
+			wb->half = wantHalf;
+			wb->hulls.Clear();
+			wb->ShapeFinish();
+		}
 
 		const FVector3 localOfs(*vr_physics_weapon_ofs_fwd, 0.f, *vr_physics_weapon_ofs_up);
 		wb->rot = handBody->rot;
@@ -1650,9 +1829,12 @@ void P_PhysicsFrame()
 				// Splitting the step so the body never moves more than a
 				// fraction of its own smallest dimension is the cheap fix and
 				// costs nothing at rest, where sub == 1.
-				float smallest = b.half.X;
-				if (b.half.Y < smallest) smallest = b.half.Y;
-				if (b.half.Z < smallest) smallest = b.half.Z;
+				// The narrowest half-thickness in the hull set. A long
+				// thin object -- a cartridge, a slide -- can tunnel through a
+				// floor at a speed a compact one of the same bounding radius
+				// never would, so the bound has to come from the thin
+				// direction, not the overall size.
+				float smallest = b.thinHalf;
 
 				const float travel = b.vel.Length() * (float)step;
 				int sub = 1;
@@ -1783,6 +1965,10 @@ static void PhysicsEnable(AActor *self, double massKg, double hx, double hy, dou
 	if (hy < 0.002) hy = 0.002;
 	if (hz < 0.002) hz = 0.002;
 	b.half = FVector3((float)hx, (float)hy, (float)hz);
+	// No real geometry supplied, so the shape is the box -- one hull, and the
+	// solver treats it exactly as it treated a box before hulls existed.
+	b.hulls.Clear();
+	b.ShapeFinish();
 
 	if (massKg < 0.001) massKg = 0.001;
 	b.invMass = (float)(1.0 / massKg);
@@ -2112,9 +2298,16 @@ DEFINE_ACTION_FUNCTION_NATIVE(AActor, PhysicsIsHeld, PhysicsIsHeld)
 	ACTION_RETURN_BOOL(PhysicsIsHeld(self) != 0);
 }
 
-// How far this body's surface is from a point, in METRES -- distance to the
-// collision box, not to the actor's origin. Reaching for a long object should
-// succeed when you touch its end, not only when you touch its middle.
+// How far this body's SURFACE is from a point, in METRES -- not the distance
+// to the actor's origin. Reaching for a long object should succeed when you
+// touch its end, not only when you touch its middle.
+//
+// Measured against the real hulls now. For a convex hull the distance to a
+// point outside it is the largest of its signed face distances, which is exact
+// for a point facing a face and a slight underestimate out past an edge or a
+// corner. That error is well under a millimetre at these sizes and it errs
+// toward being generous about a grab, which is the right way to be wrong when
+// a hand is reaching for something.
 static double PhysicsDistanceTo(AActor *self, double x, double y, double z)
 {
 	PhysBody *b = FindBody(self);
@@ -2123,12 +2316,24 @@ static double PhysicsDistanceTo(AActor *self, double x, double y, double z)
 	const FVector3 p(MapToM(x), MapToM(y), MapToM(z));
 	FVector3 local = b->rot.Inverse().Rotate(p - b->pos);
 
-	FVector3 clamped(
-		local.X < -b->half.X ? -b->half.X : (local.X > b->half.X ? b->half.X : local.X),
-		local.Y < -b->half.Y ? -b->half.Y : (local.Y > b->half.Y ? b->half.Y : local.Y),
-		local.Z < -b->half.Z ? -b->half.Z : (local.Z > b->half.Z ? b->half.Z : local.Z));
+	// Nearest over the set: a compound shape is as close as its closest piece.
+	double best = 1e9;
+	for (unsigned hi = 0; hi < b->hulls.Size(); hi++)
+	{
+		const PhysHull &h = b->hulls[hi];
+		if (h.planes.Size() == 0) continue;
 
-	return (local - clamped).Length();
+		float outside = -FLT_MAX;
+		for (unsigned i = 0; i < h.planes.Size(); i++)
+		{
+			const FVector4 &pl = h.planes[i];
+			const float d = (local.X * pl.X + local.Y * pl.Y + local.Z * pl.Z) - pl.W;
+			if (d > outside) outside = d;
+		}
+		const double d = (outside < 0.f) ? 0.0 : (double)outside;   // inside = touching
+		if (d < best) best = d;
+	}
+	return (best > 1e8) ? 1e9 : best;
 }
 
 DEFINE_ACTION_FUNCTION_NATIVE(AActor, PhysicsDistanceTo, PhysicsDistanceTo)
