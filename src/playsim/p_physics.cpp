@@ -323,6 +323,24 @@ FVector3 g_handPrevPos[2];
 Quat     g_handPrevRot[2];
 bool     g_handHavePrev[2] = { false, false };
 
+// A short history of how each hand has been moving.
+//
+// A throw does NOT leave at the speed the hand had when the button came up. A
+// human releases at the END of the motion, by which point the arm is already
+// decelerating -- so sampling at the instant of release captures the slowdown
+// rather than the throw, and the object dribbles out and drops instead of
+// arcing. Keeping a fraction of a second and taking the FASTEST moment in it is
+// what every VR game that throws convincingly does.
+//
+// 16 samples at 90Hz is about 180ms, which comfortably spans the accelerating
+// part of a throw without reaching back into whatever the hand was doing before
+// it started.
+constexpr int kHandHistory = 16;
+struct HandSample { FVector3 vel, angVel; };
+HandSample g_handHist[2][kHandHistory];
+int  g_handHistPos[2] = { 0, 0 };
+bool g_handHistFilled[2] = { false, false };
+
 // --- clock / accumulator (slice 0) ---------------------------------------
 
 uint64_t g_lastTimeNs = 0;
@@ -1209,6 +1227,15 @@ void UpdateHands(float dt)
 			b->angVel = FVector3(0, 0, 0);
 		}
 
+		// Remember this frame's motion for the release window.
+		{
+			int &wp = g_handHistPos[hand];
+			g_handHist[hand][wp].vel = b->vel;
+			g_handHist[hand][wp].angVel = b->angVel;
+			wp = (wp + 1) % kHandHistory;
+			if (wp == 0) g_handHistFilled[hand] = true;
+		}
+
 		g_handPrevPos[hand] = newPos;
 		g_handPrevRot[hand] = newRot;
 		g_handHavePrev[hand] = true;
@@ -1802,12 +1829,54 @@ static void PhysicsRelease(AActor *self)
 	PhysBody *b = FindBody(self);
 	if (b == nullptr) return;
 
+	const int hand = b->heldByHand;
+
 	b->heldByHand = -1;
 	b->kinematic = false;
 	b->asleep = false;
 	b->sleepTimer = 0.f;
 	b->sleepRefPos = b->pos;
 	b->sleepRefRot = b->rot;
+
+	// THE THROW USES THE FASTEST RECENT MOMENT, NOT THIS ONE.
+	//
+	// A person lets go at the end of a throwing motion, by which point the arm
+	// is already decelerating -- often sharply. Taking the velocity at the
+	// instant the button is released therefore captures the slowdown rather
+	// than the throw, and the object leaves far slower than it felt, dropping
+	// almost straight down instead of arcing. It reads as gravity grabbing it
+	// the moment you let go.
+	//
+	// Scanning back over the last ~180ms and taking the peak recovers the
+	// throw the hand actually made.
+	if (hand >= 0 && hand <= 1)
+	{
+		const int have = g_handHistFilled[hand] ? kHandHistory : g_handHistPos[hand];
+
+		const HandSample *best = nullptr;
+		float bestSpeed = -1.f;
+		for (int i = 0; i < have; i++)
+		{
+			const float s = g_handHist[hand][i].vel.Length();
+			if (s > bestSpeed) { bestSpeed = s; best = &g_handHist[hand][i]; }
+		}
+
+		// Only if it genuinely beats what the hand is doing now -- setting
+		// something down gently must stay gentle.
+		if (best != nullptr && bestSpeed > b->vel.Length())
+		{
+			// The object is not at the hand's centre, so a spinning hand throws
+			// it along a tangent. Same relationship used while carrying it.
+			const PhysBody *h = nullptr;
+			for (unsigned i = 0; i < g_bodies.Size(); i++)
+				if (g_bodies[i].handIndex == hand) { h = &g_bodies[i]; break; }
+
+			b->vel = best->vel;
+			if (h != nullptr)
+				b->vel += Cross(best->angVel, b->pos - h->pos);
+			b->angVel = best->angVel;
+		}
+	}
 
 	// A tracking spike can report an absurd single-frame lunge; without a cap
 	// the object simply leaves the map.
