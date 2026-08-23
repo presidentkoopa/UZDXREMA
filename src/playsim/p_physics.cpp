@@ -112,6 +112,20 @@ CVAR(Float, vr_physics_contactspindamp, 4.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // Whether your hands are solid to physics objects.
 CVAR(Bool, vr_physics_hands, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
+// How much a rotating wrist contributes to the direction of a throw.
+//
+// 1.0 is physically honest: an object held away from the hand's centre really
+// does get flung along a tangent when the wrist turns. But hand tracking
+// reports angular velocity noisily, and a throw naturally involves a wrist
+// flick, so at full strength the sideways term can visibly steer a throw away
+// from where it was aimed. Lower values keep throws going where they are
+// pointed at some cost in realism.
+CUSTOM_CVAR(Float, vr_physics_throwspin, 0.5f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{
+	if (self < 0.f) self = 0.f;
+	else if (self > 2.f) self = 2.f;
+}
+
 // How big the invisible collision shape on each hand is, as a multiplier. The
 // base is roughly a real palm; larger makes objects easier to bat around and
 // harder to reach past.
@@ -120,6 +134,35 @@ CUSTOM_CVAR(Float, vr_physics_handsize, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 	if (self < 0.25f) self = 0.25f;
 	else if (self > 4.0f) self = 4.0f;
 }
+
+// PLACEHOLDER weapon shape, one box for the whole gun.
+//
+// Genuinely temporary: real weapons will get a collision primitive PER BONE
+// (grip, slide, magwell) built from the mesh's own bind pose, which is what
+// eventually turns the magwell into an actual hole a magazine enters. Until
+// that model work lands, this single box is what makes a held weapon solid at
+// all -- clank two pistols together, feel one against your other palm, bump a
+// magazine off it -- while the T77 mesh stands in for whichever real model ends
+// up in the grip.
+//
+// Local +X is forward (out the muzzle), +Y is width, +Z is height -- the same
+// axis convention the rest of this engine builds a facing vector from out of
+// yaw/pitch (fwd = cos(pitch)*cos(yaw), cos(pitch)*sin(yaw), -sin(pitch)).
+CUSTOM_CVAR(Float, vr_physics_weaponlen, 0.11f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{ if (self < 0.02f) self = 0.02f; else if (self > 0.6f) self = 0.6f; }
+CUSTOM_CVAR(Float, vr_physics_weaponwidth, 0.02f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{ if (self < 0.005f) self = 0.005f; else if (self > 0.2f) self = 0.2f; }
+CUSTOM_CVAR(Float, vr_physics_weaponheight, 0.07f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{ if (self < 0.02f) self = 0.02f; else if (self > 0.4f) self = 0.4f; }
+
+// Where the box sits relative to the tracked grip point -- forward and up from
+// it, since the grip is normally near the back-bottom of a handgun. Guessed,
+// not measured; tune in the menu, or replace outright once real per-bone
+// shapes exist.
+CUSTOM_CVAR(Float, vr_physics_weapon_ofs_fwd, 0.08f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{ if (self < -0.3f) self = -0.3f; else if (self > 0.3f) self = 0.3f; }
+CUSTOM_CVAR(Float, vr_physics_weapon_ofs_up, 0.02f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+{ if (self < -0.2f) self = -0.2f; else if (self > 0.2f) self = 0.2f; }
 
 // Per-body trace to the log while awake, N times a second. 0 = off. This is the
 // only way to see what a body is doing without a console in the headset.
@@ -240,6 +283,11 @@ struct PhysBody
 
 	// -1 for an ordinary body; 0 = main hand, 1 = off hand.
 	int      handIndex = -1;
+
+	// -1 for anything else; 0 = attached to the main hand, 1 = the off hand.
+	// Separate from handIndex: this tags the WEAPON riding a hand, not the hand
+	// itself.
+	int      weaponHand = -1;
 
 	FVector3 pos    = FVector3(0, 0, 0);   // metres, playsim axes, Z up
 	FVector3 vel    = FVector3(0, 0, 0);   // m/s
@@ -943,8 +991,22 @@ bool DeepestFace(const FVector3 &local, const FVector3 &half, FVector3 &axisOut,
 // and a held weapon need.
 void SolvePair(PhysBody &A, PhysBody &B, float dt)
 {
-	if (A.invMass <= 0.f && B.invMass <= 0.f) return;      // nothing to move
-	if (A.kinematic && B.kinematic) return;
+	// NOT skipped just because both sides are kinematic.
+	//
+	// Two externally-tracked bodies -- a hand and the OTHER hand, a weapon and
+	// a hand, two weapons -- cannot physically push each other: neither has a
+	// finite mass for an impulse to move, since both positions come from
+	// outside the simulation. That is real and stays true below, where every
+	// impulse application is individually guarded by `if (!X.kinematic)`, so
+	// two kinematic bodies always resolve to a no-op there via the existing
+	// `denom < 1e-8f` check.
+	//
+	// But returning early HERE, before contacts are even gathered, would also
+	// throw away the one thing that pair CAN honestly report: that contact
+	// happened at all. That is what "feel the gun against your palm" needs --
+	// not a push, since your real hand cannot be shoved by software, but a
+	// detected touch to hang a haptic pulse and a sound off. Skipping here
+	// would have made that permanently impossible instead of merely unbuilt.
 
 	// Hands only PUSH things when they are set solid. They still exist and can
 	// still hold things when they are not.
@@ -1023,6 +1085,39 @@ void SolvePair(PhysBody &A, PhysBody &B, float dt)
 		if (A.asleep) { A.asleep = false; A.sleepTimer = 0.f; A.restReported = false; }
 		if (B.asleep) { B.asleep = false; B.sleepTimer = 0.f; B.restReported = false; }
 		break;
+	}
+
+	// A CONTACT HAPTIC, for the one case a push is physically impossible: your
+	// own gun touching your own other hand, or two held weapons meeting.
+	// Neither side can be shoved -- both positions come from tracking, not
+	// from the solver -- so a buzz is the only honest way to make that contact
+	// felt at all. Deliberately scoped to hand/weapon pairs only, not to
+	// grabbed objects riding a hand: that is a related but separate question
+	// for once basic weapon solidity has been felt out.
+	{
+		const int handA = (A.handIndex >= 0) ? A.handIndex : A.weaponHand;
+		const int handB = (B.handIndex >= 0) ? B.handIndex : B.weaponHand;
+
+		if (A.kinematic && B.kinematic && handA >= 0 && handB >= 0 && handA != handB)
+		{
+			float hardest = 0.f;
+			for (int i = 0; i < n; i++)
+				if (-pc[i].initialVn > hardest) hardest = -pc[i].initialVn;
+
+			const float kHapticMinSpeed = 0.15f;   // m/s -- matches the wake threshold
+			if (hardest >= kHapticMinSpeed && A.impactCooldown <= 0.f && B.impactCooldown <= 0.f)
+			{
+				float amp = hardest / 3.f;
+				if (amp > 1.f) amp = 1.f;
+				if (amp < 0.2f) amp = 0.2f;
+
+				VR_ScriptHaptic(handA, amp, 40.0);
+				VR_ScriptHaptic(handB, amp, 40.0);
+
+				A.impactCooldown = 0.1f;
+				B.impactCooldown = 0.1f;
+			}
+		}
 	}
 
 	const float restitution = *vr_physics_restitution;
@@ -1290,6 +1385,96 @@ void UpdateHands(float dt)
 	}
 }
 
+// ---------------------------------------------------------------------------
+// The weapon in each hand -- a solid object, nothing more.
+//
+// Slice 4. One box per hand that currently holds a T77, rigidly attached to
+// that hand's own body exactly the way a held object rides it, kinematic for
+// the same reason hands are: the gun follows the controller exactly and is
+// never blocked by level geometry, but it pushes everything that is not
+// static, and (see SolvePair) hitting your other hand or another weapon with
+// it is felt as a haptic pulse even though nothing can physically shove a
+// tracked hand.
+//
+// Detected by class name substring, matched cross-pk3 the same way
+// rs_hands.zs matches weapons without a compile-time reference to any of
+// them -- this file cannot name RS_T77 and does not need to.
+//
+// PLACEHOLDER SHAPE. One box for the whole gun, sized and positioned from the
+// vr_physics_weapon* cvars, not from the mesh. Real per-bone weapon colliders
+// (grip, slide, magwell) are later work; this exists so "is a held gun solid"
+// can be felt and judged before that model work is done.
+// ---------------------------------------------------------------------------
+
+bool IsPhysicalWeapon(AActor *weap)
+{
+	if (weap == nullptr) return false;
+	FString name = weap->GetClass()->TypeName.GetChars();
+	name.ToLower();
+	return name.IndexOf("t77") >= 0;
+}
+
+void UpdateWeapons()
+{
+	if (consoleplayer < 0 || consoleplayer >= MAXPLAYERS) return;
+	player_t *pl = &players[consoleplayer];
+	if (pl->mo == nullptr) return;
+
+	for (int hand = 0; hand < 2; hand++)
+	{
+		AActor *weap = (hand == 0) ? pl->ReadyWeapon : pl->OffhandWeapon;
+		const bool want = IsPhysicalWeapon(weap);
+
+		PhysBody *wb = nullptr;
+		for (unsigned i = 0; i < g_bodies.Size(); i++)
+			if (g_bodies[i].weaponHand == hand) { wb = &g_bodies[i]; break; }
+
+		if (!want)
+		{
+			if (wb != nullptr)
+			{
+				for (unsigned i = 0; i < g_bodies.Size(); i++)
+					if (g_bodies[i].weaponHand == hand) { g_bodies.Delete(i); break; }
+			}
+			continue;
+		}
+
+		const PhysBody *handBody = nullptr;
+		for (unsigned i = 0; i < g_bodies.Size(); i++)
+			if (g_bodies[i].handIndex == hand) { handBody = &g_bodies[i]; break; }
+		if (handBody == nullptr) continue;   // hands disabled -- nothing to attach to
+
+		if (wb == nullptr)
+		{
+			PhysBody nb;
+			nb.weaponHand = hand;
+			nb.owner = nullptr;
+			nb.kinematic = true;
+			nb.invMass = 0.f;
+			nb.invInertia = FVector3(0, 0, 0);
+			g_bodies.Push(nb);
+			wb = &g_bodies[g_bodies.Size() - 1];
+		}
+
+		wb->half = FVector3(
+			*vr_physics_weaponlen * 0.5f,
+			*vr_physics_weaponwidth * 0.5f,
+			*vr_physics_weaponheight * 0.5f);
+
+		const FVector3 localOfs(*vr_physics_weapon_ofs_fwd, 0.f, *vr_physics_weapon_ofs_up);
+		wb->rot = handBody->rot;
+		wb->pos = handBody->pos + handBody->rot.Rotate(localOfs);
+
+		// Inherits the hand's motion the same way a grabbed object does --
+		// needed for the impact-speed haptic above, and for pushing a
+		// magazine at something close to the speed the gun actually swung at.
+		wb->vel = handBody->vel + Cross(handBody->angVel, wb->pos - handBody->pos);
+		wb->angVel = handBody->angVel;
+
+		wb->asleep = false;
+	}
+}
+
 // Push the solver's transform back onto the actor.
 //
 // Done here rather than in AActor::Tick because in VR the playsim frequently
@@ -1346,7 +1531,7 @@ void ReportLine(const char *why, double dt)
 	int awake = 0, real = 0;
 	for (unsigned i = 0; i < g_bodies.Size(); i++)
 	{
-		if (g_bodies[i].handIndex >= 0) continue;
+		if (g_bodies[i].handIndex >= 0 || g_bodies[i].weaponHand >= 0) continue;
 		real++;
 		if (!g_bodies[i].asleep) awake++;
 	}
@@ -1364,7 +1549,7 @@ void ReportLine(const char *why, double dt)
 		for (unsigned i = 0; i < g_bodies.Size(); i++)
 		{
 			const PhysBody &b = g_bodies[i];
-			if (b.asleep || b.handIndex >= 0) continue;
+			if (b.asleep || b.handIndex >= 0 || b.weaponHand >= 0) continue;
 			const float m = b.velEMA.Length();
 			if (m < best) { best = m; quietest = &b; }
 		}
@@ -1441,6 +1626,7 @@ void P_PhysicsFrame()
 		// the simulation, and everything else this step reacts to where they
 		// are now rather than where they were last frame.
 		UpdateHands((float)dt);
+		UpdateWeapons();
 
 		const double step = 1.0 / (double)*vr_physics_hz;
 		g_accumulator += dt;
@@ -1853,27 +2039,39 @@ static void PhysicsRelease(AActor *self)
 	{
 		const int have = g_handHistFilled[hand] ? kHandHistory : g_handHistPos[hand];
 
+		// Where the object sits relative to the hand -- a spinning wrist throws
+		// it along a tangent from here.
+		const PhysBody *h = nullptr;
+		for (unsigned i = 0; i < g_bodies.Size(); i++)
+			if (g_bodies[i].handIndex == hand) { h = &g_bodies[i]; break; }
+		const FVector3 r = (h != nullptr) ? (b->pos - h->pos) : FVector3(0, 0, 0);
+		const float spinF = *vr_physics_throwspin;
+
+		// Peak measured on the OBJECT's speed, not the hand centre's.
+		//
+		// These differ whenever the wrist is turning, which during a throw is
+		// always. Picking the fastest moment of the HAND and then adding
+		// whatever rotation happened to be present at that instant chooses a
+		// moment on one basis and a direction on another -- so a throw could
+		// leave in a direction that was never the fastest thing the object did,
+		// and it read as throws not going where they were aimed.
 		const HandSample *best = nullptr;
 		float bestSpeed = -1.f;
+		FVector3 bestVel(0, 0, 0);
+
 		for (int i = 0; i < have; i++)
 		{
-			const float s = g_handHist[hand][i].vel.Length();
-			if (s > bestSpeed) { bestSpeed = s; best = &g_handHist[hand][i]; }
+			const HandSample &s = g_handHist[hand][i];
+			const FVector3 v = s.vel + Cross(s.angVel * spinF, r);
+			const float sp = v.Length();
+			if (sp > bestSpeed) { bestSpeed = sp; best = &s; bestVel = v; }
 		}
 
 		// Only if it genuinely beats what the hand is doing now -- setting
 		// something down gently must stay gentle.
 		if (best != nullptr && bestSpeed > b->vel.Length())
 		{
-			// The object is not at the hand's centre, so a spinning hand throws
-			// it along a tangent. Same relationship used while carrying it.
-			const PhysBody *h = nullptr;
-			for (unsigned i = 0; i < g_bodies.Size(); i++)
-				if (g_bodies[i].handIndex == hand) { h = &g_bodies[i]; break; }
-
-			b->vel = best->vel;
-			if (h != nullptr)
-				b->vel += Cross(best->angVel, b->pos - h->pos);
+			b->vel = bestVel;
 			b->angVel = best->angVel;
 		}
 	}

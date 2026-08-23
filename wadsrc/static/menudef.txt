@@ -2586,11 +2586,23 @@ OptionMenu "VRPhysicsMenu" protected
 	Option "Hands are solid",   vr_physics_hands,        OnOff
 	Slider "Hand size",         vr_physics_handsize,     0.25, 4.0, 0.05, 2
 	StaticText " "
+	StaticText "A held T77 is now a solid placeholder box --", gold
+	StaticText "real per-part shapes come with the real model.", gold
+	Slider "Weapon length",     vr_physics_weaponlen,     0.02, 0.6, 0.01, 2
+	Slider "Weapon width",      vr_physics_weaponwidth,   0.005, 0.2, 0.005, 3
+	Slider "Weapon height",     vr_physics_weaponheight,  0.02, 0.4, 0.01, 2
+	Slider "Weapon fwd offset", vr_physics_weapon_ofs_fwd, -0.3, 0.3, 0.01, 2
+	Slider "Weapon up offset",  vr_physics_weapon_ofs_up,  -0.2, 0.2, 0.01, 2
+	StaticText " "
+	StaticText "How much a turning wrist steers a throw.", gold
+	StaticText "Lower = throws go where you point them.", gold
+	Slider "Wrist spin on throw", vr_physics_throwspin,  0.0, 2.0, 0.05, 2
+	StaticText " "
 	StaticText "Diagnostics -- written to the log file.", gold
 	Option "Log summary",       vr_physics_debug,        OnOff
 	Slider "Trace (per sec)",   vr_physics_trace,        0, 20, 1, 0
 	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_physics_restitution vr_physics_friction vr_physics_lineardamp vr_physics_angulardamp vr_physics_contactspindamp vr_physics_gravity vr_physics_hz vr_physics_trace"
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_physics_weaponlen vr_physics_weaponwidth vr_physics_weaponheight vr_physics_weapon_ofs_fwd vr_physics_weapon_ofs_up vr_physics_throwspin vr_physics_restitution vr_physics_friction vr_physics_lineardamp vr_physics_angulardamp vr_physics_contactspindamp vr_physics_gravity vr_physics_hz vr_physics_trace"
 }
 
 OptionMenu "PostProcessMenu" protected
