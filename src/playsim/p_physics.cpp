@@ -1590,7 +1590,19 @@ void UpdateHands(float dt)
 		const DVector3 p = (hand == 0) ? pawn->AttackPos : pawn->OffhandPos;
 		const FVector3 newPos(MapToM(p.X), MapToM(p.Y), MapToM(p.Z));
 
-		const double yaw   = (hand == 0) ? pawn->Angles.Yaw.Degrees()   : pawn->OffhandAngle.Degrees();
+		// AttackAngle, NOT Angles.Yaw.
+		//
+		// Angles.Yaw is the PLAYER'S BODY facing. Using it here meant the main
+		// hand yawed with the torso and ignored the controller entirely, while
+		// its pitch and roll came from the real hand -- so an object held in it
+		// rolled and pitched correctly and simply refused to turn left or
+		// right. The off hand was already right, which is what made the two
+		// hands behave differently for no visible reason.
+		//
+		// All three now come from the same hand: AttackAngle / AttackPitch /
+		// MainHandRoll are the main controller's own pose, the exact
+		// counterparts of the OffhandAngle / OffhandPitch / OffhandRoll trio.
+		const double yaw   = (hand == 0) ? pawn->AttackAngle.Degrees()  : pawn->OffhandAngle.Degrees();
 		const double pitch = (hand == 0) ? pawn->AttackPitch.Degrees()  : pawn->OffhandPitch.Degrees();
 		const double roll  = (hand == 0) ? pawn->MainHandRoll.Degrees() : pawn->OffhandRoll.Degrees();
 		const Quat newRot = Quat::FromEulerDeg(yaw, pitch, roll);
@@ -2323,13 +2335,34 @@ static void PhysicsGrab(AActor *self, int hand)
 	if (self == nullptr) return;
 	if (hand < 0 || hand > 1) return;
 
+	// EVERY FAILURE HERE SAYS SO. All three used to be a bare `return`, and a
+	// grab that silently does nothing is indistinguishable from a grab that
+	// was never asked for -- which is exactly how "why is there no gun in my
+	// off hand" became unanswerable from a log.
 	PhysBody *b = FindBody(self);
-	if (b == nullptr) return;
+	if (b == nullptr)
+	{
+		Printf("\x1b[33m[PHYS] grab refused: %s has no physics body (PhysicsEnable not called, or it was removed)\n",
+			self->GetClass()->TypeName.GetChars());
+		return;
+	}
 
 	const PhysBody *h = nullptr;
 	for (unsigned i = 0; i < g_bodies.Size(); i++)
 		if (g_bodies[i].handIndex == hand) { h = &g_bodies[i]; break; }
-	if (h == nullptr) return;      // hands disabled
+	if (h == nullptr)
+	{
+		Printf("\x1b[33m[PHYS] grab refused: no body for hand %d -- there is no player, so no hands exist yet\n", hand);
+		return;
+	}
+
+	if (b->heldByHand >= 0 && b->heldByHand != hand)
+	{
+		// Passing an object between hands is legitimate; being held by two at
+		// once is not, and the second grab would quietly win. Say which.
+		Printf("\x1b[33m[PHYS] %s moved from hand %d to hand %d\n",
+			self->GetClass()->TypeName.GetChars(), b->heldByHand, hand);
+	}
 
 	// Offsets in the hand's frame.
 	b->grabPosOffset = h->rot.Inverse().Rotate(b->pos - h->pos);
