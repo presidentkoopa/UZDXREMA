@@ -41,6 +41,9 @@
 #include "i_interface.h"
 #include "i_time.h"
 #include "menustate.h"
+#include "filesystem.h"
+#include "sc_man.h"
+#include "name.h"
 #include "printf.h"
 #include "r_defs.h"
 #include "s_doomsound.h"
@@ -394,6 +397,121 @@ inline bool HullDeepest(const FVector3 &local, const PhysHull &h,
 	return true;
 }
 
+// --- PHYSDEF: collision shapes shipped with the models --------------------
+//
+// One lump, parsed once, keyed on actor class name:
+//
+//     Body RS_BM9_Mag
+//     {
+//         Hull
+//         {
+//             V  x y z        // a vertex, body space, METRES
+//             P  nx ny nz d   // a face plane, n outward, inside when n.p <= d
+//         }
+//         Hull { ... }        // several hulls make a CONCAVE shape
+//     }
+//
+// Both lists are given rather than derived, because the solver asks two
+// different questions -- "where does this touch the world" wants vertices,
+// "is that point inside me" wants planes -- and computing either from the
+// other every step would cost more than storing both.
+//
+// Generated from the mesh by a tool, never hand-authored: the numbers are a
+// convex decomposition and there is nothing a human can usefully do with them
+// by eye.
+struct PhysShapeDef
+{
+	TArray<PhysHull> hulls;
+};
+
+TMap<FName, PhysShapeDef> g_shapeLib;
+bool g_shapesLoaded = false;
+
+void LoadPhysDefs()
+{
+	g_shapesLoaded = true;
+
+	int lump, lastlump = 0;
+	int bodies = 0, hulls = 0;
+
+	while ((lump = fileSystem.FindLump("PHYSDEF", &lastlump)) != -1)
+	{
+		FScanner sc(lump);
+		sc.SetCMode(false);
+
+		while (sc.GetString())
+		{
+			if (!sc.Compare("Body"))
+			{
+				sc.ScriptMessage("PHYSDEF: expected 'Body', got '%s'", sc.String);
+				continue;
+			}
+
+			sc.MustGetString();
+			FName cls = sc.String;
+			PhysShapeDef def;
+
+			sc.MustGetStringName("{");
+			while (!sc.CheckString("}"))
+			{
+				sc.MustGetStringName("Hull");
+				sc.MustGetStringName("{");
+
+				PhysHull h;
+				while (!sc.CheckString("}"))
+				{
+					sc.MustGetString();
+					if (sc.Compare("V"))
+					{
+						float v[3];
+						for (int i = 0; i < 3; i++) { sc.MustGetFloat(); v[i] = (float)sc.Float; }
+						h.verts.Push(FVector3(v[0], v[1], v[2]));
+					}
+					else if (sc.Compare("P"))
+					{
+						float p[4];
+						for (int i = 0; i < 4; i++) { sc.MustGetFloat(); p[i] = (float)sc.Float; }
+						h.planes.Push(FVector4(p[0], p[1], p[2], p[3]));
+					}
+					else
+					{
+						sc.ScriptError("PHYSDEF: unknown token '%s' in Hull", sc.String);
+					}
+				}
+
+				// A hull with no planes can never report a contact and a hull
+				// with no vertices can never make one. Either way it is a
+				// silent hole in the shape, so say so rather than ship it.
+				if (h.verts.Size() == 0 || h.planes.Size() == 0)
+				{
+					Printf("\x1b[33mPHYSDEF: %s has a hull with %u verts and %u planes -- dropped\n",
+						cls.GetChars(), h.verts.Size(), h.planes.Size());
+				}
+				else
+				{
+					HullFinish(h);
+					def.hulls.Push(h);
+					hulls++;
+				}
+			}
+
+			if (def.hulls.Size() > 0)
+			{
+				g_shapeLib.Insert(cls, def);
+				bodies++;
+			}
+		}
+	}
+
+	if (bodies > 0)
+		Printf("[PHYS] PHYSDEF: %d bodies, %d hulls\n", bodies, hulls);
+}
+
+// Defined below, once PhysBody exists. Declared here because
+// PhysicsEnable calls it and the parser above owns the data.
+struct PhysBody;
+bool ApplyPhysDefShape(PhysBody &b, FName cls);
+
 // --- a body ---------------------------------------------------------------
 
 struct PhysBody
@@ -523,6 +641,40 @@ struct PhysBody
 	// is answerable from the log without asking anyone to watch it.
 	bool  restReported = false;
 };
+
+// Give this body the shape its class shipped, if any. Returns false when there
+// is none, and the caller falls back to the box.
+//
+// The hulls are authored relative to the ACTOR'S ORIGIN, which is the natural
+// thing for a tool to emit and matches the model. The solver works in
+// centre-of-mass space. So the offset is taken out here, once, rather than
+// being applied on every vertex on every step.
+bool ApplyPhysDefShape(PhysBody &b, FName cls)
+{
+	if (!g_shapesLoaded) LoadPhysDefs();
+
+	PhysShapeDef *def = g_shapeLib.CheckKey(cls);
+	if (def == nullptr) return false;
+
+	b.hulls = def->hulls;
+	for (unsigned i = 0; i < b.hulls.Size(); i++)
+	{
+		PhysHull &h = b.hulls[i];
+		for (unsigned v = 0; v < h.verts.Size(); v++)
+			h.verts[v] -= b.comOffset;
+		for (unsigned p = 0; p < h.planes.Size(); p++)
+		{
+			// Shifting a plane's origin moves its offset by the projection of
+			// the shift onto its normal. Forgetting this leaves the faces where
+			// the actor's origin was while the vertices move -- an object that
+			// looks right and collides somewhere else.
+			FVector4 &pl = h.planes[p];
+			pl.W -= (pl.X * b.comOffset.X + pl.Y * b.comOffset.Y + pl.Z * b.comOffset.Z);
+		}
+		HullFinish(h);
+	}
+	return true;
+}
 
 TArray<PhysBody> g_bodies;
 
@@ -1965,9 +2117,23 @@ static void PhysicsEnable(AActor *self, double massKg, double hx, double hy, dou
 	if (hy < 0.002) hy = 0.002;
 	if (hz < 0.002) hz = 0.002;
 	b.half = FVector3((float)hx, (float)hy, (float)hz);
-	// No real geometry supplied, so the shape is the box -- one hull, and the
-	// solver treats it exactly as it treated a box before hulls existed.
+
+	// THE SHAPE IS THE MODEL, if the model shipped one.
+	//
+	// A PHYSDEF lump keyed on this actor's class name replaces the box with the
+	// real geometry. Nothing else changes -- mass, centre of mass and inertia
+	// still come from the arguments, because those are properties of the OBJECT
+	// and a mod author knows them better than a mesh does.
+	//
+	// Falling back to the box when there is no entry is the whole reason this
+	// is safe to add: a mod that ships no hulls behaves exactly as it did.
 	b.hulls.Clear();
+	if (!ApplyPhysDefShape(b, self->GetClass()->TypeName))
+	{
+		// No real geometry supplied, so the shape is the box -- one hull, and
+		// the solver treats it exactly as it treated a box before hulls
+		// existed.
+	}
 	b.ShapeFinish();
 
 	if (massKg < 0.001) massKg = 0.001;
