@@ -949,7 +949,6 @@ set (PCH_SOURCES
 	playsim/p_maputl.cpp
 	playsim/p_mobj.cpp
 	p_openmap.cpp
-	playsim/p_physics.cpp
 	playsim/p_pspr.cpp
 	p_saveg.cpp
 	p_setup.cpp

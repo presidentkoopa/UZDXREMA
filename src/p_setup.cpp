@@ -44,7 +44,6 @@
 #include "a_keys.h"
 #include "s_sndseq.h"
 #include "sbar.h"
-#include "p_physics.h"
 #include "p_setup.h"
 #include "r_data/r_interpolate.h"
 #include "r_sky.h"
@@ -404,12 +403,6 @@ void FLevelLocals::ClearLevelData(bool fullgc)
 	if (automap) automap->Destroy();
 	Behaviors.UnloadModules();
 	localEventManager->Shutdown();
-
-	// RS FORK -- VR object physics. After the thinkers are gone (so no actor
-	// still references a body) and before the level geometry it collides
-	// against is freed.
-	P_PhysicsLevelEnd();
-
 	if (aabbTree) delete aabbTree;
 	if (levelMesh) delete levelMesh;
 	aabbTree = nullptr;

@@ -972,52 +972,6 @@ class Actor : Thinker native
 	native clearscope double Distance3DSquared(Actor other) const;
 	native void SetOrigin(vector3 newpos, bool moving);
 	native void SetXYZ(vector3 newpos);
-
-	// RS FORK -- rigid-body physics. See src/playsim/p_physics.h.
-	//
-	// Once enabled, the SOLVER owns this actor's position, orientation and
-	// velocity: Doom's movement is skipped entirely for it, and writing pos or
-	// Vel from script will simply be overwritten on the next frame. Move it
-	// with impulses instead.
-	//
-	// Mass is in KILOGRAMS and the half-extents of its collision box are in
-	// METRES -- real units, not map units, because that is what the simulation
-	// runs in. A pistol magazine is roughly 0.25kg and (0.015, 0.045, 0.06).
-	// comX/Y/Z is where the centre of mass sits relative to the actor's ORIGIN,
-	// in metres, in the model's own axes. Rarely zero for a real model: a
-	// magazine exported with its origin at the base has its mass centred about
-	// 5cm above that, and leaving this at zero puts the collision box over the
-	// bottom half of the mesh only.
-	native void PhysicsEnable(double massKg, double halfX, double halfY, double halfZ,
-		double comX = 0, double comY = 0, double comZ = 0);
-	native void PhysicsDisable();
-	// kg*m/s at the centre of mass -- this is how a throw gets its speed.
-	native void PhysicsAddImpulse(double x, double y, double z);
-	// Spin, radians per second.
-	native void PhysicsAddSpin(double x, double y, double z);
-	// What it sounds like hitting something, and how hard it must hit (m/s)
-	// before it makes any noise at all.
-	native void PhysicsSetImpactSound(sound snd, double minSpeed = 0.6);
-	// True once it has come to rest and stopped simulating.
-	native clearscope bool PhysicsIsAsleep() const;
-	// Hold it (the solver stops moving it) or let it go. To throw: hold, drive
-	// it with PhysicsSetTransform each tic, then release and add an impulse.
-	native void PhysicsSetHeld(bool held);
-	// Place a held body. Position in MAP units, angles in degrees.
-	native void PhysicsSetTransform(double x, double y, double z, double yaw, double pitch, double roll);
-
-	// GRABBING. Prefer these to PhysicsSetHeld/SetTransform: the engine then
-	// carries the object at physics rate rather than at the 35Hz tic rate, and
-	// it keeps the pose it had when you grabbed it instead of snapping to the
-	// hand. Releasing needs no impulse -- a held object has been inheriting the
-	// hand's motion all along, so a throw is simply letting go.
-	// hand: 0 = main, 1 = off.
-	native void PhysicsGrab(int hand);
-	native void PhysicsRelease();
-	native clearscope bool PhysicsIsHeld() const;
-	// Distance in METRES from a map-space point to this body's collision SHAPE,
-	// not to its origin -- so reaching for the end of a long object works.
-	native clearscope double PhysicsDistanceTo(double x, double y, double z) const;
 	native clearscope Actor GetPointer(int aaptr);
 	native double BulletSlope(out FTranslatedLineTarget pLineTarget = null, int aimflags = 0);
 	native void CheckFakeFloorTriggers (double oldz, bool oldz_has_viewheight = false);

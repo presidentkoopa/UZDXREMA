@@ -516,61 +516,16 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 		}
 	}
 
-	// RS FORK -- MOD-OWNED PLACEMENT FOR *WORLD* MODELS.
-	//
-	// PlacementCVars already existed, but only in RenderHUDModel -- so the
-	// sliders worked for HUD weapons (RS_Hands) and did absolutely nothing for
-	// a world actor, which is a different function entirely. A physically held
-	// gun is a world actor, so it could never be tuned this way at all.
-	//
-	// Same six CVARs, same names, same order and sign as the HUD path, so a
-	// value found on a slider means the same thing in either and can be folded
-	// into MODELDEF verbatim afterwards.
-	//
-	// Looked up by name every frame rather than cached, for the reason the HUD
-	// path documents: MODELDEF is parsed before a mod's CVARINFO is guaranteed
-	// to have run, so a null resolved once would be permanent.
-	float wPlaceOfs[3] = { 0.0f, 0.0f, 0.0f };
-	float wPlaceRot[3] = { 0.0f, 0.0f, 0.0f };
-	float wPlaceScale = 1.0f;
-	if (placementCVars != NAME_None)
-	{
-		static const char *sufOfs[3] = { "_ofs_x", "_ofs_y", "_ofs_z" };
-		static const char *sufRot[3] = { "_yaw", "_pitch", "_roll" };
-		FString nm;
-		for (int i = 0; i < 3; ++i)
-		{
-			nm.Format("%s%s", placementCVars.GetChars(), sufOfs[i]);
-			if (FBaseCVar *cv = FindCVar(nm.GetChars(), nullptr))
-				wPlaceOfs[i] = (float)cv->GetGenericRep(CVAR_Float).Float;
-			nm.Format("%s%s", placementCVars.GetChars(), sufRot[i]);
-			if (FBaseCVar *cv = FindCVar(nm.GetChars(), nullptr))
-				wPlaceRot[i] = (float)cv->GetGenericRep(CVAR_Float).Float;
-		}
-
-		// Scale defaults to 1, NOT to the 0 an absent CVAR reads as -- a
-		// missing or zeroed slider must leave the model alone rather than
-		// collapse it to a point.
-		nm.Format("%s_scale", placementCVars.GetChars());
-		if (FBaseCVar *cv = FindCVar(nm.GetChars(), nullptr))
-		{
-			const float s = (float)cv->GetGenericRep(CVAR_Float).Float;
-			if (s > 0.0f) wPlaceScale = s;
-		}
-	}
-
 	// 3) Scaling model.
-	objectToWorldMatrix.scale(scaleFactorX * wPlaceScale, scaleFactorZ * wPlaceScale, scaleFactorY * wPlaceScale);
+	objectToWorldMatrix.scale(scaleFactorX, scaleFactorZ, scaleFactorY);
 
 	// 4) Aplying model offsets (model offsets do not depend on model scalings).
-	objectToWorldMatrix.translate((xoffset + wPlaceOfs[0]) / xscale,
-		(zoffset + wPlaceOfs[2]) / (zscale*stretch),
-		(yoffset + wPlaceOfs[1]) / yscale);
+	objectToWorldMatrix.translate(xoffset / xscale, zoffset / (zscale*stretch), yoffset / yscale);
 
 	// 5) Applying model rotations.
-	objectToWorldMatrix.rotate(-(angleoffset + wPlaceRot[0]), 0, 1, 0);
-	objectToWorldMatrix.rotate(pitchoffset + wPlaceRot[1], 0, 0, 1);
-	objectToWorldMatrix.rotate(-(rolloffset + wPlaceRot[2]), 1, 0, 0);
+	objectToWorldMatrix.rotate(-angleoffset, 0, 1, 0);
+	objectToWorldMatrix.rotate(pitchoffset, 0, 0, 1);
+	objectToWorldMatrix.rotate(-rolloffset, 1, 0, 0);
 
 	if (!(flags & MDL_CORRECTPIXELSTRETCH) && modelIDs.Size() > 0)
 	{

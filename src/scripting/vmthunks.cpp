@@ -6361,40 +6361,6 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, GetModelBoundsHint, GetModelBoundsHi
 	return min(numret, 2);
 }
 
-// GetActorModelClass -- which class's MODELDEF an ACTOR INSTANCE actually
-// resolves against right now, as opposed to which class its own type is.
-// Mirrors FindModelFrame(AActor*)'s own fallback exactly (r_data/models.cpp,
-// line ~2163): modelData->modelDef if a per-instance override has been set,
-// else the actor's own GetClass(). A_ChangeModel sets modelData->modelDef as
-// a side effect on the INSTANCE it is called on (see actor.zs's own
-// `hasmodel` comment, which documents exactly this: "A_ChangeModel sets it
-// on the instance as a side effect"), and it persists there regardless of
-// whether that actor is currently being rendered.
-//
-// Built so a holster/prop system can show the CORRECT model for a weapon
-// some OTHER mod has model-swapped onto a per-instance basis. ModelSwapper
-// is the motivating case: it points a flat-sprite weapon's psprite at a
-// donor class's model via A_ChangeModel called on the live weapon instance,
-// and never registers a MODELDEF entry under that weapon's OWN class name
-// at all -- a caller doing its own class-name-keyed lookup (what every
-// GetModel*Hint above already does, and what RS_Holsters' holster prop used
-// to do directly) finds nothing for exactly that weapon, because the model
-// only ever lived on the instance, never on the class.
-static PClass* GetActorModelClass(FLevelLocals* self, AActor* act)
-{
-	if (act == nullptr) return nullptr;
-	if (act->modelData != nullptr && act->modelData->modelDef != nullptr)
-		return act->modelData->modelDef;
-	return act->GetClass();
-}
-
-DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, GetActorModelClass, GetActorModelClass)
-{
-	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
-	PARAM_OBJECT(act, AActor);
-	ACTION_RETURN_POINTER(GetActorModelClass(self, act));
-}
-
 DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, AimBillboard, AimBillboard)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);

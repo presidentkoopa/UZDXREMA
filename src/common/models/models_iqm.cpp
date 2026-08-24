@@ -904,28 +904,7 @@ const TArray<VSMatrix>* IQMModel::CalculateBonesOnlyOffsets(TArray<BoneOverride>
 
 			for (int i = 0; i < numbones; i++)
 			{
-				// SEEDED FROM THE BIND POSE, not default-constructed.
-				//
-				// A default TRS is identity. The matrix built from it is then
-				// multiplied by inversebaseframe[i], so every bone came out
-				// displaced by the INVERSE OF ITS OWN BIND POSE rather than
-				// left where the model put it. The moment anything asked for a
-				// bone -- a position, a rotation, anything -- the whole model
-				// was transformed by that inverse.
-				//
-				// How badly depends entirely on what the bind pose happens to
-				// be, which is why it looks like a different bug on every
-				// model: a rig whose root carries a 90 degree rotation renders
-				// sideways, and one whose root carries a 0.01 scale renders a
-				// hundred times too large, wrapped around the camera.
-				//
-				// TRS::operator= is templated precisely so an IQMJoint can be
-				// assigned here (TRS.h).
-				// Declared then assigned, NOT copy-initialised: TRS has only a
-				// templated operator= (TRS.h) and no converting constructor, so
-				// `TRS bone = Joints[i];` cannot find a conversion at all.
 				TRS bone;
-				bone = Joints[i];
 
 				out->bones[i] = {};
 
@@ -965,15 +944,7 @@ const TArray<VSMatrix>* IQMModel::CalculateBonesOnlyOffsets(TArray<BoneOverride>
 
 			for (int i = 0; i < numbones; i++)
 			{
-				// Seeded from the bind pose -- the same defect as the branch
-				// above, in the path that has no output struct. Both had to be
-				// fixed: fixing one leaves the model correct only when
-				// something happens to be collecting bone output that frame.
-				// Declared then assigned, NOT copy-initialised: TRS has only a
-				// templated operator= (TRS.h) and no converting constructor, so
-				// `TRS bone = Joints[i];` cannot find a conversion at all.
 				TRS bone;
-				bone = Joints[i];
 
 				(*in)[i].Modify(bone, time);
 
