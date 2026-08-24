@@ -61,8 +61,9 @@ building or launching the engine.
 8. [Input, menus and build](#8-input-menus-and-build)
 9. [Gap inventory](#9-gap-inventory)
 10. [Capability assessment](#10-capability-assessment)
-11. [Path forward](#11-path-forward)
-12. [Appendix — all 80 changed files](#12-appendix--all-80-changed-files)
+11. [Path forward](#11-path-forward--zdoom-vr-with-high-fidelity-guns)
+12. [Current working state](#12-current-working-state)
+13. [Appendix — all 80 changed files](#13-appendix--all-80-changed-files)
 
 ---
 
@@ -1731,7 +1732,66 @@ debris piles read as settled.
 
 ---
 
-## 12. Appendix — all 80 changed files
+## 12. Current working state
+
+Three files are modified in the working tree and **not** part of the committed
+`1d2572bdcc..main` scope the rest of this document covers. Two of them post-date the audit.
+They are recorded here because uncommitted work is invisible to a commit-range diff and would
+otherwise leave a hole in the record.
+
+### `src/scripting/vmthunks.cpp` + `wadsrc/static/zscript/doombase.zs`
+
+One new native on `FLevelLocals`, plus its ZScript declaration:
+
+```
+native class<Actor> GetActorModelClass(Actor act);
+```
+
+It answers *which class's MODELDEF a live actor instance actually resolves against right now*,
+as distinct from what its own type is:
+
+```cpp
+if (act->modelData != nullptr && act->modelData->modelDef != nullptr)
+    return act->modelData->modelDef;
+return act->GetClass();
+```
+
+**Verified:** this mirrors `FindModelFrame(AActor*)`'s own fallback exactly — the ternary at
+[models.cpp:2163](src/r_data/models.cpp:2163) is
+`(thing->modelData && thing->modelData->modelDef) ? thing->modelData->modelDef : thing->GetClass()`.
+Read-only; it changes nothing about how anything renders.
+
+**Why it exists.** `A_ChangeModel` sets `modelData->modelDef` on the *instance* it is called on.
+A mod that model-swaps that way — ModelSwapper is the motivating case, pointing a flat-sprite
+weapon's psprite at a donor class's model — never registers a MODELDEF entry under the weapon's
+own class name. So any caller doing a class-name-keyed lookup finds nothing for exactly that
+weapon, because the model only ever lived on the instance. Every `GetModel*Hint` native above it
+in the same file has that blind spot; this one does not.
+
+Relevant to §9: it is the same class of problem as the `GetLocalExtent` gap — a model-identity
+question that class-keyed lookup cannot answer.
+
+### `src/common/rendering/hwrenderer/data/hw_vrwheel.cpp`
+
+Predates this session and belongs to a different lane sharing this engine tree. `OpenWheel`
+gains an early-out reading a **mod-owned** cvar:
+
+```cpp
+if (FBaseCVar *suppress = FindCVar("wr_suppress_native_wheel", nullptr))
+{
+    UCVarValue v = suppress->GetGenericRep(CVAR_Bool);
+    if (v.Bool) return;
+}
+```
+
+The engine *reads* a cvar the mod declares, rather than declaring one for the mod to write.
+Absent means enabled, so a session with no such mod loaded behaves exactly as before. Looked up
+per call rather than cached, since a pk3 can create the cvar long after this translation unit's
+statics initialise.
+
+---
+
+## 13. Appendix — all 80 changed files
 
 | File | Lines |
 |---|---|
