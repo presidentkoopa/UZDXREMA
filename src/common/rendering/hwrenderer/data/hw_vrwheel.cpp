@@ -1153,6 +1153,30 @@ namespace
 
 	static void OpenWheel(EVRWheelType type)
 	{
+		// A LOADED MOD MAY SUPPRESS THIS WHEEL ENTIRELY.
+		//
+		// Read the MOD's cvar rather than keeping an engine-side one for it
+		// to write. That direction is not a style preference, it is the only
+		// one that works: CVar.SetInt/SetBool refuse any cvar lacking
+		// CVAR_MOD when called outside menu code (vmnatives.cpp:944), so a
+		// mod writing an engine cvar from its own tick aborts the VM. An
+		// engine READ of a mod cvar has no such restriction, and needs
+		// nothing declared here at all.
+		//
+		// Absent -- no such mod loaded -- means enabled, so a plain session
+		// behaves exactly as it always has. Looked up per call rather than
+		// cached because a pk3 can be loaded, and the cvar created, long
+		// after this translation unit's statics are initialised; OpenWheel
+		// runs on a button press, so the cost is irrelevant.
+		if (FBaseCVar *suppress = FindCVar("wr_suppress_native_wheel", nullptr))
+		{
+			UCVarValue v = suppress->GetGenericRep(CVAR_Bool);
+			if (v.Bool)
+			{
+				return;
+			}
+		}
+
 		auto vrmode = VRMode::GetVRModeCached(true);
 		auto player = &players[consoleplayer];
 		if (!VRWheel_Available(vrmode) || player == nullptr || player->mo == nullptr)
