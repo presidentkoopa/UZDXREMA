@@ -1,4 +1,4 @@
-i have not verified the credits but i have verified the claims
+PK note - 90% of this is verified. I can't track down the tornado, but damn near everything else I'd seen an interacted.
 ![Doom XR Edition](https://github.com/iAmErmac/DoomXR/blob/doomxr/branding/banner.png)
 
 # UZDXREMA — a rendering fork of DoomXR
@@ -259,6 +259,8 @@ template for the original.
 [status_git]: https://github.com/UZDoom/UZDoom/actions/workflows/continuous_integration.yml
 [badge_git]: https://github.com/UZDoom/UZDoom/actions/workflows/continuous_integration.yml/badge.svg
 
+
+UZDXREMA engine conceptualized and developemnt-directed by PresidentKoopa
 [badge_trans]: https://hosted.weblate.org/widget/uzdoom/svg-badge.svg
 [status_trans]: https://hosted.weblate.org/engage/uzdoom/
 
