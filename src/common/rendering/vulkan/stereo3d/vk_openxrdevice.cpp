@@ -3670,9 +3670,10 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 
 			if (held && !wasHeld)
 			{
-				// rising edge: only a press that STARTS in a holster counts,
+				// rising edge: only a press that STARTS in a holster (or a
+				// hardpoint -- same tap-completion path, see below) counts,
 				// so drifting a held hand into one never stores by accident
-				xrHolsterArmed[h] = holsterHere && *vr_holster_use_grip;
+				xrHolsterArmed[h] = (holsterHere || hardpointHere) && *vr_holster_use_grip;
 				xrHolsterCombo[h] = false;
 			}
 			else if (held)
@@ -3683,7 +3684,14 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			else if (!held && wasHeld)
 			{
 				// falling edge: a clean tap that began and ended in a holster
-				if (xrHolsterArmed[h] && !xrHolsterCombo[h] && holsterHere)
+				// OR a hardpoint. hardpointHere was already being classified
+				// into GRIPCTX_Hardpoint/GRIPSUBJ_Holster above (pose, debug
+				// print) but never actually completed a tap here -- so a
+				// hardpoint-only claim could never fire xrHolsterFire, and
+				// the F13/F14 store/draw pulse (and RS_HardPoints' own
+				// edit-mode drag, which rides the identical netevent) never
+				// ran for a hand that was ONLY inside a hardpoint's radius.
+				if (xrHolsterArmed[h] && !xrHolsterCombo[h] && (holsterHere || hardpointHere))
 					xrHolsterFire[h] = true;
 
 				// A clean tap ANYWHERE (no other button joined it) is also
