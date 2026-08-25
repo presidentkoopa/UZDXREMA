@@ -59,6 +59,23 @@ enum
 	MDL_NOAUTOREVERSE				= 1<<16,	// model ships explicit left/right variants, so never apply the VR non-dominant-hand mirror
 	MDL_USEHANDOFFSETS				= 1<<17,	// apply the live vr_hand_* placement CVARs on top of this model's own MODELDEF offsets
 	MDL_IGNORESKINALPHA				= 1<<18,	// skin alpha carries data, not opacity -- do not alpha-test against it
+
+	// A world actor's model normally gets its transform from where the actor was
+	// last PUT -- position and Angles, written by script in the playsim tic. That
+	// is 35Hz, it is interpolated between tics, and it stops entirely while a menu
+	// is open. There is no controller anywhere in that path: ObjectToWorldMatrix
+	// contains zero references to AttackPos, weaponangles or GetWeaponTransform.
+	// So a world model does not track a hand badly -- it has never been wired to
+	// one at all, which is why moving a gun off a psprite and into the world lost
+	// tracking outright rather than degrading it.
+	//
+	// With one of these set, the model's transform comes from the SAME call the
+	// HUD psprite path has always used -- VRMode::GetWeaponTransform, read fresh
+	// at DRAW time. Not a reimplementation of it: the same function, the same
+	// matrix, the same clock. The model's own MODELDEF scale, offset and angle
+	// offsets still apply on top, exactly as they do for any other world model.
+	MDL_FOLLOWMAINHAND				= 1<<19,	// world model rides the main hand's controller transform, at draw rate
+	MDL_FOLLOWOFFHAND				= 1<<20,	// world model rides the off hand's controller transform, at draw rate
 };
 
 FSpriteModelFrame * FindModelFrame(AActor * thing, int sprite, int frame, bool dropped);
@@ -118,6 +135,10 @@ void RenderHUDModel(FModelRenderer* renderer, DPSprite* psp, FVector3 translatio
 
 struct CalcModelFrameInfo
 {
+	// RS fork -- carried so CalcModelOverrides can honour an actor's explicit
+	// ModelFrame the same way it already honours a psprite's. It receives the
+	// psprite but never received the actor.
+	const AActor * actor;
 	int smf_flags;
 	const FSpriteModelFrame * smfNext;
 	float inter;

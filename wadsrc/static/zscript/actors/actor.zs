@@ -382,6 +382,16 @@ class Actor : Thinker native
 	// to the weapon; use AttackRoll for anything that must agree over a net.
 	// OffhandRoll is already true and needs no counterpart.
 	native readonly double MainHandRoll;
+
+	// RS fork -- address a model frame directly, bypassing the sprite letter
+	// table. The hand rig's poses live at 0-10 and 1289-1297 and no sprite
+	// letter can name frame 1293, so this is the only way to reach them on a
+	// world actor. Set ModelFrame to -1 to go back to normal resolution.
+	// ModelFrameLerp in 0..1 blends the BONES from ModelFrame toward
+	// ModelFrameNext, so a grip closes instead of snapping shut.
+	native int ModelFrame;
+	native int ModelFrameNext;
+	native float ModelFrameLerp;
 	native readonly vector3 OffhandPos;
 	native readonly double OffhandPitch;
 	native readonly double OffhandRoll;
@@ -1714,6 +1724,29 @@ class Actor : Thinker native
 
 	//input position/direction vectors are in xzy, model space
 	native version("4.15.1") Vector3, Vector3, Vector3 TransformByBone(int boneIndex, Vector3 position, Vector3 forward = (1,0,0), Vector3 up = (0,0,1), bool include_offsets = true);
+	// RS fork -- VR_WORLDACTOROFFSET.
+	//
+	// Take a point in this actor's MODEL space and return where it is in the
+	// WORLD, plus the model's forward and up axes there. Runs the renderer's own
+	// object-to-world matrix, so it carries the actor transform, every MODELDEF
+	// correction, and -- for a FollowMainHand/FollowOffHand model -- the whole
+	// controller transform.
+	//
+	// TransformByNamedBone stops at model space and cannot tell you where a bone
+	// is in the room. Compose the two and a bone becomes a world position:
+	// seating a gun into a hand is then subtracting one from the other, and the
+	// firing line is the returned forward axis rather than a guess rebuilt out
+	// of Euler angles.
+	native Vector3, Vector3, Vector3 ModelPointToWorld(double mx, double my, double mz);
+
+	// RS fork -- does this actor's model carry this bone? -1 if not.
+	//
+	// The model declares what it is: a mesh with MARKER_grip has a grip, one
+	// with MARKER_muzzle is a firearm. Every other bone call fails silently on a
+	// missing name -- the setters Printf and no-op, TransformByNamedBone returns
+	// the origin -- so none of them can answer "is it there".
+	native int FindBoneIndex(Name bone);
+
 	native version("4.15.1") Vector3, Vector3, Vector3 TransformByNamedBone(Name boneName, Vector3 position, Vector3 forward = (1,0,0), Vector3 up = (0,0,1), bool include_offsets = true);
 
 	version("4.15.1") Vector3, Vector3, Vector3 GetBonePosition(int boneIndex, bool include_offsets = true)

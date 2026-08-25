@@ -365,6 +365,84 @@ void RenderModel(FModelRenderer *renderer, float x, float y, float z, FSpriteMod
 	renderer->EndDrawModel(actor->RenderStyle, smf_flags);
 }
 
+// VR_WORLDACTOROFFSET -- where a world actor's MODEL actually is, in the world.
+//
+// THE GAP THIS FILLS.
+//
+// TransformByNamedBone answers "where is this bone" in MODEL space. It applies
+// the bone matrix and stops. It never sees the object-to-world matrix -- the
+// actor's position, the MODELDEF scale and offsets and angle corrections, or,
+// for a followed model, the entire controller transform loaded by
+// GetWeaponTransform. So script could ask where MARKER_grip was and get an
+// answer in a space with no relation to the room.
+//
+// That is why every attempt at seating a world model has come down to a human
+// finding an offset by eye on a slider. There was no way to ask.
+//
+// With this, seating is arithmetic and not taste:
+//
+//     grip = gun.ModelPointToWorld(gun.TransformByNamedBone('MARKER_grip', ...))
+//     palm = hand.ModelPointToWorld(hand.TransformByNamedBone('HANDPALM_joint', ...))
+//     gun.SetOrigin(gun.Pos + (palm - grip), false)
+//
+// and the firing line is the returned forward axis -- the direction the barrel
+// is actually drawn pointing, not a reconstruction from Euler angles.
+//
+// Returns position, forward, up. Forward and up are unit vectors in world space,
+// taken from the matrix's own basis, so they carry every correction the model
+// received including ones nothing in script knows about.
+static void ModelWorldTransform(AActor *self, double mx, double my, double mz,
+	DVector3 &posOut, DVector3 &fwdOut, DVector3 &upOut)
+{
+	posOut = DVector3(0, 0, 0);
+	fwdOut = DVector3(1, 0, 0);
+	upOut  = DVector3(0, 0, 1);
+	if (self == nullptr) return;
+
+	// The frame the renderer would pick for this actor right now. Decoupled
+	// actors resolve through BaseSpriteModelFrames, which is why an actor
+	// without BaseFrame answers nothing here -- the same reason it draws nothing.
+	FSpriteModelFrame *smf = FindModelFrame(self, self->sprite, self->frame, false);
+	if (smf == nullptr) return;
+
+	const double ticFrac = I_GetTimeFrac();
+	VSMatrix m = smf->ObjectToWorldMatrix(self,
+		(float)self->X(), (float)self->Y(), (float)self->Z(), ticFrac);
+
+	// Column-major, the way VSMatrix stores it: [0..2] is axis X, [4..6] axis Y,
+	// [8..10] axis Z, [12..14] the translation.
+	const FLOATTYPE *v = m.get();
+	auto xf = [&](double a, double b, double c) {
+		return DVector3(
+			v[0]*a + v[4]*b + v[8]*c  + v[12],
+			v[1]*a + v[5]*b + v[9]*c  + v[13],
+			v[2]*a + v[6]*b + v[10]*c + v[14]);
+	};
+	posOut = xf(mx, my, mz);
+
+	// Axes as differences from the transformed origin, so translation cancels
+	// and any scale baked into the matrix normalises away.
+	const DVector3 org = xf(0, 0, 0);
+	DVector3 fx = xf(1, 0, 0) - org;
+	DVector3 fy = xf(0, 1, 0) - org;
+	if (fx.Length() > 1e-9) fwdOut = fx / fx.Length();
+	if (fy.Length() > 1e-9) upOut  = fy / fy.Length();
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(AActor, ModelPointToWorld, ModelWorldTransform)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_FLOAT(mx);
+	PARAM_FLOAT(my);
+	PARAM_FLOAT(mz);
+	DVector3 pos, fwd, up;
+	ModelWorldTransform(self, mx, my, mz, pos, fwd, up);
+	if (numret > 2) ret[2].SetVector(up);
+	if (numret > 1) ret[1].SetVector(fwd);
+	if (numret > 0) ret[0].SetVector(pos);
+	return numret;
+}
+
 VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(AActor * actor, float x, float y, float z, double ticFrac)
 {
 	int smf_flags = getFlags(actor->modelData);
@@ -451,8 +529,49 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 	VSMatrix objectToWorldMatrix;
 	objectToWorldMatrix.loadIdentity();
 
-	// Model space => World space
-	objectToWorldMatrix.translate(translation.X, translation.Z, translation.Y);
+	// MDL_FOLLOWMAINHAND / MDL_FOLLOWOFFHAND -- see the flag comment in models.h.
+	//
+	// Deliberately GetWeaponTransform and not a reconstruction of it. Two prior
+	// attempts to rebuild this engine's rotation basis by hand each passed their
+	// own self-consistency check and each still landed every prop 4.55 units off,
+	// because neither accounted for RenderModel negating pitch before rotating.
+	// Replaying the engine's own transform is the only approach in this tree's
+	// history that ever worked, so this calls the exact function the working HUD
+	// path calls and takes the matrix whole -- no decomposition, no Euler round
+	// trip, nothing to get the axis order wrong in.
+	bool followedHand = false;
+	const int followHand = (flags & MDL_FOLLOWMAINHAND) ? VR_MAINHAND
+		: ((flags & MDL_FOLLOWOFFHAND) ? VR_OFFHAND : -1);
+	if (followHand >= 0)
+	{
+		auto vrmode = VRMode::GetVRModeCached(true);
+		if (vrmode != nullptr && vrmode->IsVR() &&
+			vrmode->GetWeaponTransform(&objectToWorldMatrix, followHand, !(flags & MDL_NOAUTOREVERSE)))
+		{
+			followedHand = true;
+		}
+		else
+		{
+			// Not in VR, or the pose is unavailable this frame. Fall back to the
+			// ordinary world placement rather than drawing at the origin.
+			objectToWorldMatrix.loadIdentity();
+		}
+	}
+
+	if (followedHand)
+	{
+		// The controller supplies orientation, so the actor's own Angles must not
+		// be applied on top. Zeroing them here rather than branching around the
+		// rotation block below leaves that block's structure untouched -- a
+		// rotate() of zero degrees is a no-op -- so MDL_ROTATING and the rotation
+		// -centre paths keep behaving exactly as they always have.
+		rotation.Yaw = rotation.Pitch = rotation.Roll = DAngle::fromDeg(0.);
+	}
+	else
+	{
+		// Model space => World space
+		objectToWorldMatrix.translate(translation.X, translation.Z, translation.Y);
+	}
 
 	// consider the pixel stretching. For non-voxels this must be factored out here
 	float stretch = 1.f;
@@ -516,16 +635,77 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 		}
 	}
 
+	// PlacementCVars on the WORLD path.
+	//
+	// This used to exist only in RenderHUDModel, which made the feature exactly
+	// backwards: a physically held gun IS a world actor, so the one case that
+	// most needs live tuning was the one case the sliders could not reach, and
+	// moving them did nothing at all with nothing in the log to say why.
+	// Commit 026d2a8a80 fixed that and the wholesale revert took it back out.
+	//
+	// Summed into the SAME translate and rotate calls as the MODELDEF values,
+	// never applied afterwards. Rotations do not commute: a yaw applied after the
+	// model's own pitch and roll turns about an already-rotated axis and is NOT
+	// the same number added to angleoffset. Because they fold in here, a value
+	// found by eye transfers into the MODELDEF verbatim and the slider returns to
+	// zero with nothing moving.
+	float wPlaceOfs[3] = { 0.0f, 0.0f, 0.0f };
+	float wPlaceRot[3] = { 0.0f, 0.0f, 0.0f };
+	float wPlaceScale = 1.0f;
+	// PER-AXIS scale, on top of the uniform one. Needed by anything whose three
+	// dimensions are genuinely different numbers -- a drawn collision box, most
+	// obviously, whose whole value is being the same three numbers the solver
+	// was handed. Axes are stated in ACTOR terms, matching _ofs_x/_y/_z:
+	// x = forward, y = sideways, z = up.
+	float wPlaceAxis[3] = { 1.0f, 1.0f, 1.0f };
+	if (placementCVars != NAME_None)
+	{
+		static const char *sufOfs[3] = { "_ofs_x", "_ofs_y", "_ofs_z" };
+		static const char *sufRot[3] = { "_yaw", "_pitch", "_roll" };
+		FString nm;
+		for (int i = 0; i < 3; ++i)
+		{
+			nm.Format("%s%s", placementCVars.GetChars(), sufOfs[i]);
+			if (FBaseCVar *cv = FindCVar(nm.GetChars(), nullptr))
+				wPlaceOfs[i] = (float)cv->GetGenericRep(CVAR_Float).Float;
+			nm.Format("%s%s", placementCVars.GetChars(), sufRot[i]);
+			if (FBaseCVar *cv = FindCVar(nm.GetChars(), nullptr))
+				wPlaceRot[i] = (float)cv->GetGenericRep(CVAR_Float).Float;
+		}
+		// Defaults to 1, NOT the 0 an absent cvar reads as -- a missing slider
+		// must leave the model alone, not collapse it to a point.
+		nm.Format("%s_scale", placementCVars.GetChars());
+		if (FBaseCVar *cv = FindCVar(nm.GetChars(), nullptr))
+		{
+			const float sc = (float)cv->GetGenericRep(CVAR_Float).Float;
+			if (sc > 0.0f) wPlaceScale = sc;
+		}
+		static const char *sufAxis[3] = { "_scale_x", "_scale_y", "_scale_z" };
+		for (int i = 0; i < 3; ++i)
+		{
+			nm.Format("%s%s", placementCVars.GetChars(), sufAxis[i]);
+			if (FBaseCVar *cv = FindCVar(nm.GetChars(), nullptr))
+			{
+				const float sc = (float)cv->GetGenericRep(CVAR_Float).Float;
+				if (sc > 0.0f) wPlaceAxis[i] = sc;
+			}
+		}
+	}
+
 	// 3) Scaling model.
-	objectToWorldMatrix.scale(scaleFactorX, scaleFactorZ, scaleFactorY);
+	objectToWorldMatrix.scale(scaleFactorX * wPlaceScale * wPlaceAxis[0],
+		scaleFactorZ * wPlaceScale * wPlaceAxis[2],
+		scaleFactorY * wPlaceScale * wPlaceAxis[1]);
 
 	// 4) Aplying model offsets (model offsets do not depend on model scalings).
-	objectToWorldMatrix.translate(xoffset / xscale, zoffset / (zscale*stretch), yoffset / yscale);
+	objectToWorldMatrix.translate((xoffset + wPlaceOfs[0]) / xscale,
+		(zoffset + wPlaceOfs[2]) / (zscale*stretch),
+		(yoffset + wPlaceOfs[1]) / yscale);
 
 	// 5) Applying model rotations.
-	objectToWorldMatrix.rotate(-angleoffset, 0, 1, 0);
-	objectToWorldMatrix.rotate(pitchoffset, 0, 0, 1);
-	objectToWorldMatrix.rotate(-rolloffset, 1, 0, 0);
+	objectToWorldMatrix.rotate(-(angleoffset + wPlaceRot[0]), 0, 1, 0);
+	objectToWorldMatrix.rotate(pitchoffset + wPlaceRot[1], 0, 0, 1);
+	objectToWorldMatrix.rotate(-(rolloffset + wPlaceRot[2]), 1, 0, 0);
 
 	if (!(flags & MDL_CORRECTPIXELSTRETCH) && modelIDs.Size() > 0)
 	{
@@ -654,6 +834,10 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	float placeOfs[3] = { 0.0f, 0.0f, 0.0f };
 	float placeRot[3] = { 0.0f, 0.0f, 0.0f };
 	float placeScale = 1.0f;
+	// Per-axis, same as the world path -- kept in step so a prefix behaves the
+	// same whichever path draws it. A model tuned on one and moved to the other
+	// silently losing an axis is the kind of asymmetry that costs a session.
+	float placeAxis[3] = { 1.0f, 1.0f, 1.0f };
 	if (smf->placementCVars != NAME_None)
 	{
 		static const char *sufOfs[3] = { "_ofs_x", "_ofs_y", "_ofs_z" };
@@ -677,6 +861,16 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 		{
 			const float s = (float)cv->GetGenericRep(CVAR_Float).Float;
 			if (s > 0.0f) placeScale = s;
+		}
+		static const char *sufAxis[3] = { "_scale_x", "_scale_y", "_scale_z" };
+		for (int i = 0; i < 3; ++i)
+		{
+			nm.Format("%s%s", smf->placementCVars.GetChars(), sufAxis[i]);
+			if (FBaseCVar *cv = FindCVar(nm.GetChars(), nullptr))
+			{
+				const float v = (float)cv->GetGenericRep(CVAR_Float).Float;
+				if (v > 0.0f) placeAxis[i] = v;
+			}
 		}
 	}
 
@@ -860,7 +1054,9 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	//Scale weapon
 	// placeScale is the mod's own live slider, multiplied onto the global one so
 	// a per-weapon size can be found without disturbing every other weapon.
-	objectToWorldMatrix.scale(vr_weaponScale * placeScale, vr_weaponScale * placeScale, vr_weaponScale * placeScale);
+	objectToWorldMatrix.scale(vr_weaponScale * placeScale * placeAxis[0],
+		vr_weaponScale * placeScale * placeAxis[2],
+		vr_weaponScale * placeScale * placeAxis[1]);
 
 	float orientation = smf->xscale * smf->yscale * smf->zscale;
 
@@ -1064,6 +1260,16 @@ CalcModelFrameInfo CalcModelFrame(FLevelLocals *Level, const FSpriteModelFrame *
 		inter   = f;
 		smfNext = smf;
 	}
+	// RS FORK -- the same, for a WORLD ACTOR. A world-actor hand has no psprite
+	// to carry the blend, and without this every pose change is a single-tic
+	// jump between rigged shapes, which reads as the hand teleporting.
+	else if (actor && actor->ModelFrameLerp >= 0.f)
+	{
+		float f = actor->ModelFrameLerp;
+		if (f > 1.f) f = 1.f;
+		inter   = f;
+		smfNext = smf;
+	}
 
 	// RS FORK -- NATIVE STATE REMAP interpolation (FORK_CHANGES.md, "Native
 	// state remap"). When the weapon carries a state->frame table, the
@@ -1103,6 +1309,7 @@ CalcModelFrameInfo CalcModelFrame(FLevelLocals *Level, const FSpriteModelFrame *
 
 	return
 	{
+		actor,          // RS fork -- so the overrides pass can read ModelFrame
 		smf_flags,
 		smfNext,
 		inter,
@@ -1245,6 +1452,15 @@ bool CalcModelOverrides(int i, const FSpriteModelFrame *smf, DActorModelData* da
 	{
 		out.modelframe     = psp->ModelFrame;
 		out.modelframenext = (psp->ModelFrameNext >= 0) ? psp->ModelFrameNext : psp->ModelFrame;
+		out.modelframe_explicit = true;
+	}
+	// RS FORK -- the same, for a WORLD ACTOR. Checked second so a psprite still
+	// wins on the HUD path; the two never both apply to one draw.
+	else if (info.actor && info.actor->ModelFrame >= 0)
+	{
+		out.modelframe     = info.actor->ModelFrame;
+		out.modelframenext = (info.actor->ModelFrameNext >= 0)
+			? info.actor->ModelFrameNext : info.actor->ModelFrame;
 		out.modelframe_explicit = true;
 	}
 
@@ -1757,6 +1973,14 @@ void ParseModelDefLump(int Lump)
 				else if (sc.Compare("ignoretranslation"))
 				{
 					smf.flags |= MDL_IGNORETRANSLATION;
+				}
+				else if (sc.Compare("followmainhand"))
+				{
+					smf.flags |= MDL_FOLLOWMAINHAND;
+				}
+				else if (sc.Compare("followoffhand"))
+				{
+					smf.flags |= MDL_FOLLOWOFFHAND;
 				}
 				else if (sc.Compare("pitchfrommomentum"))
 				{

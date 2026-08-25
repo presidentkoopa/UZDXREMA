@@ -1046,6 +1046,16 @@ struct LevelLocals native
 	// model format that has not measured its own geometry for this.
 	native bool, double GetModelBoundsHint(class<Actor> cls, int sprite, int frame);
 
+	// Which class's MODELDEF a live ACTOR INSTANCE actually resolves
+	// against right now -- modelData->modelDef if something (A_ChangeModel,
+	// called on this exact instance) set a per-instance override, else the
+	// actor's own class. Lets a holster/prop system show the correct model
+	// for a weapon another mod has model-swapped per-instance (ModelSwapper
+	// is the motivating case) instead of doing its own class-name lookup,
+	// which finds nothing for a weapon that was never given its own
+	// MODELDEF entry -- the swap only ever lived on the instance.
+	native class<Actor> GetActorModelClass(Actor act);
+
 	native int, Vector2 AimBillboard(Vector3 start, Vector3 dir, double maxDist = 0);
 	// Point versus billboard -- the touch case. Returns the nearest billboard
 	// the point is within maxRange of and inside the bounds of, its UV, and

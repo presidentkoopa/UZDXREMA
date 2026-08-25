@@ -1752,6 +1752,30 @@ public:
 	// OffhandRoll needs no equivalent: nothing zeroes it outside multiplayer.
 	DAngle   MainHandRoll;
 
+	// RS FORK -- DIRECT MODEL FRAME ADDRESSING FOR WORLD ACTORS.
+	//
+	// The same three fields DPSprite has carried since the psprite hands were
+	// posed (p_pspr.h). They are the ONLY mechanism in this tree that has ever
+	// actually driven a rigged hand to a chosen shape: the decoupled animation
+	// path resolves a frame through the sprite letter table, which caps at
+	// MAX_SPRITE_FRAMES, and the hand rig's poses live at frames 0-10 and
+	// 1289-1297. There is no letter that names frame 1293.
+	//
+	// Absent these, a world-actor hand had no way to be posed at all -- which is
+	// why the manipulation set has been authored and unreachable the whole time.
+	//
+	// ModelFrame < 0 means "resolve normally", so an actor that never touches
+	// them behaves exactly as before. ModelFrameLerp in 0..1 blends ModelFrame
+	// toward ModelFrameNext by that factor, blending BONE MATRICES -- the
+	// fingers travel between shapes instead of the hand snapping.
+	//
+	// Renderer-owned and not serialised, same as the Hmd* block: a pose is
+	// re-decided every tic from live state, so persisting one would restore a
+	// grip on a gun that is no longer held.
+	int   ModelFrame     = -1;
+	int   ModelFrameNext = -1;
+	float ModelFrameLerp = -1.f;
+
 	DVector3 (*AttackDir)(AActor* actor, DAngle yaw, DAngle pitch);
 
 	DVector3 OffhandPos;

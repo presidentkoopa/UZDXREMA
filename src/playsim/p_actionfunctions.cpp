@@ -5286,6 +5286,43 @@ FModel * GetBoneShared(AActor * self, int model_index, int &bone_index, FName * 
 
 //================================================
 //
+// FindBoneIndex -- does this model have this bone?
+//
+// THE MODEL DECLARES WHAT IT IS.
+//
+// A mesh that ships MARKER_grip is saying "I have a grip"; one that also ships
+// MARKER_muzzle is saying "I am a firearm". That makes the question "should this
+// seat into a hand as a weapon" answerable from the asset itself, with no class
+// list to register in and no per-weapon code -- a new gun drops in with markers
+// and behaves correctly on the first grab.
+//
+// Needed because every other bone entry point takes a name and fails SILENTLY on
+// a miss: the by-name setters Printf and no-op, and TransformByNamedBone returns
+// the origin, which is indistinguishable from a bone that really is at the
+// origin. Neither can answer "is it there".
+//
+// Returns -1 when the actor has no model, no bones, or no bone by that name.
+//
+//================================================
+
+static int FindBoneIndexNative(AActor * self, int boneName_i)
+{
+	if (self == nullptr) return -1;
+	FName bone_name { ENamedName(boneName_i) };
+	int bone_index = -1;
+	FModel * mdl = GetBoneShared(self, 0, bone_index, &bone_name);
+	return mdl ? bone_index : -1;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(AActor, FindBoneIndex, FindBoneIndexNative)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_NAME(bone_name);
+	ACTION_RETURN_INT(FindBoneIndexNative(self, bone_name.GetIndex()));
+}
+
+//================================================
+//
 // SetBoneRotation
 //
 //================================================

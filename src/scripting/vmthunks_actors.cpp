@@ -2232,6 +2232,9 @@ DEFINE_FIELD(AActor, AttackPos)
 DEFINE_FIELD(AActor, AttackPitch)
 DEFINE_FIELD(AActor, AttackRoll)
 DEFINE_FIELD(AActor, MainHandRoll)
+DEFINE_FIELD(AActor, ModelFrame)       // RS fork -- see actor.h
+DEFINE_FIELD(AActor, ModelFrameNext)   // RS fork
+DEFINE_FIELD(AActor, ModelFrameLerp)   // RS fork
 DEFINE_FIELD(AActor, AttackAngle)
 DEFINE_FIELD(AActor, OffhandPos)
 DEFINE_FIELD(AActor, OffhandPitch)
