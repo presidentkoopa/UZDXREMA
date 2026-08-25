@@ -2562,15 +2562,14 @@ OptionMenu "VR3DMenu" protected
  *=======================================*/
 
 OptionMenu "VRPhysicsMenu" protected
+{
+	Title "Object physics"
+
 	StaticText ""
 	// OFF by default. P_PhysicsFrame is called unconditionally from D_DoomLoop,
 	// so with nothing using the module that is a solver iterating an empty list
 	// every frame plus a report line in the log every second, forever.
-	Option "VR object physics", vr_physics,       OnOff
-	Option "Log physics stats", vr_physics_debug, OnOff
-	StaticText ""
-{
-	Title "Object physics"
+	Option "VR object physics", vr_physics, OnOff
 
 	StaticText "How dropped and thrown objects behave.", gold
 	StaticText " "

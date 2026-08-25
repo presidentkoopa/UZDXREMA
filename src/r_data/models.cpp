@@ -443,6 +443,31 @@ DEFINE_ACTION_FUNCTION_NATIVE(AActor, ModelPointToWorld, ModelWorldTransform)
 	return numret;
 }
 
+// PLACEMENT CVARS ARE `user` CVARS, AND FindCVar CANNOT READ THOSE.
+//
+// FindCVar hands back the raw FBaseCVar. For a CVAR_USERINFO cvar that object
+// is not where the value lives: c_cvars.cpp's own GetCVar exists to say so and
+// redirects through callbacks->GetUserCVar(playernum, name) for precisely this
+// case. Read the raw one and you get 0.
+//
+// Which is the worst answer available, because 0 is a legal-looking number.
+// Every guard downstream is `if (v > 0)`, so a scale silently stays 1 and an
+// offset silently stays 0 -- the model draws exactly as if every slider were
+// centred, moving a slider does nothing, and nothing is logged to say the value
+// never arrived. It is why the drawn reach volume came out a fixed sphere
+// rather than the oval its three separate semi-axes describe, and why the
+// offsets could not move it.
+//
+// Returns false only when the cvar genuinely does not exist, so a caller keeps
+// its own default instead of being handed a zero.
+static bool GetPlacementCVar(const char *name, float &out)
+{
+	FBaseCVar *cv = GetCVar(consoleplayer, name);
+	if (cv == nullptr) return false;
+	out = (float)cv->GetGenericRep(CVAR_Float).Float;
+	return true;
+}
+
 VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(AActor * actor, float x, float y, float z, double ticFrac)
 {
 	int smf_flags = getFlags(actor->modelData);
@@ -666,28 +691,24 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 		for (int i = 0; i < 3; ++i)
 		{
 			nm.Format("%s%s", placementCVars.GetChars(), sufOfs[i]);
-			if (FBaseCVar *cv = FindCVar(nm.GetChars(), nullptr))
-				wPlaceOfs[i] = (float)cv->GetGenericRep(CVAR_Float).Float;
+			GetPlacementCVar(nm.GetChars(), wPlaceOfs[i]);
 			nm.Format("%s%s", placementCVars.GetChars(), sufRot[i]);
-			if (FBaseCVar *cv = FindCVar(nm.GetChars(), nullptr))
-				wPlaceRot[i] = (float)cv->GetGenericRep(CVAR_Float).Float;
+			GetPlacementCVar(nm.GetChars(), wPlaceRot[i]);
 		}
 		// Defaults to 1, NOT the 0 an absent cvar reads as -- a missing slider
 		// must leave the model alone, not collapse it to a point.
 		nm.Format("%s_scale", placementCVars.GetChars());
-		if (FBaseCVar *cv = FindCVar(nm.GetChars(), nullptr))
 		{
-			const float sc = (float)cv->GetGenericRep(CVAR_Float).Float;
-			if (sc > 0.0f) wPlaceScale = sc;
+			float sc = 0.0f;
+			if (GetPlacementCVar(nm.GetChars(), sc) && sc > 0.0f) wPlaceScale = sc;
 		}
 		static const char *sufAxis[3] = { "_scale_x", "_scale_y", "_scale_z" };
 		for (int i = 0; i < 3; ++i)
 		{
 			nm.Format("%s%s", placementCVars.GetChars(), sufAxis[i]);
-			if (FBaseCVar *cv = FindCVar(nm.GetChars(), nullptr))
 			{
-				const float sc = (float)cv->GetGenericRep(CVAR_Float).Float;
-				if (sc > 0.0f) wPlaceAxis[i] = sc;
+				float sc = 0.0f;
+				if (GetPlacementCVar(nm.GetChars(), sc) && sc > 0.0f) wPlaceAxis[i] = sc;
 			}
 		}
 	}
@@ -846,30 +867,26 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 		for (int i = 0; i < 3; ++i)
 		{
 			nm.Format("%s%s", smf->placementCVars.GetChars(), sufOfs[i]);
-			if (FBaseCVar *cv = FindCVar(nm.GetChars(), nullptr))
-				placeOfs[i] = (float)cv->GetGenericRep(CVAR_Float).Float;
+			GetPlacementCVar(nm.GetChars(), placeOfs[i]);
 			nm.Format("%s%s", smf->placementCVars.GetChars(), sufRot[i]);
-			if (FBaseCVar *cv = FindCVar(nm.GetChars(), nullptr))
-				placeRot[i] = (float)cv->GetGenericRep(CVAR_Float).Float;
+			GetPlacementCVar(nm.GetChars(), placeRot[i]);
 		}
 
 		// Scale defaults to 1, NOT to the 0 an absent CVAR would read as -- a
 		// missing or zeroed slider must leave the model alone, not collapse it
 		// to a point.
 		nm.Format("%s_scale", smf->placementCVars.GetChars());
-		if (FBaseCVar *cv = FindCVar(nm.GetChars(), nullptr))
 		{
-			const float s = (float)cv->GetGenericRep(CVAR_Float).Float;
-			if (s > 0.0f) placeScale = s;
+			float sv = 0.0f;
+			if (GetPlacementCVar(nm.GetChars(), sv) && sv > 0.0f) placeScale = sv;
 		}
 		static const char *sufAxis[3] = { "_scale_x", "_scale_y", "_scale_z" };
 		for (int i = 0; i < 3; ++i)
 		{
 			nm.Format("%s%s", smf->placementCVars.GetChars(), sufAxis[i]);
-			if (FBaseCVar *cv = FindCVar(nm.GetChars(), nullptr))
 			{
-				const float v = (float)cv->GetGenericRep(CVAR_Float).Float;
-				if (v > 0.0f) placeAxis[i] = v;
+				float v = 0.0f;
+				if (GetPlacementCVar(nm.GetChars(), v) && v > 0.0f) placeAxis[i] = v;
 			}
 		}
 	}
