@@ -248,6 +248,13 @@ protected:
 	mutable XrActionSet xrActionSet = XR_NULL_HANDLE;
 	mutable XrAction xrPoseAction = XR_NULL_HANDLE;
 	mutable XrSpace xrHandSpaces[2] = { XR_NULL_HANDLE, XR_NULL_HANDLE };
+	// MEASUREMENT ONLY. xrPoseAction above is bound to /input/aim/pose on every
+	// interaction profile -- the pointer ray, not the fist. These bind the grip
+	// pose alongside it so the difference between the two can be logged. Nothing
+	// reads them for placement; they exist to put a number on how far the frame
+	// the engine calls "the hand" is from the player's actual hand.
+	mutable XrAction xrGripPoseAction = XR_NULL_HANDLE;
+	mutable XrSpace xrGripSpaces[2] = { XR_NULL_HANDLE, XR_NULL_HANDLE };
 	mutable XrAction xrSelectAction = XR_NULL_HANDLE;
 	mutable XrAction xrMenuAction = XR_NULL_HANDLE;
 	mutable XrAction xrGripAction = XR_NULL_HANDLE;

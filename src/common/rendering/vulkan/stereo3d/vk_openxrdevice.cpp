@@ -94,6 +94,12 @@ EXTERN_CVAR(Bool, vr_move_use_offhand);
 EXTERN_CVAR(Bool, vr_switch_sticks);
 EXTERN_CVAR(Bool, vr_secondary_button_mappings);
 EXTERN_CVAR(Bool, vr_teleport);
+// A0 harness. ON by default. A measurement nobody remembers to switch on is a
+// measurement that never happens, and this one exists precisely because twelve
+// sessions went without it. See the block in UpdateControllerState for what it
+// measures and how to read what it prints.
+CVAR(Bool, vr_a0, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
 EXTERN_CVAR(Float, vr_weaponRotate);
 EXTERN_CVAR(Float, vr_weaponScale);
 EXTERN_CVAR(Bool, vr_enable_haptics);
@@ -1252,8 +1258,14 @@ static void LogBoundSourcesForAction(XrInstance instance, XrSession session, XrA
 	uint32_t sourceCount = 0;
 	if (XR_FAILED(xrEnumerateBoundSourcesForAction(session, &enumerateInfo, 0, &sourceCount, nullptr)) || sourceCount == 0)
 	{
-		if (developer > 0)
-			Printf("OpenXR: bound sources [%s] unavailable.\n", label);
+		// NOT gated on developer. An action with no bound sources is a feature
+		// that is silently dead for this controller -- the thumb-touch action,
+		// for one, is only ever suggested on the Oculus Touch profile, so on an
+		// Index or WMR runtime it reports nothing forever and every pose that
+		// asks "is the thumb resting?" gets a permanent no. That is exactly the
+		// kind of failure that has to be visible in a log rather than inferred
+		// from a hand that will not change shape.
+		Printf("OpenXR: bound sources [%s] NONE -- this action is dead on the active controller profile.\n", label);
 		return;
 	}
 
@@ -2031,6 +2043,9 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	};
 
 	createAction("hand_pose", "Hand Pose", XR_ACTION_TYPE_POSE_INPUT, xrPoseAction);
+	// Measurement only -- see the declaration in the header. hand_pose is bound
+	// to the AIM pose; this one takes the GRIP pose so the two can be compared.
+	createAction("grip_pose", "Grip Pose", XR_ACTION_TYPE_POSE_INPUT, xrGripPoseAction);
 	createAction("select", "Select", XR_ACTION_TYPE_BOOLEAN_INPUT, xrSelectAction);
 	createAction("menu", "Menu", XR_ACTION_TYPE_BOOLEAN_INPUT, xrMenuAction);
 	createAction("grip", "Grip", XR_ACTION_TYPE_BOOLEAN_INPUT, xrGripAction);
@@ -2164,6 +2179,8 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	AddBinding(simpleBindings, xrMenuAction, rightMenuClickPath);
 	AddBinding(simpleBindings, xrPoseAction, leftAimPosePath);
 	AddBinding(simpleBindings, xrPoseAction, rightAimPosePath);
+	AddBinding(simpleBindings, xrGripPoseAction, leftGripPosePath);
+	AddBinding(simpleBindings, xrGripPoseAction, rightGripPosePath);
 	AddBinding(simpleBindings, xrHapticAction, leftHapticPath);
 	AddBinding(simpleBindings, xrHapticAction, rightHapticPath);
 	SuggestBindingsForProfile(xrInstance, simpleProfile, "KHR simple", simpleBindings);
@@ -2181,6 +2198,8 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	AddBinding(viveBindings, xrMenuAction, rightMenuClickPath);
 	AddBinding(viveBindings, xrPoseAction, leftAimPosePath);
 	AddBinding(viveBindings, xrPoseAction, rightAimPosePath);
+	AddBinding(viveBindings, xrGripPoseAction, leftGripPosePath);
+	AddBinding(viveBindings, xrGripPoseAction, rightGripPosePath);
 	AddBinding(viveBindings, xrHapticAction, leftHapticPath);
 	AddBinding(viveBindings, xrHapticAction, rightHapticPath);
 	SuggestBindingsForProfile(xrInstance, viveProfile, "Vive", viveBindings);
@@ -2201,6 +2220,8 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	AddBinding(touchBindings, xrMenuAction, leftMenuClickPath);
 	AddBinding(touchBindings, xrPoseAction, leftAimPosePath);
 	AddBinding(touchBindings, xrPoseAction, rightAimPosePath);
+	AddBinding(touchBindings, xrGripPoseAction, leftGripPosePath);
+	AddBinding(touchBindings, xrGripPoseAction, rightGripPosePath);
 	AddBinding(touchBindings, xrHapticAction, leftHapticPath);
 	AddBinding(touchBindings, xrHapticAction, rightHapticPath);
 	// One action bound to several paths: a boolean action is true when ANY
@@ -2233,6 +2254,8 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	AddBinding(indexBindings, xrBAction, rightSecondaryClickPath);
 	AddBinding(indexBindings, xrPoseAction, leftAimPosePath);
 	AddBinding(indexBindings, xrPoseAction, rightAimPosePath);
+	AddBinding(indexBindings, xrGripPoseAction, leftGripPosePath);
+	AddBinding(indexBindings, xrGripPoseAction, rightGripPosePath);
 	AddBinding(indexBindings, xrHapticAction, leftHapticPath);
 	AddBinding(indexBindings, xrHapticAction, rightHapticPath);
 	SuggestBindingsForProfile(xrInstance, indexProfile, "Valve Index", indexBindings);
@@ -2250,6 +2273,8 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	AddBinding(wmrBindings, xrMenuAction, rightMenuClickPath);
 	AddBinding(wmrBindings, xrPoseAction, leftAimPosePath);
 	AddBinding(wmrBindings, xrPoseAction, rightAimPosePath);
+	AddBinding(wmrBindings, xrGripPoseAction, leftGripPosePath);
+	AddBinding(wmrBindings, xrGripPoseAction, rightGripPosePath);
 	AddBinding(wmrBindings, xrHapticAction, leftHapticPath);
 	AddBinding(wmrBindings, xrHapticAction, rightHapticPath);
 	SuggestBindingsForProfile(xrInstance, wmrProfile, "WMR", wmrBindings);
@@ -2259,13 +2284,26 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	attachInfo.actionSets = &xrActionSet;
 	xrAttachSessionActionSets(xrSession, &attachInfo);
 
+	// The bound-source report was REMOVED. xrEnumerateBoundSourcesForAction
+	// returns nothing on this runtime -- it reported the AIM pose as dead, and
+	// the aim pose is what tracks the hands. A diagnostic that answers NONE for
+	// a demonstrably working action is worse than no diagnostic: it invites a
+	// wrong conclusion with the authority of a log line.
+
 	for (int i = 0; i < 2; ++i)
 	{
 		XrActionSpaceCreateInfo actionSpaceInfo{ XR_TYPE_ACTION_SPACE_CREATE_INFO };
 		actionSpaceInfo.action = xrPoseAction;
-		actionSpaceInfo.subactionPath = subactionPaths[i]; 
+		actionSpaceInfo.subactionPath = subactionPaths[i];
 		actionSpaceInfo.poseInActionSpace = XrPosef{ {0,0,0,1}, {0,0,0} };
 		xrCreateActionSpace(xrSession, &actionSpaceInfo, &xrHandSpaces[i]);
+
+		// Measurement only. Same subaction path, grip pose instead of aim.
+		XrActionSpaceCreateInfo gripSpaceInfo{ XR_TYPE_ACTION_SPACE_CREATE_INFO };
+		gripSpaceInfo.action = xrGripPoseAction;
+		gripSpaceInfo.subactionPath = subactionPaths[i];
+		gripSpaceInfo.poseInActionSpace = XrPosef{ {0,0,0,1}, {0,0,0} };
+		xrCreateActionSpace(xrSession, &gripSpaceInfo, &xrGripSpaces[i]);
 	}
 
 	uint32_t viewCount = 0;
@@ -2751,6 +2789,14 @@ void VKOpenXRDeviceMode::DestroyOpenXR() const
 			handSpace = XR_NULL_HANDLE;
 		}
 	}
+	for (auto& gripSpace : xrGripSpaces)
+	{
+		if (gripSpace != XR_NULL_HANDLE)
+		{
+			xrDestroySpace(gripSpace);
+			gripSpace = XR_NULL_HANDLE;
+		}
+	}
 	if (xrActionSet != XR_NULL_HANDLE)
 	{
 		if (xrHapticAction != XR_NULL_HANDLE)
@@ -2794,6 +2840,7 @@ void VKOpenXRDeviceMode::DestroyOpenXR() const
 	xrHasLocalHeightAnchor = false;
 	xrLocalHeightAnchor = 0.0f;
 	xrPoseAction = XR_NULL_HANDLE;
+	xrGripPoseAction = XR_NULL_HANDLE;
 	xrSelectAction = XR_NULL_HANDLE;
 	xrMenuAction = XR_NULL_HANDLE;
 	xrGripAction = XR_NULL_HANDLE;
@@ -3338,23 +3385,36 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 
 	auto updateHandPose = [&](int hand, float* offset, float* angles)
 	{
-		if (xrHandSpaces[hand] == XR_NULL_HANDLE)
+		// EVERY REFUSAL SAYS WHY. All three of grab's refusal paths in the reverted
+		// physics module were a bare return, which is how "why is there no gun in
+		// my off hand" became unanswerable from a log. Rate limited so a permanent
+		// failure does not drown the file. A lambda, not a macro -- a multi-line
+		// macro inside an existing lambda is asking for trouble for no benefit.
+		static uint64_t lastRefusal[2] = { 0, 0 };
+		auto refuse = [&](const char *why) -> bool
 		{
+			const uint64_t n = I_nsTime();
+			if (n - lastRefusal[hand] > 2000000000ull)
+			{
+				Printf("[A0] hand %d pose REFUSED: %s\n", hand, why);
+				lastRefusal[hand] = n;
+			}
 			xrHandPoseValid[hand] = false;
 			return false;
-		}
+		};
+
+		if (xrHandSpaces[hand] == XR_NULL_HANDLE)
+			return refuse("action space is XR_NULL_HANDLE -- the pose action never bound");
+
 		XrSpaceLocation location{ XR_TYPE_SPACE_LOCATION };
 		if (XR_FAILED(xrLocateSpace(xrHandSpaces[hand], xrSpace, xrFrameState.predictedDisplayTime, &location)))
-		{
-			xrHandPoseValid[hand] = false;
-			return false;
-		}
+			return refuse("xrLocateSpace failed -- runtime could not place this hand");
 
 		const bool valid = (location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0 &&
 			(location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0;
 		xrHandPoseValid[hand] = valid;
 		if (!valid)
-			return false;
+			return refuse("runtime reported the pose as not valid this frame (tracking lost)");
 
 		xrHandPoses[hand] = location.pose;
 
@@ -3380,6 +3440,129 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 
 	const bool mainHandValid = updateHandPose(mainHand, weaponoffset, weaponangles);
 	const bool offHandValid = updateHandPose(offHand, offhandoffset, offhandangles);
+
+	// ======================================================================
+	// A0 HARNESS -- measure before changing anything.
+	//
+	// This exists because twelve sessions shipped a fix and then went looking in
+	// a headset for a feeling. A feeling cannot distinguish a constant offset
+	// from a growing one, and those two have completely different causes and
+	// completely different fixes. This turns that into a number.
+	//
+	// THE MEASUREMENT THAT MATTERS is the Euler round-trip residual. The runtime
+	// hands us a quaternion. The engine decomposes it to yaw/pitch/roll and every
+	// consumer downstream rebuilds from those three numbers. If that round trip
+	// is lossless the residual is zero at every orientation. If it is NOT, the
+	// residual is zero at rest and GROWS the further you rotate away -- which in
+	// a headset reads as the model sliding over the surface of a sphere, is
+	// indistinguishable from a bad export, and cannot be cancelled by any
+	// constant. Sorting those two apart is the whole point of A0.
+	//
+	// Toggle: vr_a0 (menu). Off by default; costs nothing when off.
+	// ======================================================================
+	if (vr_a0)
+	{
+		static uint64_t a0LastReport = 0;
+		static int      a0Frames     = 0;
+		static double   a0ResidSum[4]   = {0,0,0,0};   // binned by rotation magnitude
+		static double   a0ResidMax[4]   = {0,0,0,0};
+		static int      a0ResidCount[4] = {0,0,0,0};
+		static double   a0LatSum = 0.0, a0LatMax = 0.0;
+		static int      a0LatCount = 0;
+
+		const uint64_t nowNs = I_nsTime();
+
+		for (int h = 0; h < 2; ++h)
+		{
+			if (!xrHandPoseValid[h])
+				continue;
+
+			const XrQuaternionf& raw = xrHandPoses[h].orientation;
+
+			// Decompose exactly as the engine does, then rebuild from those three
+			// numbers using the inverse of the same permutation. Any difference is
+			// information the round trip destroyed.
+			const XrVector3f e = OpenVREulerAnglesFromQuaternion(raw);
+			const double yaw = e.x, pitch = e.y, roll = e.z;
+
+			const double cr = cos(roll * 0.5),  sr = sin(roll * 0.5);
+			const double cp = cos(pitch * 0.5), sp = sin(pitch * 0.5);
+			const double cy = cos(yaw * 0.5),   sy = sin(yaw * 0.5);
+
+			// q0..q3 in the SAME slots OpenVREulerAnglesFromQuaternion reads them
+			// from: q0=w, q1=z, q2=x, q3=y.
+			const double q0 = cr * cp * cy + sr * sp * sy;
+			const double q1 = sr * cp * cy - cr * sp * sy;
+			const double q2 = cr * sp * cy + sr * cp * sy;
+			const double q3 = cr * cp * sy - sr * sp * cy;
+
+			XrQuaternionf back;
+			back.w = (float)q0; back.z = (float)q1; back.x = (float)q2; back.y = (float)q3;
+
+			double dot = fabs((double)raw.w * back.w + (double)raw.x * back.x +
+			                  (double)raw.y * back.y + (double)raw.z * back.z);
+			if (dot > 1.0) dot = 1.0;
+			const double residualDeg = 2.0 * acos(dot) * (180.0 / M_PI);
+
+			// How far from identity is this orientation? The bin is what separates
+			// "constant offset" from "grows with rotation".
+			double wAbs = fabs((double)raw.w);
+			if (wAbs > 1.0) wAbs = 1.0;
+			const double totalDeg = 2.0 * acos(wAbs) * (180.0 / M_PI);
+
+			int bin = 0;
+			if (totalDeg >= 30.0)  bin = 1;
+			if (totalDeg >= 60.0)  bin = 2;
+			if (totalDeg >= 120.0) bin = 3;
+
+			a0ResidSum[bin] += residualDeg;
+			if (residualDeg > a0ResidMax[bin]) a0ResidMax[bin] = residualDeg;
+			a0ResidCount[bin]++;
+		}
+
+		// Pose-sample to now. predictedDisplayTime is in the runtime's clock, so
+		// this is only meaningful as a RELATIVE figure across frames -- which is
+		// all that is wanted: it is the shape of the number that matters, not its
+		// absolute value.
+		{
+			static uint64_t a0PrevFrame = 0;
+			if (a0PrevFrame != 0)
+			{
+				const double dtMs = double(nowNs - a0PrevFrame) / 1.0e6;
+				a0LatSum += dtMs;
+				if (dtMs > a0LatMax) a0LatMax = dtMs;
+				a0LatCount++;
+			}
+			a0PrevFrame = nowNs;
+		}
+
+		++a0Frames;
+
+		if (a0LastReport == 0) a0LastReport = nowNs;
+		if (nowNs - a0LastReport > 3000000000ull)   // every 3 seconds
+		{
+			static const char *binName[4] = { "  0-30", " 30-60", " 60-120", "120+  " };
+			Printf("[A0] ---- %d frames ----\n", a0Frames);
+			for (int b = 0; b < 4; ++b)
+			{
+				if (!a0ResidCount[b]) continue;
+				Printf("[A0] rot %s deg : euler round-trip residual mean %.4f max %.4f  (n=%d)\n",
+					binName[b], a0ResidSum[b] / a0ResidCount[b], a0ResidMax[b], a0ResidCount[b]);
+			}
+			if (a0LatCount)
+				Printf("[A0] frame interval mean %.2f ms  max %.2f ms  (n=%d)\n",
+					a0LatSum / a0LatCount, a0LatMax, a0LatCount);
+			Printf("[A0] READ IT LIKE THIS: residual flat across the bins = a constant\n"
+			       "[A0] offset, cancellable by one number. Residual RISING with the bin =\n"
+			       "[A0] the Euler round trip is lossy and no constant can ever fix it.\n");
+
+			for (int b = 0; b < 4; ++b) { a0ResidSum[b]=0; a0ResidMax[b]=0; a0ResidCount[b]=0; }
+			a0LatSum = 0; a0LatMax = 0; a0LatCount = 0;
+			a0Frames = 0;
+			a0LastReport = nowNs;
+		}
+	}
+
 	if (mainHandValid && offHandValid)
 	{
 		const float dx = xrHandPoses[mainHand].position.x - xrHandPoses[offHand].position.x;
