@@ -1625,6 +1625,24 @@ enum EParticleStyle
 // whether it is on an SMG or a shotgun, it cares whether it is wrapping a fat
 // cylinder or squeezing a vertical grip, so two guns held the same way claim
 // the same subject. Mirrors EGripSubject in vk_openxrdevice.h.
+// What a hand's GRIP MEANS this frame, as decided by the engine's arbiter --
+// one hand, one meaning, resolved in priority order before any consumer runs.
+// Read from Actor.GripContextMain/Off. Mirrors EGripContext in
+// vk_openxrdevice.h, where the priority order actually lives.
+//
+// GRIPCTX_Object is published even while the squeeze is RELEASED: a hand keeps
+// holding a magazine when you relax your fingers. So this is the wrong field to
+// test for "is the grip down" -- read Actor.GripHeldMain/Off for the button.
+enum EGripContext
+{
+	GRIPCTX_None = 0,
+	GRIPCTX_Holster,    // hand is inside a holster volume; highest priority
+	GRIPCTX_Stabilize,  // off hand supporting the main hand's weapon
+	GRIPCTX_Modifier,   // dominant grip acting as the shift layer
+	GRIPCTX_Plain,      // ordinary grip, whatever it is bound to
+	GRIPCTX_Object,     // hand is closed on a physical thing that script claimed
+}
+
 enum EGripSubject
 {
 	GRIPSUBJ_None = 0,

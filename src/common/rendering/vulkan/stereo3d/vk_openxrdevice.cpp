@@ -3769,6 +3769,11 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		{
 			consolePawn->GripContextMain = xrGripContext[mainHand];
 			consolePawn->GripContextOff  = xrGripContext[offHand];
+			// The raw squeeze, published alongside what the arbiter made of it.
+			// Held state needs the edge, and the context above cannot give it
+			// one once something has claimed -- see actor.h.
+			consolePawn->GripHeldMain    = handInput[mainHand].grip;
+			consolePawn->GripHeldOff     = handInput[offHand].grip;
 			consolePawn->GripSubjectMain = xrGripSubject[mainHand];
 			consolePawn->GripSubjectOff  = xrGripSubject[offHand];
 			consolePawn->FingerTouchMain = xrFingerTouch[mainHand];

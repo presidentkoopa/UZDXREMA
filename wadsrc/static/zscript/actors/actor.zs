@@ -429,6 +429,16 @@ class Actor : Thinker native
 	native readonly int GripContextMain;
 	native readonly int GripContextOff;
 
+	// The RAW squeeze, per hand. Engine-owned.
+	//
+	// GripContext above is published even while the grip is NOT held -- a hand
+	// keeps holding a magazine when you relax your fingers -- so once anything
+	// claims a subject it latches to GRIPCTX_Object and `GripContext != 0`
+	// reads as a grip held forever. That is correct for POSE and useless for
+	// EDGES: a toggle can never see its own release. Test this for the button.
+	native readonly bool GripHeldMain;
+	native readonly bool GripHeldOff;
+
 	// What each hand is closed ON, as opposed to what its grip MEANS above.
 	// EGripSubject, declared in constants.zs so every mod can name the values
 	// rather than writing bare integers.

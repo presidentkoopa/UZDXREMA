@@ -2253,6 +2253,8 @@ DEFINE_FIELD(AActor, GripContextMain)
 DEFINE_FIELD(AActor, GripContextOff)
 DEFINE_FIELD(AActor, GripClaimMain)
 DEFINE_FIELD(AActor, GripClaimOff)
+DEFINE_FIELD(AActor, GripHeldMain)      // RS fork -- raw squeeze, see actor.h
+DEFINE_FIELD(AActor, GripHeldOff)       // RS fork
 DEFINE_FIELD(AActor, GripSubjectMain)
 DEFINE_FIELD(AActor, GripSubjectOff)
 DEFINE_FIELD(AActor, TwoHandedHold)

@@ -1819,6 +1819,20 @@ public:
 	int GripContextMain;
 	int GripContextOff;
 
+	// The RAW squeeze, per hand, arbiter-independent. Engine-owned.
+	//
+	// GripContext above cannot answer this. It is deliberately published even
+	// while the grip is NOT held -- a hand keeps holding a magazine when the
+	// player relaxes the squeeze, and the pose has to keep showing that -- so
+	// the moment script claims a subject, GripContext latches to GRIPCTX_Object
+	// and stays there. Any script testing `GripContext != 0` for "is the grip
+	// down" is correct right up until something claims, and then reads as a
+	// grip held forever, so a toggle can never see its release edge.
+	//
+	// Held state needs the button itself and nothing else. This is that button.
+	bool GripHeldMain;
+	bool GripHeldOff;
+
 	// What each hand is closed on, EGripSubject. Same script-claims /
 	// engine-arbitrates split as the pair above: script writes GripClaim*,
 	// because only script can know that a shell is being held, and the engine
