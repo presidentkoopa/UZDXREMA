@@ -108,8 +108,19 @@ The target is this fork playing against itself.
 - **`vr_physics` defaults OFF**, `vr_physics_debug` OFF. `P_PhysicsFrame()`
   early-returns and clears bodies. The module is intact behind the switch, not
   gutted. Engine timing is stock: 35 Hz playsim, headset-rate render.
-- **Mod**: `E:\UZDXR_Hands` → repo `RS_Hands`, branch `main`, one remote.
-  Autoloaded as `build-dxr/Debug/UZDXR_Hands.pk3`.
+- **Mod**: `E:\rs_hands`, a clone of `presidentkoopa/RS_Hands`, branch `main`.
+  Packs to `build-dxr/Debug/RS_Hands.pk3`, which is what the ini autoloads.
+  `E:\UZDXR_Hands` was the uncommitted working copy and is now **dead** — it
+  was merged into the clone on 2026-08-25 and editing it changes nothing that
+  loads. The packer skips `README.md`, `docs/`, `tools/` and `hand_frames.txt`;
+  `docs/` alone is megabytes of PNG the engine would index as textures.
+- **Hands**: the **psprite** hands are the ones on screen. `rs_hands=true`,
+  `rs_handworld=false`. The world hands stay in the tree and stay switchable —
+  they are what collision and grabbing would need if that comes back — but two
+  hand systems drawing at once put one mesh on top of another at two different
+  scales, which is not a comparison anyone can judge. Both were saved **true**
+  in the ini while CVARINFO defaulted both to false: a saved value always wins,
+  which is why changing a CVARINFO default reads as a fix that silently failed.
 - **Removed**: the M9 package (pk3 preserved as `UZDXR_M9.pk3.removed`), gravity
   gloves, and the psprite hands' seat/anchor machinery — `SEAT_MATCH`/`MAIN`/
   `SUPPORT`/`RACK`, `AnchorToGrip`, all `rs_seat_*` cvars and menus.
