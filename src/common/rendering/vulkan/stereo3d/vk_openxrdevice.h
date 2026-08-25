@@ -81,6 +81,7 @@ enum EGripContext
 	// and renumbering it would silently change what every existing test means.
 	// Priority lives in the branch order of ResolveGripContexts, not here.
 	GRIPCTX_Object,     // hand is closed on a physical thing that script claimed
+	GRIPCTX_Hardpoint,  // hand is at a body hardpoint (not a weapon holster)
 };
 
 // WHAT a hand is closed on, as distinct from what its grip MEANS.

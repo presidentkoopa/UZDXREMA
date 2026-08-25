@@ -1812,6 +1812,38 @@ public:
 	bool HolsterClaimMain;
 	bool HolsterClaimOff;
 
+	// THIS HAND HAS SOMETHING IT COULD TAKE HOLD OF. Script-owned, exactly like
+	// HolsterClaim* above, and read by the same arbiter.
+	//
+	// The engine cannot work this out. Whether anything is in reach depends on a
+	// reach volume, a grabbability table and a targeting cone that all live in
+	// script; there is nothing here to test against. So script claims and the
+	// arbiter decides.
+	//
+	// It exists because the dominant grip has two jobs. With
+	// vr_secondary_button_mappings on, holding it is the shift layer -- and that
+	// layer stands analog turning down, so reaching for a barrel stops you
+	// turning. Both jobs are legitimate; what was missing was any way to tell
+	// them apart. A hand pointed at something it can grab is grabbing. A hand
+	// pointed at nothing is still your modifier.
+	bool GrabClaimMain;
+	bool GrabClaimOff;
+
+	// THIS HAND IS AT A BODY HARDPOINT. Script-owned, and SEPARATE from
+	// HolsterClaim* even though both are body-anchored volumes.
+	//
+	// They were the same field, and the two mods that drive them both wrote it
+	// unconditionally every tic: whichever handler ran second won, so a hand
+	// genuinely inside a holster had its claim erased by the hardpoint mod
+	// reporting "not at a hardpoint", and the reverse. One boolean cannot carry
+	// two independent facts, and nothing logged the loss.
+	//
+	// Separate fields also make the states legible downstream, which is the
+	// point: holstering, using a hardpoint, stabilizing and grabbing are four
+	// different things a hand can be doing and each needs to be nameable.
+	bool HardpointClaimMain;
+	bool HardpointClaimOff;
+
 	// What the grip arbiter decided each hand's grip means this frame; see
 	// EGripContext in vk_openxrdevice.h. Engine-owned and read-only to script,
 	// the mirror image of HolsterClaim* above: script says what it wants to

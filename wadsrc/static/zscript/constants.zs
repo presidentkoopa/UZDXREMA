@@ -1641,6 +1641,7 @@ enum EGripContext
 	GRIPCTX_Modifier,   // dominant grip acting as the shift layer
 	GRIPCTX_Plain,      // ordinary grip, whatever it is bound to
 	GRIPCTX_Object,     // hand is closed on a physical thing that script claimed
+	GRIPCTX_Hardpoint,  // hand is at a body hardpoint, not a weapon holster
 }
 
 enum EGripSubject

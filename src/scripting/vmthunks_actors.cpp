@@ -2245,6 +2245,10 @@ DEFINE_FIELD(AActor, HmdYaw)
 DEFINE_FIELD(AActor, HmdPitch)
 DEFINE_FIELD(AActor, HmdRoll)
 DEFINE_FIELD(AActor, StabilizeReach)
+DEFINE_FIELD(AActor, HardpointClaimMain) // RS fork -- see actor.h
+DEFINE_FIELD(AActor, HardpointClaimOff)  // RS fork
+DEFINE_FIELD(AActor, GrabClaimMain)      // RS fork -- see actor.h
+DEFINE_FIELD(AActor, GrabClaimOff)       // RS fork
 DEFINE_FIELD(AActor, HolsterClaimMain)
 DEFINE_FIELD(AActor, HolsterClaimOff)
 DEFINE_FIELD(AActor, FingerTouchMain)

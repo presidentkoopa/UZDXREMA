@@ -3633,7 +3633,12 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			// together, so without this every reload reads as gripping the
 			// weapon two-handed.
 			const bool supporting = (claimed == GRIPSUBJ_Forend || claimed == GRIPSUBJ_Foregrip);
-			const bool objectHere = (claimed > 0) && !supporting;
+			// Either already holding something, or pointed at something it could
+			// take. The second half is the claim script writes -- see
+			// GrabClaimMain/Off in actor.h.
+			const bool grabHere = consolePawn
+				&& (isMain ? consolePawn->GrabClaimMain : consolePawn->GrabClaimOff);
+			const bool objectHere = ((claimed > 0) && !supporting) || grabHere;
 
 			// ---- tap vs combo -------------------------------------------
 			// Grip alone does nothing as a modifier -- the shift layer only
@@ -3700,18 +3705,39 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 				// suppressed while armed -- see dominantGripModifierNew.
 				ctx = GRIPCTX_Holster;
 			}
-			else if (isMain && *vr_secondary_button_mappings)
+			else if (consolePawn && (isMain ? consolePawn->HardpointClaimMain
+			                                : consolePawn->HardpointClaimOff))
 			{
-				ctx = GRIPCTX_Modifier;
+				// Under a weapon holster, over everything else. Both are small
+				// deliberate targets on your body and in practice they do not
+				// overlap; when they somehow do, the holster is the one holding
+				// a gun and wins.
+				ctx = GRIPCTX_Hardpoint;
 			}
 			else if (objectHere)
 			{
-				// Above stabilize on purpose. Stabilize is proximity alone: it
-				// cannot tell a hand supporting the weapon from a hand that
-				// merely happens to be near it, and a hand that has closed on a
-				// named object is the one case where we know for certain which
-				// of the two it is.
+				// ABOVE THE MODIFIER, and that ordering is the point.
+				//
+				// It used to sit below, which meant the dominant grip was the
+				// shift layer whenever it was held -- including when the hand
+				// was closed on a magazine. A fist round an object is not a
+				// shift key, and the modifier layer stands analog turning down,
+				// so reaching for anything stopped you turning.
+				//
+				// The modifier is not lost: it is what this grip still means
+				// whenever the hand has nothing to take and nothing in it, which
+				// is nearly always. Holster still outranks both -- that is a
+				// small deliberate spatial target and beats a general one.
+				//
+				// Also above stabilize, as before. Stabilize is proximity alone
+				// and cannot tell a hand supporting the weapon from one that
+				// merely happens to be near it; a hand on a named object is the
+				// one case where we know which.
 				ctx = GRIPCTX_Object;
+			}
+			else if (isMain && *vr_secondary_button_mappings)
+			{
+				ctx = GRIPCTX_Modifier;
 			}
 			else if (!isMain && (supporting || stabilizeGeometryOk))
 			{

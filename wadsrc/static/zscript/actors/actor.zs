@@ -417,6 +417,28 @@ class Actor : Thinker native
 	native bool HolsterClaimMain;
 	native bool HolsterClaimOff;
 
+	// Set true for a hand while it has something it could take hold of -- in
+	// reach, or picked out by a targeting cone. Script-owned, same claim /
+	// arbitrate split as HolsterClaim* above.
+	//
+	// It outranks the grip modifier layer. The dominant grip is the shift layer
+	// while vr_secondary_button_mappings is on, and that layer stands analog
+	// turning down -- so without this, reaching for anything stops you turning.
+	// Claim it and that hand's grip means grabbing for as long as there is
+	// something to grab, and goes back to being the modifier when there is not.
+	native bool GrabClaimMain;
+	native bool GrabClaimOff;
+
+	// Set true for a hand while it is at a body HARDPOINT. Separate from
+	// HolsterClaim* deliberately: both are body-anchored volumes, but they are
+	// driven by different mods and a single shared flag meant each one erased
+	// the other's answer every tic, silently.
+	//
+	// Own your own field and write it every frame. Do not write another
+	// system's.
+	native bool HardpointClaimMain;
+	native bool HardpointClaimOff;
+
 	// What the grip arbiter decided each hand's grip MEANS this frame.
 	// 0 none, 1 holster, 2 stabilize, 3 modifier, 4 plain (EGripContext).
 	// Engine-owned and the mirror of HolsterClaim* above: script says what it
