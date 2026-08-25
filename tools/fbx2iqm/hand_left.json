@@ -1,0 +1,61 @@
+{
+  "name": "hand_left",
+  "source_fbx": "E:/oldshit/DXR-main/models/hands/hand_final.fbx",
+  "out_dir": "E:/UZDXREMA/tools/fbx2iqm/out",
+  "out_name": "hand_left.iqm",
+  "orientation": "fbx_native",
+  "meshes": [
+    "Hand_Low"
+  ],
+  "rig": {
+    "mode": "existing",
+    "armature": "Armature",
+    "action": "Armature|Take 001|BaseLayer"
+  },
+  "target": {
+    "axis": "y",
+    "metres": 0.19,
+    "tolerance_pct": 0.25
+  },
+  "mirror_x": true,
+  "materials": {
+    "aiStandardSurface1": "models/hands/lambert1_Base_Color"
+  },
+  "modeldef": {
+    "actor": "DXRHandLeft",
+    "path": "models/hands",
+    "map_units_per_metre": 34.0
+  },
+  "expect": {
+    "joints": 22,
+    "joint_names": [
+      "Root_joint",
+      "HANDPALM_joint",
+      "INDEX_BASE_joint",
+      "MIDDLE_F_BASE_joint",
+      "RING_BASE_joint",
+      "PINK_BASE_joint",
+      "THUMB_BASE_joint",
+      "INDEX_MID_joint",
+      "MIDDLE_F_MID_joint",
+      "RING_MID_joint",
+      "PINK_MID_joint",
+      "THUMB_MID_joint",
+      "INDEX_TOP_joint",
+      "MIDDLE_F_TOP_joint",
+      "RING_TOP_joint",
+      "PINK_TOP_joint",
+      "THUMB_TOP_joint",
+      "INDEX_UP_TOP_joint",
+      "MIDDLE_F_UP_TOP_joint",
+      "RING_UP_TOP_joint",
+      "PINK_UP_TOP_joint",
+      "THUMB_UP_TOP_joint"
+    ],
+    "frames": 1278,
+    "min_moving_joints": 10,
+    "max_centroid_pct": 20.0,
+    "signed_volume_sign": -1
+  },
+  "mirror_reverse_winding": true
+}
