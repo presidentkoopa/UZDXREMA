@@ -100,6 +100,9 @@ EXTERN_CVAR(Bool, vr_teleport);
 // measures and how to read what it prints.
 CVAR(Bool, vr_a0, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
+// One line per hand per context CHANGE. See the block in ResolveGripContexts.
+CVAR(Bool, vr_grip_debug, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
 EXTERN_CVAR(Float, vr_weaponRotate);
 EXTERN_CVAR(Float, vr_weaponScale);
 EXTERN_CVAR(Bool, vr_enable_haptics);
@@ -3638,6 +3641,8 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			// GrabClaimMain/Off in actor.h.
 			const bool grabHere = consolePawn
 				&& (isMain ? consolePawn->GrabClaimMain : consolePawn->GrabClaimOff);
+			const bool hardpointHere = consolePawn
+				&& (isMain ? consolePawn->HardpointClaimMain : consolePawn->HardpointClaimOff);
 			const bool objectHere = ((claimed > 0) && !supporting) || grabHere;
 
 			// ---- tap vs combo -------------------------------------------
@@ -3705,8 +3710,7 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 				// suppressed while armed -- see dominantGripModifierNew.
 				ctx = GRIPCTX_Holster;
 			}
-			else if (consolePawn && (isMain ? consolePawn->HardpointClaimMain
-			                                : consolePawn->HardpointClaimOff))
+			else if (hardpointHere)
 			{
 				// Under a weapon holster, over everything else. Both are small
 				// deliberate targets on your body and in practice they do not
@@ -3747,6 +3751,28 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			{
 				ctx = GRIPCTX_Plain;
 			}
+			// SAY WHAT IT DECIDED, on change only.
+			//
+			// The whole promise here is one hand, one meaning -- and there has
+			// never been any way to see which meaning won. From inside a
+			// headset a grip that does the wrong thing and a grip that arrived
+			// as the wrong context are indistinguishable, and there is no
+			// console to ask. Printed on transition rather than per frame, so a
+			// steady state costs one line and not ninety a second.
+			if (*vr_grip_debug && xrGripContext[h] != ctx)
+			{
+				static const char *ctxName[] = {
+					"none", "HOLSTER", "stabilize", "modifier", "plain",
+					"OBJECT", "HARDPOINT"
+				};
+				const int nctx = int(sizeof(ctxName) / sizeof(ctxName[0]));
+				Printf("[GRIP] %s: %s -> %s   (held=%d holster=%d hardpoint=%d grab=%d claimed=%d)\n",
+					isMain ? "MAIN" : "OFF ",
+					(xrGripContext[h] >= 0 && xrGripContext[h] < nctx) ? ctxName[xrGripContext[h]] : "?",
+					(ctx >= 0 && ctx < nctx) ? ctxName[ctx] : "?",
+					held ? 1 : 0, holsterHere ? 1 : 0, hardpointHere ? 1 : 0,
+					grabHere ? 1 : 0, claimed);
+			}
 			xrGripContext[h] = ctx;
 
 			// Published whatever the context resolved to, including when the
@@ -3785,6 +3811,14 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			int subj = GRIPSUBJ_None;
 			if (claimed > 0)                            subj = claimed;
 			else if (holsterHere)                       subj = GRIPSUBJ_Holster;
+			// A hardpoint reach LOOKS like a holster reach, because it is the
+			// same thing: a splayed hand about to take hold of something on
+			// your body. The two are distinguished by CONTEXT, which is the
+			// question "what is this grip for"; the subject is the question
+			// "what shape is the hand", and there they have the same answer.
+			// Giving hardpoints their own subject would mean authoring a second
+			// pose identical to the first.
+			else if (hardpointHere)                     subj = GRIPSUBJ_Holster;
 			else if (!isMain && held && holdingWeapon)  subj = GRIPSUBJ_Support;
 			xrGripSubject[h] = subj;
 		}
