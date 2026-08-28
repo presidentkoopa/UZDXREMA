@@ -1410,6 +1410,7 @@ OptionMenu "VideoOptions" protected
 	Option "$DSPLYMNU_DEATHCAM",               r_deathcamera,          OnOff
 	Option "$DSPLYMNU_TELEZOOM",               telezoom,               OnOff
 	Option "$DSPLYMNU_NOMONSTERINTERPOLATION", nomonsterinterpolation, NoYes
+
 	StaticText " "
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vid_refreshrate screenblocks vid_gamma vid_brightness vid_contrast vid_saturation vid_hwgamma fov r_actorspriteshadow cl_customizeinvulmap cl_custominvulmapcolor1 cl_custominvulmapcolor2 wipetype r_drawfuzz r_vanillatrans transsouls r_fakecontrast cl_rockettrails addrocketexplosion cl_bloodtype cl_pufftype r_maxparticles cl_maxdecals r_drawplayersprites r_deathcamera telezoom r_quakeintensity nomonsterinterpolation"
 }
@@ -4424,6 +4425,57 @@ OptionMenu ModOptionsMenu protected
 	Submenu "$VRLASERMNU_TITLE",			"VRLaserSightOptions"
 	Submenu "$VRTRACERMNU_TITLE",			"VRHitscanTracerOptions"
 	Submenu "$VRWHEELMNU_TITLE",			"VRWeaponWheelOptions"
+	Submenu "Voxel Options",				"VRVoxelOptions"
+}
+
+/*=======================================
+ *
+ * RS FORK -- Voxel Options
+ *
+ * r_drawvoxels was console-only, which is no use at all in a headset. The
+ * distance limit is new.
+ *
+ * WHY A DISTANCE LIMIT. A decoration voxel pack tags every column, torch,
+ * barrel and pickup in the game, so a room that cost a few hundred billboards
+ * costs a few hundred model draws instead. Past the limit the ordinary sprite
+ * is drawn -- which is exactly what the player saw before the pack was loaded,
+ * and is indistinguishable at range.
+ *
+ * WHY "OFF" IS A REAL SETTING HERE AND NOT JUST A FALLBACK. An actor carrying
+ * VoxelOverride ignores both of these entirely, so a pack can sit loaded and
+ * inert while only the thing in your hand goes solid -- a monster you are
+ * holding becomes a voxel without every other monster in the level costing
+ * you frames. Held objects are never distance-culled either.
+ *
+ *=======================================*/
+
+OptionMenu "VRVoxelOptions" protected
+{
+	Title "Voxel Options"
+
+	StaticText ""
+	StaticText "Voxels for the whole world. Needs a voxel pack", gold
+	StaticText "loaded to do anything.", gold
+	StaticText ""
+	Option "Voxels",				r_drawvoxels,		OnOff
+	StaticText ""
+	StaticText "How far away they stay voxels. 34 units is a", gold
+	StaticText "metre; 0 is no limit. Beyond it the ordinary", gold
+	StaticText "sprite is drawn instead.", gold
+	Slider "Voxel distance",		r_voxeldistance,	0, 2048, 64, 0
+	StaticText ""
+	StaticText "Anything held in your hand ignores both of", gold
+	StaticText "these and is always a voxel, always drawn.", gold
+	StaticText ""
+	StaticText "Held voxels turn with your wrist. -1 works the", gold
+	StaticText "correction out from the pack itself and is right", gold
+	StaticText "for every pack tried so far. Only change it if a", gold
+	StaticText "held voxel tilts toward and away from you when", gold
+	StaticText "you roll your wrist.", gold
+	StaticText ""
+	Slider "Held voxel roll axis",	vr_voxel_bodyyaw,	-1, 270, 90, 0
+	StaticText ""
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar r_drawvoxels r_voxeldistance vr_voxel_bodyyaw"
 }
 
 /*=======================================

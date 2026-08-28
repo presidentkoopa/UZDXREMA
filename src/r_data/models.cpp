@@ -318,6 +318,28 @@ static void ValidateHudModel(const FSpriteModelFrame *smf, FModel *mdl, const DP
 }
 
 EXTERN_CVAR(Bool, r_drawvoxels)
+
+// [BB] BODY-AXIS CORRECTION FOR HELD VOXELS.
+//
+// A voxel pack's AngleOffset corrects which way the mesh FACES. That is not
+// the same thing as putting its long axis on +X, which is what the pitch and
+// roll rotations assume. When the two disagree by a quarter turn, a wrist roll
+// comes out as a fore/aft tilt -- the mesh is being rolled about an axis that
+// runs across it rather than along it.
+//
+// Which way a given pack is off is not knowable from the data; it depends on
+// how its author authored the voxels. So this is a dial, not a constant. It
+// wraps the pitch/roll pair only, leaving yaw and the mesh's resting facing
+// alone, and applies ONLY to actors with VoxelOverride set -- scenery voxels
+// standing on a floor never see it.
+// Negative = derive it from the pack's own angleoffset, which is right for
+// every pack examined so far. 0 and up override with a literal quarter turn.
+CVAR(Float, vr_voxel_bodyyaw, -1.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+// Held-voxel orientation trace. On by default while this is being worked out;
+// it only ever prints for an actor that is actually in a hand, and only once a
+// second, so it is quiet unless something is held.
+CVAR(Bool, vr_voxel_debug, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(Int, vr_control_scheme)
 EXTERN_CVAR(Float, vr_weaponScale)
 EXTERN_CVAR(Float, vr_3dweaponOffsetX);
@@ -472,6 +494,54 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(AActor * actor, float x, float y
 {
 	int smf_flags = getFlags(actor->modelData);
 
+	// [BB] A VOXEL ASKED FOR BY HAND TURNS WITH THE HAND.
+	//
+	// An actor with VoxelOverride set has been switched to its voxel for a
+	// reason -- something is holding it, and a held thing has to answer the
+	// wrist. But pitch and roll are opt-in per model definition, and no voxel
+	// pack in the wild sets them: they were authored for scenery standing on a
+	// floor, where the only meaningful rotation is yaw. The pack this was
+	// written against declares AngleOffset on all 74 entries and
+	// UseActorPitch/UseActorRoll on none of them, which is typical.
+	//
+	// Forcing both here rather than asking authors to re-tag their packs, and
+	// doing it on a LOCAL copy of the flags rather than on the shared
+	// FSpriteModelFrame, so nothing leaks to the same voxel drawn elsewhere in
+	// the level. Costs one OR on actors that have the field set and nothing at
+	// all on those that do not.
+	// MDL_VOXELBODYAXIS rides along so the matrix overload below -- which is
+	// handed flags and no actor -- knows this one is held.
+	if (actor->VoxelOverride) smf_flags |= MDL_USEACTORPITCH | MDL_USEACTORROLL | MDL_VOXELBODYAXIS;
+
+	// [BB] HELD-VOXEL DIAGNOSTIC.
+	//
+	// Which quarter turn a pack is off by is not something anyone should have
+	// to find by feel in a headset, and it is not guessable from the pack
+	// either -- it depends on how its author laid the voxels out. But it IS
+	// derivable from the three model offsets against the three actor angles,
+	// and both of those are right here.
+	//
+	// Throttled to once a second per actor rather than once per draw: this runs
+	// on the render path, which is called per eye, so an unthrottled Printf
+	// would be two lines a frame and would itself cost frametime.
+	if (actor->VoxelOverride && vr_voxel_debug)
+	{
+		static const AActor *lastActor = nullptr;
+		static int lastTic = -1000;
+		if (actor != lastActor || (gametic - lastTic) > TICRATE)
+		{
+			lastActor = actor;
+			lastTic = gametic;
+			Printf("[RSVOX] %s  modeloffsets angle=%.1f pitch=%.1f roll=%.1f  |  actor yaw=%.1f pitch=%.1f roll=%.1f  |  bodyyaw=%.1f  usepitch=%d useroll=%d rotcentre=%d\n",
+				actor->GetClass()->TypeName.GetChars(),
+				angleoffset, pitchoffset, rolloffset,
+				actor->Angles.Yaw.Degrees(), actor->Angles.Pitch.Degrees(), actor->Angles.Roll.Degrees(),
+				(float)vr_voxel_bodyyaw,
+				!!(smf_flags & MDL_USEACTORPITCH), !!(smf_flags & MDL_USEACTORROLL),
+				!!(smf_flags & MDL_USEROTATIONCENTER));
+		}
+	}
+
 	// Setup transformation.
 	DRotator angles;
 
@@ -525,10 +595,25 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(AActor * actor, float x, float y
 		tic += ticFrac;
 	}
 
-	return ObjectToWorldMatrix(actor->Level, DVector3(x, y, z), DRotator(DAngle::fromDeg(pitch), DAngle::fromDeg(angle), DAngle::fromDeg(roll)), actor->InterpolatedScale(ticFrac), smf_flags, tic);
+	// TURN IT ABOUT ITS MIDDLE, NOT ITS FEET.
+	//
+	// An actor's origin sits on the floor between its feet, and every rotation
+	// below is applied about that origin. For scenery standing in a room that is
+	// exactly right -- a barrel turns on the spot. For a barrel in your hand it
+	// is not: the thing you are holding swings through an arc the length of its
+	// own height, which reads as the object pivoting about a point somewhere
+	// below it rather than turning where you are holding it.
+	//
+	// Half the height is the honest approximation. The real answer is where the
+	// hand actually gripped it, which nothing here knows; the midpoint is right
+	// for the upright cylinders this mostly picks up and wrong by less than half
+	// a height for everything else.
+	const float bodyPivotZ = actor->VoxelOverride ? float(actor->Height * 0.5) : 0.f;
+
+	return ObjectToWorldMatrix(actor->Level, DVector3(x, y, z), DRotator(DAngle::fromDeg(pitch), DAngle::fromDeg(angle), DAngle::fromDeg(roll)), actor->InterpolatedScale(ticFrac), smf_flags, tic, bodyPivotZ);
 }
 
-VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic)
+VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic, float bodyPivotZ)
 {
 	double rotateOffset = 0;
 
@@ -609,6 +694,25 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 		objectToWorldMatrix.scale(1, stretch, 1);
 	}
 
+	// Zero for everything that is not a held voxel, so the common path is one
+	// compare and the rotate calls below fold away.
+	// NEGATIVE MEANS DERIVE IT, and that is the default.
+	//
+	// Step 5 below spins the mesh by -angleoffset before any of this runs. A
+	// pack that declares 90 therefore leaves the mesh's long axis on Z while
+	// roll still turns about X -- a quarter turn out, which is a wrist roll
+	// coming out as a fore/aft tilt. Undoing exactly the offset the pack
+	// declared puts the body axes back where pitch and roll expect them, so the
+	// right number is not a matter of taste and nobody should have to find it
+	// by feel. Confirmed against the barrel: angleoffset=90, tilt on roll.
+	//
+	// The override stays because a pack whose voxels are authored nose-up
+	// rather than nose-along could need something else, and there is no way to
+	// tell that from the data either.
+	float voxBodyYaw = 0.f;
+	if (flags & MDL_VOXELBODYAXIS)
+		voxBodyYaw = (vr_voxel_bodyyaw < 0.f) ? angleoffset : (float)vr_voxel_bodyyaw;
+
 	bool rotating_xzy = (flags & MDL_ROTATING) && (flags & MDL_FIXROTATING);
 	bool rotating_xyz = (flags & MDL_ROTATING) && !(flags & MDL_FIXROTATING);
 
@@ -619,8 +723,10 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 		objectToWorldMatrix.translate(rotationCenterX, rotationCenterZ/stretch, rotationCenterY);
 
 		objectToWorldMatrix.rotate(-rotation.Yaw.Degrees(), 0, 1, 0);
+		if (voxBodyYaw != 0.f) objectToWorldMatrix.rotate(-voxBodyYaw, 0, 1, 0);
 		objectToWorldMatrix.rotate(rotation.Pitch.Degrees(), 0, 0, 1);
 		objectToWorldMatrix.rotate(-rotation.Roll.Degrees(), 1, 0, 0);
+		if (voxBodyYaw != 0.f) objectToWorldMatrix.rotate(voxBodyYaw, 0, 1, 0);
 
 		// 2) Applying Doomsday like rotation of the weapon pickup models
 		// The rotation angle is based on the elapsed time.
@@ -640,9 +746,20 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 	}
 	else
 	{
+		// Same shape as the USEROTATIONCENTER branch above -- lift the pivot to
+		// the origin, turn, put it back -- but the height comes from the ACTOR
+		// rather than from a MODELDEF, because no voxel pack declares one and a
+		// held object needs one regardless. Zero for everything else, and the
+		// two translates fold away.
+		if (bodyPivotZ != 0.f) objectToWorldMatrix.translate(0, bodyPivotZ / stretch, 0);
+
 		objectToWorldMatrix.rotate(-rotation.Yaw.Degrees(), 0, 1, 0);
+		if (voxBodyYaw != 0.f) objectToWorldMatrix.rotate(-voxBodyYaw, 0, 1, 0);
 		objectToWorldMatrix.rotate(rotation.Pitch.Degrees(), 0, 0, 1);
 		objectToWorldMatrix.rotate(-rotation.Roll.Degrees(), 1, 0, 0);
+		if (voxBodyYaw != 0.f) objectToWorldMatrix.rotate(voxBodyYaw, 0, 1, 0);
+
+		if (bodyPivotZ != 0.f) objectToWorldMatrix.translate(0, -bodyPivotZ / stretch, 0);
 
 		// 2) Applying Doomsday like rotation of the weapon pickup models
 		// The rotation angle is based on the elapsed time.
@@ -2282,6 +2399,36 @@ void ParseModelDefLump(int Lump)
 //
 //===========================================================================
 
+//===========================================================================
+//
+// [BB] FindVoxelFrame
+//
+// The voxel half of the lookup, lifted out of FindModelFrameRaw so the
+// per-actor override below can reach it without duplicating the walk or the
+// dropped-spin rule. Deliberately does NOT consult r_drawvoxels: the two
+// callers disagree about that on purpose -- the ordinary path is gated by the
+// cvar, the per-actor override is not.
+//
+// Voxels are keyed on the SPRITE FRAME, not on a class, which is the whole
+// reason a per-actor opt-in has to live outside this function.
+//
+//===========================================================================
+
+FSpriteModelFrame * FindVoxelFrame(int sprite, int frame, bool dropped)
+{
+	if (sprite < 0 || sprite >= (int)sprites.Size()) return nullptr;
+
+	spritedef_t *sprdef = &sprites[sprite];
+	if (frame >= sprdef->numframes) return nullptr;
+
+	spriteframe_t *sprframe = &SpriteFrames[sprdef->spriteframes + frame];
+	if (sprframe->Voxel == nullptr) return nullptr;
+
+	int index = sprframe->Voxel->VoxeldefIndex;
+	if (dropped && sprframe->Voxel->DroppedSpin != sprframe->Voxel->PlacedSpin) index++;
+	return &SpriteModelFrames[index];
+}
+
 FSpriteModelFrame * FindModelFrameRaw(const AActor * actorDefaults, const PClass * ti, int sprite, int frame, bool dropped)
 {
 	if(actorDefaults->hasmodel)
@@ -2306,17 +2453,8 @@ FSpriteModelFrame * FindModelFrameRaw(const AActor * actorDefaults, const PClass
 	// Check for voxel replacements
 	if (r_drawvoxels)
 	{
-		spritedef_t *sprdef = &sprites[sprite];
-		if (frame < sprdef->numframes)
-		{
-			spriteframe_t *sprframe = &SpriteFrames[sprdef->spriteframes + frame];
-			if (sprframe->Voxel != nullptr)
-			{
-				int index = sprframe->Voxel->VoxeldefIndex;
-				if (dropped && sprframe->Voxel->DroppedSpin != sprframe->Voxel->PlacedSpin) index++;
-				return &SpriteModelFrames[index];
-			}
-		}
+		FSpriteModelFrame *vox = FindVoxelFrame(sprite, frame, dropped);
+		if (vox != nullptr) return vox;
 	}
 
 	return nullptr;
@@ -2355,6 +2493,69 @@ FSpriteModelFrame * FindModelFrame(const PClass * ti, bool is_decoupled, int spr
 FSpriteModelFrame * FindModelFrame(AActor * thing, int sprite, int frame, bool dropped)
 {
 	if(!thing) return nullptr;
+
+	// [BB] PER-ACTOR VOXEL OVERRIDE.
+	//
+	// Voxels are otherwise all-or-nothing: the lookup keys on a sprite frame
+	// and is gated by one global cvar, so loading a voxel pack turns EVERY
+	// actor that has one into a voxel, everywhere, with no way to ask for it
+	// on a single object. VoxelOverride is that way.
+	//
+	// This is the hook for "a thing you are physically holding becomes a real
+	// 3D object". A billboard cannot be turned over in your hand -- it always
+	// faces you -- so a grabbed item wants to be a voxel for exactly as long
+	// as it is held, and a sprite again the moment it is dropped. Set the
+	// field on grab, clear it on release.
+	//
+	// TWO DELIBERATE DIFFERENCES from the ordinary path, both of which are the
+	// point of the feature rather than oversights:
+	//
+	//   IT IGNORES r_drawvoxels. That cvar means "draw voxels for everything",
+	//   and the case this exists for is a pack loaded with it switched OFF.
+	//   Gating the override on it would make the feature unreachable in the
+	//   exact configuration it was built for.
+	//
+	//   IT OUTRANKS A MODEL. Ordinarily a model wins and the voxel is only a
+	//   fallback (see FindModelFrameRaw). Here the caller has explicitly asked
+	//   for the voxel on this one actor, so it takes precedence -- otherwise
+	//   anything carrying a MODELDEF could never be overridden, which includes
+	//   most of what a mod would want to pick up.
+	//
+	// Falls through when the actor has no voxel for its current frame, so
+	// setting the field on something without one costs a null check and
+	// changes nothing.
+	if (thing->VoxelOverride)
+	{
+		FSpriteModelFrame *vox = FindVoxelFrame(sprite, frame, dropped);
+
+		// [BB] REPORT THE MISS, NOT JUST THE HIT.
+		//
+		// The first cut of this trace lived in ObjectToWorldMatrix, which only
+		// ever runs on something that has ALREADY resolved to a voxel -- so the
+		// one outcome worth knowing about, "asked for a voxel and there is not
+		// one", printed nothing at all and read exactly like the trace being
+		// broken. This is the decision itself: what was asked for, by which
+		// sprite and frame, and whether the pack answered.
+		if (vr_voxel_debug)
+		{
+			static const AActor *lastActor = nullptr;
+			static int lastTic = -1000;
+			if (thing != lastActor || (gametic - lastTic) > TICRATE)
+			{
+				lastActor = thing;
+				lastTic = gametic;
+				char sprname[5] = { 0 };
+				if (sprite >= 0 && sprite < (int)sprites.Size())
+					memcpy(sprname, sprites[sprite].name, 4);
+				Printf("[RSVOX] %s  sprite=%s frame=%d dropped=%d  ->  %s\n",
+					thing->GetClass()->TypeName.GetChars(),
+					sprname, frame, (int)dropped,
+					vox ? "VOXEL FOUND" : "no voxel for this frame");
+			}
+		}
+
+		if (vox != nullptr) return vox;
+	}
 
 	return FindModelFrame((thing->modelData != nullptr && thing->modelData->modelDef != nullptr) ? thing->modelData->modelDef : thing->GetClass(), (thing->flags9 & MF9_DECOUPLEDANIMATIONS), sprite, frame, dropped);
 }

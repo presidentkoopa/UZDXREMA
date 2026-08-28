@@ -76,11 +76,13 @@ enum
 	// offsets still apply on top, exactly as they do for any other world model.
 	MDL_FOLLOWMAINHAND				= 1<<19,	// world model rides the main hand's controller transform, at draw rate
 	MDL_FOLLOWOFFHAND				= 1<<20,	// world model rides the off hand's controller transform, at draw rate
+	MDL_VOXELBODYAXIS				= 1<<21,	// held voxel: wrap pitch/roll in vr_voxel_bodyyaw. Set at runtime, never from MODELDEF
 };
 
 FSpriteModelFrame * FindModelFrame(AActor * thing, int sprite, int frame, bool dropped);
 FSpriteModelFrame * FindModelFrame(const PClass * ti, bool is_decoupled, int sprite, int frame, bool dropped);
 FSpriteModelFrame * FindModelFrame(const PClass * ti, int sprite, int frame, bool dropped);
+FSpriteModelFrame * FindVoxelFrame(int sprite, int frame, bool dropped);
 //FSpriteModelFrame * FindModelFrameRaw(const AActor * actorDefaults, const PClass * ti, int sprite, int frame, bool dropped);
 
 bool IsHUDModelForPlayerAvailable(player_t * player);

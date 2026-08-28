@@ -115,7 +115,12 @@ public:
 	friend void ParseModelDefLump(int Lump);
 
 	VSMatrix ObjectToWorldMatrix(AActor * actor, float x, float y, float z, double ticFrac);
-	VSMatrix ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic);
+	// bodyPivotZ: height above the actor's origin to turn about, in map units.
+	// Zero keeps the historical behaviour of turning about the origin itself --
+	// which for anything standing on a floor is the point between its feet, so a
+	// held object swings through an arc instead of turning in place. Only the
+	// held-voxel path passes anything else.
+	VSMatrix ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic, float bodyPivotZ = 0.f);
 };
 
 

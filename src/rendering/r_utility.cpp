@@ -96,6 +96,20 @@ static TArray<DVector3a> InterpolationPath;
 CVAR (Bool, r_deathcamera, false, CVAR_ARCHIVE)
 CVAR (Int, r_clearbuffer, 0, 0)
 CVAR (Bool, r_drawvoxels, true, 0)
+
+// [BB] How far away a voxel is still drawn as a voxel, in map units. 0 is
+// unlimited, which is the old behaviour and the default.
+//
+// Voxels are model draws, and a decoration pack tags every column, torch,
+// barrel and pickup in the game -- so a room that used to cost a few
+// hundred billboards can cost a few hundred models instead. Beyond this
+// distance the ordinary sprite is drawn instead, which is what the player
+// saw before the pack was loaded and is indistinguishable at range.
+//
+// Does NOT apply to an actor with VoxelOverride set. That flag means
+// something is deliberately holding this object as a solid thing, and a
+// held object is never far away -- culling it would only ever be a bug.
+CVAR (Float, r_voxeldistance, 0.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR (Bool, r_drawplayersprites, true, 0)	// [RH] Draw player sprites?
 CVAR(Int, r_PlayerSprites3DMode, 1, CVAR_ARCHIVE); // Back only as default
 CVAR(Float, gl_fatItemWidth, 0.5f, CVAR_ARCHIVE);

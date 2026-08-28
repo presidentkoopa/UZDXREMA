@@ -1208,6 +1208,17 @@ public:
 	double			FloatSpeed;
 	TObjPtr<DActorModelData*>		modelData;
 
+	// [BB] Draw this actor as its voxel, if it has one, regardless of
+	// r_drawvoxels and in preference to any model. See FindModelFrame in
+	// r_data/models.cpp for why both of those are deliberate.
+	//
+	// Exists so a single object can become a real 3D thing for as long as
+	// something is true of it -- being held in a hand, most obviously, since a
+	// billboard cannot be turned over and a voxel can. Voxel selection is
+	// otherwise keyed on the sprite frame and gated by one global cvar, so
+	// there was no way to ask for it per-actor at all.
+	bool			VoxelOverride;
+
 // interaction info
 	FBlockNode		*BlockNode;			// links in blocks (if needed)
 	struct sector_t	*Sector;

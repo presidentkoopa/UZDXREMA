@@ -370,6 +370,11 @@ class Actor : Thinker native
 	native uint freezetics;
 	native Vector2 AutomapOffsets;
 	native double LandingSpeed;
+	// Draw this actor as its voxel if it has one, ignoring r_drawvoxels and
+	// outranking any model. Set it on grab and clear it on release to make a
+	// held object a real 3D thing you can turn over; a billboard cannot be.
+	// Costs a null check on actors that have no voxel. See FindModelFrame.
+	native bool VoxelOverride;
 	native readonly vector3 AttackPos;
 	native readonly double AttackPitch;
 	native readonly double AttackRoll;

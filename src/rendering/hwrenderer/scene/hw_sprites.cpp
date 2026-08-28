@@ -67,6 +67,7 @@ EXTERN_CVAR(Bool, r_debug_disable_vis_filter)
 EXTERN_CVAR(Float, transsouls)
 EXTERN_CVAR(Float, r_actorspriteshadowalpha)
 EXTERN_CVAR(Float, r_actorspriteshadowfadeheight)
+EXTERN_CVAR(Float, r_voxeldistance)
 EXTERN_CVAR(Bool, gl_texture_thread)
 EXTERN_CVAR(Bool, gl_texture_thread_models)
 
@@ -1051,6 +1052,38 @@ void HWSprite::Process(HWDrawInfo *di, AActor* thing, sector_t * sector, area_t 
 	}
 
 	modelframe = isPicnumOverride ? nullptr : FindModelFrame(thing, spritenum, thing->frame, !!(thing->flags & MF_DROPPED));
+
+	// [BB] VOXEL DISTANCE CULL.
+	//
+	// A decoration voxel pack tags every column, torch, barrel and pickup in
+	// the game, so a room that used to cost a few hundred billboards costs a
+	// few hundred model draws instead. Past r_voxeldistance the ordinary
+	// sprite is drawn instead -- which is exactly what the player saw before
+	// the pack was loaded, and is indistinguishable at range.
+	//
+	// Nulling modelframe IS the fallback: everything downstream already treats
+	// "no model frame" as "draw the billboard", so this needs no second path.
+	//
+	// VOXELS ONLY. A model is authored deliberately for one actor and is
+	// usually rare; a voxel arrives in bulk from a pack, which is what makes
+	// this worth having and what makes culling it safe.
+	//
+	// NEVER culls a held object. VoxelOverride means something is deliberately
+	// holding this as a solid thing -- it is by definition within arm's reach,
+	// so the test could only ever fire as a bug, and skipping it costs one
+	// compare.
+	//
+	// Squared throughout, so this adds no sqrt to a per-sprite path.
+	if (modelframe != nullptr && modelframe->isVoxel && !thing->VoxelOverride && r_voxeldistance > 0)
+	{
+		double lim = (double)r_voxeldistance;
+		DVector3 vpos = thing->InterpolatedPosition(vp.TicFrac);
+		double dx = vpos.X - vp.CenterEyePos.X;
+		double dy = vpos.Y - vp.CenterEyePos.Y;
+		double dz = vpos.Z - vp.CenterEyePos.Z;
+		if ((dx * dx + dy * dy + dz * dz) > (lim * lim)) modelframe = nullptr;
+	}
+
 	modelframeflags = modelframe ? modelframe->getFlags(thing->modelData) : 0;
 
 	if (modelframe != nullptr &&
