@@ -427,7 +427,7 @@ static const char *shaderBindings = R"(
 		int uFlatGlowFalloff;
 		int uFlatGlowLineCount;
 		int uFlatGlowIsCeiling;
-		int uFlatGlowPad2;
+		int uDarknessExempt;
 		vec4 uFlatGlowLines[64];
 
 		vec4 uGradientTopPlane;
@@ -563,6 +563,7 @@ static const char *shaderBindings = R"(
 	#define uFlatGlowFar data[uDataIndex].uFlatGlowFar
 	#define uFlatGlowFalloff data[uDataIndex].uFlatGlowFalloff
 	#define uFlatGlowIsCeiling data[uDataIndex].uFlatGlowIsCeiling
+	#define uDarknessExempt data[uDataIndex].uDarknessExempt
 	#define uFlatGlowLineCount data[uDataIndex].uFlatGlowLineCount
 	#define uFlatGlowLines data[uDataIndex].uFlatGlowLines
 	#define uGradientTopPlane data[uDataIndex].uGradientTopPlane

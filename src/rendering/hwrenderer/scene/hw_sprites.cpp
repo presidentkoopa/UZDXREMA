@@ -190,6 +190,19 @@ void HWSprite::DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent)
 
 		state.SetRenderStyle(RenderStyle);
 		state.SetTextureMode(RenderStyle);
+
+		// [BB] A fullbright sprite is declaring that it is NOT lit by the room,
+		// so world darkness -- which scales the light a room has -- has nothing
+		// to say about it. This is the same rule the glow already gets: the
+		// darkness pass runs before it because it is emissive, and this is that
+		// rule applied to the other emissive case.
+		//
+		// The UI billboards depend on it. They are marked fullbright precisely
+		// so a panel stays readable in a dark room (see HWSprite::ProcessBillboard
+		// below), and fullbright is implemented as lightlevel = 255 -- which
+		// arrives here indistinguishable from a brightly lit surface and gets
+		// scaled to nothing along with everything else.
+		state.SetDarknessExempt(fullbright);
 		if (translucentCanvas)
 		{
 			state.SetTextureMode(TM_NORMAL);
@@ -461,6 +474,7 @@ void HWSprite::DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent)
 	state.SetAddColor(0);
 	state.EnableTexture(true);
 	state.SetDynLight(0, 0, 0);
+	state.SetDarknessExempt(false);
 }
 
 //==========================================================================
@@ -2394,6 +2408,33 @@ void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double
 		return;
 	}
 
+	// [BB] A hexagon, same field machinery. Its own case rather than a flag on
+	// the panel above because the two are different shapes with different
+	// shaders -- see BB_SDFHEX's note for why a comb cannot be sampled.
+	case BB_SDFHEX:
+	{
+		FGameTexture* whiteHex = GetBillboardShape("bbwhite");
+		if (whiteHex == nullptr) return;
+		const int savedHex = OverrideShader;
+		OverrideShader = SHADER_SDFHex;
+		emit(0.0, 0.0, halfw, halfh, whiteHex, tint, FBillboardUV());
+		OverrideShader = savedHex;
+		return;
+	}
+
+	// [BB] A star. Same field machinery and the same white stand-in texture;
+	// the shader draws pure luminance and never samples it.
+	case BB_SDFSTAR:
+	{
+		FGameTexture* whiteStar = GetBillboardShape("bbwhite");
+		if (whiteStar == nullptr) return;
+		const int savedStar = OverrideShader;
+		OverrideShader = SHADER_SDFStar;
+		emit(0.0, 0.0, halfw, halfh, whiteStar, tint, FBillboardUV());
+		OverrideShader = savedStar;
+		return;
+	}
+
 	case BB_RING:
 		emit(0.0, 0.0, halfw, halfh, GetBillboardShape("bbring"), tint, FBillboardUV());
 		return;
@@ -2704,7 +2745,8 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 			// above -- and it was free: nothing downstream reads uAddColor.a.
 			// Every other payload keeps the 255 it has always had.
 			int alpha = 255;
-			if (bb->payload == BB_SDFPANEL)
+			if (bb->payload == BB_SDFPANEL || bb->payload == BB_SDFHEX
+			 || bb->payload == BB_SDFSTAR)
 			{
 				const int rad = clamp((bb->data >> 0) & 0xFF, 0, 15);
 				const int bor = clamp((bb->data >> 8) & 0xFF, 0, 15);

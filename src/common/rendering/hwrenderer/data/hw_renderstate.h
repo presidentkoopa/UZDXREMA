@@ -257,7 +257,11 @@ struct StreamData
 	// apart -- and the glow wave gives them different phases, so it has to.
 	// This was a pad, so it costs nothing: MAX_STREAM_DATA is unchanged.
 	int uFlatGlowIsCeiling;
-	int uFlatGlowPad2;
+
+	// [BB] DARKNESS EXEMPTION, per draw. Not flat-glow business despite the
+	// company it keeps -- it sits here because this was uFlatGlowPad2, so it
+	// costs nothing and MAX_STREAM_DATA is unchanged. See SetDarknessExempt.
+	int uDarknessExempt;
 	FVector4 uFlatGlowLines[64];
 
 	FVector4 uGradientTopPlane;
@@ -394,6 +398,7 @@ public:
 		mStreamData.uFlatGlowFar = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uFlatGlowFalloff = 0;
 		mStreamData.uFlatGlowIsCeiling = 0;
+		mStreamData.uDarknessExempt = 0;
 		mStreamData.uFlatGlowLineCount = 0;
 		mStreamData.uGradientTopPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uGradientBottomPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -638,6 +643,23 @@ public:
 	// [BB] Flat-edge glow: rgb + reach, a falloff curve, and up to 64 of the
 	// sector's linedef endpoints for the shader's per-pixel distance check.
 	// "farColor", not "far" -- windows.h defines `far` as an empty macro.
+	// [BB] Take this draw OUT of world darkness.
+	//
+	// Darkness scales the light a room HAS. Some draws are not that. A
+	// fullbright sprite is stating it is not lit by the room at all, and the
+	// UI billboards are fullbright precisely so a panel stays readable in a
+	// dark one -- scaling those by room darkness undoes the thing fullbright
+	// is for. Same rule the glow already gets by running after the darkness
+	// pass: emissive light is not room light.
+	//
+	// Additive and default-off: nothing is exempt until something asks, so
+	// every existing caller is untouched. Any draw that is emissive rather
+	// than lit can use it, not only sprites.
+	void SetDarknessExempt(bool exempt)
+	{
+		mStreamData.uDarknessExempt = exempt ? 1 : 0;
+	}
+
 	void SetFlatGlowParams(float r, float g, float b, float reach, const FVector4 &farColor, int falloff, int lineCount, const FVector4* lines, int isCeiling = 0)
 	{
 		mStreamData.uFlatGlowColor = { r, g, b, reach };

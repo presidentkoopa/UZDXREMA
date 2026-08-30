@@ -2899,7 +2899,16 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 	// The fog path has no scalar light -- the colour IS the light there -- so
 	// its luminance stands in, which keeps the two paths agreeing about how
 	// dark a room is instead of one of them quietly opting out.
-	if (uDarkness.x > 0.0)
+	// NOT IN 2D. uFogEnabled == -3 is the engine's existing marker for the
+	// special 2D 'fog' mode (gl_renderstate.cpp:99, hw_draw2d.cpp:146), which
+	// is how every HUD, menu and console quad reaches this shader.
+	//
+	// Without this the luminance fallback below catches them: 2D never sets a
+	// light level, so it arrives with the same -1 sentinel the fog path uses,
+	// and every HUD element gets darkened by its OWN brightness. The fallback
+	// is right for fog, where the colour genuinely is the light. It is wrong
+	// for a status bar, which was never in the world to be dark.
+	if (uDarkness.x > 0.0 && uFogEnabled != -3 && uDarknessExempt == 0)
 	{
 		float dl = (uLightLevel >= 0.0) ? uLightLevel : grayscale(vec4(color.rgb, 1.0));
 		color.rgb *= DarknessAt(dl);
