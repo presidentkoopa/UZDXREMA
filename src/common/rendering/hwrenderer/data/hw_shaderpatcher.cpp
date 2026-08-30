@@ -312,6 +312,12 @@ const FDefaultShader defaultshaders[] =
 	// size, and it can take a halo, which a sampled plate structurally cannot.
 	// Also samples nothing -- callers hand it bbwhite and it ignores it.
 	{"SDF Panel", "shaders/glsl/func_sdfpanel.fp", "shaders/glsl/material_nolight.fp", "#define NO_LAYERS\n"},
+	// [BB] A tessellating cell. Same field machinery as the panel, different
+	// distance function -- and it has to be a field rather than a sprite
+	// precisely because hexes SHARE EDGES: two soft edges do not meet, they
+	// seam. Samples nothing; bbwhite is bound and ignored.
+	{"SDF Hex", "shaders/glsl/func_sdfhex.fp", "shaders/glsl/material_nolight.fp", "#define NO_LAYERS\n"},
+	{"SDF Star", "shaders/glsl/func_sdfstar.fp", "shaders/glsl/material_nolight.fp", "#define NO_LAYERS\n"},
 	{nullptr,nullptr,nullptr,nullptr}
 };
 

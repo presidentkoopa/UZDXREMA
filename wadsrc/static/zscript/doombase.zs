@@ -695,6 +695,20 @@ struct LevelLocals native
 		// BBFL_VOID turns it into a hole -- dark inside, only the rim lit --
 		// exactly as it does on BB_SEAM.
 		BB_SDFPANEL = 11,
+		// A HEXAGON, for tessellation. Same field, same halo, same border and the
+		// same two shape nibbles as BB_SDFPANEL -- only the distance function is
+		// different. Its own payload because a comb SHARES EDGES, and a shared
+		// edge is the one place a sampled shape cannot hide: two neighbours each
+		// half a pixel soft do not meet, they seam. Pointy-top.
+		BB_SDFHEX  = 12,
+
+		// AN N-POINTED STAR POLYGON -- the symbol a chart draws, filled or
+		// stroked as an outline. A glyph rather than a point of light, because
+		// a glyph has an inside to name. shape byte0 = stroke width 0-15 where
+		// 0 means FILLED, byte1 = point count (under 3 means 5). The shape sits
+		// well inside its quad so the halo has room to fall off; size the
+		// billboard about 1.7x the star you want to see.
+		BB_SDFSTAR = 13,
 	}
 
 	enum EBillboardFacing

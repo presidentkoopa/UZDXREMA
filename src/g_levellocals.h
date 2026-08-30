@@ -139,6 +139,49 @@ enum EBillboardPayload
 	// data byte0 = corner radius 0-255 across the half-extent, byte1 = border
 	// width in the same units; 0 border draws a plain filled plate.
 	BB_SDFPANEL = 11,
+
+	// [BB] A HEXAGON, for tessellation. Same field, same halo, same border and
+	// the same shape nibbles as BB_SDFPANEL -- only the distance function is
+	// different.
+	//
+	// Its own payload rather than a shape flag on the panel, because a comb is
+	// a different problem from a card: cells SHARE EDGES, and a shared edge is
+	// the one place a sampled shape cannot hide. Two neighbours each half a
+	// pixel soft do not meet, they seam, and forty of them read as a mesh of
+	// grey lines instead of tiles.
+	//
+	// Pointy-top. Numbered above BB_TEXT like every other field payload, so it
+	// lands inside the `payload >= BB_TEXT` gate that packs the halo.
+	BB_SDFHEX  = 12,
+
+	// [BB] AN N-POINTED STAR POLYGON -- the symbol a chart draws, not a point
+	// of light. Filled, or stroked as an outline of a given width.
+	//
+	// The distinction is the whole point of the payload: a glyph has an
+	// INSIDE, and a chart wants to put something there or hang a leader off
+	// it. A light has no middle to write in.
+	//
+	// STROKE OR FILL IS A HIERARCHY, cheaply: one payload draws a chart's
+	// named stars (hollow, large) and the hundreds of specks around them
+	// (solid, small), and they match because they are literally the same
+	// shape at different sizes.
+	//
+	// Its own payload and not a nibble on BB_SDFPANEL because the panel's
+	// whole structure is edge-then-fill of a rounded rect. Cranking that
+	// radius to maximum gives a superellipse, whose four surviving corners
+	// are plainly visible at the size a star is drawn -- it reads as a
+	// lozenge. There is no rectangle setting that is a star.
+	//
+	// data byte0 = stroke width 0-15, where 0 means FILLED; byte1 = number of
+	// points, under 3 meaning the default 5. The same two nibbles in the same
+	// places as the panel and the hex, with different meanings, because a
+	// star has no corner radius to describe.
+	//
+	// The shape is fitted well inside its quad rather than to it, so the halo
+	// has transparent margin to fall off in -- fit it to the quad and every
+	// glow clips square at the edge. The caller pays in (transparent) quad
+	// area, which is the correct trade for anything that glows.
+	BB_SDFSTAR = 13,
 };
 
 // [BB] How a billboard decides which way it points. Facing is a MODE, not

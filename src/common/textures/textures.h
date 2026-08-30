@@ -80,6 +80,8 @@ enum MaterialShaderIndex
 	SHADER_Seam,
 	SHADER_WG13,
 	SHADER_SDFPanel,
+	SHADER_SDFHex,
+	SHADER_SDFStar,
 	FIRST_USER_SHADER
 };
 
