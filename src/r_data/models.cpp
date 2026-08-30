@@ -513,6 +513,13 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(AActor * actor, float x, float y
 	// handed flags and no actor -- knows this one is held.
 	if (actor->VoxelOverride) smf_flags |= MDL_USEACTORPITCH | MDL_USEACTORROLL | MDL_VOXELBODYAXIS;
 
+	// The same opt-in without the voxel, for an actor wearing a model it does
+	// not own -- a holstered weapon above all. See the field note in actor.h.
+	// No MDL_VOXELBODYAXIS here: the body-axis correction undoes a VOXEL pack's
+	// angleoffset, and a borrowed MODELDEF's offsets are already the ones its
+	// own weapon is drawn with.
+	if (actor->ForceModelAngles) smf_flags |= MDL_USEACTORPITCH | MDL_USEACTORROLL;
+
 	// [BB] HELD-VOXEL DIAGNOSTIC.
 	//
 	// Which quarter turn a pack is off by is not something anyone should have

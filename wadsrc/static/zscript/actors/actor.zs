@@ -375,6 +375,7 @@ class Actor : Thinker native
 	// held object a real 3D thing you can turn over; a billboard cannot be.
 	// Costs a null check on actors that have no voxel. See FindModelFrame.
 	native bool VoxelOverride;
+	native bool ForceModelAngles;
 	native readonly vector3 AttackPos;
 	native readonly double AttackPitch;
 	native readonly double AttackRoll;

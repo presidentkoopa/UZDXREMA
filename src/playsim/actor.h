@@ -1219,6 +1219,23 @@ public:
 	// there was no way to ask for it per-actor at all.
 	bool			VoxelOverride;
 
+	// RS FORK -- HONOUR THIS ACTOR'S PITCH AND ROLL WHATEVER ITS MODEL SAYS.
+	//
+	// MDL_USEACTORPITCH and MDL_USEACTORROLL are opt-in per MODELDEF, and yaw
+	// is not -- so an actor that BORROWS another class's model definition can
+	// be turned in yaw and cannot be pitched or rolled at all. Its pitch and
+	// roll are simply discarded, silently, with nothing anywhere to say why.
+	//
+	// That is exactly what a holstered weapon is: a prop wearing the real
+	// weapon's model via A_ChangeModel. Setting the flags on the borrowed
+	// definition is not an option -- it is shared with the actual weapon, so
+	// tuning how a pistol sits in a holster would change how the pistol is
+	// drawn in your hand.
+	//
+	// Per-actor, therefore, and read as a local OR over the flags at draw time
+	// so nothing leaks to anything else drawn from the same definition.
+	bool			ForceModelAngles;
+
 // interaction info
 	FBlockNode		*BlockNode;			// links in blocks (if needed)
 	struct sector_t	*Sector;
