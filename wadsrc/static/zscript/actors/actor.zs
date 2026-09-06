@@ -1783,10 +1783,9 @@ class Actor : Thinker native
 
 	native version("4.15.1") int GetBoneCount();
 
-	// [XR] VR body avatar / native arm IK (playsim/vr_armik.cpp, vmthunks_actors.cpp).
+	// [XR] VR body avatar natives (vmthunks_actors.cpp).
 	native void SetModelUseProceduralPose(bool enable);
 	native void SetModelBonePose(int boneIndex, double tx, double ty, double tz, double qx, double qy, double qz, double qw);
-	native void SetArmIKEnabled(bool enable);
 	// Designate the actor the engine draws and poses as this player's VR body. Call on the
 	// PLAYER PAWN (it resolves the player from self). null restores the default: the pawn itself.
 	native void SetVRBodyActor(Actor body);

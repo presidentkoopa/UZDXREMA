@@ -5186,7 +5186,7 @@ static void EnsureModelData(AActor * mobj)
 	}
 }
 
-// [XR] The file-static EnsureModelData, exported for playsim/vr_armik.cpp and the
+// [XR] The file-static EnsureModelData, exported for the
 // procedural-pose thunks (vmthunks_actors.cpp) so there is exactly one allocator.
 void P_EnsureActorModelData(AActor * mobj)
 {

@@ -188,4 +188,24 @@ const TArray<VSMatrix> * ProcessModelFrame(FModel * animation, bool nextFrame, i
 
 EXTERN_CVAR(Float, cl_scaleweaponfov)
 
+// Model joint queries, defined in models.cpp. These used to be declared in
+// playsim/vr_armik.h; that file is gone, but these are not arm-IK -- they are
+// the general "where is this joint in the world right now" pair, and the render
+// attachment system (holsters, hardpoints) is built on them.
+
+// Where a joint of an actor's model is drawn this frame: the world (GL layout)
+// position of (joint bind position + offsetModel, both in the model's file
+// space) and the model's object matrix. False if the actor has no model frame
+// or no such joint.
+bool VR_ModelJointWorld(AActor* a, FName joint, const FVector3& offsetModel, FVector3& outPosGL, VSMatrix& outObjToWorld);
+// The inverse: a Doom world point expressed as an offset from a joint, in the
+// model's file space.
+bool VR_ModelWorldToJointOffset(AActor* a, FName joint, const DVector3& worldDoom, FVector3& outOffsetModel);
+// The heading an attached actor inherits from its parent.
+double VR_ActorFacing(AActor* a);
+
+// Defined in playsim/p_actionfunctions.cpp -- the single allocator for an
+// actor's model data. Also formerly declared in vr_armik.h.
+void P_EnsureActorModelData(AActor* mobj);
+
 #endif

@@ -66,7 +66,6 @@
 #include "serialize_obj.h" // IWYU pragma: keep
 #include "serializer_doom.h"
 #include "vm.h"
-#include "vr_armik.h"
 
 extern int paused;
 
@@ -1813,11 +1812,6 @@ void P_PlayerThink (player_t *player)
 
 	previous_health = player->health;
 
-	// [XR] VR body avatar: pose the arms onto the controllers, then settle the decoupled body
-	// facing -- this order (IK first, facing after) is the original's. playsim/vr_armik.cpp.
-	// The arm solve itself now runs at render time (models.cpp RenderModel -> VR_UpdateArmIKFrame),
-	// from the same controller pose the weapon is drawn with that frame. Only the facing stays here.
-	VR_UpdateBodyFacing(player);
 }
 
 void P_PredictionLerpReset()

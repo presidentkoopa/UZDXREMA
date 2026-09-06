@@ -369,9 +369,23 @@ EXTERN_CVAR(Float, vr_offhand_yaw);
 EXTERN_CVAR(Float, vr_offhand_pitch);
 EXTERN_CVAR(Float, vr_offhand_roll);
 
-// ======================= [XR] VR body avatar (playsim/vr_armik.cpp) =======================
-#include "vr_armik.h"
+// ======================= [XR] VR body avatar =======================
+// The arm IK that used to drive this (playsim/vr_armik.cpp) has been removed.
+// What remains is body PLACEMENT: where a body model is drawn relative to the
+// headset. Nothing solves arms any more.
 EXTERN_CVAR(Int, vr_mode)   // [XR] real VR-on check; vrmode->IsVR() lies (returns 0) in the render path
+
+// The actor the renderer treats as the local VR body: the designated body actor
+// when a mod set one, else the player's pawn. Never null for a live player.
+// Was VR_BodyActor() in vr_armik.cpp; kept here because the placement path below
+// still needs to know which actor is the body.
+static AActor* VR_BodyActor(player_t* player)
+{
+	if (player == nullptr) return nullptr;
+	AActor* body = player->vr_body_actor;
+	if (body != nullptr && !(body->ObjectFlags & OF_EuthanizeMe)) return body;
+	return player->mo;
+}
 
 CVAR(Float, vr_body_size, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)   // [XR] life size; the body's own units are map units
 CVAR(Float, vr_body_z,     0.0f,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -403,30 +417,11 @@ CVAR(Float, vr_body_neck_eye_gap, 3.5f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // the property the placement actually wanted. The two distances are the player's own anatomy, in
 // map units (about 34 to the metre): 8cm back, 10cm down.
 CVAR(Bool,  vr_body_head_pivot, true,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
-EXTERN_CVAR(Bool, vr_body_crouch)   // playsim/vr_armik.cpp -- see the standing-height note below
+// Defined here now: it used to live in playsim/vr_armik.cpp, and this is the only
+// place that reads it. See the standing-height note below.
+CVAR(Bool, vr_body_crouch, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_body_neck_back,  2.7f,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // eye -> neck, along head-forward
 CVAR(Float, vr_body_neck_drop,  3.4f,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // eye -> neck, along head-up
-
-// [XR] The live body-fit scale actually applied to the local avatar this frame (autofit smoothed
-// value, or the manual vr_body_size when autofit is off). Published so the playsim arm-IK
-// (vr_armik.cpp VR_UpdateArmIK) can divide the world hand target by the SAME scale the renderer used,
-// converting the target from rendered-body space into the unscaled baseframe the IK solves in.
-// Written on the render thread, read on the playsim thread: a plain float, at worst one frame stale,
-// and the value is heavily smoothed, so no sync is needed.
-float g_xr_vrBodyRenderScale = 0.70f;
-
-// [XR] The EXACT finalized objectToWorldMatrix used to draw the local VR body this frame, published so
-// the playsim arm-IK (VR_UpdateArmIK) can INVERT the renderer's OWN transform instead of
-// hand-rebuilding world->model-local math. baseframe-space -> GL-world is F = objectToWorldMatrix*swapYZ
-// (boneData==I at bind), so the IK does target_baseframe = swapYZ * objectToWorldMatrix^-1 * controller_GL.
-// This captures the drawn yaw (vr_body_facing/vr_body_yaw), vr_body_z, AND the Y/Z-swapped bodyScale
-// factors exactly, so the manual un-yaw/axis-remap/feet-subtract/scale-divide all become obsolete.
-// Written on the render thread, read on the playsim thread: at worst one frame stale, the pose is smooth,
-// same lock-free contract as g_xr_vrBodyRenderScale above. Valid flag guards the pre-first-render frame.
-VSMatrix g_xr_vrBodyObjectToWorld;
-bool     g_xr_vrBodyObjToWorldValid = false;
-// [XR] Diagnostic: how many times the renderer consumed a procedural pose. Read by the playsim probe.
-int      g_xr_vrRenderProcHits = 0;
 
 // [XR] Is this actor the local player's VR body? The designated body actor when a mod set one,
 // else the console player's pawn -- the original test was `actor == players[consoleplayer].mo`.
@@ -453,17 +448,6 @@ void RenderModel(FModelRenderer *renderer, float x, float y, float z, FSpriteMod
 		translation = actor->Translation;
 
 	VSMatrix objectToWorldMatrix = smf->ObjectToWorldMatrix(actor, x, y, z, ticFrac);
-
-	// [XR] Publish the finalized VR-body transform so the arm-IK can invert F = objectToWorldMatrix*swapYZ.
-	// ObjectToWorldMatrix is complete here (every translate/rotate/scale, pixel stretch included, is baked
-	// in) and it is exactly the matrix the GPU uses as the model matrix -- so its inverse is exact.
-	if (VR_IsBodyActor(actor))
-	{
-		g_xr_vrBodyObjectToWorld = objectToWorldMatrix; g_xr_vrBodyObjToWorldValid = true;
-		// [XR] Solve the arms for THIS frame, against this exact matrix and the controllers as they are
-		// right now -- the same pose the weapon is drawn with -- before the body's bones are read.
-		VR_UpdateArmIKFrame(&players[consoleplayer], screen->FrameTime);
-	}
 
 	const DVector2 scale = actor->InterpolatedScale(ticFrac);
 	float scaleFactorX = scale.X * smf->xscale;
@@ -868,10 +852,6 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(AActor * actor, float x, float y
 			if (smoothedEye > 1.0)
 				bodyScale = (float)clamp((smoothedEye - (double)vr_body_headroom) / neckH, 0.25, 1.9);
 		}
-		// [XR] Publish the exact scale we're about to apply so the playsim arm-IK divides the hand
-		// target by the SAME factor (see g_xr_vrBodyRenderScale decl above). Do this even when the
-		// scale is 1.0 so a stale value never lingers.
-		if (bodyScale > 0.05f && bodyScale < 8.0f) g_xr_vrBodyRenderScale = bodyScale;
 		if (!(bodyScale > 0.f)) bodyScale = 1.f;
 
 		// [XR] +vr_body_z raises/lowers the local VR body only.
@@ -2143,12 +2123,10 @@ const TArray<VSMatrix> * ProcessModelFrame(FModel * animation, bool nextFrame, i
 
 	if (modelData && modelData->useProceduralPose && modelData->proceduralPose.Size() > 0)
 	{
-		// [XR] Procedurally supplied per-bone pose (the VR body's arm IK, playsim/vr_armik.cpp, or
-		// ZScript SetModelBonePose) overrides any baked animation. CalculateBonesIQM already branches
+		// [XR] Procedurally supplied per-bone pose (ZScript SetModelBonePose)
+		// overrides any baked animation. CalculateBonesIQM already branches
 		// on (animationData ? *animationData : TRSData): one frame's worth of TRS, frame index 0.
 		animationData = &modelData->proceduralPose;
-		g_xr_vrRenderProcHits++;
-		{ static int s_vrRenderDbg = 0; if (s_vrRenderDbg < 20) { s_vrRenderDbg++; Printf("[VRIK_RENDER] useProc=1 poseSize=%d is_decoupled=%d modelframe=%d\n", (int)modelData->proceduralPose.Size(), (int)is_decoupled, drawinfo.modelframe); } }
 	}
 	else if (drawinfo.animationid >= 0)
 	{
@@ -2319,19 +2297,6 @@ void RenderFrameModels(FModelRenderer *renderer, FLevelLocals *Level, const FSpr
 	bool is_decoupled = (actor->flags9 & MF9_DECOUPLEDANIMATIONS);
 
 	DActorModelData* modelData = actor ? actor->modelData.ForceGet() : nullptr;
-
-	// [XR] Diagnostic: what the renderer actually sees on the VR body, independent of any branch below.
-	if (actor && VR_IsBodyActor(actor))
-	{
-		static int s_rfm = 0;
-		if ((s_rfm++ % 140) == 0)
-		{
-			Printf("[VRIK_RFM] actor=%p md=%p useProc=%d pose=%u models=%u smfModels=%u decoupled=%d hits=%d\n",
-				actor, modelData, modelData ? (int)modelData->useProceduralPose : -1,
-				modelData ? modelData->proceduralPose.Size() : 0u, modelData ? modelData->models.Size() : 0u,
-				smf->modelsAmount, (int)is_decoupled, g_xr_vrRenderProcHits);
-		}
-	}
 
 	CalcModelFrameInfo frameinfo = CalcModelFrame(Level, smf, curState, curTics, modelData, actor, is_decoupled, tic, ticFrac, psp);
 	ModelDrawInfo drawinfo;

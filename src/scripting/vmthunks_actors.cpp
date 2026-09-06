@@ -2386,12 +2386,12 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SpawnParticle, SpawnParticle)
 
 //==========================================================================
 //
-// [XR] VR body avatar / procedural pose / arm IK natives -- ported from DXR.
-// Backed by playsim/vr_armik.cpp and DActorModelData::proceduralPose.
+// [XR] VR body avatar / procedural pose natives -- ported from DXR.
+// Backed by DActorModelData::proceduralPose.
 //
 //==========================================================================
 
-#include "vr_armik.h"
+#include "r_data/models.h"
 
 DEFINE_ACTION_FUNCTION(AActor, SetModelUseProceduralPose)
 {
@@ -2429,25 +2429,10 @@ DEFINE_ACTION_FUNCTION(AActor, SetModelBonePose)
 	return 0;
 }
 
-static player_t *XR_ArmIKOwner(AActor *self)
+// The player that owns this actor, or null. Used by the VR body natives below.
+static player_t *XR_VRBodyOwner(AActor *self)
 {
 	return (self != nullptr) ? self->player : nullptr;
-}
-
-DEFINE_ACTION_FUNCTION(AActor, SetArmIKEnabled)
-{
-	PARAM_SELF_PROLOGUE(AActor);
-	PARAM_BOOL(enable);
-
-	player_t *player = XR_ArmIKOwner(self);
-	if (player == nullptr) return 0;
-
-	player->vr_ik_enabled = enable;
-	if (!enable)
-	{
-		player->vr_ik_pose.Clear();   // TArray<TRS>::Clear() -> IK subsystem sees empty = inactive
-	}
-	return 0;
 }
 
 // Designate the actor the renderer draws and the IK poses as this player's VR body.
@@ -2457,7 +2442,7 @@ DEFINE_ACTION_FUNCTION(AActor, SetVRBodyActor)
 	PARAM_SELF_PROLOGUE(AActor);
 	PARAM_OBJECT(body, AActor);
 
-	player_t *player = XR_ArmIKOwner(self);
+	player_t *player = XR_VRBodyOwner(self);
 	if (player == nullptr) return 0;
 
 	player->vr_body_actor = body;
@@ -2470,7 +2455,7 @@ DEFINE_ACTION_FUNCTION(AActor, SetVRBodyBone)
 	PARAM_SELF_PROLOGUE(AActor);
 	PARAM_NAME(role);
 	PARAM_NAME(bone);
-	player_t *player = XR_ArmIKOwner(self);
+	player_t *player = XR_VRBodyOwner(self);
 	if (player == nullptr || role == NAME_None) return 0;
 	if (bone == NAME_None) player->vr_body_bone_roles.Remove(role);
 	else                   player->vr_body_bone_roles[role] = bone;
@@ -2483,7 +2468,7 @@ DEFINE_ACTION_FUNCTION(AActor, SetVRBodyGripAxis)
 {
 	PARAM_SELF_PROLOGUE(AActor);
 	PARAM_FLOAT(x); PARAM_FLOAT(y); PARAM_FLOAT(z);
-	player_t *player = XR_ArmIKOwner(self);
+	player_t *player = XR_VRBodyOwner(self);
 	if (player == nullptr) return 0;
 	player->vr_body_grip_axis = FVector3((float)x, (float)y, (float)z);
 	return 0;
@@ -2495,7 +2480,7 @@ DEFINE_ACTION_FUNCTION(AActor, SetVRBodyHiddenBone)
 	PARAM_SELF_PROLOGUE(AActor);
 	PARAM_NAME(bone);
 	PARAM_BOOL(hidden);
-	player_t *player = XR_ArmIKOwner(self);
+	player_t *player = XR_VRBodyOwner(self);
 	if (player == nullptr || bone == NAME_None) return 0;
 	auto &list = player->vr_body_hidden_bones;
 	for (unsigned i = 0; i < list.Size(); i++)
@@ -2518,7 +2503,7 @@ DEFINE_ACTION_FUNCTION(AActor, SetVRBodyHandPose)
 	PARAM_INT(frame);
 	PARAM_INT(frameNext);
 	PARAM_FLOAT(lerp);
-	player_t *player = XR_ArmIKOwner(self);
+	player_t *player = XR_VRBodyOwner(self);
 	if (player == nullptr || hand < 0 || hand > 1) return 0;
 	player->vr_body_hand_pose_frame[hand] = frame;
 	player->vr_body_hand_pose_next[hand]  = frameNext;
@@ -2534,7 +2519,7 @@ DEFINE_ACTION_FUNCTION(AActor, SetVRBodyHandTarget)
 	PARAM_INT(hand);
 	PARAM_FLOAT(x); PARAM_FLOAT(y); PARAM_FLOAT(z);
 	PARAM_BOOL(valid);
-	player_t *player = XR_ArmIKOwner(self);
+	player_t *player = XR_VRBodyOwner(self);
 	if (player == nullptr || hand < 0 || hand > 1) return 0;
 	player->vr_body_hand_target_valid[hand] = valid;
 	player->vr_body_hand_target_pos[hand] = DVector3(x, y, z);
@@ -2551,7 +2536,7 @@ DEFINE_ACTION_FUNCTION(AActor, SetVRBodyHandFrame)
 	PARAM_FLOAT(ayx); PARAM_FLOAT(ayy); PARAM_FLOAT(ayz);
 	PARAM_FLOAT(azx); PARAM_FLOAT(azy); PARAM_FLOAT(azz);
 	PARAM_BOOL(valid);
-	player_t *player = XR_ArmIKOwner(self);
+	player_t *player = XR_VRBodyOwner(self);
 	if (player == nullptr || hand < 0 || hand > 1) return 0;
 	player->vr_body_hand_frame_valid[hand] = valid;
 	player->vr_body_hand_frame_ax[hand] = FVector3((float)axx, (float)axy, (float)axz);
@@ -2567,7 +2552,7 @@ DEFINE_ACTION_FUNCTION(AActor, SetVRBodyHandAlign)
 	PARAM_SELF_PROLOGUE(AActor);
 	PARAM_INT(hand);
 	PARAM_FLOAT(x); PARAM_FLOAT(y); PARAM_FLOAT(z); PARAM_FLOAT(w);
-	player_t *player = XR_ArmIKOwner(self);
+	player_t *player = XR_VRBodyOwner(self);
 	if (player == nullptr || hand < 0 || hand > 1) return 0;
 	FQuaternion q((float)x, (float)y, (float)z, (float)w);
 	if (q.LengthSquared() < 1.e-6f) { player->vr_body_hand_align_set[hand] = false; return 0; }
@@ -2587,7 +2572,7 @@ DEFINE_ACTION_FUNCTION(AActor, SetVRBodyHandActor)
 	PARAM_OBJECT(ha, AActor);
 	PARAM_NAME(palmBone);
 	PARAM_FLOAT(ox); PARAM_FLOAT(oy); PARAM_FLOAT(oz);
-	player_t *player = XR_ArmIKOwner(self);
+	player_t *player = XR_VRBodyOwner(self);
 	if (player == nullptr || hand < 0 || hand > 1) return 0;
 	player->vr_body_hand_actor[hand] = ha;
 	player->vr_body_hand_palm_bone[hand] = palmBone;
@@ -2643,7 +2628,7 @@ DEFINE_ACTION_FUNCTION(AActor, ClearRenderAttachment)
 DEFINE_ACTION_FUNCTION(AActor, ClearVRBodyRig)
 {
 	PARAM_SELF_PROLOGUE(AActor);
-	player_t *player = XR_ArmIKOwner(self);
+	player_t *player = XR_VRBodyOwner(self);
 	if (player == nullptr) return 0;
 	player->vr_body_bone_roles.Clear();
 	player->vr_body_hidden_bones.Clear();

@@ -674,34 +674,6 @@ CVAR(Bool, vr_teleport, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_weaponRotate, -30.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_weaponScale, 1.02f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
-// --- [XR] VR body avatar / native arm-IK cvars (read via EXTERN_CVAR in playsim/vr_armik.cpp) ---
-CVAR(Bool,  vr_arm_ik,          true,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG)  // gates VR_UpdateArmIK
-CVAR(Float, vr_ik_shoulder_width,  7.0f,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG)  // half body width, collar offset from head
-CVAR(Float, vr_ik_upperarm_len,    0.0f,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG)  // 0 => read from model bind pose
-CVAR(Float, vr_ik_forearm_len,     0.0f,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG)  // 0 => read from model bind pose
-// [XR] Palm-facing offset for the IK wrist/hand bone. The bind hand's palm axis vs the
-// controller's forward differ by a fixed local rotation; these three cvars are that
-// correction in DEGREES (applied on the model-space side of the hand rotation, so they
-// rotate the whole hand about its own axes). All 0 => hand takes the raw controller
-// orientation. Dial in-headset: vr_ik_hand_roll usually does the "palm faces the right way"
-// twist; the other two nudge if the wrist is pitched/yawed off. GLOBALCONFIG so they persist.
-CVAR(Bool,  vr_ik_hand_rot,        true,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG)  // master enable for wrist-follows-controller
-CVAR(Float, vr_ik_hand_pitch,      0.0f,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG)  // palm offset, deg about hand local X (lateral)
-CVAR(Float, vr_ik_hand_yaw,        0.0f,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG)  // palm offset, deg about hand local Y (forward)
-CVAR(Float, vr_ik_hand_roll,       0.0f,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG)  // palm offset, deg about hand local Z (up)
-// [XR] Wrist orientation smoothing. Per-tic follow amount toward the raw controller orientation:
-// 1.0 = instant/raw (no smoothing, jittery), lower = smoother but laggier. Routed through SLerp,
-// which also enforces quaternion sign-continuity, so the renderer never interpolates the wrist
-// "the long way" between tics (the main cause of the violent jitter). 0.5 is a good default.
-CVAR(Float, vr_ik_hand_smooth,     0.5f,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG)  // 1=raw, lower=smoother
-// [XR] Wrist rotation RATE LIMIT (degrees per game tic). The euler round-trip produces INSTANTANEOUS
-// gimbal-lock jumps that a real wrist physically cannot; this caps how far the wrist may rotate per tic,
-// so violent spikes are clamped to human speed (and then smoothed away) while normal motion passes
-// through. 30 deg/tic ~= 1050 deg/s -- faster than a real flick, tighter than a gimbal spike. Raise it
-// if fast real flicks feel clipped; lower it for even more stability. 0 disables the cap.
-CVAR(Float, vr_ik_hand_maxstep,    30.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)  // deg/tic cap; 0 = off
-// [XR] Clamp a hand's IK target to the wall when player_t::vr_hand_touching_wall says it is against one.
-CVAR(Bool,  vr_hand_ik_clamp,      true,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_3dweaponOffsetX, 0.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_3dweaponOffsetY, 0.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_3dweaponOffsetZ, 0.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)

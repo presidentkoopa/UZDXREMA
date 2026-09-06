@@ -765,7 +765,7 @@ public:
 
 	// [XR] Procedural per-bone pose. When useProceduralPose is set and proceduralPose holds one
 	// TRS per bone, ProcessModelFrame feeds this straight into CalculateBones instead of the
-	// model's baked animation -- letting native code (playsim/vr_armik.cpp) or ZScript
+	// model's baked animation -- letting ZScript
 	// (SetModelBonePose) drive IQM bones directly each tic. One frame's worth of poses
 	// (size == bone count); rewritten every tic, not saved.
 	TArray<TRS> proceduralPose;

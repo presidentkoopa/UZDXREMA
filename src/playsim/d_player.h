@@ -538,29 +538,18 @@ public:
 
 	bool PlayInVR = false;	// Identifies if this player is playing in VR
 
-	// [XR] VR body avatar + native arm IK (playsim/vr_armik.cpp), ported from DXR.
+	// [XR] VR body avatar. The native arm IK that used to drive this is GONE --
+	// what is left is body PLACEMENT and the rig description a mod supplies.
 	// TRANSIENT / CLIENT-PRESENTATION-ONLY: none of this is serialized or sent over the net.
 	// It is rebuilt every tic from the LOCAL headset, so it is only ever meaningful for the
 	// console player on this machine.
 	TObjPtr<AActor*> vr_body_actor = MakeObjPtr<AActor*>(nullptr); // the actor drawn/posed as this player's VR body; null = the pawn itself
-	TArray<TRS> vr_ik_pose;                       // bind TRS for non-arm joints, solved TRS for the arm chain
-	bool        vr_ik_active = false;             // true when VR_UpdateArmIK wrote a valid pose this tic
-	bool        vr_ik_enabled = true;             // per-player gate toggled by the SetArmIKEnabled thunk
-	float       vr_body_facing_yaw = 0.f;         // decoupled body heading (VR_UpdateBodyFacing); the renderer draws the body at this, not the HMD yaw
+	float       vr_body_facing_yaw = 0.f;         // decoupled body heading; the renderer draws the body at this, not the HMD yaw
 	bool        vr_body_facing_valid = false;
-	// Hand-vs-world contact, indexed by VR_MAINHAND/VR_OFFHAND. Read by the IK wall clamp; written by a
-	// hand-collision pass. Inert (false) until something writes it.
-	bool        vr_hand_touching_wall[2] = { false, false };
-	DVector3    vr_hand_collision_clamp_pos[2] = {};   // world point the hand is pulled back to when touching -- the real contact radius from the wall
-	// Two-handed foregrip. Read by the IK foregrip pin; written by a two-handing pass. Inert until set.
-	bool        vr_foregrip_engaged = false;      // off-hand is foregripping the main weapon's hs_foregrip this tic
-	float       vr_foregrip_world[3] = { 0.f, 0.f, 0.f }; // hs_foregrip world point (Doom x, y, z-up)
 
 	// [XR] Rig description for the VR body, supplied by the mod that owns the body (Actor.SetVRBody*).
-	// The IK is written against joint ROLES (collar_r, upperarm_r, lowerarm_r, hand_r, the _l set,
-	// index_0_r .. pinky_2_l, thumb_0_r .., neck); this table maps a role to a joint name on whatever
-	// rig is loaded. Empty table = the built-in marine names. Every change bumps vr_body_rig_gen so
-	// the IK re-resolves its cached joint indices.
+	// Maps a joint ROLE to a joint name on whatever rig is loaded. Empty table = the built-in
+	// marine names. Every change bumps vr_body_rig_gen so cached joint indices are re-resolved.
 	TMap<FName, FName> vr_body_bone_roles;
 	int          vr_body_rig_gen = 0;
 	FVector3     vr_body_grip_axis = FVector3(1.f, 0.f, 0.f); // finger flex axis in joint-local space (marine: +X)

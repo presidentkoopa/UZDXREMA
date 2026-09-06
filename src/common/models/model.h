@@ -218,8 +218,8 @@ public:
 
 	virtual const TArray<VSMatrix>* GetBasePose() {return nullptr;}
 
-	// [XR] Joint introspection under the names the DXR arm-IK was written against
-	// (playsim/vr_armik.cpp): thin readers over the joint API above. GetJointCount()==0 on a
+	// [XR] Joint introspection: 
+	// thin readers over the joint API above. GetJointCount()==0 on a
 	// non-IQM model is itself the "not an IQM" signal, so callers need no RTTI/dynamic_cast.
 	int  GetJointCount() { return NumJoints(); }
 	int  FindJointByName(FName name) { return FindJoint(name); }

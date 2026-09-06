@@ -609,7 +609,6 @@ static PalEntry CycleHue(PalEntry base, int target)
 }
 
 // Straight per-channel lerp toward a target colour, alpha untouched. Used by
-// the headshot line-up reaction to blend toward vr_laser_headshot_color
 // instead of hard-swapping it, so a pulsing reaction fades rather than pops.
 static PalEntry LerpColor(PalEntry from, PalEntry to, float t)
 {
