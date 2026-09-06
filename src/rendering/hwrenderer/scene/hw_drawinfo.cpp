@@ -685,19 +685,24 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 		// volumetric beam pass gets its own copy in VIEW space and cannot
 		// share -- see hw_viewpointuniforms.h. Outside the slab gate too:
 		// a tornado standing in clear air is exactly the case that needs it.
-		if (Level->VolBeamActive)
+		// The fog carries ONE torch cone -- there is a single set of mFogBeam
+		// uniforms -- so with several beams live it takes the lowest live slot
+		// rather than whichever was written most recently. Deterministic, and
+		// slot 0 is the one a flashlight would naturally hold.
+		const int fb = Level->FirstVolBeam();
+		if (fb >= 0)
 		{
 			VPUniforms.mFogBeamPos = {
-				(float)Level->VolBeamPos.X, (float)Level->VolBeamPos.Z,
-				(float)Level->VolBeamPos.Y, (float)Level->VolBeamLength };
+				(float)Level->VolBeamPos[fb].X, (float)Level->VolBeamPos[fb].Z,
+				(float)Level->VolBeamPos[fb].Y, (float)Level->VolBeamLength[fb] };
 			VPUniforms.mFogBeamDir = {
-				(float)Level->VolBeamDir.X, (float)Level->VolBeamDir.Z,
-				(float)Level->VolBeamDir.Y,
-				(float)cos(Level->VolBeamInner * M_PI / 180.0) };
+				(float)Level->VolBeamDir[fb].X, (float)Level->VolBeamDir[fb].Z,
+				(float)Level->VolBeamDir[fb].Y,
+				(float)cos(Level->VolBeamInner[fb] * M_PI / 180.0) };
 			VPUniforms.mFogBeamCol = {
-				Level->VolBeamColor.r / 255.f, Level->VolBeamColor.g / 255.f,
-				Level->VolBeamColor.b / 255.f,
-				(float)cos(Level->VolBeamOuter * M_PI / 180.0) };
+				Level->VolBeamColor[fb].r / 255.f, Level->VolBeamColor[fb].g / 255.f,
+				Level->VolBeamColor[fb].b / 255.f,
+				(float)cos(Level->VolBeamOuter[fb] * M_PI / 180.0) };
 		}
 		else
 		{
@@ -955,9 +960,9 @@ angle_t HWDrawInfo::FrustumAngle()
 
 void HWDrawInfo::SetupVolumetricBeam()
 {
-	if (Level == nullptr || !Level->VolBeamActive)
+	if (Level == nullptr)
 	{
-		hw_postprocess.volbeam.ClearBeam();
+		hw_postprocess.volbeam.ClearBeams();
 		return;
 	}
 
@@ -969,24 +974,32 @@ void HWDrawInfo::SetupVolumetricBeam()
 		return FVector3(out[0], out[1], out[2]);
 	};
 
-	VolumetricBeamUniforms u = {};
-	u.BeamPos = worldToView(Level->VolBeamPos, false);
+	// Every live slot gets its own uniform set. The pass draws them one after
+	// another and is ADDITIVE, so they composite correctly with no blending
+	// work and no shader change -- each pass contributes only its own light.
+	hw_postprocess.volbeam.ClearBeams();
+	for (int bi = 0; bi < FLevelLocals::MAX_VOL_BEAMS; bi++)
+	{
+	if (!Level->VolBeamActive[bi]) continue;
 
-	FVector3 dir = worldToView(Level->VolBeamDir, true);
+	VolumetricBeamUniforms u = {};
+	u.BeamPos = worldToView(Level->VolBeamPos[bi], false);
+
+	FVector3 dir = worldToView(Level->VolBeamDir[bi], true);
 	float dl = dir.Length();
 	u.BeamDir = (dl > 0.0001f) ? dir / dl : FVector3(0, 0, -1);
 
-	u.BeamColor = FVector3(Level->VolBeamColor.r / 255.f,
-		Level->VolBeamColor.g / 255.f,
-		Level->VolBeamColor.b / 255.f);
+	u.BeamColor = FVector3(Level->VolBeamColor[bi].r / 255.f,
+		Level->VolBeamColor[bi].g / 255.f,
+		Level->VolBeamColor[bi].b / 255.f);
 
 	// Half-angles arrive in degrees; the shader compares cosines, so convert
 	// once here rather than per pixel.
-	u.CosInner = (float)cos(Level->VolBeamInner * M_PI / 180.0);
-	u.CosOuter = (float)cos(Level->VolBeamOuter * M_PI / 180.0);
-	u.BeamLength = (float)Level->VolBeamLength;
-	u.Density = (float)Level->VolBeamDensity;
-	u.Falloff = (float)Level->VolBeamFalloff;
+	u.CosInner = (float)cos(Level->VolBeamInner[bi] * M_PI / 180.0);
+	u.CosOuter = (float)cos(Level->VolBeamOuter[bi] * M_PI / 180.0);
+	u.BeamLength = (float)Level->VolBeamLength[bi];
+	u.Density = (float)Level->VolBeamDensity[bi];
+	u.Falloff = (float)Level->VolBeamFalloff[bi];
 
 	// Rebuilding the pixel ray in the shader needs the view frustum's shape,
 	// which is exactly what the projection matrix's first two diagonals hold.
@@ -999,9 +1012,9 @@ void HWDrawInfo::SetupVolumetricBeam()
 
 	// Dust is sampled in world space, so the shader needs a way back out of
 	// view space. Without this the motes would ride along with the camera.
-	u.DustAmount = (float)Level->VolBeamDust;
-	u.DustScale = (float)Level->VolBeamDustScale;
-	u.DustDrift = (float)Level->VolBeamDustDrift;
+	u.DustAmount = (float)Level->VolBeamDust[bi];
+	u.DustScale = (float)Level->VolBeamDustScale[bi];
+	u.DustDrift = (float)Level->VolBeamDustDrift[bi];
 	u.DustTime = (float)(screen->FrameTime * 0.001);
 	u.AxisFade = (float)clamp<double>(vol_beam_axisfade, 0.0, 1.0);
 
@@ -1017,7 +1030,8 @@ void HWDrawInfo::SetupVolumetricBeam()
 	if (!VPUniforms.mViewMatrix.inverseMatrix(inv)) inv.loadIdentity();
 	memcpy(u.ViewToWorld, inv.get(), sizeof(float) * 16);
 
-	hw_postprocess.volbeam.SetBeam(u);
+	hw_postprocess.volbeam.AddBeam(u);
+	}
 }
 
 //-----------------------------------------------------------------------------

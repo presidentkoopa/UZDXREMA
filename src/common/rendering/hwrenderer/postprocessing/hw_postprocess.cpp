@@ -81,21 +81,28 @@ void PPBloom::UpdateTextures(int width, int height)
 // sells it as light rather than as a drawn shape.
 void PPVolumetricBeam::Render(PPRenderState *renderstate, int sceneWidth, int sceneHeight)
 {
-	if (!active || uniforms.Density <= 0.0f || uniforms.BeamLength <= 0.0f)
+	if (count <= 0)
 		return;
 
 	renderstate->PushGroup("volumetricbeam");
 
-	renderstate->Clear();
-	renderstate->Shader = &Beam;
-	renderstate->Uniforms.Set(uniforms);
-	renderstate->Viewport = screen->mSceneViewport;
-	renderstate->SetInputSceneDepth(0);
-	renderstate->SetOutputCurrent();
-	// Additive: the pass outputs only the beam's own contribution, so it
-	// never has to read the scene colour back in.
-	renderstate->SetAdditiveBlend();
-	renderstate->Draw();
+	for (int i = 0; i < count; i++)
+	{
+		if (uniforms[i].Density <= 0.0f || uniforms[i].BeamLength <= 0.0f)
+			continue;
+
+		renderstate->Clear();
+		renderstate->Shader = &Beam;
+		renderstate->Uniforms.Set(uniforms[i]);
+		renderstate->Viewport = screen->mSceneViewport;
+		renderstate->SetInputSceneDepth(0);
+		renderstate->SetOutputCurrent();
+		// Additive: the pass outputs only this beam's own contribution and
+		// never reads the scene colour back -- which is exactly why running it
+		// once per beam composites them correctly for free.
+		renderstate->SetAdditiveBlend();
+		renderstate->Draw();
+	}
 
 	renderstate->PopGroup();
 }

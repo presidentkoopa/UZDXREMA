@@ -1103,8 +1103,14 @@ struct LevelLocals native
 	// faded to nothing by outer. falloff shapes the fade along the length --
 	// 1 linear, higher concentrates the light near the lens. Publish it each
 	// tic while the light is on; clear it when off, which costs nothing.
-	native void SetVolumetricBeam(Vector3 pos, Vector3 dir, color col, double inner, double outer, double length, double density, double falloff, double dust = 0, double dustScale = 0.04, double dustDrift = 0);
-	native void ClearVolumetricBeam();
+	// FOUR SLOTS. Slot 0 is what a caller that never heard of slots gets, so
+	// every call site written before slots existed keeps working. A torch, a
+	// wheel laser, a weapon effect and one spare -- before this they all shared
+	// one set of fields, so opening the weapon wheel put your flashlight out.
+	native void SetVolumetricBeam(Vector3 pos, Vector3 dir, color col, double inner, double outer, double length, double density, double falloff, double dust = 0, double dustScale = 0.04, double dustDrift = 0, int slot = 0);
+	// One slot, or every slot with -1. Defaults to 0 rather than to all of them:
+	// a caller is turning off the beam it turned on, not everyone else's.
+	native void ClearVolumetricBeam(int slot = 0);
 
 	// [BB] Sweep -- up to eight thin bands of light travelling through the
 	// world, each tested per pixel against world position on every surface,

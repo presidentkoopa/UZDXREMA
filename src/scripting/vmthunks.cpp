@@ -3595,25 +3595,48 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, RemoveBillboardGroup, RemoveBillboar
 static void SetVolumetricBeam(FLevelLocals *self, double px, double py, double pz,
 	double dx, double dy, double dz, int color,
 	double inner, double outer, double length, double density, double falloff,
-	double dust, double dustScale, double dustDrift)
+	double dust, double dustScale, double dustDrift, int slot)
 {
-	self->VolBeamActive = true;
-	self->VolBeamDust = dust;
-	self->VolBeamDustScale = dustScale;
-	self->VolBeamDustDrift = dustDrift;
-	self->VolBeamPos = DVector3(px, py, pz);
+	// Slot 0 for anything that never heard of slots, which is every caller
+	// that existed before there were any.
+	if (slot < 0 || slot >= FLevelLocals::MAX_VOL_BEAMS) slot = 0;
+
+	self->VolBeamActive[slot] = true;
+	self->VolBeamDust[slot] = dust;
+	self->VolBeamDustScale[slot] = dustScale;
+	self->VolBeamDustDrift[slot] = dustDrift;
+	self->VolBeamPos[slot] = DVector3(px, py, pz);
 	DVector3 d(dx, dy, dz);
 	double len = d.Length();
-	self->VolBeamDir = (len > 0.0) ? d / len : DVector3(1, 0, 0);
-	self->VolBeamColor = (PalEntry)color;
-	self->VolBeamInner = inner;
-	self->VolBeamOuter = outer;
-	self->VolBeamLength = length;
-	self->VolBeamDensity = density;
-	self->VolBeamFalloff = falloff;
+	self->VolBeamDir[slot] = (len > 0.0) ? d / len : DVector3(1, 0, 0);
+	self->VolBeamColor[slot] = (PalEntry)color;
+	self->VolBeamInner[slot] = inner;
+	self->VolBeamOuter[slot] = outer;
+	self->VolBeamLength[slot] = length;
+	self->VolBeamDensity[slot] = density;
+	self->VolBeamFalloff[slot] = falloff;
 }
 
-DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetVolumetricBeam, SetVolumetricBeam)
+// NATIVE0, NOT NATIVE -- and this is not a style choice.
+//
+// The plain _NATIVE macro also registers a DIRECT-CALL pointer, which the JIT
+// uses to emit a straight call to the C++ function. asmjit caps that at 16
+// arguments (kFuncArgCount in libraries/asmjit/asmjit/base/func.h). This one
+// needs seventeen: self, two Vector3s at three floats each, the colour, five
+// doubles, three dust doubles and the slot. Over the cap the JIT blows up while
+// compiling at load -- the process dies with no window, no dialog, no script
+// error and nothing written to any log.
+//
+// It sat at exactly sixteen until `slot` was added, which is why this only
+// started when beams gained slots, and why it broke every caller at once rather
+// than only the one that passed the new argument: the JIT builds the direct call
+// from the FUNCTION signature, not from the call site, so leaving `slot` to its
+// default did not help anybody.
+//
+// _NATIVE0 registers the same function with no direct-call pointer. The VM
+// calling convention has no such limit. If you add a parameter to any native,
+// count the VM arguments first -- a Vector3 is three.
+DEFINE_ACTION_FUNCTION_NATIVE0(FLevelLocals, SetVolumetricBeam, SetVolumetricBeam)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
 	PARAM_FLOAT(px); PARAM_FLOAT(py); PARAM_FLOAT(pz);
@@ -3627,19 +3650,31 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetVolumetricBeam, SetVolumetricBeam
 	PARAM_FLOAT(dust);
 	PARAM_FLOAT(dustScale);
 	PARAM_FLOAT(dustDrift);
-	SetVolumetricBeam(self, px, py, pz, dx, dy, dz, color, inner, outer, length, density, falloff, dust, dustScale, dustDrift);
+	PARAM_INT(slot);
+	SetVolumetricBeam(self, px, py, pz, dx, dy, dz, color, inner, outer, length, density, falloff, dust, dustScale, dustDrift, slot);
 	return 0;
 }
 
-static void ClearVolumetricBeam(FLevelLocals *self)
+// Clear ONE slot, or every slot with -1. Defaulting to slot 0 rather than to
+// all of them is deliberate: a caller that never heard of slots is turning off
+// the beam it turned on, not everyone else's -- which was the whole failure the
+// slots exist to fix.
+static void ClearVolumetricBeam(FLevelLocals *self, int slot)
 {
-	self->VolBeamActive = false;
+	if (slot < 0)
+	{
+		for (int i = 0; i < FLevelLocals::MAX_VOL_BEAMS; i++)
+			self->VolBeamActive[i] = false;
+		return;
+	}
+	if (slot < FLevelLocals::MAX_VOL_BEAMS) self->VolBeamActive[slot] = false;
 }
 
 DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearVolumetricBeam, ClearVolumetricBeam)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
-	ClearVolumetricBeam(self);
+	PARAM_INT(slot);
+	ClearVolumetricBeam(self, slot);
 	return 0;
 }
 

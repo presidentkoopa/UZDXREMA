@@ -1236,21 +1236,47 @@ public:
 	//
 	// mode: 0 off, 1 cylinder from origin, 2 plane along X, 3 plane along Y,
 	//       4 sphere from origin
-	// [BB] Volumetric beam -- a cone of visible light in the air, for a
-	// flashlight. Published from script each tic and consumed by the
-	// renderer, which resolves it into view space per eye.
-	bool VolBeamActive = false;
-	DVector3 VolBeamPos;
-	DVector3 VolBeamDir;
-	PalEntry VolBeamColor;
-	double VolBeamInner = 10.0;    // degrees, full brightness inside this
-	double VolBeamOuter = 25.0;    // degrees, faded to nothing by here
-	double VolBeamLength = 1024.0;
-	double VolBeamDensity = 1.0;
-	double VolBeamFalloff = 1.5;
-	double VolBeamDust = 0.0;      // 0 = clean beam, 1 = heavily mottled
-	double VolBeamDustScale = 0.04;// higher = finer motes
-	double VolBeamDustDrift = 0.0; // world units per second the dust settles
+	// [BB] VOLUMETRIC BEAMS -- lit air rather than lit surfaces.
+	//
+	// FOUR OF THEM, and it used to be one. A singleton meant every caller was
+	// really the same caller: the weapon wheel's laser, RS_Lance and anything
+	// else all wrote the same fields, so whoever set it last won and whoever
+	// finished first called Clear and took everyone else's light out with it.
+	// A flashlight was impossible to add for exactly that reason -- open the
+	// wheel and your torch would go dark.
+	//
+	// Four because these are not free: each is a raymarch. They cost nothing
+	// when off-screen -- the pass bounds every one with an analytic ray/cone
+	// intersection and returns black in a few dot products -- but four beams
+	// lighting the same corridor is four marches over the same pixels. Four is
+	// a torch, a wheel laser, a weapon effect and one spare, which is the set
+	// that actually comes up.
+	//
+	// Slot 0 is what a caller that never heard of slots gets, so every existing
+	// call site keeps working unchanged.
+	static const int MAX_VOL_BEAMS = 4;
+
+	bool     VolBeamActive[MAX_VOL_BEAMS] = {};
+	DVector3 VolBeamPos[MAX_VOL_BEAMS] = {};
+	DVector3 VolBeamDir[MAX_VOL_BEAMS] = {};
+	PalEntry VolBeamColor[MAX_VOL_BEAMS] = {};
+	double   VolBeamInner[MAX_VOL_BEAMS] = {};   // degrees, full brightness inside
+	double   VolBeamOuter[MAX_VOL_BEAMS] = {};   // degrees, faded out by here
+	double   VolBeamLength[MAX_VOL_BEAMS] = {};
+	double   VolBeamDensity[MAX_VOL_BEAMS] = {};
+	double   VolBeamFalloff[MAX_VOL_BEAMS] = {};
+	double   VolBeamDust[MAX_VOL_BEAMS] = {};    // 0 clean, 1 heavily mottled
+	double   VolBeamDustScale[MAX_VOL_BEAMS] = {};
+	double   VolBeamDustDrift[MAX_VOL_BEAMS] = {};
+
+	// The first live beam, or -1. The fog reads a single torch cone (it has one
+	// set of mFogBeam uniforms), so it takes the lowest live slot rather than
+	// silently taking whichever happened to be written last.
+	int FirstVolBeam() const
+	{
+		for (int i = 0; i < MAX_VOL_BEAMS; i++) if (VolBeamActive[i]) return i;
+		return -1;
+	}
 
 	// Up to eight bands travel at once, so a train of them can chase each
 	// other with their own colours and spacing.
