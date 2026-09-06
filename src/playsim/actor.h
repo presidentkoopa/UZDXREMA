@@ -439,7 +439,6 @@ enum ActorFlag9
 	MF9_ISPUFF					= 0x00000040,	// [AA] Set on actors by P_SpawnPuff
 	MF9_FORCESECTORDAMAGE		= 0x00000080,	// [inkoalawetrust] Actor ALWAYS takes hurt floor damage if there's any. Even if the floor doesn't have SECMF_HURTMONSTERS.
 	MF9_NOAUTOOFFSKULLFLY		= 0x00000100,	// Don't automatically disable MF_SKULLFLY if velocity is 0.
-	MF9_PHYSICSBODY				= 0x00000200,	// RS FORK -- rigid-body physics owns this actor's transform; see p_physics.h
 };
 
 // --- mobj.renderflags ---
@@ -763,6 +762,14 @@ public:
 	// Deliberately NOT serialized: state pointers do not survive a session,
 	// and binds re-register the table on load anyway.
 	TMap<intptr_t, int64_t>		stateRemap;
+
+	// [XR] Procedural per-bone pose. When useProceduralPose is set and proceduralPose holds one
+	// TRS per bone, ProcessModelFrame feeds this straight into CalculateBones instead of the
+	// model's baked animation -- letting native code (playsim/vr_armik.cpp) or ZScript
+	// (SetModelBonePose) drive IQM bones directly each tic. One frame's worth of poses
+	// (size == bone count); rewritten every tic, not saved.
+	TArray<TRS> proceduralPose;
+	bool useProceduralPose = false;
 
 	DActorModelData() = default;
 	virtual void Serialize(FSerializer& arc) override;
@@ -1236,6 +1243,32 @@ public:
 	// so nothing leaks to anything else drawn from the same definition.
 	bool			ForceModelAngles;
 
+	// RS FORK -- WORN ON THE BODY, PLACED AT DRAW RATE.
+	//
+	// FollowBodyMode 1 draws this actor in the player's body frame -- head
+	// position and yaw, read fresh every frame through
+	// VRMode::GetHmdTransform -- with FollowBodyOfs as its seat in that frame.
+	// 0, the default, leaves the actor placed the ordinary way and is what
+	// everything that never asks for this gets.
+	//
+	// WHY THIS IS PER-ACTOR AND NOT A MODELDEF FLAG. MDL_FOLLOWMAINHAND works
+	// as a flag because there is one main hand and everything riding it wants
+	// the same transform. A worn rig is the opposite: a dozen props share one
+	// class and each sits at its own place on the body, chosen by the player.
+	// A per-class MODELDEF prefix cannot say "this one is on my left hip and
+	// that one is behind my shoulder", so the seat travels with the instance.
+	//
+	// WHAT IT REPLACES. Script could only sample the head pose once a tic and
+	// re-place each prop with SetOrigin, so between two samples the whole rig
+	// swam -- and a prop far from the anchor swept a wide arc for a small head
+	// movement, which is why the low ones looked worst. Interpolation cannot
+	// help: it smooths between two stale samples of a pose that moved at 90Hz.
+	//
+	// Offsets are in the body's own frame: X forward, Y right, Z up, in map
+	// units, matching _ofs_x/_ofs_y/_ofs_z everywhere else in this fork.
+	int				FollowBodyMode;
+	DVector3		FollowBodyOfs;
+
 	// RS FORK -- WHICH BUTTONS ARE DOWN ON A HAND WHOSE POSE HAS CLAIMED THEM.
 	//
 	// Bit 0 grip, bit 1 face pad, bit 2 trigger, for whichever hand is armed;
@@ -1253,6 +1286,31 @@ public:
 	// would have meant hunting six made-up keys in Customize Controls from inside
 	// a headset before anything worked at all.
 	int				HardpointButtons;
+
+	// RS FORK -- TRACE THIS ACTOR IN NEON, FROM ITS OWN SPRITE.
+	//
+	// The drawing is func_spriteoutline.fp: a Sobel edge detect over the
+	// sprite the actor is already showing, so the outline is exactly the right
+	// size and shape for ANY actor, including one a mod added this morning.
+	// Nothing here names a monster and nothing measures a body.
+	//
+	// This lives per actor rather than per scene because the previous fork put
+	// it per scene -- one global cvar, bound in gldefs to fifteen hardcoded
+	// Doom sprite names -- and that could not light one corpse, could not fade,
+	// and knew nothing about anybody else's monsters.
+	//
+	// INERT UNTIL SET. OutlineMode 0 is off, which is the default, and off
+	// costs one float compare in the fragment shader. Read in
+	// HWSprite::DrawSprite.
+	PalEntry		OutlineColorA;
+	PalEntry		OutlineColorB;
+	double			OutlineStrength;	// master; 0 is off, and a fade passes through it
+	double			OutlineThickness;	// how wide the traced line is, in texels
+	double			OutlineThreshold;	// how much contrast counts as an edge
+	double			OutlineGlow;		// how far the halo reaches off the line
+	double			OutlinePulse;		// A-to-B crossfade speed; 0 holds on A
+	int				OutlineMode;		// 0 off, 1 edge, 2 wire, 3 ghost
+
 
 // interaction info
 	FBlockNode		*BlockNode;			// links in blocks (if needed)
@@ -1836,6 +1894,17 @@ public:
 	// menus anchored to the player) that needs to reason about the player's
 	// physical pose rather than where they are aiming.
 	DVector3 HmdPos;
+
+	// [XR] RENDER ATTACHMENT. When RenderAttachParent is set, the renderer places this actor's MODEL
+	// at a joint of the parent's model, from the parent's live object matrix EVERY FRAME -- so a
+	// holster on the body's hip, or a hardpoint on a hand, moves with its parent at render rate
+	// instead of trailing it by a tic. The actor's own position and angles are ignored for drawing
+	// (they still rule everything else: collision, use, pickup). Offset is in the parent model's
+	// file space; Angles are added to the parent's facing. Not saved: the owner re-attaches.
+	TObjPtr<AActor*> RenderAttachParent;
+	FName    RenderAttachBone = NAME_None;
+	FVector3 RenderAttachOffset = FVector3(0.f, 0.f, 0.f);
+	DRotator RenderAttachAngles = DRotator(nullAngle, nullAngle, nullAngle);
 	DAngle   HmdYaw;
 	DAngle   HmdPitch;
 	DAngle   HmdRoll;
@@ -1937,6 +2006,7 @@ public:
 	// hands are.
 	bool TwoHandedHold;
 
+
 	// Capacitive finger contact, FINGERTOUCH_* bits. Contact is not a press:
 	// this says where a finger RESTS, which is what a hand pose needs.
 	int FingerTouchMain;
@@ -1969,13 +2039,6 @@ public:
 	DVector3 LaserTraceHitPosMain;
 	DVector3 LaserTraceHitPosOff;
 
-	// The other direction: did a mod decide the point above is a headshot?
-	// Script-owned (a class list of what even has a head is mod data, not
-	// engine data -- see the Headshots gameplay mod), native reads this to
-	// react on the sight. One tic of lag behind LaserTraceTarget* is fine;
-	// this is a cosmetic reaction, not a hit determination.
-	bool LaserHeadshotLinedUpMain;
-	bool LaserHeadshotLinedUpOff;
 
 	DVector3 (*OffhandDir)(AActor* actor, DAngle yaw, DAngle pitch);
 };

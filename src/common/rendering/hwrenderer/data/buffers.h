@@ -61,7 +61,8 @@ enum EVertexAttributeFormat
 	VFmt_Float,
 	VFmt_Byte4,
 	VFmt_Packed_A2R10G10B10,
-	VFmt_Byte4_UInt
+	VFmt_Byte4_UInt,
+	VFmt_UShort4_UInt	// [XR] 16-bit unsigned integer x4: bone selectors for rigs past 255 joints (the Slayer has 924)
 };
 
 struct FVertexBufferAttribute

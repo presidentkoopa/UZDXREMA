@@ -1964,6 +1964,13 @@ void DStaticEventHandler::WorldThingDamaged(AActor* actor, AActor* inflictor, AA
 		e.DamageType = mod;
 		e.DamageFlags = flags;
 		e.DamageAngle = angle;
+		// [BB] These were set only on the line and sector damage paths, so a
+		// handler reading them for a THING read uninitialised memory -- and
+		// the fields are the obvious ones to reach for when you want to know
+		// where an explosion went off. The inflictor is the bomb spot, which
+		// is what P_RadiusAttack passes and what "where did it happen" means.
+		e.DamageIsRadius = (flags & DMG_EXPLOSION) != 0;
+		e.DamagePosition = inflictor ? inflictor->Pos() : actor->Pos();
 		VMValue params[2] = { (DStaticEventHandler*)this, &e };
 		VMCall(func, params, 2, nullptr, 0);
 	}

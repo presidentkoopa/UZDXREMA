@@ -35,7 +35,6 @@
 #include "p_lnspec.h"
 
 #include "v_text.h"
-#include "p_physics.h"
 #include "p_setup.h"
 #include "gi.h"
 #include "engineerrors.h"
@@ -3254,7 +3253,6 @@ void MapLoader::LoadLevel(MapData *map, const char *lumpname, int position)
 	// RS FORK -- VR object physics. Here because this is the point at which all
 	// static geometry is final: slopes have been applied, 3D floors spawned,
 	// sections built and polyobjects initialised.
-	P_PhysicsLevelStart();
 
 	// [DVR] Populate subsector->bbox for alternative space culling in orthographic projection with no fog of war
 	subsector_t* sub = &Level->subsectors[0];

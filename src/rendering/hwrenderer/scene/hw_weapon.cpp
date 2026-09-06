@@ -84,10 +84,6 @@ EXTERN_CVAR(Float, vr_laser_beam_fade)
 EXTERN_CVAR(Bool, vr_laser_color_cycle)
 EXTERN_CVAR(Float, vr_laser_color_cycle_speed)
 EXTERN_CVAR(Bool, vr_laser_color_cycle_dot)
-EXTERN_CVAR(Bool, vr_laser_headshot_react)
-EXTERN_CVAR(Color, vr_laser_headshot_color)
-EXTERN_CVAR(Bool, vr_laser_headshot_pulse)
-EXTERN_CVAR(Float, vr_laser_headshot_pulse_speed)
 EXTERN_CVAR(Bool, vr_laser_lock)
 EXTERN_CVAR(Float, vr_laser_lock_tighten)
 EXTERN_CVAR(Float, vr_laser_lock_rate)
@@ -143,6 +139,11 @@ CVARD(Bool, gl_weapon_purelightlevel, false, CVAR_GLOBALCONFIG | CVAR_ARCHIVE, "
 //
 //==========================================================================
 
+// [BB] Defined in hw_flats.cpp, beside the flat glow it mirrors. Declared here
+// the same way SetGlowPlanes is shared between the wall and sprite paths.
+FVector3 FlatGlowAtPoint(sector_t *sector, const DVector3 &at, FLevelLocals *Level, double timeSec);
+void SplitRoomGlow(const FVector3 &glow, FVector3 &tintOut, FVector3 &addOut);
+
 void HWDrawInfo::DrawPSprite(HUDSprite *huds, FRenderState &state)
 {
 	if (huds->RenderStyle.BlendOp == STYLEOP_Shadow)
@@ -160,8 +161,9 @@ void HWDrawInfo::DrawPSprite(HUDSprite *huds, FRenderState &state)
 	// RS fork: the psprite's own additive term rides on top of the
 	// sector's. Set before RenderHUDModel below and never cleared by the
 	// model renderer, so a 3D weapon model receives it.
+	PalEntry add;
 	{
-		PalEntry add = huds->owner->Sector
+		add = huds->owner->Sector
 			? PalEntry(huds->owner->Sector->AdditiveColors[sector_t::sprites] | 0xff000000)
 			: PalEntry(0);
 		const PalEntry g = huds->AddColor;
@@ -172,8 +174,64 @@ void HWDrawInfo::DrawPSprite(HUDSprite *huds, FRenderState &state)
 			add.b = min<int>(255, add.b + g.b);
 			add.a = 255;
 		}
-		state.SetAddColor(add);
 	}
+
+	// [BB] THE GUN AND HANDS TAKE THE ROOM'S GLOW, ALWAYS.
+	//
+	// The shader path cannot do this. Flat glow is distance from a fragment's
+	// world XZ to the sector's linedefs, and a HUD model is drawn in VIEW
+	// space -- it has no world XZ. What it used to pick up was the last flat's
+	// uniforms measured against view coordinates, which is why the weapon
+	// glowed in some rooms and some facings and not others, with no pattern.
+	//
+	// So the shader term is cleared outright and the real answer is computed
+	// once, on the CPU, at the player's actual position in the world. One
+	// colour for the whole model, which is right for a view model: the room
+	// lights it, it does not have edges of its own for the glow to run along.
+	state.ClearFlatGlow();
+	{
+		const FVector3 roomGlow = huds->owner
+			? FlatGlowAtPoint(huds->owner->Sector, huds->owner->Pos(), Level,
+				(screen->FrameTime - state.firstFrame) / 1000.0)
+			: FVector3(0.f, 0.f, 0.f);
+		FVector3 tint, gadd;
+		SplitRoomGlow(roomGlow, tint, gadd);
+
+		// Multiply first, so the weapon takes the room's COLOUR. Adding alone
+		// raised every channel and sent it toward white -- a red room made the
+		// gun pale rather than red.
+		PalEntry oc = huds->ObjectColor;
+		oc.r = (uint8_t)clamp<int>(int(oc.r * tint.X), 0, 255);
+		oc.g = (uint8_t)clamp<int>(int(oc.g * tint.Y), 0, 255);
+		oc.b = (uint8_t)clamp<int>(int(oc.b * tint.Z), 0, 255);
+		state.SetObjectColor(oc);
+
+		if (gadd.X > 0.f || gadd.Y > 0.f || gadd.Z > 0.f)
+		{
+			add.r = min<int>(255, add.r + int(gadd.X));
+			add.g = min<int>(255, add.g + int(gadd.Y));
+			add.b = min<int>(255, add.b + int(gadd.Z));
+			add.a = 255;
+		}
+	}
+
+	// AFTER the fold, not before it. Pushed above this block the room glow was
+	// computed into a value nothing then sent, so the whole thing was dead.
+	state.SetAddColor(add);
+
+	// [BB] THE PSPRITE PATH TAKES THE SAME EXEMPTION THE SPRITE PATH DOES.
+	//
+	// Set only in HWSprite::DrawSprite before this, so the Spare-actors setting
+	// reached world actors and stopped at anything drawn as a player sprite --
+	// while the render state's default left psprites taking the darkening in
+	// full. That is invisible until you can switch between the two, and the VR
+	// hands can be either: world actors or psprites, toggled at runtime. The
+	// same hands would darken differently depending on which mode they were in,
+	// with nothing to explain why.
+	//
+	// Same value, same reasoning, so the two agree.
+	state.SetDarknessExempt((float)Level->DarkActorExempt);
+
 	state.SetDynLight(huds->dynrgb[0], huds->dynrgb[1], huds->dynrgb[2]);
 	state.EnableBrightmap(!(huds->RenderStyle.Flags & STYLEF_ColorIsFixed));
 
@@ -1419,28 +1477,6 @@ void DrawLaserSightWorld(FRenderState& state)
 					dotCol = CycleHue(dotCol, base + 1);
 			}
 
-			// HEADSHOT LINE-UP REACTS ON TOP OF EVERYTHING ABOVE, including
-			// colour cycling -- a live headshot lineup is the most urgent
-			// thing the sight can say, so it always wins the pixel. Reacts
-			// to a flag script wrote from the trace just published above
-			// (one tic of lag), never decides "is this a head" itself.
-			const bool headshotHot = offhand ? player->mo->LaserHeadshotLinedUpOff : player->mo->LaserHeadshotLinedUpMain;
-			if (vr_laser_headshot_react && headshotHot)
-			{
-				float t = 1.0f;
-				if (vr_laser_headshot_pulse)
-				{
-					constexpr double TWO_PI = 6.283185307179586;
-					const double speed = std::max(0.0, (double)vr_laser_headshot_pulse_speed);
-					const double wave = 0.5 + 0.5 * std::sin(I_msTimeF() * 0.001 * speed * TWO_PI);
-					// Floored at 0.4, not 0: a pulse that dips to zero reads as
-					// the reaction switching off and on, not as one continuous
-					// alert breathing.
-					t = 0.4f + 0.6f * (float)wave;
-				}
-				beamCol = LerpColor(beamCol, (int)vr_laser_headshot_color, t);
-				dotCol  = LerpColor(dotCol,  (int)vr_laser_headshot_color, t);
-			}
 
 			DrawLaserBeamGeometry(state, points.Start, points.BeamEnd, points.HitEnd, drawBeam, drawPointer, points.OnTarget,
 				(int)beamCol, (int)dotCol);

@@ -308,6 +308,7 @@ static const char *shaderBindings = R"(
 		vec4 uSurfaceStampCol[16];
 		vec4 uSurfaceStampArg[16];
 		vec4 uSurfaceStampMod[16];
+		vec4 uSurfaceStampCol2[16];
 		vec4 uSurfaceStampParams;
 	};
 
@@ -390,6 +391,7 @@ static const char *shaderBindings = R"(
 	#define uSurfaceStampCol viewpoints[HW_VIEWPOINT_INDEX].uSurfaceStampCol
 	#define uSurfaceStampArg viewpoints[HW_VIEWPOINT_INDEX].uSurfaceStampArg
 	#define uSurfaceStampMod viewpoints[HW_VIEWPOINT_INDEX].uSurfaceStampMod
+	#define uSurfaceStampCol2 viewpoints[HW_VIEWPOINT_INDEX].uSurfaceStampCol2
 	#define uSurfaceStampParams viewpoints[HW_VIEWPOINT_INDEX].uSurfaceStampParams
 
 	layout(set = 1, binding = 1, std140) uniform readonly MatricesUBO {
@@ -440,7 +442,7 @@ static const char *shaderBindings = R"(
 		int uFlatGlowFalloff;
 		int uFlatGlowLineCount;
 		int uFlatGlowIsCeiling;
-		int uDarknessExempt;
+		float uDarknessExempt;
 		vec4 uFlatGlowLines[64];
 
 		vec4 uGradientTopPlane;
@@ -462,6 +464,16 @@ static const char *shaderBindings = R"(
 		int padding1;
 		int padding2;
 		int padding3;
+
+		// [OUTLINE] Sprite outlines. Mirrors hw_renderstate.h field for field;
+		// the order is the contract and a mismatch here reads garbage.
+		vec4  uOutlineColorA;
+		vec4  uOutlineColorB;
+		vec4  uOutlineParms;
+		float uFogDensityScale;
+		int   uFogPad0;
+		int   uFogPad1;
+		int   uFogPad2;
 	};
 
 	layout(set = 1, binding = 2, std140) uniform readonly StreamUBO {
@@ -591,6 +603,10 @@ static const char *shaderBindings = R"(
 	#define uGlobalFadeDensity data[uDataIndex].uGlobalFadeDensity
 	#define uGlobalFadeGradient data[uDataIndex].uGlobalFadeGradient
 	#define uLightRangeLimit data[uDataIndex].uLightRangeLimit
+	#define uOutlineColorA data[uDataIndex].uOutlineColorA
+	#define uOutlineColorB data[uDataIndex].uOutlineColorB
+	#define uOutlineParms data[uDataIndex].uOutlineParms
+	#define uFogDensityScale data[uDataIndex].uFogDensityScale
 
 	#define SUPPORTS_SHADOWMAPS
 	#define VULKAN_COORDINATE_SYSTEM
@@ -661,6 +677,12 @@ std::unique_ptr<VulkanShader> VkShaderManager::LoadFragShader(FString shadername
 	// gl_shader.cpp; both backends read the same lump.
 	code << "\n#line 1\n";
 	code << LoadPrivateShaderLump("shaders/glsl/func_surfacestamps.fp").GetChars() << "\n";
+
+	// [OUTLINE] Sprite outlines, prepended for the same reason as the stamps.
+	// Reads `tex` and timer from the preamble above; its texture coordinate
+	// arrives as a parameter, since vTexCoord belongs to main.fp.
+	code << "\n#line 1\n";
+	code << LoadPrivateShaderLump("shaders/glsl/func_spriteoutline.fp").GetChars() << "\n";
 
 	code << "\n#line 1\n";
 	code << LoadPrivateShaderLump(frag_lump).GetChars() << "\n";

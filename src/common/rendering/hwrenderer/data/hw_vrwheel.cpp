@@ -261,8 +261,10 @@ namespace
 
 		IFVIRTUALPTRNAME(player->mo, NAME_PlayerPawn, MoveWeaponToHand)
 		{
-			VMValue param[] = { player->mo, weapon, targetOffhand ? 1 : 0 };
-			VMCall(func, param, 3, nullptr, 0);
+			// Fourth argument is exactInstance (see PlayerPawn.MoveWeaponToHand);
+			// passed explicitly rather than relying on the script default.
+			VMValue param[] = { player->mo, weapon, targetOffhand ? 1 : 0, 0 };
+			VMCall(func, param, 4, nullptr, 0);
 		}
 	}
 

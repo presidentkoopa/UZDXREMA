@@ -306,7 +306,8 @@ const FDefaultShader defaultshaders[] =
 	{"Segment", "shaders/glsl/func_segment.fp", "shaders/glsl/material_nolight.fp", "#define NO_LAYERS\n"},
 	// [BB] A glowing slit that opens. Also samples nothing.
 	{"Seam", "shaders/glsl/func_seam.fp", "shaders/glsl/material_nolight.fp", "#define NO_LAYERS\n"},
-	// [BB] GITD's kill badge, transcribed. Plate and digits in ONE pass.
+	// [BB] GITD s number panel, the original: glass plate, distance-field digits,
+	// white filament with the colour bleeding out. Drawn additive -- see BB_WG13.
 	{"WG13", "shaders/glsl/func_wg13.fp", "shaders/glsl/material_nolight.fp", "#define NO_LAYERS\n"},
 	// [BB] BB_PANEL as a field rather than a sampled texture: crisp at any
 	// size, and it can take a halo, which a sampled plate structurally cannot.

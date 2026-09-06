@@ -66,6 +66,16 @@ CVAR (Bool,		vertspread,				false,		CVAR_USERINFO | CVAR_ARCHIVE);
 CVAR (Int,		cl_otherplayernames,	2,			CVAR_ARCHIVE);
 CVAR (Int,		cl_otherplayerhealth,	2,			CVAR_ARCHIVE);
 
+// [BB] Names every cvar that actually puts a userinfo or serverinfo command on
+// the wire.
+//
+// The per-tic net buffer is finite and a large enough mod set fills it, but the
+// resulting I_Error says only that the stream overran -- not who filled it, and
+// not whether it was one caller shouting or four hundred whispering. Guessing
+// from cvar COUNTS is what this replaces: a mod can declare a thousand and send
+// none of them, or declare six and rewrite them every tic.
+CVAR (Bool,		net_logcvarsends,		false,		CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
 static void D_AssignDefaultMultiplayerName()
 {
 	// [UZDXREMA] Upstream 5.0.0 deleted the global doomcom_t block, so the old
@@ -602,6 +612,7 @@ void D_UserInfoChanged (FBaseCVar *cvar)
 
 	mysnprintf (foo, countof(foo), "\\%s\\%s", cvar->GetName(), escaped_val.GetChars());
 
+	if (net_logcvarsends) Printf("[netcvar] user   %s = %s\n", cvar->GetName(), escaped_val.GetChars());
 	Net_WriteInt8 (DEM_UINFCHANGED);
 	Net_WriteString (foo);
 }
@@ -696,6 +707,7 @@ bool D_SendServerInfoChange (FBaseCVar *cvar, UCVarValue value, ECVarType type)
 
 		namelen = cvar->GetNameLen();
 
+		if (net_logcvarsends) Printf("[netcvar] server %s\n", cvar->GetName());
 		Net_WriteInt8(DEM_SINFCHANGED);
 		Net_WriteInt8((uint8_t)(namelen | (type << 6)));
 		Net_WriteBytes((uint8_t*)cvar->GetName(), (int)namelen);

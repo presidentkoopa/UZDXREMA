@@ -37,8 +37,17 @@ EXTERN_CVAR(Bool, gl_texture_thread)
 //
 //==========================================================================
 
+// [BB] Defined in hw_walls.cpp, shared by every path that draws in a sector.
+float FogScaleForSector(FLevelLocals *Level, sector_t *sec);
+
 void HWDecal::DrawDecal(HWDrawInfo *di, FRenderState &state)
 {
+	// [BB] A decal is painted ON a wall and is not a flat, so it takes neither
+	// the flat glow nor a stale fog scale. Decals are their own pass, drawn
+	// after the flats, so both would otherwise be whatever the last floor left
+	// -- a blood splat lit and fogged differently from the wall under it.
+	state.ClearFlatGlow();
+	state.SetFogDensityScale(FogScaleForSector(di->Level, decal ? decal->Sector : nullptr));
 	PalEntry DecalColor;
 	// alpha color only has an effect when using an alpha texture.
 	if (decal->RenderStyle.Flags & (STYLEF_RedIsAlpha | STYLEF_ColorIsFixed))

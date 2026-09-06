@@ -393,8 +393,221 @@ void HWFlat::DrawFloodPlanes(HWDrawInfo *di, FRenderState &state)
 //
 //
 //==========================================================================
+//==========================================================================
+//
+// [BB] THE FLAT GLOW AT ONE WORLD POINT, ON THE CPU.
+//
+// main.fp computes flat glow per fragment from pixelpos.xz -- the fragment's
+// own world position. Anything drawn in VIEW space has no world position to
+// give it: the weapon and the VR hands sit in front of the camera, not in the
+// room, so they can never take the shader path however the render state is
+// set. What they picked up before was the last flat's uniforms applied to
+// view-space coordinates, which is why the gun glowed in some rooms and some
+// facings and not others.
+//
+// This runs the same arithmetic once, for one point, so something drawn in
+// view space can still be lit by the room it is standing in. Floor and ceiling
+// are summed: a room lit from both should light what stands in it from both.
+//
+// NOT A WEAPON FEATURE. It takes a sector and a point and nothing else, so
+// anything else drawn outside world space can ask the same question.
+//
+// The glow WAVE is not applied here. The shader modulates reach and brightness
+// with it, so a room that breathes will breathe while this stays steady. Worth
+// adding, and deliberately not guessed at.
+//
+//==========================================================================
+
+// The room's PULSE, evaluated at a point. Mirrors GlowWaveRaw in main.fp --
+// same distance functions, same detune, same sharpness, same per-room scatter
+// off the sector's first vertex -- so a thing standing in a breathing room
+// breathes WITH it rather than beside it. Returns -1..1, as the shader does.
+//
+// Without this the surfaces of a room pulsed and everything standing in them
+// held perfectly steady, which reads as the actors not being part of the scene.
+static double GlowWaveAtPoint(FLevelLocals *Level, sector_t *sector,
+	const DVector3 &at, double timeSec, bool ceiling)
+{
+	if (Level == nullptr || Level->GlowWaveLength <= 0.0) return 0.0;
+
+	// Shader space is (x, z, y) -- see the upload in hw_drawinfo.cpp -- so the
+	// shader's xz plane is the game's xy, and its y is the game's z.
+	const DVector3 &wo = Level->GlowWaveOrigin;
+	double d;
+	switch (Level->GlowWaveShape)
+	{
+	case 2:  d = fabs(at.X - wo.X); break;
+	case 3:  d = fabs(at.Y - wo.Y); break;
+	case 4:  d = (at - wo).Length(); break;
+	case 5:  d = at.Z - wo.Z; break;
+	default: d = (at.XY() - wo.XY()).Length(); break;
+	}
+
+	double seedOff = 0.0;
+	if (Level->GlowWaveSeed > 0.0 && sector != nullptr && sector->Lines.Size() > 0)
+	{
+		const double src = sector->Lines[0]->v1->fX() + sector->Lines[0]->v1->fY();
+		seedOff = (sin(src * 12.9898) * 43758.5453);
+		seedOff = (seedOff - floor(seedOff)) * 6.2831853 * Level->GlowWaveSeed;
+	}
+
+	const double phase = Level->GlowWavePhase[ceiling ? 3 : 2];
+	const double t = d / Level->GlowWaveLength + timeSec * Level->GlowWaveSpeed + phase + seedOff;
+	double w = 0.5 + 0.5 * sin(t);
+
+	if (Level->GlowWaveDetune > 0.0)
+	{
+		const double w2 = 0.5 + 0.5 * sin(t * 0.6180339887 + 1.7);
+		w = w + (w * w2 * 2.0 - w) * Level->GlowWaveDetune;
+	}
+	w = pow(clamp(w, 0.0, 1.0), max(Level->GlowWaveSharp, 0.001));
+	return 2.0 * w - 1.0;
+}
+
+//==========================================================================
+//
+// [BB] THE ROOM'S COLOUR ON A THING STANDING IN IT.
+//
+// Folding the glow in as a pure ADD was wrong, and wrong in a specific way: an
+// add raises every channel, so a bright room pushed the sprite toward white and
+// the gun went fullbright instead of going RED. Adding light is not how a
+// coloured light looks on a surface.
+//
+// A coloured light does two things. It adds its own colour, and it takes away
+// the channels it does not have -- a red lamp on a grey wall makes the wall red
+// by suppressing green and blue, not by adding red until the wall is pink. So
+// this splits the glow into a TINT and a much smaller ADD.
+//
+// The tint multiplies, which is what keeps the sprite's own shading and its own
+// colours: a green imp under a red lamp goes dark and muddy, which is correct,
+// where an add would have made it pale.
+//
+// The add is what stops a strongly tinted thing reading as merely dark. It is
+// deliberately a third of the strength, and it carries the same hue, so it
+// brightens toward the light's colour rather than toward white.
+//
+// Takes the raw glow, returns the multiply, and leaves the additive part in
+// `addOut` as 0-255 channels ready to fold into an existing PalEntry.
+//
+//==========================================================================
+
+void SplitRoomGlow(const FVector3 &glow, FVector3 &tintOut, FVector3 &addOut)
+{
+	tintOut = { 1.f, 1.f, 1.f };
+	addOut = { 0.f, 0.f, 0.f };
+
+	const float m = max(glow.X, max(glow.Y, glow.Z));
+	if (m <= 0.f) return;
+
+	// The chroma on its own, so the amount and the colour are separable.
+	const FVector3 hue = glow / m;
+	const float amt = min(m, 1.f);
+
+	// Multiply toward the light's colour. At amt 1 the surface keeps only what
+	// the light actually emits, which is what makes it read as coloured rather
+	// than as brightened.
+	tintOut = { 1.f - amt + amt * hue.X,
+	            1.f - amt + amt * hue.Y,
+	            1.f - amt + amt * hue.Z };
+
+	// A third, and in the light's own hue.
+	addOut = hue * (amt * 0.33f * 255.f);
+}
+
+FVector3 FlatGlowAtPoint(sector_t *sector, const DVector3 &at, FLevelLocals *Level, double timeSec)
+{
+	FVector3 out(0.f, 0.f, 0.f);
+	if (sector == nullptr) return out;
+
+	const int count = min<int>((int)sector->Lines.Size(), 64);
+	if (count <= 0) return out;
+
+	for (int pass = 0; pass < 2; pass++)
+	{
+		auto &sp = sector->planes[pass == 0 ? sector_t::floor : sector_t::ceiling];
+		if (sp.FlatGlowColor.a == 0 || sp.FlatGlowHeight <= 0.f) continue;
+
+		// The wave rides reach and brightness, the same two the shader gives it.
+		const double wv = GlowWaveAtPoint(Level, sector, at, timeSec, pass != 0);
+		const float reach = (float)(sp.FlatGlowHeight
+			* (1.0 + (Level ? Level->GlowWaveReach : 0.0) * wv));
+		if (reach <= 0.f) continue;
+
+		// Squared throughout with one root at the end -- the same trick the
+		// shader uses, and for the same reason.
+		double bestSq = 1e30;
+		for (int i = 0; i < count; i++)
+		{
+			auto ln = sector->Lines[i];
+			const DVector2 a(ln->v1->fX(), ln->v1->fY());
+			const DVector2 b(ln->v2->fX(), ln->v2->fY());
+			const DVector2 ab = b - a;
+			const double len2 = ab.LengthSquared();
+			double t = 0.0;
+			if (len2 > 0.0) t = clamp(((at.XY() - a) | ab) / len2, 0.0, 1.0);
+			const DVector2 d = at.XY() - (a + ab * t);
+			const double dsq = d.LengthSquared();
+			if (dsq < bestSq) bestSq = dsq;
+		}
+
+		const float minDist = (float)sqrt(bestSq);
+		if (minDist >= reach) continue;
+
+		const float frac = minDist / reach;
+		float atten;
+		switch (sp.FlatGlowFalloff)
+		{
+		case 0:  atten = 1.f - frac;              break;
+		case 1:  atten = 1.f - frac * frac;       break;
+		case 2:  atten = 1.f - (float)sqrt(frac); break;
+		default: atten = (float)exp(-frac * 3.f); break;
+		}
+		if (atten <= 0.f) continue;
+
+		// HEIGHT FALLOFF. Flat glow is a 2D distance field -- distance to the
+		// sector's edges and nothing else -- so without this an imp is lit as
+		// brightly at the horns as at the hooves, and the room reads as evenly
+		// flooded rather than as light coming off the floor.
+		//
+		// Fades over the same reach the glow already spreads inward by, so a
+		// floor that pools light 128 units in from its edges also pools it 128
+		// units up. No new knob to set, and it scales with the effect.
+		//
+		// SURFACES ARE UNAFFECTED. Flats are drawn by the shader, which never
+		// calls this -- a floor sits at its own height and would fade by zero
+		// anyway. This changes what things STANDING in the room receive.
+		const double planeZ = (pass == 0)
+			? sector->floorplane.ZatPoint(at.XY())
+			: sector->ceilingplane.ZatPoint(at.XY());
+		const double dz = fabs(at.Z - planeZ);
+		if (dz >= reach) continue;
+		atten *= float(1.0 - dz / reach);
+		if (atten <= 0.f) continue;
+
+		const float inten = sp.FlatGlowIntensity > 0.f ? sp.FlatGlowIntensity : 1.f;
+		FVector3 col(sp.FlatGlowColor.r / 255.f * inten,
+		             sp.FlatGlowColor.g / 255.f * inten,
+		             sp.FlatGlowColor.b / 255.f * inten);
+
+		// The far colour, same ramp along the reach as the shader.
+		const PalEntry farCol = sp.FlatGlowColorFar;
+		if (farCol.a > 0)
+		{
+			FVector3 fc(farCol.r / 255.f * inten, farCol.g / 255.f * inten, farCol.b / 255.f * inten);
+			col = fc + (col - fc) * atten;
+		}
+
+		const float bright = (float)(1.0 + (Level ? Level->GlowWaveBright : 0.0) * wv);
+		out += col * atten * max(bright, 0.f);
+	}
+	return out;
+}
+
+float FogScaleForSector(FLevelLocals *Level, sector_t *sec);
+
 void HWFlat::DrawFlat(HWDrawInfo *di, FRenderState &state, bool translucent)
 {
+	state.SetFogDensityScale(FogScaleForSector(di->Level, sector));
 #ifdef _DEBUG
 	if (sector->sectornum == gl_breaksec)
 	{

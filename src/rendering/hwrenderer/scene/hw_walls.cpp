@@ -115,6 +115,23 @@ extern int lightsWallPerEye;
 
 bool IsDistanceCulled(seg_t *line);
 
+// [BB] HOW MUCH FOG THIS SECTOR GETS.
+//
+// A sky ceiling is outdoors -- the marker every Doom map already carries, so
+// this needs no new mapping work and no new flag. Shared by the wall, flat and
+// sprite paths the same way SetGlowPlanes below is, because all three have to
+// agree or the boundary lands in the wrong place.
+//
+// Both scales default to 1, so a level that never asks for this is fogged
+// exactly as it was.
+float FogScaleForSector(FLevelLocals *Level, sector_t *sec)
+{
+	if (Level == nullptr) return 1.f;
+	if (sec == nullptr) return (float)Level->FogIndoorScale;
+	const bool outdoor = sec->GetTexture(sector_t::ceiling) == skyflatnum;
+	return (float)(outdoor ? Level->FogOutdoorScale : Level->FogIndoorScale);
+}
+
 void SetGlowPlanes(FRenderState &state, const secplane_t& top, const secplane_t& bottom)
 {
 	auto& tn = top.Normal();
@@ -198,6 +215,10 @@ void HWWall::RenderWall(FRenderState &state, int textured)
 
 void HWWall::RenderFogBoundary(HWWallDispatcher*di, FRenderState &state)
 {
+	// A fog boundary is not a flat and never wants the flat's glow. It is drawn
+	// where two sectors meet -- a doorway, most often -- so inheriting the last
+	// flat's colour and edge list here showed up as a door flashing.
+	state.ClearFlatGlow();
 	if (gl_fogmode && !di->isFullbrightScene())
 	{
 		int rel = rellight + getExtraLight();
@@ -221,6 +242,7 @@ void HWWall::RenderFogBoundary(HWWallDispatcher*di, FRenderState &state)
 //==========================================================================
 void HWWall::RenderMirrorSurface(HWWallDispatcher*di, FRenderState &state)
 {
+	state.ClearFlatGlow();
 	if (!TexMan.mirrorTexture.isValid()) return;
 
 	state.SetDepthFunc(DF_LEqual);
@@ -298,6 +320,20 @@ void HWWall::RenderTexturedWall(HWWallDispatcher*di, FRenderState &state, int rf
 			frontsector->GetGlowFalloff(sector_t::floor),
 			frontsector->GetGlowIntensity(sector_t::floor) > 0.f ? frontsector->GetGlowIntensity(sector_t::floor) : 1.0f);
 	}
+
+	// [BB] CLEARED BEFORE THE DRAW, NOT ONLY AFTER IT.
+	//
+	// There is a ClearFlatGlow at the end of this function already, and it is
+	// not enough: it protects the NEXT surface, never this one. Draw order is
+	// plain walls, plain flats, then masked walls -- so the first masked wall
+	// after the flat pass was still drawn carrying the last flat's colour and
+	// that sector's linedef list, and measured its own world XZ against a
+	// foreign sector's edges. Which wall that is depends on the viewpoint,
+	// which is why walls appeared to light and unlight as the player moved.
+	//
+	// A wall is not a flat and never wants this, so it is cleared outright.
+	state.ClearFlatGlow();
+	state.SetFogDensityScale(FogScaleForSector(di->Level, frontsector));
 
 	// [BB] ALWAYS, not only when this wall glows.
 	//
@@ -774,7 +810,29 @@ void HWWall::PutWall(HWWallDispatcher *di, bool translucent)
 			Colormap.Clear();
 		}
 
-		if (ddi->isFullbrightScene() || (Colormap.LightColor.isWhite() && lightlevel == 255))
+		// [BB] A FULLY-LIT WALL STILL TAKES ITS GLOW.
+		//
+		// Stock strips HWF_GLOW when the wall is already at maximum -- sound
+		// reasoning when a glow is only ever extra brightness, since you cannot
+		// brighten what is already white. In this fork the glow is COLOURED
+		// LIGHT: it carries a hue, a far colour it ramps toward, a wave and a
+		// texture. Throwing it away at 255 throws all of that away and leaves a
+		// plain lit wall next to a glowing one.
+		//
+		// FLATS NEVER DID THIS. Only walls, so a bright floor kept its
+		// flat-edge glow while the wall standing on it lost its wall glow --
+		// the hard seam where one wall segment glows and the next does not.
+		//
+		// And it is not stable. Sector light level moves: doors, blinking and
+		// flickering light specials, and the player's own extralight from a
+		// muzzle flash. Every crossing of 255 switched the glow off and on
+		// again, which is the flicker on doors and on walls as the viewpoint
+		// changes which sectors are in frame.
+		//
+		// isFullbrightScene is kept. That is invulnerability or a light
+		// amplifier forcing the WHOLE scene flat, where the flats bail out too,
+		// so dropping the glow there stays consistent with them.
+		if (ddi->isFullbrightScene())
 		{
 			flags &= ~HWF_GLOW;
 		}

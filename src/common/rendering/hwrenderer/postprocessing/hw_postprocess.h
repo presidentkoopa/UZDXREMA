@@ -485,14 +485,28 @@ class PPVolumetricBeam
 public:
 	void Render(PPRenderState *renderstate, int sceneWidth, int sceneHeight);
 
-	// Set per scene draw, in view space, by the renderer. Cleared when no
-	// beam is live so a switched-off flashlight costs nothing at all.
-	void SetBeam(const VolumetricBeamUniforms &u) { uniforms = u; active = true; }
-	void ClearBeam() { active = false; }
+	// Set per scene draw, in view space, by the renderer. Cleared when no beam
+	// is live so a switched-off flashlight costs nothing at all.
+	//
+	// SEVERAL, and the pass simply runs once per beam. That works with no
+	// blending machinery and no shader change because the pass is already
+	// ADDITIVE -- it emits only its own light and never reads the scene back --
+	// so N draws composite exactly as one draw of N beams would.
+	//
+	// It is also cheaper than it sounds. Every beam bounds itself with an
+	// analytic ray/cone intersection before marching, so one that is off-screen
+	// or behind you costs a depth sample and a few dot products per pixel and
+	// returns black. Only beams actually lighting the same pixels cost twice.
+	void ClearBeams() { count = 0; }
+	void AddBeam(const VolumetricBeamUniforms &u)
+	{
+		if (count < MAX_BEAMS) uniforms[count++] = u;
+	}
 
 private:
-	VolumetricBeamUniforms uniforms = {};
-	bool active = false;
+	static const int MAX_BEAMS = 4;
+	VolumetricBeamUniforms uniforms[MAX_BEAMS] = {};
+	int count = 0;
 
 	PPShader Beam = { "shaders/pp/volumetricbeam.fp", "", VolumetricBeamUniforms::Desc() };
 };

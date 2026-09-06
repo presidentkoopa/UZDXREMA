@@ -673,6 +673,35 @@ CVAR(Bool, vr_move_use_offhand, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_teleport, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_weaponRotate, -30.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_weaponScale, 1.02f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+// --- [XR] VR body avatar / native arm-IK cvars (read via EXTERN_CVAR in playsim/vr_armik.cpp) ---
+CVAR(Bool,  vr_arm_ik,          true,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG)  // gates VR_UpdateArmIK
+CVAR(Float, vr_ik_shoulder_width,  7.0f,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG)  // half body width, collar offset from head
+CVAR(Float, vr_ik_upperarm_len,    0.0f,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG)  // 0 => read from model bind pose
+CVAR(Float, vr_ik_forearm_len,     0.0f,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG)  // 0 => read from model bind pose
+// [XR] Palm-facing offset for the IK wrist/hand bone. The bind hand's palm axis vs the
+// controller's forward differ by a fixed local rotation; these three cvars are that
+// correction in DEGREES (applied on the model-space side of the hand rotation, so they
+// rotate the whole hand about its own axes). All 0 => hand takes the raw controller
+// orientation. Dial in-headset: vr_ik_hand_roll usually does the "palm faces the right way"
+// twist; the other two nudge if the wrist is pitched/yawed off. GLOBALCONFIG so they persist.
+CVAR(Bool,  vr_ik_hand_rot,        true,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG)  // master enable for wrist-follows-controller
+CVAR(Float, vr_ik_hand_pitch,      0.0f,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG)  // palm offset, deg about hand local X (lateral)
+CVAR(Float, vr_ik_hand_yaw,        0.0f,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG)  // palm offset, deg about hand local Y (forward)
+CVAR(Float, vr_ik_hand_roll,       0.0f,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG)  // palm offset, deg about hand local Z (up)
+// [XR] Wrist orientation smoothing. Per-tic follow amount toward the raw controller orientation:
+// 1.0 = instant/raw (no smoothing, jittery), lower = smoother but laggier. Routed through SLerp,
+// which also enforces quaternion sign-continuity, so the renderer never interpolates the wrist
+// "the long way" between tics (the main cause of the violent jitter). 0.5 is a good default.
+CVAR(Float, vr_ik_hand_smooth,     0.5f,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG)  // 1=raw, lower=smoother
+// [XR] Wrist rotation RATE LIMIT (degrees per game tic). The euler round-trip produces INSTANTANEOUS
+// gimbal-lock jumps that a real wrist physically cannot; this caps how far the wrist may rotate per tic,
+// so violent spikes are clamped to human speed (and then smoothed away) while normal motion passes
+// through. 30 deg/tic ~= 1050 deg/s -- faster than a real flick, tighter than a gimbal spike. Raise it
+// if fast real flicks feel clipped; lower it for even more stability. 0 disables the cap.
+CVAR(Float, vr_ik_hand_maxstep,    30.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)  // deg/tic cap; 0 = off
+// [XR] Clamp a hand's IK target to the wall when player_t::vr_hand_touching_wall says it is against one.
+CVAR(Bool,  vr_hand_ik_clamp,      true,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_3dweaponOffsetX, 0.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_3dweaponOffsetY, 0.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Float, vr_3dweaponOffsetZ, 0.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -889,32 +918,6 @@ CVAR(Float, vr_laser_color_cycle_speed, 60.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // on target" if its colour holds still while the beam leading to it cycles.
 CVAR(Bool, vr_laser_color_cycle_dot, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 
-// ---------------------------------------------------------------------
-// HEADSHOT LINE-UP REACTION -- the sight tells you when it is resting on a
-// head, not just on something that can die (that is vr_laser_lock, above).
-//
-// The engine only draws the reaction; a gameplay mod (see the Headshots
-// mod's HS_Handler) decides what counts as a head and writes the answer
-// back to AActor.LaserHeadshotLinedUpMain/Off each tic, reading the exact
-// same trace the beam itself is drawn from (AActor.LaserTraceTarget*/
-// LaserTraceHitPos*). This is deliberately not a beam/dot split like
-// colour cycling above -- a headshot lineup is meant to be unmissable, so
-// it always tints both.
-CVAR(Bool, vr_laser_headshot_react, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
-
-// The colour the sight blends toward when lined up. Default is a hot red,
-// deliberately far from the cool default sight colours so it reads as an
-// alert rather than as one more available hue.
-CVAR(Color, vr_laser_headshot_color, 0xff2020, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
-
-// Pulse toward the colour above instead of holding it solid. Off means a
-// flat colour swap the instant the sight lines up; on means it breathes,
-// which reads as "live" rather than as a static UI state change.
-CVAR(Bool, vr_laser_headshot_pulse, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
-
-// Pulse rate in cycles per second. Wall-clock driven (see CycleHue's own
-// comment on why) so it stays smooth regardless of the fixed 35 tic rate.
-CVAR(Float, vr_laser_headshot_pulse_speed, 6.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 
 CUSTOM_CVAR(Int, vr_hitscan_tracer, 0, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 {
@@ -941,18 +944,18 @@ CVAR(Bool, vr_secondary_button_mappings, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // Two-hand stabilize: the weapon is REPOSITIONED to point along the line
 // between the two controllers.
 //
-// Off, and it should stay off. It conflated two jobs that turned out to be
-// separable, and only one of them was ever wanted. Steadying the aim is worth
-// having; moving the gun is not, because nothing grabbed it -- the weapon
-// snapped because two controllers came within a fixed distance of each other,
-// whether or not the off hand had anything to do with the weapon at all.
+// ON, as it originally was. It was switched off when the trigger was still a
+// bare proximity test -- the weapon snapped because two controllers came
+// within a fixed distance of each other, whether or not the off hand had
+// anything to do with the weapon, and reloading is exactly the gesture that
+// brings the hands together.
 //
-// What replaces it is a real grab: a second hand on the pistol grip or on the
-// shotgun's forend, published as AActor::TwoHandedHold, which weapons read to
-// tighten their spread. The gun stays exactly where your hands are holding it,
-// and being two-handed makes you shoot straighter rather than making the gun
-// move by itself.
-CVAR(Bool, vr_two_handed_weapons, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// The trigger is no longer a guess. The reposition runs only on a script
+// CLAIM of the forend or foregrip (vk_openxrdevice.cpp, alongTheGun), and
+// script only claims when the off hand is inside a support volume drawn on
+// the weapon. With the guess gone, the mechanic is what it was always meant
+// to be, and it goes back to being on.
+CVAR(Bool, vr_two_handed_weapons, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // Fallback two-hand stabilize reach in real-world inches, used by any weapon
 // that does not set Weapon.StabilizeDistance (0, the ZScript default).
 CVAR(Float, vr_stabilize_distance_inches, 8.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -976,6 +979,18 @@ CVAR(Bool, vr_stabilize_requires_grab, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // secondary-button modifier layer, a plain bind -- and taking it over is the
 // part of this that is still unsettled, so it is opt-in rather than assumed.
 CVAR(Bool, vr_holster_use_grip, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// Moving a weapon between hands puts it straight into its ready state instead
+// of playing its draw animation.
+//
+// The weapon was never holstered, so the sixteen tics A_Raise spends walking
+// the psprite up from WEAPONBOTTOM are sixteen tics of holding a gun that will
+// not fire -- paid twice when the receiving hand has to be emptied first. In a
+// headset that is the whole of a hand-off spent defenceless.
+//
+// Off costs a mod nothing; on costs it any work its Select state does beyond
+// A_Raise, which is why it is a switch rather than a removal. Read from
+// PlayerPawn.HandSwitchIsInstant, which also fences it behind !multiplayer.
+CVAR(Bool, vr_handswitch_instant, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // Only used in player.zs
 CVAR(Bool, vr_momentum, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // Only used in player.zs
 CVAR(Float, vr_momentum_threshold, 1.f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, vr_crouch_use_button, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)

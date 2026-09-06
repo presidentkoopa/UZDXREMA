@@ -412,8 +412,12 @@ struct FWorldEvent
 	line_t* DamageLine = nullptr;
 	sector_t* DamageSector = nullptr;
 	int DamageLineSide = -1;
-	DVector3 DamagePosition;
-	bool DamageIsRadius; // radius damage yes/no
+	// [BB] INITIALISED, because for a long time nothing filled these on the
+	// THING-damage path and every mod reading them there was reading whatever
+	// was on the stack. Every neighbour in this struct has a default; these
+	// two did not.
+	DVector3 DamagePosition = { 0, 0, 0 };
+	bool DamageIsRadius = false; // radius damage yes/no
 	int NewDamage = 0; // sector/line damaged. allows modifying damage
 	FState* CrushedState = nullptr; // custom crush state set in thingground
 	DVector3 AttackPos; //hitscan point of origin

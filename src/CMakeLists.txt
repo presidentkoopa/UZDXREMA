@@ -949,7 +949,6 @@ set (PCH_SOURCES
 	playsim/p_maputl.cpp
 	playsim/p_mobj.cpp
 	p_openmap.cpp
-	playsim/p_physics.cpp
 	playsim/p_pspr.cpp
 	p_saveg.cpp
 	p_setup.cpp
@@ -958,6 +957,7 @@ set (PCH_SOURCES
 	playsim/p_things.cpp
 	p_tick.cpp
 	playsim/p_user.cpp
+	playsim/vr_armik.cpp
 	rendering/r_utility.cpp
 	rendering/r_sky.cpp
 	sound/s_advsound.cpp

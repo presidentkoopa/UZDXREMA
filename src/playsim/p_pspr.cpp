@@ -182,6 +182,13 @@ DEFINE_FIELD(DPSprite, AnchorAngles)     // RS fork
 DEFINE_FIELD(DPSprite, ModelFrame)       // RS fork
 DEFINE_FIELD(DPSprite, ModelFrameNext)   // RS fork
 DEFINE_FIELD(DPSprite, ModelFrameLerp)   // RS fork
+// RS fork -- per-part frame addressing; see p_pspr.h. Fixed-size native arrays
+// reach ZScript through a plain DEFINE_FIELD, the same way Actor.Args[5] and
+// PlayerInfo.frags[MAXPLAYERS] already do.
+DEFINE_FIELD(DPSprite, ModelFramePart)      // RS fork
+DEFINE_FIELD(DPSprite, ModelFrameNextPart)  // RS fork
+DEFINE_FIELD(DPSprite, ModelFrameLerpPart)  // RS fork
+DEFINE_FIELD(DPSprite, ModelPartHidden)     // RS fork
 DEFINE_FIELD(DPSprite, x)
 DEFINE_FIELD(DPSprite, y)
 DEFINE_FIELD(DPSprite, oldx)
@@ -1519,6 +1526,19 @@ void DPSprite::Serialize(FSerializer &arc)
 		("valign", VAlign)
 		("renderstyle_", Renderstyle)	// The underscore is intentional to avoid problems with old savegames which had this as an ERenderStyle (which is not future proof.)
 		("baseScale", baseScale);
+
+	// RS fork -- per-part model frames (p_pspr.h). Separate statements rather
+	// than links in the chain above because Array() carries an element count
+	// and reads better on its own line.
+	//
+	// A save written before these existed simply has no such keys, and the
+	// serialiser leaves an absent field alone -- which is exactly why the
+	// in-class initialisers are spelled out at the declaration. Without them an
+	// old save would resume with garbage frame numbers rather than -1.
+	arc.Array("modelframepart",     ModelFramePart,     RS_MODEL_PARTS);
+	arc.Array("modelframenextpart", ModelFrameNextPart, RS_MODEL_PARTS);
+	arc.Array("modelframelerppart", ModelFrameLerpPart, RS_MODEL_PARTS);
+	arc.Array("modelparthidden",    ModelPartHidden,    RS_MODEL_PARTS);
 }
 
 //------------------------------------------------------------------------

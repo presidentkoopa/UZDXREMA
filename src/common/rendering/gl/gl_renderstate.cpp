@@ -139,6 +139,10 @@ bool FGLRenderState::ApplyShader()
 	activeShader->muGlobalFadeGradient.Set(mStreamData.uGlobalFadeGradient);
 	activeShader->muGlobalFadeColor.Set(mStreamData.uGlobalFadeColor);
 	activeShader->muLightRangeLimit.Set(mStreamData.uLightRangeLimit);
+	activeShader->muOutlineColorA.Set(&mStreamData.uOutlineColorA.X);
+	activeShader->muOutlineColorB.Set(&mStreamData.uOutlineColorB.X);
+	activeShader->muOutlineParms.Set(&mStreamData.uOutlineParms.X);
+	activeShader->muFogDensityScale.Set(mStreamData.uFogDensityScale);
 #ifdef NPOT_EMULATION
 	activeShader->muNpotEmulation.Set(&mStreamData.uNpotEmulation.X);
 #endif

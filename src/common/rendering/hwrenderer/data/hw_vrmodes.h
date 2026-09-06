@@ -193,6 +193,22 @@ struct VRMode
 	virtual bool SubmitFrame() const { return true; }
 
 	virtual bool GetHandTransform(int hand, VSMatrix* out) const { return false; }
+
+	// THE BODY FRAME, READ AT DRAW RATE -- head POSITION and YAW, never pitch
+	// or roll.
+	//
+	// The hand transforms above let a world model ride a controller at the
+	// display's clock instead of the tic's. Nothing offered the same for the
+	// frame everything WORN is placed in, so anything anchored to the body had
+	// to sample the head pose from script at 35Hz and re-place itself; between
+	// two samples the whole rig swims, and the further from the anchor a thing
+	// sits the wider the arc it sweeps.
+	//
+	// Yaw only is not a simplification, it is the definition. A holster does
+	// not tip when you look at the floor, and a body-worn thing that pitched
+	// and rolled with the headset would be attached to your face rather than
+	// to you.
+	virtual bool GetHmdTransform(VSMatrix* out) const { return false; }
 	virtual bool GetWeaponTransform(VSMatrix* out, int hand = 0, bool allowAutoReverse = true) const;
 	virtual bool RenderPlayerSpritesInScene() const;
 	virtual bool GetTeleportLocation(DVector3 &out) const { return false; }

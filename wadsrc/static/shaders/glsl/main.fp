@@ -782,11 +782,33 @@ float SweepBandAttenAt(int sb)
 	int smode = int(sorg.w);
 	if (smode <= 0) return 0.0;
 
+	// [BB] SIGNED SHAPES -- an actual sweep.
+	//
+	// Modes 2 and 3 are abs(), which makes them TWO planes moving apart from
+	// the origin. That is a split, not a sweep: the word means one front that
+	// starts at one end of the level and travels to the other, and until these
+	// were added the only signed shape in here was 5, which is vertical only.
+	// A band could rise through a map and could not cross one.
+	//
+	// Signed, so the band is a single plane at origin + radius and everything
+	// behind it has already been passed. Put the origin off the near edge and
+	// give it the map's span as its reach and it crosses the whole level once.
+	//
+	//   6  along +X          7  along +Y
+	//   8  along -X          9  along -Y
+	//
+	// The negative pair exists so a sweep can come from either side without
+	// the caller having to move the origin to the far edge and invert its own
+	// reach, which is arithmetic every caller would otherwise repeat.
 	float sdist;
 	if (smode == 1)      sdist = length(pixelpos.xz - sorg.xz);
 	else if (smode == 2) sdist = abs(pixelpos.x - sorg.x);
 	else if (smode == 3) sdist = abs(pixelpos.z - sorg.z);
 	else if (smode == 5) sdist = pixelpos.y - sorg.y;
+	else if (smode == 6) sdist = pixelpos.x - sorg.x;
+	else if (smode == 7) sdist = pixelpos.z - sorg.z;
+	else if (smode == 8) sdist = sorg.x - pixelpos.x;
+	else if (smode == 9) sdist = sorg.z - pixelpos.z;
 	else                 sdist = length(pixelpos.xyz - sorg.xyz);
 
 	float ssigned = sdist - sband.x;
@@ -906,7 +928,8 @@ float GlowWaveSeedOff(float src)
 //   uGlowTex   x noise amount, y noise scale, z drift, w contrast
 //   uGlowTex2  x flow amount, y flow spacing, z flow speed, w flow sharpness
 //   uGlowTex3  x cell amount, y cell scale, z cell speed, w cell edge width
-//   uGlowTex4  x disturbance reach, y state pulse depth, z state level, w -
+//   uGlowTex4  x disturbance reach, y state pulse depth, z state level,
+//              w pulse rate multiplier (1 = the rate the level implies)
 //
 // Sampled in WORLD space, not surface space. A wall and the floor it meets
 // then agree about the pattern crossing the join, which is what makes it read
@@ -1537,7 +1560,11 @@ float GlowTextureAt(float seedOff)
 		// Rate rises with the level, so it is not just brighter when things
 		// are bad -- it is FASTER, which is what reads as urgency.
 		float lvl = clamp(uGlowTex4.z, 0.0, 1.0);
-		float rate = 1.0 + 6.0 * lvl;
+		// The level sets the rate, which means bright and slow was not a thing
+		// that could be asked for: any preset wanting a strong alarm got a fast
+		// one. uGlowTex4.w scales it so depth and speed are separable. 1 is the
+		// original rate exactly, so nothing that leaves it alone changes.
+		float rate = (1.0 + 6.0 * lvl) * max(uGlowTex4.w, 0.0);
 		float beat = 0.5 + 0.5 * sin(timer * rate * 6.2831853 * 0.35);
 		mul *= 1.0 + uGlowTex4.y * lvl * (beat - 0.5) * 2.0;
 	}
@@ -1884,10 +1911,22 @@ vec3 BeamAirGlow(vec3 fragPos)
 // lattice paths -- painted and in the air -- next to the code they belong to.
 float SweepLineAxis(float coord, float spacing, float width, float soft, float t);
 
-vec3 SweepAirLattice(vec3 fragPos)
+// [BB] Returns the light the lattice ADDS, and writes how much of the view it
+// OCCLUDES into occOut with the colour to occlude toward in occColOut.
+//
+// Additive alone can only ever brighten, so a band could be a wall of light and
+// never a wall of darkness -- adding cannot subtract. A band whose draw mode is
+// CRUSH now blends the scene toward its own colour instead of adding to it,
+// which is the same thing crush already means on a surface, applied in the air.
+//
+// That is what makes a solid band something you cannot see through: black to
+// hide what is coming, or any colour for a wall of it.
+vec3 SweepAirLattice(vec3 fragPos, out float occOut, out vec3 occColOut)
 {
 	vec3 sum = vec3(0.0);
 	if (uSweepCount <= 0) return sum;
+	occOut = 0.0;
+	occColOut = vec3(0.0);
 	if (uSweepAir.x <= 0.0) return sum;
 	if (uSweepFill.x <= 0.0 && uSweepFill.y <= 0.0) return sum;
 
@@ -2058,8 +2097,20 @@ vec3 SweepAirLattice(vec3 fragPos)
 			if (bfill == 3) cov = 1.0;
 		}
 
-		sum += uSweepFillCol.rgb * cov * slab * uSweepColors[sb].a
-		     * uSweepAir.x * roomFade;
+		float amt = cov * slab * uSweepColors[sb].a * uSweepAir.x * roomFade;
+
+		// CRUSH OCCLUDES INSTEAD OF ADDING. Same meaning the mode already has
+		// on a surface -- take light away rather than put it in -- so a solid
+		// slab in crush is a wall you cannot see through.
+		if (int(uSweepBands[sb].w) == 3)
+		{
+			float o = clamp(amt, 0.0, 1.0);
+			if (o > occOut) { occOut = o; occColOut = uSweepFillCol.rgb; }
+		}
+		else
+		{
+			sum += uSweepFillCol.rgb * amt;
+		}
 	}
 	return sum;
 }
@@ -2422,7 +2473,9 @@ vec4 FogSlabAt(vec3 fragPos)
 	// fragment. The fog for a pixel is an integral along that whole line, and
 	// sampling at the far end makes the field appear pinned to the walls --
 	// you would walk through a bank and see it stay where the geometry is.
-	float dens = uFogSlab.y;
+	// Scaled per draw -- a courtyard and a cellar want opposite amounts of
+	// this, and the sector picked which. 1 is the slab as configured.
+	float dens = uFogSlab.y * uFogDensityScale;
 	if (uFogNoise.y > 0.0)
 	{
 		vec2 mid = mix(eye.xz, fragPos.xz, 0.5) + uFogNoise.zw * timer;
@@ -2544,7 +2597,12 @@ vec4 FogSlabAt(vec3 fragPos)
 	// constant -- a tendril growing out of a rolling surface has to roll with
 	// it or it hangs unattached in the air above the mist.
 	if (haveTend)
-		amount = clamp(amount + FogTendrilAt(fragPos, topFrag), 0.0, 1.0);
+		// SCALED WITH THE SLAB. The body honours the indoor/outdoor split and
+		// the wisps did not, so Cellar -- thick indoors, almost nothing
+		// outdoors -- put full-strength tendrils standing in clear air the
+		// moment you stepped outside. Both presets written to exercise the
+		// split were the ones it looked wrong in.
+		amount = clamp(amount + FogTendrilAt(fragPos, topFrag) * uFogDensityScale, 0.0, 1.0);
 
 	vec3 col = uFogSlabColor.rgb;
 
@@ -2809,8 +2867,8 @@ float SweepFillAt(int fill, int shape, vec3 origin)
 
 	// Pick the band's two tangent axes.
 	vec2 uv;
-	if (shape == 2)       uv = vec2(pixelpos.z, pixelpos.y);
-	else if (shape == 3)  uv = vec2(pixelpos.x, pixelpos.y);
+	if (shape == 2 || shape == 6 || shape == 8)  uv = vec2(pixelpos.z, pixelpos.y);
+	else if (shape == 3 || shape == 7 || shape == 9) uv = vec2(pixelpos.x, pixelpos.y);
 	else if (shape == 5)  uv = vec2(pixelpos.x, pixelpos.z);
 	else
 	{
@@ -2908,10 +2966,14 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 	// and every HUD element gets darkened by its OWN brightness. The fallback
 	// is right for fog, where the colour genuinely is the light. It is wrong
 	// for a status bar, which was never in the world to be dark.
-	if (uDarkness.x > 0.0 && uFogEnabled != -3 && uDarknessExempt == 0)
+	if (uDarkness.x > 0.0 && uFogEnabled != -3 && uDarknessExempt < 1.0)
 	{
 		float dl = (uLightLevel >= 0.0) ? uLightLevel : grayscale(vec4(color.rgb, 1.0));
-		color.rgb *= DarknessAt(dl);
+		// Partial, not all-or-nothing. uDarknessExempt is how much of the
+		// darkening this draw is spared -- 0 takes all of it, 1 takes none,
+		// and actors sit somewhere in between so a blacked-out room still has
+		// things visible moving in it.
+		color.rgb *= mix(DarknessAt(dl), 1.0, clamp(uDarknessExempt, 0.0, 1.0));
 	}
 
 	//
@@ -3246,7 +3308,16 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 	// is what lets a shot light up a room darkened to black. Takes the surface
 	// normal because a shape that spins or tiles needs to know which way is
 	// round on the surface it is being painted on.
-	ApplySurfaceStamps(color.rgb, pixelpos.xyz, vWorldNormal.xyz);
+	vec3 stampAdd;
+	ApplySurfaceStamps(color.rgb, stampAdd, pixelpos.xyz, vWorldNormal.xyz);
+	// Desaturated with the sector, which is the line the original ended on.
+	// ApplySurfaceStamps cannot call this itself -- it is prepended above.
+	color.rgb += desaturate(vec4(stampAdd, 1.0)).rgb;
+
+	// [OUTLINE] The traced edge, emissive for the same reason the stamps are:
+	// after the lighting equation and after DarknessAt, so a corpse stays lit
+	// in a room turned black. Zero unless this draw is an outlined sprite.
+	color.rgb += gOutlineEmissive;
 #endif
 	color = min(color, 1.0);
 
@@ -3386,6 +3457,15 @@ void main()
 #else
 	Material material = ProcessMaterial();
 #endif
+
+	// [OUTLINE] An actor traced in neon by its own sprite. HERE, before the
+	// alpha test below, because the wire mode erases the body by rewriting
+	// material.Base.a -- do it after the test and the body has already been
+	// kept. Off for every draw that is not an outlined sprite, and off is one
+	// float compare. The glowing half is left in gOutlineEmissive and spent in
+	// getLightColor with the stamps.
+	ApplySpriteOutline(material.Base, vTexCoord.st);
+
 	vec4 frag = material.Base;
 
 #ifndef NO_ALPHATEST
@@ -3484,7 +3564,13 @@ void main()
 		// thing should -- without a light, a sprite, or a quad.
 		// [BB] And the sweep's own lattice, hanging in the air inside the band
 		// rather than painted on what the band lands on.
-		frag.rgb += SweepAirLattice(pixelpos.xyz);
+		{
+			float airOcc; vec3 airOccCol;
+			frag.rgb += SweepAirLattice(pixelpos.xyz, airOcc, airOccCol);
+			// Blended AFTER the additive term, so a band that occludes hides
+			// what is behind it rather than being washed out by its own light.
+			if (airOcc > 0.0) frag.rgb = mix(frag.rgb, airOccCol, airOcc);
+		}
 
 		// [BB] Shapes drawn onto surfaces. Emissive, so they go here with the
 		// rest of the light rather than through the lighting equation -- a

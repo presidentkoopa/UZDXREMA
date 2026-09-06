@@ -783,6 +783,21 @@ struct LevelLocals native
 	// supports gradients then draws `col` flat. Its own setter because the
 	// Add functions are already near the argument-count cliff.
 	native void SetBillboardGradient(int id, color col2);
+
+	// [BB] Show only part of a BB_TEXTURE billboard's texture, as fractions of
+	// the whole. (0,0,1,1) is all of it and is the default.
+	//
+	// For cutting one picture into strips and placing each on its own, which is
+	// how a flat mark follows a staircase instead of clipping through it.
+	native void SetBillboardUV(int id, double u0, double v0, double u1, double v1);
+
+	// [BB] Push a distance-field glyph's core toward white, 0..1, leaving the
+	// colour to the halo around it. 0 is the flat single-colour glyph.
+	//
+	// This is what separates a coloured letter from a neon tube: the filament
+	// is too bright to read as a hue and the colour is the bleed around it.
+	// Pair it with SetBillboardGlow, which supplies the bleed.
+	native void SetBillboardCore(int id, double amount);
 	// How far through its reveal, 0..1. On BB_SEGMENT / BB_SEGLCD the plate is
 	// a thin slit at 0 that opens vertically into a full ellipse, and the
 	// characters only appear past 0.55 -- which is the reveal GITD's original
@@ -1103,8 +1118,25 @@ struct LevelLocals native
 	// faded to nothing by outer. falloff shapes the fade along the length --
 	// 1 linear, higher concentrates the light near the lens. Publish it each
 	// tic while the light is on; clear it when off, which costs nothing.
-	native void SetVolumetricBeam(Vector3 pos, Vector3 dir, color col, double inner, double outer, double length, double density, double falloff, double dust = 0, double dustScale = 0.04, double dustDrift = 0);
-	native void ClearVolumetricBeam();
+	// [BB] A cone of LIT AIR -- you see the beam itself, not only the disc it
+	// lands on. Raymarched as a postprocess pass, in view space, so each eye
+	// resolves its own matrix and stereo comes out right for free.
+	//
+	// FOUR SLOTS. It was one, which meant every caller was secretly the same
+	// caller: whoever set it last won, and whoever finished first switched off
+	// everyone else's. A flashlight could not coexist with the weapon wheel's
+	// laser for that reason alone.
+	//
+	// slot defaults to 0, so every call written before slots existed keeps
+	// working and keeps the beam it always had.
+	// SEVENTEEN VM ARGUMENTS -- one over asmjit's direct-call cap of 16, which is
+	// why vmthunks.cpp registers this with DEFINE_ACTION_FUNCTION_NATIVE0 rather
+	// than _NATIVE. See the note there before changing either end. Count before
+	// adding a parameter here: self is one, and a Vector3 is three.
+	native void SetVolumetricBeam(Vector3 pos, Vector3 dir, color col, double inner, double outer, double length, double density, double falloff, double dust = 0, double dustScale = 0.04, double dustDrift = 0, int slot = 0);
+	// -1 clears every slot. The default clears only slot 0 -- turning off your
+	// own beam, not everybody else's.
+	native void ClearVolumetricBeam(int slot = 0);
 
 	// [BB] Sweep -- up to eight thin bands of light travelling through the
 	// world, each tested per pixel against world position on every surface,
@@ -1117,17 +1149,33 @@ struct LevelLocals native
 	//        2 plane along X        -- bars sweeping east/west down a corridor
 	//        3 plane along Y        -- the same, north/south
 	//        4 sphere from origin   -- shells, so a band rises as it expands
+	//        5 plane rising         -- signed, climbs through the map
+	//        6 plane along +X       -- signed: ONE front crossing the level
+	//        7 plane along +Y
+	//        8 plane along -X       -- the same, from the other side
+	//        9 plane along -Y
+	//
+	// 2 and 3 are abs(), so they are two planes moving APART from the origin.
+	// 6 to 9 are signed, which is what the word sweep actually means: one
+	// front that starts at one end and travels to the other. Put the origin
+	// off the near edge and give the band the map's span as its reach.
 	//
 	// Set the origin and how many bands are live, then each band's position
 	// and colour. Drive the radii each tic: grow them for a ping, oscillate
 	// for a sweep, stagger them for a train chasing itself down a corridor.
-	native void SetSweepOrigin(int mode, Vector3 origin, int count);
-	native void SetSweepBand(int index, double radius, double thickness, double softness, color col, double intensity);
-	native void SetSweepBandDraw(int index, int drawmode);
-	native void SetSweepCount(int count);
-	native void SetSweepBandAt(int index, Vector3 origin, int shape);
-	native void SetSweepTrail(double trail);
-	native void ClearSweep();
+	// CLEARSCOPE, like the fog and glow-wave setters and for the same reason:
+	// these are render settings on FLevelLocals, not simulation. Nothing
+	// downstream can change what happens in the world, none of it is
+	// serialised, so a menu may push them while the playsim is paused and a
+	// slider moves the picture as it is dragged. Resolving an origin that
+	// FOLLOWS something is still the caller's play-scope problem.
+	native clearscope void SetSweepOrigin(int mode, Vector3 origin, int count);
+	native clearscope void SetSweepBand(int index, double radius, double thickness, double softness, color col, double intensity);
+	native clearscope void SetSweepBandDraw(int index, int drawmode);
+	native clearscope void SetSweepCount(int count);
+	native clearscope void SetSweepBandAt(int index, Vector3 origin, int shape);
+	native clearscope void SetSweepTrail(double trail);
+	native clearscope void ClearSweep();
 
 	// [BB] Glow wave: peaks and valleys along a glow, per pixel. Reach moves
 	// the band's edge, brightness moves its light, colour moves the two-colour
@@ -1142,7 +1190,14 @@ struct LevelLocals native
 	// world -- it keeps its last value while the game is stopped, which is
 	// right, since nothing in the world is moving either.
 	native clearscope void SetGlowWave(double wavelength, double speed, double sharpness, int shape);
-	native void SetGlowWaveOrigin(Vector3 origin);
+	// [BB] clearscope like the other four. GlowWaveOrigin is render state --
+	// its only reader is hw_drawinfo.cpp packing it into mGlowWaveOrigin for the
+	// shader, and nothing in the simulation touches it. It was the one setter in
+	// this group left play-scoped, which meant a mod pushing wave settings from
+	// UiTick (so the picture moves while its menu is open) could set the wave,
+	// its depth and its phase but not its origin, and had to split one call site
+	// across two scopes for no reason a caller could see.
+	native clearscope void SetGlowWaveOrigin(Vector3 origin);
 	native clearscope void SetGlowWaveDepth(double reach, double bright, double colour, double detune, double seed);
 	native clearscope void SetGlowWavePhase(double wallTop, double wallBottom, double floorPhase, double ceilPhase);
 	native clearscope void ClearGlowWave();
@@ -1153,6 +1208,10 @@ struct LevelLocals native
 	// Mode 0 = off. Clearscope for the same reason as above.
 	native clearscope void SetDarkness(int mode, double adjust, double minLight, double preGain, double postGain);
 	native clearscope void SetDarknessSpace(double distDepth, double distRange, double heightDepth, double heightRef, double heightRange);
+	// How much of the darkening actors are spared: 0 darkens them with the
+	// room, 1 leaves them at full brightness. A dark room still needs things
+	// visible moving in it.
+	native clearscope void SetDarknessActors(double exempt);
 	native clearscope void ClearDarkness();
 
 	// [BB] Fog with a top -- a horizontal slab of mist with a world-space
@@ -1187,6 +1246,10 @@ struct LevelLocals native
 	// positive follows the floor, negative the ceiling. The magnitude is the
 	// gentleness -- 0.3 turns a staircase into a slope rather than steps.
 	native clearscope void SetFogFollow(double top, double bottom);
+	// How much fog a room gets by whether it has sky over it. A sky ceiling is
+	// outdoors -- the marker every Doom map already carries. Both 1 is one fog
+	// everywhere, which is what it was.
+	native clearscope void SetFogZones(double indoor, double outdoor);
 	native clearscope void SetFogGradient(color col, double mix);
 
 	// [BB] SHAPES -- signed distance fields drawn onto surfaces. 128 slots,
@@ -1270,7 +1333,7 @@ struct LevelLocals native
 	// Deliberately script-side: which sectors make up one room is a
 	// judgement -- a Doom room is usually several, and whether a window or a
 	// step ends it has no single right answer -- so the caller decides.
-	native void SetSweepRoom(double minx, double miny, double minz, double maxx, double maxy, double maxz, double soft);
+	native clearscope void SetSweepRoom(double minx, double miny, double minz, double maxx, double maxy, double maxz, double soft);
 	native clearscope void SetShapeLook(double soft, double heightFade, double reach, color under);
 
 	// [BB] TEXTURE INSIDE THE GLOW. The wave varies a glow's EDGE and has
@@ -1280,7 +1343,7 @@ struct LevelLocals native
 	native clearscope void SetGlowTexture(double noise, double scale, double drift, double contrast);
 	native clearscope void SetGlowFlow(double amount, double spacing, double speed, double sharp);
 	native clearscope void SetGlowCells(double amount, double scale, double speed, double width);
-	native clearscope void SetGlowReact(double react, double pulse, double level);
+	native clearscope void SetGlowReact(double react, double pulse, double level, double rate = 1.0);
 
 	// [BB] WHAT SURVIVES A COLOUR DRAIN. Desaturation was all or nothing, so a
 	// monochrome world made blood exactly as grey as the wall behind it.
@@ -1354,7 +1417,9 @@ struct LevelLocals native
 	//
 	// clearscope so a menu can preview one while the game is paused, for the
 	// same reason the glow setters on Sector are.
-	native clearscope void SpawnSurfaceStamp(int shape, Vector3 pos, double radius, color col, int life, Vector3 axis, int tex = 0, double texStr = 0.0);
+	//   col2     the colour it grades toward over its life; alpha 0 = no gradient
+	//   fadeAt   fraction of life after which it fades out; 1.0 = never
+	native clearscope void SpawnSurfaceStamp(int shape, Vector3 pos, double radius, color col, int life, Vector3 axis, int tex = 0, double texStr = 0.0, color col2 = 0, double fadeAt = 1.0);
 	native clearscope void ClearSurfaceStamps();
 
 	native clearscope void SetBeam(int index, Vector3 start, Vector3 end, double thick, double soft, color col, double intensity);

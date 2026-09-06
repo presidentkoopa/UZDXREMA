@@ -376,7 +376,47 @@ class Actor : Thinker native
 	// Costs a null check on actors that have no voxel. See FindModelFrame.
 	native bool VoxelOverride;
 	native bool ForceModelAngles;
+	// Draw this actor in the player's body frame -- head position and yaw, read
+	// fresh every frame -- instead of at its own world position. 1 follows, 0
+	// (default) does not. FollowBodyOfs is its seat in that frame: X forward,
+	// Y right, Z up, map units. See the note in actor.h.
+	//
+	// Per-actor rather than a MODELDEF flag because a worn rig is many props of
+	// one class, each sitting somewhere different on the body.
+	native int FollowBodyMode;
+	native Vector3 FollowBodyOfs;
 	native int HardpointButtons;
+	// Trace this actor in neon, from its own sprite. See func_spriteoutline.fp
+	// and the note in actor.h. OutlineMode 0 is off and is the default; 1 keeps
+	// the body and adds a glowing edge, 2 erases the body and leaves the wire
+	// figure, 3 flattens the body to the tint with the edge bright over it.
+	// Works on any actor, names no monster, and is unaffected by stairs -- the
+	// outline IS the sprite.
+	native color OutlineColorA;
+	native color OutlineColorB;
+	native double OutlineStrength;
+	native double OutlineThickness;
+	native double OutlineThreshold;
+	native double OutlineGlow;
+	native double OutlinePulse;
+	native int OutlineMode;
+
+	// [BB] A SWEEP FRONT JUST REACHED THIS ACTOR.
+	//
+	// Called once, at the moment a travelling band's front crosses it -- not
+	// while it is inside the band, and not when the band was fired.
+	//
+	// EMPTY HERE ON PURPOSE. This exists so the thing that DRAWS a sweep never
+	// has to know what a monster is, and the thing that knows what a monster is
+	// never has to know a sweep exists. A lighting mod calls it on whatever it
+	// crosses; a monster mod overrides it and re-tiers. Neither has to be
+	// loaded for the other to compile.
+	//
+	// The tint is the band's colour AT THAT MOMENT, so a band carrying a second
+	// colour hands out a different one at the near edge than at the far edge --
+	// which is what lets one sweep leave a gradient behind it rather than one
+	// flat answer.
+	virtual void OnSweepCrossed(Vector3 origin, double front, Color tint) {}
 	// WRITABLE FROM SCRIPT, 2026-08-30. These six were readonly, which was fine
 	// while the only thing that ever set them was the VR backend writing the
 	// controller pose -- but a WRIST-MOUNTED weapon fires from the mount along
@@ -506,6 +546,11 @@ class Actor : Thinker native
 	// weapon's spread: that is what a second hand buys. It does not move the
 	// weapon, deliberately.
 	native readonly bool TwoHandedHold;
+	// What this actor is currently drawn attached to, or null. Read it before calling
+	// SetRenderAttachment*: re-deriving an attachment every tic re-samples a tic-rate position
+	// into a render-rate transform, which is exactly what makes an attached prop jitter while
+	// the thing it rides stays smooth. Attach once, then leave it alone.
+	native readonly Actor RenderAttachParent;
 
 	// Accumulated CONTROLLER-driven yaw (snap + stick turn), degrees. HmdYaw is
 	// physical head yaw PLUS this. Body-relative anchors must follow this part
@@ -522,12 +567,6 @@ class Actor : Thinker native
 	native readonly vector3 LaserTraceHitPosMain;
 	native readonly vector3 LaserTraceHitPosOff;
 
-	// Write true here when the point above is a headshot -- the engine has no
-	// idea which classes have heads, that is gameplay-mod data. The laser
-	// sight reacts to this (vr_laser_headshot_react and friends) on whichever
-	// hand it is set for.
-	native bool LaserHeadshotLinedUpMain;
-	native bool LaserHeadshotLinedUpOff;
 
 	meta String Obituary;		// Player was killed by this actor
 	meta String HitObituary;		// Player was killed by this actor in melee
@@ -1032,56 +1071,6 @@ class Actor : Thinker native
 	native void SetOrigin(vector3 newpos, bool moving);
 	native void SetXYZ(vector3 newpos);
 
-	// RS FORK -- rigid-body physics. See src/playsim/p_physics.h.
-	//
-	// Once enabled, the SOLVER owns this actor's position, orientation and
-	// velocity: Doom's movement is skipped entirely for it, and writing pos or
-	// Vel from script will simply be overwritten on the next frame. Move it
-	// with impulses instead.
-	//
-	// Mass is in KILOGRAMS and the half-extents of its collision box are in
-	// METRES -- real units, not map units, because that is what the simulation
-	// runs in. A pistol magazine is roughly 0.25kg and (0.015, 0.045, 0.06).
-	// comX/Y/Z is where the centre of mass sits relative to the actor's ORIGIN,
-	// in metres, in the model's own axes. Rarely zero for a real model: a
-	// magazine exported with its origin at the base has its mass centred about
-	// 5cm above that, and leaving this at zero puts the collision box over the
-	// bottom half of the mesh only.
-	native void PhysicsEnable(double massKg, double halfX, double halfY, double halfZ,
-		double comX = 0, double comY = 0, double comZ = 0);
-	native void PhysicsDisable();
-	// kg*m/s at the centre of mass -- this is how a throw gets its speed.
-	native void PhysicsAddImpulse(double x, double y, double z);
-	// Spin, radians per second.
-	native void PhysicsAddSpin(double x, double y, double z);
-	// What it sounds like hitting something, and how hard it must hit (m/s)
-	// before it makes any noise at all.
-	native void PhysicsSetImpactSound(sound snd, double minSpeed = 0.6);
-	// True once it has come to rest and stopped simulating.
-	native clearscope bool PhysicsIsAsleep() const;
-	// Hold it (the solver stops moving it) or let it go. To throw: hold, drive
-	// it with PhysicsSetTransform each tic, then release and add an impulse.
-	native void PhysicsSetHeld(bool held);
-	// Place a held body. Position in MAP units, angles in degrees.
-	native void PhysicsSetTransform(double x, double y, double z, double yaw, double pitch, double roll);
-
-	// GRABBING. Prefer these to PhysicsSetHeld/SetTransform: the engine then
-	// carries the object at physics rate rather than at the 35Hz tic rate, and
-	// it keeps the pose it had when you grabbed it instead of snapping to the
-	// hand. Releasing needs no impulse -- a held object has been inheriting the
-	// hand's motion all along, so a throw is simply letting go.
-	// hand: 0 = main, 1 = off.
-	native void PhysicsGrab(int hand);
-	// A SECOND HAND on a held body, at a world point on it; a negative hand
-	// clears it. The firing hand keeps position and roll, the support hand
-	// decides where the thing points.
-	native void PhysicsSetSupport(int hand, double wx, double wy, double wz);
-	native int PhysicsGetSupport();
-	native void PhysicsRelease();
-	native clearscope bool PhysicsIsHeld() const;
-	// Distance in METRES from a map-space point to this body's collision SHAPE,
-	// not to its origin -- so reaching for the end of a long object works.
-	native clearscope double PhysicsDistanceTo(double x, double y, double z) const;
 	native clearscope Actor GetPointer(int aaptr);
 	native double BulletSlope(out FTranslatedLineTarget pLineTarget = null, int aimflags = 0);
 	native void CheckFakeFloorTriggers (double oldz, bool oldz_has_viewheight = false);
@@ -1793,6 +1782,38 @@ class Actor : Thinker native
 	native version("4.15.1") Quat GetNamedBoneBaseRotation(Name boneName);
 
 	native version("4.15.1") int GetBoneCount();
+
+	// [XR] VR body avatar / native arm IK (playsim/vr_armik.cpp, vmthunks_actors.cpp).
+	native void SetModelUseProceduralPose(bool enable);
+	native void SetModelBonePose(int boneIndex, double tx, double ty, double tz, double qx, double qy, double qz, double qw);
+	native void SetArmIKEnabled(bool enable);
+	// Designate the actor the engine draws and poses as this player's VR body. Call on the
+	// PLAYER PAWN (it resolves the player from self). null restores the default: the pawn itself.
+	native void SetVRBodyActor(Actor body);
+	// Rig description for that body (all resolved from self.player). Roles: collar_r, upperarm_r,
+	// lowerarm_r, hand_r and the _l set; index_0_r .. pinky_2_r, thumb_0_r .. (and _l); neck.
+	native void SetVRBodyBone(Name role, Name bone);
+	native void SetVRBodyGripAxis(double x, double y, double z);
+	native void SetVRBodyHiddenBone(Name bone, bool hidden = true);
+	// hand: 0 = main, 1 = off. Frames index the body model's own pose clip; -1 = bind pose + grip curl.
+	native void SetVRBodyHandPose(int hand, int frame, int frameNext = -1, double lerp = 0.0);
+	// hand: 0 = main, 1 = off. World position the wrist should land on; valid=false = the controller.
+	native void SetVRBodyHandTarget(int hand, Vector3 pos, bool valid = true);
+	// The hand model's drawn axes (from ModelPointToWorld: fwd = model +X, up = model +Y, and
+	// model +Z) so the wrist copies its orientation; needs SetVRBodyHandAlign for that hand.
+	native void SetVRBodyHandFrame(int hand, Vector3 ax, Vector3 ay, Vector3 az, bool valid = true);
+	native void SetVRBodyHandAlign(int hand, double x, double y, double z, double w);
+	// Follow a hand MODEL ACTOR at render rate: the wrist lands on palmBone (+ offset, in that
+	// model's own space) wherever that actor is drawn each frame. null = stop following.
+	native void SetVRBodyHandActor(int hand, Actor handActor, Name palmBone, Vector3 offsetModel);
+
+	// RENDER ATTACHMENT: draw this actor at a joint of another actor's model, from that actor's
+	// live matrix every frame (a holster on a hip, a hardpoint on a hand). Position and angles of
+	// this actor still rule its gameplay; only the drawing follows the parent. 'none' = model origin.
+	native void SetRenderAttachment(Actor parent, Name bone, Vector3 offsetModel, double yaw = 0, double pitch = 0, double roll = 0);
+	native bool SetRenderAttachmentAtWorld(Actor parent, Name bone, Vector3 worldPos, double worldYaw, double pitch = 0, double roll = 0);
+	native void ClearRenderAttachment();
+	native void ClearVRBodyRig();
 
 	//================================================
 	//

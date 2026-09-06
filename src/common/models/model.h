@@ -47,7 +47,7 @@ extern TDeletingArray<FModel*> Models;
 extern TArray<FSpriteModelFrame> SpriteModelFrames;
 extern TMap<const PClass*, FSpriteModelFrame> BaseSpriteModelFrames;
 
-#define MD3_MAX_SURFACES	32
+#define MD3_MAX_SURFACES	64	// [XR] was 32; the Slayer body ships 64 mesh parts and every one must be addressable by SurfaceSkin
 #define MIN_MODELS	4
 
 struct FSpriteModelFrame
@@ -62,6 +62,32 @@ struct FSpriteModelFrame
 	// [BB] Added zoffset, rotation parameters and flags.
 	// Added xoffset, yoffset
 	float xoffset, yoffset, zoffset;
+
+	// [BB] THE POINT THE MODEL TURNS ABOUT, IN ITS OWN SPACE.
+	//
+	// Offset above cannot express this, and the difference is not a nicety.
+	// Offset is applied AFTER the rotations (ObjectToWorldMatrix runs step 4 then
+	// step 5, so on the vertex it lands second), which makes it a rigid
+	// displacement in the parent frame: it moves the model without moving the
+	// point the model SPINS about. A mesh whose own origin is not where it ought
+	// to turn from therefore ORBITS that origin instead of rotating in place, and
+	// no value of Offset shrinks that orbit -- it only moves the whole circle
+	// somewhere else.
+	//
+	// This is subtracted BEFORE the rotations instead, which is the ordinary
+	// v' = R * (v - p). It is the only way to say "turn about HERE" for a mesh
+	// that was not authored centred on the point it should turn from.
+	//
+	// Zero by default, so every existing model is untouched.
+	//
+	// Wanted independently by three things already, which is why it is a MODELDEF
+	// field and not a fix inside one caller: a grenade whose mesh sits 5.85 units
+	// off its own origin and swings rather than spins when thrown; a hand model
+	// whose palm is nowhere near its origin; and anything wearing a borrowed model
+	// on a holster bracket or a hardpoint mount, where the mount rotates and the
+	// borrowed mesh was authored for a different anchor entirely.
+	float pivotx, pivoty, pivotz;
+
 	float xrotate, yrotate, zrotate;
 	float rotationCenterX, rotationCenterY, rotationCenterZ;
 	float rotationSpeed;
@@ -120,7 +146,10 @@ public:
 	// which for anything standing on a floor is the point between its feet, so a
 	// held object swings through an arc instead of turning in place. Only the
 	// held-voxel path passes anything else.
-	VSMatrix ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic, float bodyPivotZ = 0.f);
+	// followBodyMode/followBodyOfs come from the ACTOR, not from MODELDEF, so
+	// they arrive as arguments rather than as flags -- see AActor::FollowBodyMode.
+	// Defaulted off: every caller written before this existed is unaffected.
+	VSMatrix ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic, float bodyPivotZ = 0.f, int followBodyMode = 0, DVector3 followBodyOfs = DVector3(0, 0, 0));
 };
 
 
@@ -188,6 +217,35 @@ public:
 	virtual const TArray<VSMatrix>* CalculateBonesOnlyOffsets(TArray<BoneOverride> *in, BoneInfo *out, double time) { return nullptr; };
 
 	virtual const TArray<VSMatrix>* GetBasePose() {return nullptr;}
+
+	// [XR] Joint introspection under the names the DXR arm-IK was written against
+	// (playsim/vr_armik.cpp): thin readers over the joint API above. GetJointCount()==0 on a
+	// non-IQM model is itself the "not an IQM" signal, so callers need no RTTI/dynamic_cast.
+	int  GetJointCount() { return NumJoints(); }
+	int  FindJointByName(FName name) { return FindJoint(name); }
+	// Case-INSENSITIVE joint-name lookup so authored names resolve regardless of the case the
+	// modeler used. Base no-op -> -1 on any non-IQM model, same pattern as FindJoint above.
+	virtual int FindJointByNameCI(FName name) { return -1; }
+	// RAW per-joint local bind TRS exactly as read off disk -- callers compose these themselves;
+	// nothing here is skinning-space (no swapYZ, no inversebaseframe).
+	bool GetJointBindTRS(int jointIndex, TRS& out)
+	{
+		if (jointIndex < 0 || jointIndex >= NumJoints()) return false;
+		out = GetJointBaseTRS(jointIndex);
+		return true;
+	}
+	// Parent-resolved MODEL-LOCAL bind position of a joint -- the translation column of
+	// baseframe[jointIndex] (VSMatrix is column-major; translation at [12/13/14]).
+	bool GetJointBaseframePos(int jointIndex, FVector3& out)
+	{
+		const TArray<VSMatrix>* bf = GetBasePose();
+		if (bf == nullptr || jointIndex < 0 || (unsigned)jointIndex >= bf->Size()) return false;
+		const auto* m = (*bf)[jointIndex].get();
+		out.X = (float)m[12];
+		out.Y = (float)m[13];
+		out.Z = (float)m[14];
+		return true;
+	}
 
 	// Largest |X|/|Y|/|Z| across the model's own raw local-space vertices,
 	// tracked independently per axis (not necessarily from the same vertex --

@@ -369,6 +369,73 @@ EXTERN_CVAR(Float, vr_offhand_yaw);
 EXTERN_CVAR(Float, vr_offhand_pitch);
 EXTERN_CVAR(Float, vr_offhand_roll);
 
+// ======================= [XR] VR body avatar (playsim/vr_armik.cpp) =======================
+#include "vr_armik.h"
+EXTERN_CVAR(Int, vr_mode)   // [XR] real VR-on check; vrmode->IsVR() lies (returns 0) in the render path
+
+CVAR(Float, vr_body_size, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)   // [XR] life size; the body's own units are map units
+CVAR(Float, vr_body_z,     0.0f,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// [XR] Body position in its own facing frame: forward/back and left/right of the pawn, map units.
+CVAR(Float, vr_body_forward, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// [XR] Body thickness (left-right and front-back) on top of the size: 1.0 = the rig's own proportions.
+CVAR(Float, vr_body_width,   1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_body_side,    0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_body_yaw,   90.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool,  vr_body_autofit,  true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_body_headroom, 0.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_body_neck_height, 63.64f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// [XR] NECK-TO-HMD placement (what FRIK's setBodyUnderHMD does). The body keeps whatever scale it has --
+// so its arm length, i.e. the player's reach, is untouched -- and is slid vertically so its neck stump
+// lands at the live eye height. Seated play is the case this exists for: the eye is far below a standing
+// neck, and scaling the body down to meet it (vr_body_autofit) shrinks the arms below the player's real
+// reach, which the arm-IK then has to stretch. vr_body_neck_eye_gap is how far the eyes sit above the
+// neck stump on the rig, in model units (marine: ~3.5). Composes with autofit and vr_body_z.
+CVAR(Bool,  vr_body_neck_to_hmd,  true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Float, vr_body_neck_eye_gap, 3.5f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+// [XR] HEAD PIVOT. Your eyes are not your neck: they sit above and in front of the joint the head
+// turns on, so nodding swings them through an arc while the neck stays where it is. Placing the
+// body from the raw eye height therefore moved the whole avatar every time the player looked down
+// -- and the old defence, sampling the height only while the view was near level, only narrowed
+// the window it happened in.
+//
+// So reconstruct the neck joint from the headset POSE instead of its position alone: back along the
+// head's own forward axis, down its own up axis. That point is invariant to head rotation, which is
+// the property the placement actually wanted. The two distances are the player's own anatomy, in
+// map units (about 34 to the metre): 8cm back, 10cm down.
+CVAR(Bool,  vr_body_head_pivot, true,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+EXTERN_CVAR(Bool, vr_body_crouch)   // playsim/vr_armik.cpp -- see the standing-height note below
+CVAR(Float, vr_body_neck_back,  2.7f,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // eye -> neck, along head-forward
+CVAR(Float, vr_body_neck_drop,  3.4f,  CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // eye -> neck, along head-up
+
+// [XR] The live body-fit scale actually applied to the local avatar this frame (autofit smoothed
+// value, or the manual vr_body_size when autofit is off). Published so the playsim arm-IK
+// (vr_armik.cpp VR_UpdateArmIK) can divide the world hand target by the SAME scale the renderer used,
+// converting the target from rendered-body space into the unscaled baseframe the IK solves in.
+// Written on the render thread, read on the playsim thread: a plain float, at worst one frame stale,
+// and the value is heavily smoothed, so no sync is needed.
+float g_xr_vrBodyRenderScale = 0.70f;
+
+// [XR] The EXACT finalized objectToWorldMatrix used to draw the local VR body this frame, published so
+// the playsim arm-IK (VR_UpdateArmIK) can INVERT the renderer's OWN transform instead of
+// hand-rebuilding world->model-local math. baseframe-space -> GL-world is F = objectToWorldMatrix*swapYZ
+// (boneData==I at bind), so the IK does target_baseframe = swapYZ * objectToWorldMatrix^-1 * controller_GL.
+// This captures the drawn yaw (vr_body_facing/vr_body_yaw), vr_body_z, AND the Y/Z-swapped bodyScale
+// factors exactly, so the manual un-yaw/axis-remap/feet-subtract/scale-divide all become obsolete.
+// Written on the render thread, read on the playsim thread: at worst one frame stale, the pose is smooth,
+// same lock-free contract as g_xr_vrBodyRenderScale above. Valid flag guards the pre-first-render frame.
+VSMatrix g_xr_vrBodyObjectToWorld;
+bool     g_xr_vrBodyObjToWorldValid = false;
+// [XR] Diagnostic: how many times the renderer consumed a procedural pose. Read by the playsim probe.
+int      g_xr_vrRenderProcHits = 0;
+
+// [XR] Is this actor the local player's VR body? The designated body actor when a mod set one,
+// else the console player's pawn -- the original test was `actor == players[consoleplayer].mo`.
+static inline bool VR_IsBodyActor(const AActor* actor)
+{
+	return (int)vr_mode != 0 && actor != nullptr && actor == VR_BodyActor(&players[consoleplayer]);
+}
+// ==========================================================================================
+
 extern TDeletingArray<FVoxel *> Voxels;
 extern TDeletingArray<FVoxelDef *> VoxelDefs;
 
@@ -386,6 +453,17 @@ void RenderModel(FModelRenderer *renderer, float x, float y, float z, FSpriteMod
 		translation = actor->Translation;
 
 	VSMatrix objectToWorldMatrix = smf->ObjectToWorldMatrix(actor, x, y, z, ticFrac);
+
+	// [XR] Publish the finalized VR-body transform so the arm-IK can invert F = objectToWorldMatrix*swapYZ.
+	// ObjectToWorldMatrix is complete here (every translate/rotate/scale, pixel stretch included, is baked
+	// in) and it is exactly the matrix the GPU uses as the model matrix -- so its inverse is exact.
+	if (VR_IsBodyActor(actor))
+	{
+		g_xr_vrBodyObjectToWorld = objectToWorldMatrix; g_xr_vrBodyObjToWorldValid = true;
+		// [XR] Solve the arms for THIS frame, against this exact matrix and the controllers as they are
+		// right now -- the same pose the weapon is drawn with -- before the body's bones are read.
+		VR_UpdateArmIKFrame(&players[consoleplayer], screen->FrameTime);
+	}
 
 	const DVector2 scale = actor->InterpolatedScale(ticFrac);
 	float scaleFactorX = scale.X * smf->xscale;
@@ -476,6 +554,56 @@ DEFINE_ACTION_FUNCTION_NATIVE(AActor, ModelPointToWorld, ModelWorldTransform)
 	return numret;
 }
 
+// [XR] Where a joint of an actor's model is drawn this frame. Same matrix ModelPointToWorld uses; the
+// joint's bind position (file space) goes through the file->drawn swap before the object matrix.
+bool VR_ModelJointWorld(AActor* a, FName joint, const FVector3& offsetModel, FVector3& outPosGL, VSMatrix& outObjToWorld)
+{
+	if (a == nullptr) return false;
+	FSpriteModelFrame* smf = FindModelFrame(a, a->sprite, a->frame, false);
+	if (smf == nullptr || smf->modelIDs.Size() == 0 || smf->modelIDs[0] < 0 || (unsigned)smf->modelIDs[0] >= Models.Size()) return false;
+	FModel* mdl = Models[smf->modelIDs[0]];
+	if (mdl == nullptr) return false;
+	const int j = (joint == NAME_None) ? -1 : mdl->FindJointByNameCI(joint);
+	if (j < 0 && joint != NAME_None) return false;
+	FVector3 p = ((j >= 0) ? mdl->GetJointPosition(j) : FVector3(0.f, 0.f, 0.f)) + offsetModel;   // file space
+	outObjToWorld = smf->ObjectToWorldMatrix(a, (float)a->X(), (float)a->Y(), (float)a->Z(), I_GetTimeFrac());
+	const FLOATTYPE* v = outObjToWorld.get();
+	// drawn model space is the file space with Y and Z swapped
+	const double mx = p.X, my = p.Z, mz = p.Y;
+	outPosGL = FVector3(
+		(float)(v[0]*mx + v[4]*my + v[8]*mz  + v[12]),
+		(float)(v[1]*mx + v[5]*my + v[9]*mz  + v[13]),
+		(float)(v[2]*mx + v[6]*my + v[10]*mz + v[14]));
+	return true;
+}
+
+bool VR_ModelWorldToJointOffset(AActor* a, FName joint, const DVector3& worldDoom, FVector3& outOffsetModel)
+{
+	FVector3 jointGL; VSMatrix m;
+	if (!VR_ModelJointWorld(a, joint, FVector3(0.f, 0.f, 0.f), jointGL, m)) return false;
+	VSMatrix inv;
+	if (!m.inverseMatrix(inv)) return false;
+	FLOATTYPE p[4] = { (FLOATTYPE)worldDoom.X, (FLOATTYPE)worldDoom.Z, (FLOATTYPE)worldDoom.Y, (FLOATTYPE)1 };
+	FLOATTYPE o[4];
+	inv.multMatrixPoint(p, o);
+	// drawn model space -> file space (Y/Z swap), minus the joint's file-space position
+	FSpriteModelFrame* smf = FindModelFrame(a, a->sprite, a->frame, false);
+	FModel* mdl = (smf && smf->modelIDs.Size() > 0 && smf->modelIDs[0] >= 0) ? Models[smf->modelIDs[0]] : nullptr;
+	const int j = mdl ? mdl->FindJointByNameCI(joint) : -1;
+	FVector3 jp = (j >= 0) ? mdl->GetJointPosition(j) : FVector3(0.f, 0.f, 0.f);
+	outOffsetModel = FVector3((float)o[0], (float)o[2], (float)o[1]) - jp;
+	return true;
+}
+
+double VR_ActorFacing(AActor* a)
+{
+	if (a == nullptr) return 0.0;
+	const player_t* bp = &players[consoleplayer];
+	if ((int)vr_mode != 0 && a == VR_BodyActor(&players[consoleplayer]) && bp->vr_body_facing_valid)
+		return (double)bp->vr_body_facing_yaw;
+	return a->Angles.Yaw.Degrees();
+}
+
 // PLACEMENT CVARS ARE `user` CVARS, AND FindCVar CANNOT READ THOSE.
 //
 // FindCVar hands back the raw FBaseCVar. For a CVAR_USERINFO cvar that object
@@ -531,6 +659,26 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(AActor * actor, float x, float y
 	// own weapon is drawn with.
 	if (actor->ForceModelAngles) smf_flags |= MDL_USEACTORPITCH | MDL_USEACTORROLL;
 
+	// [XR] RENDER ATTACHMENT: this actor is drawn where a joint of its parent's model is, this
+	// frame, from the parent's live matrix. Position comes from the joint (+ offset); heading is the
+	// parent's facing plus the attachment's own angles. See the field note in actor.h.
+	bool attached = false;
+	DRotator attachAngles;
+	{
+		AActor* par = actor->RenderAttachParent;
+		if (par != nullptr && !(par->ObjectFlags & OF_EuthanizeMe) && par != actor)
+		{
+			FVector3 gl; VSMatrix pm;
+			if (VR_ModelJointWorld(par, actor->RenderAttachBone, actor->RenderAttachOffset, gl, pm))
+			{
+				x = gl.X; y = gl.Z; z = gl.Y;   // GL (x, up, y) -> Doom (x, y, z)
+				attachAngles = DRotator(actor->RenderAttachAngles.Pitch, DAngle::fromDeg(VR_ActorFacing(par)) + actor->RenderAttachAngles.Yaw, actor->RenderAttachAngles.Roll);
+				attached = true;
+				smf_flags |= MDL_USEACTORPITCH | MDL_USEACTORROLL;
+			}
+		}
+	}
+
 	// [BB] HELD-VOXEL DIAGNOSTIC.
 	//
 	// Which quarter turn a pack is off by is not something anyone should have
@@ -572,7 +720,9 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(AActor * actor, float x, float y
 	// Setup transformation.
 	DRotator angles;
 
-	if (actor->renderflags & RF_INTERPOLATEANGLES) // [Nash] use interpolated angles
+	if (attached)
+		angles = attachAngles;
+	else if (actor->renderflags & RF_INTERPOLATEANGLES) // [Nash] use interpolated angles
 		angles = actor->InterpolatedAngles(ticFrac);
 	else
 		angles = actor->Angles;
@@ -615,6 +765,148 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(AActor * actor, float x, float y
 	// [Nash] take SpriteRotation into account
 	angle += actor->SpriteRotation.Degrees();
 
+	// [XR] Local VR body avatar: shrink ONLY the player's own body model, anchored at its feet (the
+	// mesh origin -- the scale below is applied around model space 0,0,0 which for the marine is
+	// between the feet). This drops the head below the HMD while the feet stay planted. Every other
+	// actor renders unchanged. vr_body_z adds a vertical nudge for fine-tuning.
+	const bool isVRBody = VR_IsBodyActor(actor);
+	float bodyScale = 1.f;
+	double bodyZ = 0.0, bodyOffX = 0.0, bodyOffY = 0.0;
+	if (isVRBody)
+	{
+		bodyScale = vr_body_size;   // manual fallback
+		const player_t* bodyPlayer = &players[consoleplayer];
+
+		// CenterEyePos.Z - actor->Z() == the live HMD eye height above the floor in map units
+		// (OpenXR floor-relative tracking, already * vr_vunits_per_meter). Smooth it so head-bob
+		// doesn't pulse the body -- only the slow standing height tracks. Shared by both fits below.
+		double eyeAboveFeet = r_viewpoint.CenterEyePos.Z - actor->Z();
+
+		// [XR] HEAD PIVOT: replace the eye height with the NECK JOINT's height, reconstructed from the
+		// headset's full pose (see the cvar decl). The head's own axes come out of GetHmdTransform in
+		// GL layout -- up = +colY, forward = -colZ -- and their Y components are the world-Z ones, so
+		//   neckZ = eyeZ - up.z * drop - fwd.z * back
+		// which is constant through any amount of nodding. Feeding it in as "eye height minus the
+		// neck->eye gap" keeps every line below unchanged, gap included.
+		bool haveNeckPivot = false;
+		if (vr_body_head_pivot)
+		{
+			auto hmdMode = VRMode::GetVRModeCached(true);
+			VSMatrix hmdXf;
+			if (hmdMode != nullptr && hmdMode->IsVR() && hmdMode->GetHmdTransform(&hmdXf))
+			{
+				const FLOATTYPE* hm = hmdXf.get();
+				const double upZ = (double)hm[5], fwdZ = -(double)hm[9];
+				const double neckZ = (double)hm[13] - upZ * (double)vr_body_neck_drop - fwdZ * (double)vr_body_neck_back;
+				const double neckAboveFeet = neckZ - actor->Z();
+				if (neckAboveFeet > 1.0)
+				{
+					// the block below places (neck + gap) at this value, so hand it the neck plus the gap
+					eyeAboveFeet = neckAboveFeet + (double)vr_body_neck_eye_gap;
+					haveNeckPivot = true;
+				}
+			}
+		}
+		static double smoothedEye = 0.0;
+
+		// [XR] STANDING HEIGHT, and why crouch needs it.
+		//
+		// Neck-to-HMD slides the whole avatar down to keep its neck under the headset. That is right
+		// for a player who is short, or seated, or has just changed their height -- and it is exactly
+		// wrong for a player who has bent their knees, because it lowers the FEET through the floor
+		// instead of bending anything. The two features were therefore cancelling: by the time the IK
+		// looked for a crouch, the placement had already absorbed every unit of it, so the drop it
+		// measured was always zero and the body stayed rigid however deep the player went.
+		//
+		// So separate the two questions. This is a high-water mark of standing height: it follows
+		// upward at once (the player straightened, or is genuinely taller than we thought) and downward
+		// only very slowly (a sustained lower posture is a new standing height, a squat behind cover is
+		// not). The body is placed at THIS height, feet planted; the difference between it and the live
+		// height is the crouch, handed to the IK to spend on the hips and the knees.
+		static double standingEye = 0.0;
+		// [XR] The eyes sit ahead of the neck pivot, so pitching the head moves them up and down by a
+		// few units -- and the body followed. Sample the standing height only while the view is near
+		// level, and follow it slowly; a nod then changes nothing, a real posture change still tracks.
+		// [XR] With the neck pivot above there is nothing left for the pitch gate to defend against, and
+		// the value can follow properly instead of crawling: a real crouch tracks in about a second
+		// rather than ten. Without it, the old gate-and-crawl stands.
+		const double viewPitch = (bodyPlayer->mo != nullptr) ? fabs(bodyPlayer->mo->Angles.Pitch.Degrees()) : 0.0;
+		if (eyeAboveFeet > 1.0 && (haveNeckPivot || viewPitch < 12.0 || smoothedEye <= 0.0))
+		{
+			const double follow = haveNeckPivot ? 0.15 : 0.01;
+			if (smoothedEye <= 0.0) smoothedEye = eyeAboveFeet;
+			else                    smoothedEye += (eyeAboveFeet - smoothedEye) * follow;
+
+			if (standingEye <= 0.0)           standingEye = smoothedEye;
+			else if (smoothedEye > standingEye) standingEye = smoothedEye;                       // straightened: at once
+			else                                standingEye += (smoothedEye - standingEye) * 0.002; // sank: very slowly
+		}
+		// Publish the crouch for the IK, and hold the body at standing height while it is non-zero.
+		{
+			player_t* pl = &players[consoleplayer];
+			double crouchDrop = 0.0;
+			if (vr_body_crouch && standingEye > 1.0 && smoothedEye > 1.0)
+				crouchDrop = standingEye - smoothedEye;
+			if (crouchDrop < 0.0) crouchDrop = 0.0;
+			pl->vr_body_crouch_drop = (float)crouchDrop;
+			if (crouchDrop > 0.0) smoothedEye = standingEye;   // the legs take it from here, not the placement
+		}
+		// [XR] Neck height: read off the rig by the IK when the mod named a "neck" role, else the cvar.
+		const double neckH = (bodyPlayer->vr_body_neck_z > 1.0f) ? (double)bodyPlayer->vr_body_neck_z
+		                   : ((vr_body_neck_height > 1.0f) ? (double)vr_body_neck_height : 63.6);
+
+		// [XR] Eye-height autofit and neck-to-HMD contradict each other (one scales the body to the eye,
+		// the other slides it there); neck-to-HMD wins, since scaling to a seated eye height halves the arms.
+		if (vr_body_autofit && !vr_body_neck_to_hmd)
+		{
+			// Scale the marine so its NECK-STUMP (bip_neck, model-Z vr_body_neck_height) lands at the HMD
+			// eye height and the feet (model origin) stay on the floor -- a true neck->HMD / feet->floor
+			// fit. The whole body, arms included, scales by this SAME factor, so the scaled arm reach
+			// matches the player's real reach (up to the marine's own arm-to-height proportion; the
+			// arm-IK stretches the last bit). This replaces the old actor->Height reference, which is the
+			// Doom HITBOX (not the mesh) and mis-sized the body so the arms fell short of the controllers.
+			if (smoothedEye > 1.0)
+				bodyScale = (float)clamp((smoothedEye - (double)vr_body_headroom) / neckH, 0.25, 1.9);
+		}
+		// [XR] Publish the exact scale we're about to apply so the playsim arm-IK divides the hand
+		// target by the SAME factor (see g_xr_vrBodyRenderScale decl above). Do this even when the
+		// scale is 1.0 so a stale value never lingers.
+		if (bodyScale > 0.05f && bodyScale < 8.0f) g_xr_vrBodyRenderScale = bodyScale;
+		if (!(bodyScale > 0.f)) bodyScale = 1.f;
+
+		// [XR] +vr_body_z raises/lowers the local VR body only.
+		bodyZ = (double)vr_body_z;
+
+		// [XR] Forward/back and left/right, in the body's facing frame (the decoupled heading when
+		// valid, else the pawn's). Folded into the same matrix the IK inverts, so the hands stay exact.
+		{
+			const double facing = bodyPlayer->vr_body_facing_valid ? (double)bodyPlayer->vr_body_facing_yaw : (double)angles.Yaw.Degrees();
+			const double fx = cos(facing * M_PI / 180.0), fy = sin(facing * M_PI / 180.0);
+			bodyOffX = fx * (double)vr_body_forward + fy * (double)vr_body_side;
+			bodyOffY = fy * (double)vr_body_forward - fx * (double)vr_body_side;
+		}
+
+		// [XR] NECK-TO-HMD: keep the scale, slide the body so the neck stump (plus the rig's neck->eye
+		// gap) sits at the live eye height. With autofit on as well the two agree and this adds ~0;
+		// with autofit off (seated play at scale 1.0) this is what puts the shoulders where yours are.
+		if (vr_body_neck_to_hmd && smoothedEye > 1.0 && bodyScale > 0.f)
+		{
+			bodyZ += smoothedEye - (neckH + (double)vr_body_neck_eye_gap) * (double)bodyScale;
+		}
+
+		// [XR] correct the local VR body's facing (marine mesh authored ~90 off). Body only.
+		angle += vr_body_yaw;
+
+		// [XR] Decouple the body facing from the HMD: the pawn yaw follows the headset, so without this the
+		// whole torso spins when you turn your head ("no neck"). If P_PlayerThink has a valid decoupled
+		// body yaw, render the body at THAT heading (plus the mesh-correction + sprite rotation) instead of
+		// the raw HMD-slaved pawn yaw. Pawn Angles.Yaw is untouched, so gameplay + arm-IK targets are as-is.
+		if (bodyPlayer->vr_body_facing_valid)
+		{
+			angle = bodyPlayer->vr_body_facing_yaw + vr_body_yaw + actor->SpriteRotation.Degrees();
+		}
+	}
+
 	double tic = actor->GetModelTimer();
 
 	if (!WorldPaused(true) && !actor->isFrozen())
@@ -637,10 +929,22 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(AActor * actor, float x, float y
 	// a height for everything else.
 	const float bodyPivotZ = actor->VoxelOverride ? float(actor->Height * 0.5) : 0.f;
 
-	return ObjectToWorldMatrix(actor->Level, DVector3(x, y, z), DRotator(DAngle::fromDeg(pitch), DAngle::fromDeg(angle), DAngle::fromDeg(roll)), actor->InterpolatedScale(ticFrac), smf_flags, tic, bodyPivotZ);
+	// [XR] The body fit rides in on the actor scale (the matrix overload multiplies it into the
+	// MODELDEF scale exactly where the original scaled scaleFactorX/Y/Z) and vr_body_z on the
+	// translation. Both are identity for everything that is not the local VR body.
+	DVector2 actorScale = actor->InterpolatedScale(ticFrac);
+	if (isVRBody)
+	{
+		// X = horizontal (both map axes), Y = vertical in an actor scale. Width slims or thickens the
+		// body without touching its height; the IK inverts this same matrix, so the hands stay put.
+		actorScale.X *= (double)bodyScale * clamp((double)vr_body_width, 0.3, 2.0);
+		actorScale.Y *= (double)bodyScale;
+	}
+
+	return ObjectToWorldMatrix(actor->Level, DVector3(x + bodyOffX, y + bodyOffY, z + bodyZ), DRotator(DAngle::fromDeg(pitch), DAngle::fromDeg(angle), DAngle::fromDeg(roll)), actorScale, smf_flags, tic, bodyPivotZ, actor->FollowBodyMode, actor->FollowBodyOfs);
 }
 
-VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic, float bodyPivotZ)
+VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic, float bodyPivotZ, int followBodyMode, DVector3 followBodyOfs)
 {
 	double rotateOffset = 0;
 
@@ -676,16 +980,44 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 	// history that ever worked, so this calls the exact function the working HUD
 	// path calls and takes the matrix whole -- no decomposition, no Euler round
 	// trip, nothing to get the axis order wrong in.
+	// AActor::FollowBodyMode -- the same idea one step out from the hand: the
+	// player's own frame, read at draw rate, with the actor's seat inside it.
+	// Taken whole from GetHmdTransform for the reason stated below about
+	// GetWeaponTransform -- rebuilding this basis by hand is what cost the two
+	// earlier attempts, and the body frame is built the same way the hand one
+	// is precisely so the two agree.
+	//
+	// The seat is applied in the body's frame BEFORE any of the model's own
+	// offsets, so MODELDEF Offset and the placement sliders keep meaning what
+	// they mean everywhere else: adjustments relative to where the thing sits.
 	bool followedHand = false;
+	if (followBodyMode > 0)
+	{
+		auto vrmode = VRMode::GetVRModeCached(true);
+		if (vrmode != nullptr && vrmode->IsVR() && vrmode->GetHmdTransform(&objectToWorldMatrix))
+		{
+			objectToWorldMatrix.translate((float)followBodyOfs.X,
+				(float)followBodyOfs.Z, (float)followBodyOfs.Y);
+			followedHand = true;
+		}
+		else
+		{
+			// Not in VR, or no pose this frame. Fall back to ordinary world
+			// placement rather than drawing everything at the origin.
+			objectToWorldMatrix.loadIdentity();
+		}
+	}
+
 	const int followHand = (flags & MDL_FOLLOWMAINHAND) ? VR_MAINHAND
 		: ((flags & MDL_FOLLOWOFFHAND) ? VR_OFFHAND : -1);
-	if (followHand >= 0)
+	if (!followedHand && followHand >= 0)
 	{
 		auto vrmode = VRMode::GetVRModeCached(true);
 		if (vrmode != nullptr && vrmode->IsVR() &&
 			vrmode->GetWeaponTransform(&objectToWorldMatrix, followHand, !(flags & MDL_NOAUTOREVERSE)))
 		{
 			followedHand = true;
+
 		}
 		else
 		{
@@ -835,10 +1167,17 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 	// was handed. Axes are stated in ACTOR terms, matching _ofs_x/_y/_z:
 	// x = forward, y = sideways, z = up.
 	float wPlaceAxis[3] = { 1.0f, 1.0f, 1.0f };
+
+	// The live pivot, so the number can be found on a slider before being folded
+	// into the MODELDEF. Every other placement value here works that way and a
+	// pivot is the hardest of them to guess, because being wrong shows up as a
+	// wobble during rotation rather than as a static misplacement.
+	float wPlacePiv[3] = { 0.0f, 0.0f, 0.0f };
 	if (placementCVars != NAME_None)
 	{
 		static const char *sufOfs[3] = { "_ofs_x", "_ofs_y", "_ofs_z" };
 		static const char *sufRot[3] = { "_yaw", "_pitch", "_roll" };
+		static const char *sufPiv[3] = { "_piv_x", "_piv_y", "_piv_z" };
 		FString nm;
 		for (int i = 0; i < 3; ++i)
 		{
@@ -846,6 +1185,8 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 			GetPlacementCVar(nm.GetChars(), wPlaceOfs[i]);
 			nm.Format("%s%s", placementCVars.GetChars(), sufRot[i]);
 			GetPlacementCVar(nm.GetChars(), wPlaceRot[i]);
+			nm.Format("%s%s", placementCVars.GetChars(), sufPiv[i]);
+			GetPlacementCVar(nm.GetChars(), wPlacePiv[i]);
 		}
 		// Defaults to 1, NOT the 0 an absent cvar reads as -- a missing slider
 		// must leave the model alone, not collapse it to a point.
@@ -879,6 +1220,40 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 	objectToWorldMatrix.rotate(-(angleoffset + wPlaceRot[0]), 0, 1, 0);
 	objectToWorldMatrix.rotate(pitchoffset + wPlaceRot[1], 0, 0, 1);
 	objectToWorldMatrix.rotate(-(rolloffset + wPlaceRot[2]), 1, 0, 0);
+
+	// 6) PIVOT -- the point the model turns about, in the model's OWN space.
+	//
+	// LAST IN CODE ORDER MEANS FIRST ON THE VERTEX, and that is the entire point.
+	// VSMatrix::translate/rotate/scale post-multiply (M = M * op, matrix.cpp:177),
+	// so the operation written last here is applied to the vertex first. Putting
+	// the subtraction here gives v' = R * (v - p): the mesh is moved onto its
+	// intended turning point BEFORE being rotated.
+	//
+	// Written after step 5 rather than before it for exactly that reason. Move
+	// these three lines above the rotations and they become another Offset --
+	// which is to say, they stop working, silently, while still looking correct.
+	//
+	// Same axis order and the same division by scale as step 4, so a pivot and an
+	// offset are stated in the same units and can be read against each other.
+	//
+	// The compare is not an optimisation: the common case is a model with no pivot
+	// at all, and three float compares are cheaper than a matrix multiply on every
+	// drawn model in the level.
+	if (pivotx != 0.f || pivoty != 0.f || pivotz != 0.f)
+	{
+		objectToWorldMatrix.translate(-(pivotx + wPlacePiv[0]) / xscale,
+			-(pivotz + wPlacePiv[2]) / (zscale*stretch),
+			-(pivoty + wPlacePiv[1]) / yscale);
+	}
+	else if (wPlacePiv[0] != 0.f || wPlacePiv[1] != 0.f || wPlacePiv[2] != 0.f)
+	{
+		// Cvar-only pivot, so the sliders can find the number before it is folded
+		// into the MODELDEF -- the same workflow the offset and rotation sliders
+		// already support.
+		objectToWorldMatrix.translate(-wPlacePiv[0] / xscale,
+			-wPlacePiv[2] / (zscale*stretch),
+			-wPlacePiv[1] / yscale);
+	}
 
 	if (!(flags & MDL_CORRECTPIXELSTRETCH) && modelIDs.Size() > 0)
 	{
@@ -1011,10 +1386,13 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	// same whichever path draws it. A model tuned on one and moved to the other
 	// silently losing an axis is the kind of asymmetry that costs a session.
 	float placeAxis[3] = { 1.0f, 1.0f, 1.0f };
+	// Live pivot, matching the world path so a prefix behaves identically on both.
+	float placePiv[3] = { 0.0f, 0.0f, 0.0f };
 	if (smf->placementCVars != NAME_None)
 	{
 		static const char *sufOfs[3] = { "_ofs_x", "_ofs_y", "_ofs_z" };
 		static const char *sufRot[3] = { "_yaw", "_pitch", "_roll" };
+		static const char *sufPiv[3] = { "_piv_x", "_piv_y", "_piv_z" };
 		FString nm;
 		for (int i = 0; i < 3; ++i)
 		{
@@ -1022,6 +1400,8 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 			GetPlacementCVar(nm.GetChars(), placeOfs[i]);
 			nm.Format("%s%s", smf->placementCVars.GetChars(), sufRot[i]);
 			GetPlacementCVar(nm.GetChars(), placeRot[i]);
+			nm.Format("%s%s", smf->placementCVars.GetChars(), sufPiv[i]);
+			GetPlacementCVar(nm.GetChars(), placePiv[i]);
 		}
 
 		// Scale defaults to 1, NOT to the 0 an absent CVAR would read as -- a
@@ -1181,6 +1561,26 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	objectToWorldMatrix.rotate(-(smf->angleoffset + placeRot[0] + seatYaw), 0, 1, 0);
 	objectToWorldMatrix.rotate(smf->pitchoffset + placeRot[1] + seatPitch, 0, 0, 1);
 	objectToWorldMatrix.rotate(-(smf->rolloffset + placeRot[2] + seatRoll), 1, 0, 0);
+
+	// PIVOT, the same field the world path uses. See the note in model.h.
+	//
+	// AFTER the rotations in code order, therefore BEFORE them on the vertex --
+	// VSMatrix post-multiplies, so the last operation written is the first
+	// applied. That ordering IS the feature: written above the rotations these
+	// three lines would silently become a second Offset.
+	//
+	// Present on both paths deliberately. A model tuned on one and moved to the
+	// other silently losing a correction is exactly the asymmetry the placement
+	// comment above warns about, and a pivot is the worst one to lose, because
+	// being wrong shows up as a wobble while turning rather than as a static
+	// misplacement anyone would spot immediately.
+	if (smf->pivotx != 0.f || smf->pivoty != 0.f || smf->pivotz != 0.f ||
+		placePiv[0] != 0.f || placePiv[1] != 0.f || placePiv[2] != 0.f)
+	{
+		objectToWorldMatrix.translate(-(smf->pivotx + placePiv[0]),
+			-(smf->pivotz + placePiv[2]),
+			-(smf->pivoty + placePiv[1]));
+	}
 
 	// THE HAND SLIDERS ARE APPLIED HERE, IN THE MODEL'S OWN ORIENTED FRAME,
 	// and NOT summed into the three calls above. They used to be summed, on
@@ -1440,6 +1840,22 @@ CalcModelFrameInfo CalcModelFrame(FLevelLocals *Level, const FSpriteModelFrame *
 		smfNext = smf;
 	}
 
+	// RS FORK -- PER-PART FRAME ADDRESSING needs a blend TARGET even when no
+	// scalar lerp was set (p_pspr.h).
+	//
+	// 'inter' itself is NOT touched here: a per-part blend is per part, so the
+	// factor is applied inside the draw loop in RenderFrameModels, where the
+	// part index exists. What must be settled before the loop is smfNext --
+	// RenderModelFrame discards 'inter' entirely when there is no next frame to
+	// blend toward, so without this a per-part lerp would be silently dropped
+	// on any layer whose scalar lerp is inactive, which is every layer using
+	// the new path. Same definition, different frame number, so smf is the
+	// correct "next" here for the same reason the two branches above say so.
+	if (psp && !smfNext && psp->AnyModelPartActive())
+	{
+		smfNext = smf;
+	}
+
 	// RS FORK -- NATIVE STATE REMAP interpolation (FORK_CHANGES.md, "Native
 	// state remap"). When the weapon carries a state->frame table, the
 	// psprite's own state IS the animation clock, and intra-state progress
@@ -1499,6 +1915,29 @@ bool CalcModelOverrides(int i, const FSpriteModelFrame *smf, DActorModelData* da
 	out.modelframe_explicit = false;
 	out.skinid.SetNull();
 	out.surfaceskinids.Clear();
+
+	// RS FORK -- PER-PART HIDE (p_pspr.h). Returning false is how this function
+	// already says "do not draw model index i", and the caller's loop skips
+	// RenderModelFrame for it.
+	//
+	// FIRST, immediately after the reset and before anything is resolved: a
+	// part that is not drawn has no model id, frame or skin worth computing,
+	// and leaving drawinfo at its reset values is the honest state for one.
+	//
+	// This is what "the magazine is out of the gun" is. The alternative the old
+	// mod used -- point the part at a frame index that does not exist and let
+	// the renderer reject it -- draws nothing only by accident and needs a
+	// junk frame to aim at.
+	//
+	// CAVEAT FOR RIGGED MODELS: RenderModelFrame threads boneStartingPosition
+	// and evaluatedSingle across iterations, so skipping a part of an IQM whose
+	// bones are evaluated once for the whole stack can leave later parts
+	// reading a bone offset that was never written. MD3 has no bones and is the
+	// case this exists for; hiding a part of a skinned model is untested.
+	if (psp && i >= 0 && i < DPSprite::RS_MODEL_PARTS && psp->ModelPartHidden[i])
+	{
+		return false;
+	}
 
 	if (data)
 	{
@@ -1611,8 +2050,10 @@ bool CalcModelOverrides(int i, const FSpriteModelFrame *smf, DActorModelData* da
 	// resolve upstream of here.
 	//
 	// Applied to every model index. A donor with several models is showing
-	// frames of one animation, so they advance together; per-index divergence
-	// would need an array and no donor needs it yet.
+	// frames of one animation, so they advance together. Where a caller DOES
+	// need the parts to diverge -- a gun whose slide moves while its magazine
+	// is gone -- the per-part arrays below override this for their own index;
+	// see p_pspr.h.
 	//
 	// Out of range is not clamped on purpose: FMD3Model::RenderFrame rejects
 	// (unsigned)frameno >= Frames.Size() and draws nothing, which is a visible
@@ -1630,6 +2071,25 @@ bool CalcModelOverrides(int i, const FSpriteModelFrame *smf, DActorModelData* da
 		out.modelframe     = info.actor->ModelFrame;
 		out.modelframenext = (info.actor->ModelFrameNext >= 0)
 			? info.actor->ModelFrameNext : info.actor->ModelFrame;
+		out.modelframe_explicit = true;
+	}
+
+	// RS FORK -- PER-PART FRAME, and it wins (p_pspr.h).
+	//
+	// LAST, so it beats both branches above for its own index and only its own
+	// index. That ordering is the whole contract: a caller may set the scalar
+	// as a base pose for the stack and then move one part off it, and a caller
+	// that sets no per-part value -- ModelSwapper, every existing weapon -- is
+	// bit-for-bit unaffected because the array is all -1.
+	//
+	// Out of range is not clamped, for the reason given above: FMD3Model::
+	// RenderFrame rejects an impossible frame and draws nothing, which is a
+	// visible failure rather than a silent wrong pose.
+	if (psp && i >= 0 && i < DPSprite::RS_MODEL_PARTS && psp->ModelFramePart[i] >= 0)
+	{
+		out.modelframe     = psp->ModelFramePart[i];
+		out.modelframenext = (psp->ModelFrameNextPart[i] >= 0)
+			? psp->ModelFrameNextPart[i] : psp->ModelFramePart[i];
 		out.modelframe_explicit = true;
 	}
 
@@ -1681,7 +2141,16 @@ const TArray<VSMatrix> * ProcessModelFrame(FModel * animation, bool nextFrame, i
 {
 	const TArray<TRS>* animationData = nullptr;
 
-	if (drawinfo.animationid >= 0)
+	if (modelData && modelData->useProceduralPose && modelData->proceduralPose.Size() > 0)
+	{
+		// [XR] Procedurally supplied per-bone pose (the VR body's arm IK, playsim/vr_armik.cpp, or
+		// ZScript SetModelBonePose) overrides any baked animation. CalculateBonesIQM already branches
+		// on (animationData ? *animationData : TRSData): one frame's worth of TRS, frame index 0.
+		animationData = &modelData->proceduralPose;
+		g_xr_vrRenderProcHits++;
+		{ static int s_vrRenderDbg = 0; if (s_vrRenderDbg < 20) { s_vrRenderDbg++; Printf("[VRIK_RENDER] useProc=1 poseSize=%d is_decoupled=%d modelframe=%d\n", (int)modelData->proceduralPose.Size(), (int)is_decoupled, drawinfo.modelframe); } }
+	}
+	else if (drawinfo.animationid >= 0)
 	{
 		animation = Models[drawinfo.animationid];
 		animationData = animation->AttachAnimationData();
@@ -1851,14 +2320,56 @@ void RenderFrameModels(FModelRenderer *renderer, FLevelLocals *Level, const FSpr
 
 	DActorModelData* modelData = actor ? actor->modelData.ForceGet() : nullptr;
 
+	// [XR] Diagnostic: what the renderer actually sees on the VR body, independent of any branch below.
+	if (actor && VR_IsBodyActor(actor))
+	{
+		static int s_rfm = 0;
+		if ((s_rfm++ % 140) == 0)
+		{
+			Printf("[VRIK_RFM] actor=%p md=%p useProc=%d pose=%u models=%u smfModels=%u decoupled=%d hits=%d\n",
+				actor, modelData, modelData ? (int)modelData->useProceduralPose : -1,
+				modelData ? modelData->proceduralPose.Size() : 0u, modelData ? modelData->models.Size() : 0u,
+				smf->modelsAmount, (int)is_decoupled, g_xr_vrRenderProcHits);
+		}
+	}
+
 	CalcModelFrameInfo frameinfo = CalcModelFrame(Level, smf, curState, curTics, modelData, actor, is_decoupled, tic, ticFrac, psp);
 	ModelDrawInfo drawinfo;
 
 	int boneStartingPosition = -1;
 	bool evaluatedSingle = false;
 
+	// RS FORK -- PER-PART BLEND (p_pspr.h).
+	//
+	// The blend factor lives in frameinfo, which is computed once for the whole
+	// stack, while a per-part blend is by definition per part. So the base is
+	// captured here and frameinfo.inter is re-seeded from it at the top of every
+	// iteration before any per-part value replaces it.
+	//
+	// RE-SEEDING IS THE LOAD-BEARING HALF. Writing the part's factor straight
+	// into frameinfo would leak it into every LATER part that has no factor of
+	// its own -- so racking a slide would smear the blend across the frame,
+	// the magazine and the hands, which is precisely the coupling this whole
+	// mechanism exists to remove.
+	//
+	// The blend TARGET (smfNext) was settled in CalcModelFrame; without it
+	// RenderModelFrame discards inter and nothing below has any effect.
+	const float baseInter = frameinfo.inter;
+	const bool  anyPart   = (psp && psp->AnyModelPartActive());
+
 	for (unsigned i = 0; i < frameinfo.modelsamount; i++)
 	{
+		if (anyPart)
+		{
+			frameinfo.inter = baseInter;
+			if (i < (unsigned)DPSprite::RS_MODEL_PARTS && psp->ModelFrameLerpPart[i] >= 0.f)
+			{
+				float f = psp->ModelFrameLerpPart[i];
+				if (f > 1.f) f = 1.f;
+				frameinfo.inter = f;
+			}
+		}
+
 		if (CalcModelOverrides(i, smf, modelData, frameinfo, drawinfo, is_decoupled, psp))
 		{
 			RenderModelFrame(renderer, i, smf, modelData, frameinfo, drawinfo, is_decoupled, tic, translation, boneStartingPosition, evaluatedSingle, psp);
@@ -2093,6 +2604,20 @@ void ParseModelDefLump(int Lump)
 					smf.yoffset = sc.Float;
 					sc.MustGetFloat();
 					smf.zoffset = sc.Float;
+				}
+				// [BB] PivotOffset -- the point the model TURNS ABOUT, in its own
+				// space. Same three axes and the same units as Offset above, and
+				// deliberately spelled to sit next to it, because the two are
+				// constantly confused: Offset moves the model, PivotOffset moves
+				// what it rotates around. See the field note in model.h.
+				else if (sc.Compare("pivotoffset"))
+				{
+					sc.MustGetFloat();
+					smf.pivotx = sc.Float;
+					sc.MustGetFloat();
+					smf.pivoty = sc.Float;
+					sc.MustGetFloat();
+					smf.pivotz = sc.Float;
 				}
 				// angleoffset, pitchoffset and rolloffset reading.
 				else if (sc.Compare("angleoffset"))

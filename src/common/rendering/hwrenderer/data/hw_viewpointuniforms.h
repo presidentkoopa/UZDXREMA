@@ -477,6 +477,8 @@ struct HWViewpointUniforms
 	FVector4 mStampCol[16];
 	FVector4 mStampArg[16];
 	FVector4 mStampMod[16];
+	// rgb the colour graded toward across life, w the fade start 0..1.
+	FVector4 mStampCol2[16];
 	FVector4 mStampParams = { 0.f, 0.f, 0.f, 0.f };
 
 	void CalcDependencies()

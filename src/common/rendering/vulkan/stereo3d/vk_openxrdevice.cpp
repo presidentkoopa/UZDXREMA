@@ -117,7 +117,15 @@ EXTERN_CVAR(Bool, vr_enable_haptics);
 // Traces the haptic path end to end. A pulse that never reaches the runtime
 // and a pulse the controller ignores are indistinguishable from inside the
 // headset, so each stage says whether it ran.
-CVAR(Bool, vr_haptic_debug, true, 0)
+//
+// Was `true, 0`: on by default AND flagless, so the ini was never read for it
+// and it came back every launch no matter what a menu or console had set. An
+// autoexec line was the only thing that could hold it down. Now off by default
+// and archived, matching its neighbours above. Nothing inherits a stale `true`
+// the way vr_posestats would have -- a flagless cvar was never written to any
+// ini in the first place, so there is nothing on disk to override the new
+// default.
+CVAR(Bool, vr_haptic_debug, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 EXTERN_CVAR(Float, vr_2dweaponScale);
 EXTERN_CVAR(Float, vr_2dweaponOffsetX);
 EXTERN_CVAR(Float, vr_2dweaponOffsetY);
@@ -157,6 +165,33 @@ EXTERN_CVAR(Float, vr_overlayscreen_vpos);
 EXTERN_CVAR(Int, vr_overlayscreen_bg);
 EXTERN_CVAR(Int, vr_control_scheme);
 EXTERN_CVAR(Bool, vr_two_handed_weapons);
+// [XR] TWO-HANDING BY PROXIMITY, RESTORED. The engine used to decide a two-handed hold on its own,
+// from the distance between the controllers with the off grip squeezed, and that was retired in
+// favour of the mod's support-oval claim. The oval is the better trigger when a weapon has been
+// tuned for it, but it needs per-weapon authoring and it is the mod's to give -- so a stock hold
+// went away with it. Both now feed the same TwoHandedHold: whichever fires first is a two-handed
+// hold, and nothing downstream can tell them apart.
+//
+// ON THE CONTROLS THAT WERE ALREADY THERE, deliberately. The switch is
+// vr_two_handed_weapons -- the one this feature has always had in Options > VR -- and the reach is
+// the Stabilize Distance slider beneath it, per weapon through AActor::StabilizeReach and globally
+// through vr_stabilize_distance_inches, with a negative reach meaning "this weapon never braces".
+// All of that outlived the logic that used it. Adding a second switch and a second distance in
+// different units left the sliders in the menu doing nothing, which is how this was found.
+//
+// The reason the proximity test was retired is real, and is fixed here rather than ignored:
+// RELOADING is the gesture that brings the hands together, so the raw distance test fired hardest
+// during the moment that least wanted it. The claim the reload writes on the off hand is the
+// answer -- a hand carrying a round, a shell, a magazine or working the slide is doing its own job
+// and is never braced, whatever the distance says.
+// [XR] A BRACE AND A HAND-TO-HAND SWAP ARE THE SAME GESTURE. Passing a weapon to the other hand means
+// bringing the palms together and squeezing the empty hand -- which is also how you wrap a second hand
+// round a pistol, and the gesture alone cannot tell them apart. The mods already settled the rule that
+// can: a brace wants the MAIN grip held as well, a swap wants it open. That rule only needs to apply
+// where the two gestures actually overlap, so it is spent here and nowhere else -- inside this
+// distance a bare off-hand squeeze is a swap and never a brace, and outside it (a hand out on a rifle's
+// forend, where no swap is possible) the off grip alone still braces.
+CVAR(Float, vr_two_handed_swap_inches, 7.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG) // inches, like its neighbour above
 EXTERN_CVAR(Bool, vr_stabilize_requires_grab);
 EXTERN_CVAR(Float, vr_stabilize_distance_inches);
 EXTERN_CVAR(Bool, vr_holster_use_grip);
@@ -3615,7 +3650,7 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		// defaults off, so even a claimed hold does not move the weapon unless
 		// the repositioning is explicitly asked for.
 		const bool stabilizeGeometryOk = false;
-		(void)stabilizeRangeMeters;
+		// stabilizeRangeMeters is live again -- see the proximity hold below
 		(void)vr_stabilize_requires_grab;
 
 		for (int h = 0; h < 2; ++h)
@@ -3642,7 +3677,11 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			// Reloading is precisely the gesture that brings the hands
 			// together, so without this every reload reads as gripping the
 			// weapon two-handed.
-			const bool supporting = (claimed == GRIPSUBJ_Forend || claimed == GRIPSUBJ_Foregrip);
+			// GRIPSUBJ_Support counts too, now that it is only ever CLAIMED: a
+			// second hand wrapped round the firing hand is on the gun exactly as
+			// much as a hand on the forend is.
+			const bool supporting = (claimed == GRIPSUBJ_Forend || claimed == GRIPSUBJ_Foregrip
+				|| claimed == GRIPSUBJ_Support);
 			// Either already holding something, or pointed at something it could
 			// take. The second half is the claim script writes -- see
 			// GrabClaimMain/Off in actor.h.
@@ -3861,14 +3900,59 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		// and it is published rather than acted on -- weapons read it to
 		// tighten their spread, which is the benefit a second hand should
 		// actually buy.
-		const int offSubject = xrGripSubject[offHand];
-		const bool twoHanded = (offSubject == GRIPSUBJ_Support
-			|| offSubject == GRIPSUBJ_Forend || offSubject == GRIPSUBJ_Foregrip);
+		// FROM THE CLAIM, NOT THE SUBJECT. The subject can still be the
+		// engine's own guess (an unclaimed off-hand squeeze while holding a
+		// weapon reads as Support, for the pose); the CLAIM is only ever
+		// written by script, and script only writes it when the off hand is
+		// inside the support volume drawn on the weapon. So this is the oval
+		// deciding, and nothing else.
+		const int offClaim = consolePawn ? consolePawn->GripClaimOff : GRIPSUBJ_None;
+		const bool claimedTwoHanded = (offClaim == GRIPSUBJ_Support
+			|| offClaim == GRIPSUBJ_Forend || offClaim == GRIPSUBJ_Foregrip);
+
+		// [XR] ...OR THE HANDS ARE SIMPLY TOGETHER ON IT. The restored stock test (see the
+		// two-handing cvar block above): the off grip squeezed with the controllers inside the
+		// Stabilize Distance of each other. Suppressed while the off hand is doing something
+		// else -- a reload claim, a held object, or its own weapon -- which is what makes this
+		// safe to leave on where the raw distance test was not.
+		bool nearTwoHanded = false;
+		if (vr_two_handed_weapons && stabilizeRangeMeters > 0.0f && consolePawn && handInput[offHand].grip)
+		{
+			const bool offBusy = (offClaim == GRIPSUBJ_Round || offClaim == GRIPSUBJ_Shell
+				|| offClaim == GRIPSUBJ_Inserting || offClaim == GRIPSUBJ_Magazine
+				|| offClaim == GRIPSUBJ_Slide || offClaim == GRIPSUBJ_Pouch
+				|| offClaim == GRIPSUBJ_Holster || offClaim == GRIPSUBJ_Grip);
+			if (!offBusy)
+			{
+				const float ddx = xrHandPoses[mainHand].position.x - xrHandPoses[offHand].position.x;
+				const float ddy = xrHandPoses[mainHand].position.y - xrHandPoses[offHand].position.y;
+				const float ddz = xrHandPoses[mainHand].position.z - xrHandPoses[offHand].position.z;
+				const float handGap = std::sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
+				const bool inSwapRange = (handGap < (float)(vr_two_handed_swap_inches * 0.0254));
+				nearTwoHanded = (handGap < stabilizeRangeMeters)
+					&& (!inSwapRange || handInput[mainHand].grip);   // see the swap-guard cvar
+			}
+		}
+
+		const bool twoHanded = claimedTwoHanded || nearTwoHanded;
 		if (consolePawn)
 			consolePawn->TwoHandedHold = twoHanded;
+		{
+			// [TWOHAND] one line per change, naming which trigger fired.
+			static int s_lastTH = -1;
+			const int nowTH = twoHanded ? (claimedTwoHanded ? 1 : 2) : 0;
+			if (nowTH != s_lastTH)
+			{
+				Printf("[TWOHAND] two-handed hold %s\n", nowTH == 0 ? "off"
+					: (nowTH == 1 ? "ON (the mod's support oval claimed it)" : "ON (hands together on the weapon)"));
+				s_lastTH = nowTH;
+			}
+		}
 
-		// Moving the weapon is a separate, opt-in thing. Defaults off: your
-		// hands hold the gun where you are holding it.
+		// Moving the weapon along the line between the hands: the original
+		// two-hand stabilize, for every weapon that is claimed, exactly as it
+		// was before the proximity test was retired -- only the trigger
+		// changed. Still behind the engine's own switch.
 		weaponStabilised = twoHanded && vr_two_handed_weapons;
 
 		if (weaponStabilised)
@@ -4561,7 +4645,32 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 
 void VKOpenXRDeviceMode::TearDown() const
 {
-	StopHaptics();
+	// [BB] THIS USED TO CALL StopHaptics(), AND THAT IS WHY HAPTICS NEVER WORKED.
+	//
+	// TearDown is not a shutdown hook. hw_entrypoint.cpp:278 calls it at the end of
+	// EVERY rendered scene frame. StopHaptics issues xrStopHapticFeedback for each
+	// live hand and then zeroes xrHapticDuration/xrHapticIntensity unconditionally,
+	// outside its own loop -- and those two arrays are the whole pump's state.
+	//
+	// So every pulse was cancelled and erased in the same frame it was requested.
+	// The per-issue window is deliberately clamped to a few milliseconds by
+	// MakeOpenXRHapticDuration BECAUSE the pump is meant to re-issue it every frame
+	// while the local timer runs. It never got a second frame. An LRA in a Touch
+	// controller needs 20-30ms to reach useful amplitude and was being braked well
+	// before that, so a 300ms test pulse and an 18ms tap felt identical: nothing.
+	//
+	// It presented as "haptics have never fired, in any situation" because the
+	// cancel is unconditional -- it takes no arguments, tests nothing, and cannot
+	// vary by trigger, hand, amplitude or requested duration.
+	//
+	// Session-scoped cancellation was never this function's job and is already
+	// handled where it belongs: DestroyOpenXR, and the STOPPING / LOSS_PENDING /
+	// EXITING session states.
+	//
+	// Servicing the pump here rather than deleting the call outright: end of frame
+	// is a legitimate third re-issue point alongside BeginFrame and RenderViewpoint
+	// setup, so the hook keeps earning its place.
+	ProcessHaptics();
 }
 
 void VKOpenXRDeviceMode::ApplyRefreshRate() const
@@ -5976,6 +6085,43 @@ bool VKOpenXRDeviceMode::RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage
 	return true;
 }
 
+// THE BODY FRAME AT DRAW RATE. Head position and yaw, never pitch or roll.
+//
+// Deliberately the same construction as GetHandTransform below, minus the hand:
+// the same CenterEyePos, the same vr_vunits_per_meter, the same pixelstretch
+// division and the same doomYaw. Anything worn on the body has to land in the
+// frame the hands already land in, and the only way to be sure of that is to
+// build it the same way rather than to derive it a second time -- the comment
+// on MDL_FOLLOWMAINHAND in models.cpp records what re-deriving this basis by
+// hand cost the last two times someone tried.
+//
+// No hand offset and no hand angles, so what comes back is where YOU are and
+// which way you are facing. Pitch and roll are left out on purpose: a holster
+// does not tip when you look down.
+bool VKOpenXRDeviceMode::GetHmdTransform(VSMatrix* mat) const
+{
+	double pixelstretch = r_viewpoint.ViewLevel ? r_viewpoint.ViewLevel->pixelstretch : 1.2;
+	player_t* player = &players[consoleplayer];
+	if (!player)
+		return false;
+
+	mat->loadIdentity();
+	mat->translate((float)r_viewpoint.CenterEyePos.X, (float)r_viewpoint.CenterEyePos.Z - GetDoomPlayerHeightWithoutCrouch(player), (float)r_viewpoint.CenterEyePos.Y);
+	mat->scale((float)vr_vunits_per_meter, (float)vr_vunits_per_meter, (float)-vr_vunits_per_meter);
+
+	mat->translate(0.f, (hmdPosition[1] + (float)vr_height_adjust) / (float)pixelstretch, 0.f);
+	mat->scale(1, 1 / (float)pixelstretch, 1);
+
+	// The cinematic screen layer takes its heading from the viewpoint for the
+	// same reason the hand path does -- doomYaw is not the drawn heading there.
+	if (VR_UseCinematicScreenLayer())
+		mat->rotate(-90 + r_viewpoint.Angles.Yaw.Degrees(), 0, 1, 0);
+	else
+		mat->rotate(-90 + doomYaw, 0, 1, 0);
+
+	return true;
+}
+
 bool VKOpenXRDeviceMode::GetHandTransform(int hand, VSMatrix* mat) const
 {
 	double pixelstretch = r_viewpoint.ViewLevel ? r_viewpoint.ViewLevel->pixelstretch : 1.2;
@@ -6051,7 +6197,17 @@ static XrDuration MakeOpenXRHapticDuration(double remainingMs)
 	// XR_MIN_HAPTIC_DURATION is valid, but several runtimes are much more reliable when we
 	// send a small finite pulse and re-issue it while the local timer is still active.
 	constexpr double kMinPulseMs = 1.0;
-	constexpr double kMaxPulseMs = 10.0;
+
+	// [BB] 50, NOT 10. The re-issue design above is sound, but 10ms is shorter than
+	// a frame: at 90Hz a frame is 11.1ms and at 72Hz it is 13.9, so a 10ms window
+	// left a dead gap in EVERY pulse even once TearDown stopped cancelling them --
+	// the drive would expire before the next re-issue could renew it, and a pulse
+	// that stutters at frame rate is felt as nothing rather than as a buzz.
+	//
+	// 50ms covers a dropped frame with margin and still cannot over-run: the pulse
+	// is stopped on expiry by the branch above, and the local timer decays in
+	// ProcessHaptics regardless of what the runtime was told.
+	constexpr double kMaxPulseMs = 50.0;
 
 	if (remainingMs < kMinPulseMs)
 		remainingMs = kMinPulseMs;

@@ -36,6 +36,10 @@ std::pair<PalEntry, PalEntry>& R_GetSkyCapColor(FGameTexture* tex);
 //-----------------------------------------------------------------------------
 void HWSkyPortal::DrawContents(HWDrawInfo *di, FRenderState &state)
 {
+	// [BB] A sky IS the outdoor case, so it takes the outdoor fog scale rather
+	// than whatever the last wall or flat happened to leave behind.
+	if (di->Level != nullptr)
+		state.SetFogDensityScale((float)di->Level->FogOutdoorScale);
 	bool drawBoth = false;
 	auto &vp = di->Viewpoint;
 

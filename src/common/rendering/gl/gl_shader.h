@@ -265,7 +265,7 @@ class FShader
 	FUniform4f muFlatGlowFar;
 	FBufferedUniform1i muFlatGlowFalloff;
 	FBufferedUniform1i muFlatGlowIsCeiling;
-	FBufferedUniform1i muDarknessExempt;
+	FBufferedUniform1f muDarknessExempt;
 	FBufferedUniform1i muFlatGlowLineCount;
 	int muFlatGlowLinesLoc;
 	FUniform4f muGradientBottomPlane;
@@ -284,6 +284,10 @@ class FShader
 	FBufferedUniform1f muGlobalFadeGradient;
 	FBufferedUniformPE muGlobalFadeColor;
 	FBufferedUniform1i muLightRangeLimit;
+	FBufferedUniform4f muOutlineColorA;
+	FBufferedUniform4f muOutlineColorB;
+	FBufferedUniform4f muOutlineParms;
+	FBufferedUniform1f muFogDensityScale;
 #ifdef NPOT_EMULATION
 	FBufferedUniform2f muNpotEmulation;
 #endif

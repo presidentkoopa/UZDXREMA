@@ -232,8 +232,97 @@ bool VR_GetMultiplayerCrouchHeight(float* outHmdHeightMapUnits)
     return true;
 }
 
+// [BB] THE PLAYSIM'S HAPTICS, CONNECTED.
+//
+// This function had an empty body. Every built-in haptic event in the game calls
+// it -- firing a weapon, taking a bullet, standing in slime, picking something
+// up, a door closing -- each one computing an intensity from its matching
+// ext_haptic_level_* cvar and handing that number to nothing. Twenty-odd call
+// sites across p_map.cpp, p_mobj.cpp, p_interaction.cpp, a_weapons.cpp,
+// sbar_mugshot.cpp and t_func.cpp, all inert.
+//
+// That is why controllers never buzzed for anything the game itself did, and why
+// the whole ext_haptic_level_* menu had no effect: the settings were real and
+// wired, the consumer was not. hw_vrmodes.h:243 states the situation outright.
+//
+// VRMode::Vibrate is the path that actually reaches the runtime
+// (VKOpenXRDeviceMode::Vibrate -> xrApplyHapticFeedback). It already gates on
+// vr_enable_haptics and clamps its own arguments, so this only has to translate.
+//
+// TRANSLATION, NOT POLICY. Three things need converting and nothing else belongs
+// here:
+//
+//   POSITION -> CHANNEL. Callers pass a PHYSICAL side: 1 left, 2 right. See
+//     p_map.cpp:4847, which writes `rightHanded ? 2 : 1` for the main hand.
+//     Vibrate takes a physical channel of 0 left, 1 right, so this is
+//     position - 1. Position 0 means no side was given, which for a body event
+//     like poison or a health station is honest rather than missing -- it goes to
+//     both hands.
+//
+//   INTENSITY. Callers pass 100 * the event's ext_haptic_level_* value, so full
+//     strength is nominally 100 and a player who turns one event up can exceed
+//     it deliberately. Divided by 100 and left for Vibrate to clamp, so raising a
+//     level above 1.0 still does something rather than being silently flattened
+//     here.
+//
+//   DURATION, which no caller supplies. One length for everything would make a
+//     pistol shot feel identical to walking into slime, so the event name picks
+//     it. These are LENGTHS, not strengths: how long a thing lasts is a property
+//     of the thing, while how hard it hits is the player's setting and stays
+//     theirs.
+//
+// angle and yHeight are ignored. They address positional hardware -- a vest or a
+// belt, where an event has a place on your body. A controller has no such axis,
+// and inventing one from them would be a guess dressed as a feature.
+CVAR(Float, vr_haptic_event_scale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
+static float VR_HapticEventDurationMs(const char* event)
+{
+	if (event == nullptr) return 60.0f;
+
+	// Ordered by how often each fires, so the common case compares first.
+	if (!stricmp(event, "fire_weapon"))   return 55.0f;
+	if (!stricmp(event, "bullet"))        return 70.0f;
+	if (!stricmp(event, "shotgun"))       return 110.0f;
+	if (!stricmp(event, "fireball"))      return 120.0f;
+	if (!stricmp(event, "melee"))         return 100.0f;
+	if (!stricmp(event, "pickup"))        return 35.0f;
+	if (!stricmp(event, "pickup_weapon")) return 60.0f;
+	if (!stricmp(event, "doorclose"))     return 45.0f;
+	if (!stricmp(event, "healstation"))   return 30.0f;
+
+	// The damage-over-time set. Longer and softer, because these repeat for as
+	// long as you stand in the thing -- a short sharp tap on repeat is a stutter,
+	// not a warning.
+	if (!stricmp(event, "slime"))         return 140.0f;
+	if (!stricmp(event, "fire"))          return 140.0f;
+	if (!stricmp(event, "poison"))        return 140.0f;
+
+	// Unknown event, and reachable: p_interaction.cpp:1945 passes a mod-defined
+	// poison type by name. A middling default is better than silence, because an
+	// unrecognised event is still a real thing that happened to the player.
+	return 60.0f;
+}
+
 void VR_HapticEvent(const char* event, int position, int intensity, float angle, float yHeight )
 {
+	const VRMode* vrmode = VRMode::GetVRModeCached();
+	if (vrmode == nullptr) return;
+
+	const float amp = (intensity / 100.0f) * (float)vr_haptic_event_scale;
+	if (amp <= 0.0f) return;
+
+	const float ms = VR_HapticEventDurationMs(event);
+
+	if (position == 1 || position == 2)
+	{
+		vrmode->Vibrate(ms, position - 1, amp);
+	}
+	else
+	{
+		vrmode->Vibrate(ms, 0, amp);
+		vrmode->Vibrate(ms, 1, amp);
+	}
 }
 
 void QzDoom_Restart()

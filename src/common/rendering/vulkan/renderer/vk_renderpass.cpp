@@ -307,7 +307,8 @@ std::unique_ptr<VulkanPipeline> VkRenderPassSetup::CreatePipeline(const VkPipeli
 		VK_FORMAT_R32_SFLOAT,
 		VK_FORMAT_R8G8B8A8_UNORM,
 		VK_FORMAT_A2B10G10R10_SNORM_PACK32,
-		VK_FORMAT_R8G8B8A8_UINT
+		VK_FORMAT_R8G8B8A8_UINT,
+		VK_FORMAT_R16G16B16A16_UINT	// VFmt_UShort4_UInt
 	};
 
 	bool inputLocations[VATTR_MAX] = {};
@@ -323,7 +324,7 @@ std::unique_ptr<VulkanPipeline> VkRenderPassSetup::CreatePipeline(const VkPipeli
 	for (int i = 0; i < VATTR_MAX; i++)
 	{
 		if (!inputLocations[i])
-			builder.AddVertexAttribute(i, 0, i != 8 ? VK_FORMAT_R32G32B32_SFLOAT : VK_FORMAT_R8G8B8A8_UINT, 0);
+			builder.AddVertexAttribute(i, 0, i != 8 ? VK_FORMAT_R32G32B32_SFLOAT : VK_FORMAT_R16G16B16A16_UINT, 0);
 	}
 
 	builder.AddDynamicState(VK_DYNAMIC_STATE_VIEWPORT);
