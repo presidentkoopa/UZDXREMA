@@ -1890,7 +1890,7 @@ const TArray<VSMatrix> * ProcessModelFrame(FModel * animation, bool nextFrame, i
 	return boneData;
 }
 
-static inline void RenderModelFrame(FModelRenderer *renderer, int i, const FSpriteModelFrame *smf, DActorModelData* modelData, const CalcModelFrameInfo &frameinfo, ModelDrawInfo &drawinfo, bool is_decoupled, double tic, FTranslationID translation, int &boneStartingPosition, bool &evaluatedSingle, const DPSprite *psp = nullptr)
+static inline void RenderModelFrame(FModelRenderer *renderer, int i, const FSpriteModelFrame *smf, DActorModelData* modelData, const CalcModelFrameInfo &frameinfo, ModelDrawInfo &drawinfo, bool is_decoupled, double tic, double ticFrac, FTranslationID translation, int &boneStartingPosition, bool &evaluatedSingle, const DPSprite *psp = nullptr)
 {
 	FModel * mdl = Models[drawinfo.modelid];
 	auto tex = drawinfo.skinid.isValid() ? TexMan.GetGameTexture(drawinfo.skinid, true) : nullptr;
@@ -1962,6 +1962,45 @@ static inline void RenderModelFrame(FModelRenderer *renderer, int i, const FSpri
 			o.frameNext = psp->SurfOvNext[s];
 			o.lerp      = psp->SurfOvLerp[s];
 			o.hidden    = psp->SurfOvHidden[s];
+
+			// RS FORK -- DISPLAY-RATE PART MOTION (p_pspr.h, SurfOvPos).
+			//
+			// Script runs at 35 Hz and a headset draws at three times that, so
+			// a part driven by the frame/lerp triple above is handed the same
+			// values two or three draws running and steps visibly. Resolving
+			// the smoothed position here instead, and deriving the triple from
+			// it, means what the renderer gets changes on every DRAWN frame
+			// rather than on every tic.
+			//
+			// UNITS: SurfOvPos is a FRACTIONAL FRAME INDEX -- 3.5 is halfway
+			// between mesh frame 3 and mesh frame 4. Not map units, not a
+			// 0..1 fraction of the travel.
+			//
+			// Negative is the opt-out, and a deliberately pinned pose takes
+			// that path: a slide held at locked-back wants to be exactly
+			// there, not eased toward it.
+			if (psp->SurfOvPos[s] >= 0.f)
+			{
+				float prev = psp->SurfOvPosPrev[s];
+
+				// A slot that has only just become active has no previous
+				// position. Interpolating from the -1 sentinel would fling the
+				// part in from before the start of the mesh on its first drawn
+				// frame; starting still is the honest answer.
+				if (prev < 0.f) prev = psp->SurfOvPos[s];
+
+				float f = (float)ticFrac;
+				if (f < 0.f) f = 0.f;
+				if (f > 1.f) f = 1.f;
+
+				float p = prev + (psp->SurfOvPos[s] - prev) * f;
+				if (p < 0.f) p = 0.f;
+
+				int lo = (int)p;
+				o.frame     = lo;
+				o.frameNext = lo + 1;
+				o.lerp      = p - (float)lo;
+			}
 		}
 		if (n)
 		{
@@ -2019,7 +2058,7 @@ void RenderFrameModels(FModelRenderer *renderer, FLevelLocals *Level, const FSpr
 
 		if (CalcModelOverrides(i, smf, modelData, frameinfo, drawinfo, is_decoupled, psp))
 		{
-			RenderModelFrame(renderer, i, smf, modelData, frameinfo, drawinfo, is_decoupled, tic, translation, boneStartingPosition, evaluatedSingle, psp);
+			RenderModelFrame(renderer, i, smf, modelData, frameinfo, drawinfo, is_decoupled, tic, ticFrac, translation, boneStartingPosition, evaluatedSingle, psp);
 		}
 	}
 }

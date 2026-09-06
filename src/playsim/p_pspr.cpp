@@ -198,6 +198,10 @@ DEFINE_FIELD(DPSprite, SurfOvFrame)         // RS fork
 DEFINE_FIELD(DPSprite, SurfOvNext)          // RS fork
 DEFINE_FIELD(DPSprite, SurfOvLerp)          // RS fork
 DEFINE_FIELD(DPSprite, SurfOvHidden)        // RS fork
+// RS fork -- display-rate part motion. SurfOvPos is a FRACTIONAL FRAME
+// INDEX, not map units and not a 0..1 fraction; see p_pspr.h.
+DEFINE_FIELD(DPSprite, SurfOvPos)           // RS fork
+DEFINE_FIELD(DPSprite, SurfOvPosPrev)       // RS fork
 DEFINE_FIELD(DPSprite, x)
 DEFINE_FIELD(DPSprite, y)
 DEFINE_FIELD(DPSprite, oldx)
@@ -1558,6 +1562,8 @@ void DPSprite::Serialize(FSerializer &arc)
 	arc.Array("surfovnext",    SurfOvNext,    RS_SURF_SLOTS);
 	arc.Array("surfovlerp",    SurfOvLerp,    RS_SURF_SLOTS);
 	arc.Array("surfovhidden",  SurfOvHidden,  RS_SURF_SLOTS);
+	arc.Array("surfovpos",     SurfOvPos,     RS_SURF_SLOTS);
+	arc.Array("surfovposprev", SurfOvPosPrev, RS_SURF_SLOTS);
 }
 
 //------------------------------------------------------------------------

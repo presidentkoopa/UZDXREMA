@@ -3207,6 +3207,24 @@ class PSprite : Object native play
 	native float SurfOvLerp[16];
 	native bool SurfOvHidden[16];
 
+	// DISPLAY-RATE MOTION. Set these instead of the frame/next/lerp triple and
+	// the renderer smooths the part across every drawn frame rather than
+	// stepping it once per tic.
+	//
+	// UNITS: A FRACTIONAL FRAME INDEX. 3.5 means halfway between the model's
+	// own frame 3 and frame 4. Not map units, not a 0..1 fraction of travel,
+	// not seconds. Nothing downstream can check this -- state it, or a value
+	// crossing the boundary in the wrong unit becomes motion that merely looks
+	// a bit wrong.
+	//
+	// SurfOvPosPrev is engine bookkeeping, shifted once per tic before any
+	// script runs. Do not write it; ScrubModelSurface seeds it on the first
+	// call so a part does not fly in from nowhere.
+	//
+	// Negative means unused, and then the explicit triple above is what draws.
+	native float SurfOvPos[16];
+	native float SurfOvPosPrev[16];
+
 	// The slot already driving this surface, or a free one, or -1 when all
 	// sixteen are taken. Reusing the existing slot is what stops a per-tic
 	// caller -- which is what a hand-driven part is -- from filling the table
@@ -3223,8 +3241,13 @@ class PSprite : Object native play
 		return free;
 	}
 
-	// Drive one surface. `lerp` below 0 leaves the surface on whatever blend
-	// the layer already had; 0..1 blends frame -> next explicitly.
+	// Pin one surface to an exact pose. `lerp` below 0 leaves the surface on
+	// whatever blend the layer already had; 0..1 blends frame -> next.
+	//
+	// EXACT, AND NOT SMOOTHED -- SurfOvPos is cleared, so the part is where it
+	// is told and does not ease toward it. That is what a held pose wants: a
+	// slide locked back on an empty gun should already be back on the frame
+	// the magazine left, not drifting there over the next tic.
 	void SetModelSurface(int model, int surface, int frame, int next = -1, double lerp = -1.0)
 	{
 		int i = FindModelSurfaceSlot(model, surface);
@@ -3234,24 +3257,40 @@ class PSprite : Object native play
 		SurfOvFrame[i]   = frame;
 		SurfOvNext[i]    = next;
 		SurfOvLerp[i]    = lerp;
+		SurfOvPos[i]     = -1.0;   // explicit path
+		SurfOvPosPrev[i] = -1.0;
 	}
 
 	// Scrub one surface along its own frame strip. `t` is 0..1 across frames
 	// `first`..`last` -- hand travel in, continuous part position out. This is
 	// the one that makes a slide feel racked rather than triggered.
+	//
+	// SMOOTHED. Only a fractional frame index is written; the renderer blends
+	// it against last tic's on every drawn frame. Script runs at 35 Hz and a
+	// headset draws at 90 or 120, so without that a hand-driven part steps
+	// three times a tic no matter how smoothly the hand moves.
 	void ScrubModelSurface(int model, int surface, int first, int last, double t)
 	{
 		if (t < 0.0) t = 0.0;
 		if (t > 1.0) t = 1.0;
 
-		int span = last - first;
-		double exact = first + span * t;
-		int lo = int(exact);
-		// Clamped so the last frame never blends toward one past the end,
-		// which the renderer would reject and draw as nothing.
-		int hi = (span >= 0) ? min(lo + 1, last) : max(lo - 1, last);
+		int i = FindModelSurfaceSlot(model, surface);
+		if (i < 0) return;
 
-		SetModelSurface(model, surface, lo, hi, exact - lo);
+		double pos = first + (last - first) * t;
+		if (pos < 0.0) pos = 0.0;
+
+		// SEED THE HISTORY WHEN THE SLOT IS NEW, or the part's first drawn
+		// frame interpolates from the -1 sentinel and it snaps in from before
+		// the start of the mesh. A part that has only just started moving has
+		// not moved yet.
+		bool fresh = (SurfOvModel[i] != model || SurfOvSurface[i] != surface || SurfOvPos[i] < 0.0);
+
+		SurfOvModel[i]   = model;
+		SurfOvSurface[i] = surface;
+		SurfOvHidden[i]  = false;
+		SurfOvPos[i]     = pos;
+		if (fresh) SurfOvPosPrev[i] = pos;
 	}
 
 	// Take a surface out of the draw entirely. This is what a magazine being
@@ -3280,6 +3319,8 @@ class PSprite : Object native play
 			SurfOvNext[i]    = -1;
 			SurfOvLerp[i]    = -1.0;
 			SurfOvHidden[i]  = false;
+			SurfOvPos[i]     = -1.0;
+			SurfOvPosPrev[i] = -1.0;
 		}
 	}
 

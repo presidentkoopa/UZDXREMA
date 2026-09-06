@@ -186,7 +186,11 @@ public:
 	DPSprite*	GetNext()							  { return Next; }
 	AActor*		GetCaller()							  { return Caller; }
 	void		SetCaller(AActor *newcaller)		  { Caller = newcaller; }
-	void		ResetInterpolation()				  { oldx = x; oldy = y; Prev = Vert; InterpolateTic = false; }
+	// RS fork -- ShiftSurfacePositions() is the per-tic half of display-rate
+	// part motion; see SurfOvPos below. NewTick() calls this on every psprite
+	// once per tic, before any script has run, which is exactly the moment
+	// "where it was" has to be captured.
+	void		ResetInterpolation()				  { oldx = x; oldy = y; Prev = Vert; InterpolateTic = false; ShiftSurfacePositions(); }
 	void OnDestroy() override;
 	std::pair<FRenderStyle, float> GetRenderStyle(FRenderStyle ownerstyle, double owneralpha);
 	float GetYAdjust(bool fullscreen);
@@ -385,6 +389,50 @@ public:
 		for (int i = 0; i < RS_SURF_SLOTS; i++)
 			if (SurfOvModel[i] >= 0) return true;
 		return false;
+	}
+
+	// RS FORK -- DISPLAY-RATE PART MOTION.
+	//
+	// THE UNIT IS FRAMES. SurfOvPos is a fractional index into the model's own
+	// frame array -- 3.5 means "halfway between mesh frame 3 and mesh frame 4".
+	// It is not map units, not a 0..1 fraction of anything, not seconds. Stated
+	// here because nothing downstream can check it: the compiler will accept
+	// any float and the VM will accept any float, and a value handed across
+	// this boundary in the wrong unit is a bug that only shows up as motion
+	// that looks subtly wrong.
+	//
+	// WHY IT EXISTS. SurfOvFrame/Next/Lerp above are set by script, and script
+	// runs at 35 Hz. The renderer draws at headset rate -- 90, 120 -- and
+	// without this it draws the SAME frame pair with the SAME blend two or
+	// three times in a row, so a slide being pulled steps instead of gliding.
+	// Quake-1 smooth, in a headset, on a part your own hand is moving.
+	//
+	// So the position is smoothed the way Doom smooths everything that moves:
+	// keep where it was at the end of last tic, keep where it is now, and let
+	// the renderer interpolate between them by how far through the tic the
+	// draw happens. ShiftSurfacePositions() does the keeping, once per tic,
+	// from ResetInterpolation(); the blend is in models.cpp at draw time.
+	//
+	// A SINGLE CONTINUOUS POSITION rather than the frame/next/lerp triple, and
+	// that is not a style choice. Interpolating the triple is wrong whenever
+	// the frame numbers change between tics: going from (3 -> 4, 0.9) to
+	// (4 -> 5, 0.1) means the position advanced from 3.9 to 4.1, but blending
+	// the lerp alone runs it 0.9 -> 0.1, backwards through the whole frame.
+	// One number has no such seam.
+	//
+	// NEGATIVE MEANS UNUSED, and the explicit SurfOvFrame/Next/Lerp path is
+	// taken instead -- kept for a caller that wants an exact pose pinned with
+	// no smoothing at all, which is what setting a slide to locked-back is.
+	float SurfOvPos    [RS_SURF_SLOTS] =
+		{ -1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f };
+	float SurfOvPosPrev[RS_SURF_SLOTS] =
+		{ -1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f };
+
+	// Once per tic, before script runs. Cheap enough to do unconditionally:
+	// sixteen float copies against the cost of tracking whether it is needed.
+	void ShiftSurfacePositions()
+	{
+		for (int i = 0; i < RS_SURF_SLOTS; i++) SurfOvPosPrev[i] = SurfOvPos[i];
 	}
 
 	// RS FORK -- SCRIPT-SUPPRESSED LAYER.
