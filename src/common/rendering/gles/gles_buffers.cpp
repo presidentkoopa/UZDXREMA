@@ -260,10 +260,13 @@ void GLBuffer::GPUWaitSync()
 
 void GLVertexBuffer::SetFormat(int numBindingPoints, int numAttributes, size_t stride, const FVertexBufferAttribute *attrs)
 {
-	static int VFmtToGLFmt[] = { GL_FLOAT, GL_FLOAT, GL_FLOAT, GL_FLOAT, GL_UNSIGNED_BYTE, GL_INT_2_10_10_10_REV, GL_UNSIGNED_BYTE }; // TODO Fix last entry GL_INT_2_10_10_10_REV, normals for models will be broken
-	static uint8_t VFmtToSize[] = {4, 3, 2, 1, 4, 4, 4};
-	static bool VFmtToNormalize[] = { false, false, false, false, true, true, false };
-	static bool VFmtToIntegerType[] = { false, false, false, false, false, false, true };
+	static int VFmtToGLFmt[] = { GL_FLOAT, GL_FLOAT, GL_FLOAT, GL_FLOAT, GL_UNSIGNED_BYTE, GL_INT_2_10_10_10_REV, GL_UNSIGNED_BYTE, GL_UNSIGNED_SHORT }; // TODO Fix last entry GL_INT_2_10_10_10_REV, normals for models will be broken
+	static uint8_t VFmtToSize[] = {4, 3, 2, 1, 4, 4, 4, 4};
+	static bool VFmtToNormalize[] = { false, false, false, false, true, true, false, false };
+	static bool VFmtToIntegerType[] = { false, false, false, false, false, false, true, true };
+	static_assert((sizeof(VFmtToGLFmt)/sizeof(VFmtToGLFmt[0])) == VFmt_COUNT && (sizeof(VFmtToSize)/sizeof(VFmtToSize[0])) == VFmt_COUNT
+		&& (sizeof(VFmtToNormalize)/sizeof(VFmtToNormalize[0])) == VFmt_COUNT && (sizeof(VFmtToIntegerType)/sizeof(VFmtToIntegerType[0])) == VFmt_COUNT,
+		"these tables must have one entry per VertexFormat -- see the note on VFmt_COUNT in buffers.h");
 
 	mStride = stride;
 	mNumBindingPoints = numBindingPoints;

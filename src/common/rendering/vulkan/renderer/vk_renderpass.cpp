@@ -307,8 +307,11 @@ std::unique_ptr<VulkanPipeline> VkRenderPassSetup::CreatePipeline(const VkPipeli
 		VK_FORMAT_R32_SFLOAT,
 		VK_FORMAT_R8G8B8A8_UNORM,
 		VK_FORMAT_A2B10G10R10_SNORM_PACK32,
-		VK_FORMAT_R8G8B8A8_UINT
+		VK_FORMAT_R8G8B8A8_UINT,
+		VK_FORMAT_R16G16B16A16_UINT	// VFmt_UShort4_UInt -- 16-bit bone selectors
 	};
+	static_assert((sizeof(vkfmts)/sizeof(vkfmts[0])) == VFmt_COUNT,
+		"vkfmts must have one entry per VertexFormat -- see the note on VFmt_COUNT in buffers.h");
 
 	bool inputLocations[VATTR_MAX] = {};
 

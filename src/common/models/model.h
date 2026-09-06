@@ -47,7 +47,7 @@ extern TDeletingArray<FModel*> Models;
 extern TArray<FSpriteModelFrame> SpriteModelFrames;
 extern TMap<const PClass*, FSpriteModelFrame> BaseSpriteModelFrames;
 
-#define MD3_MAX_SURFACES	32
+#define MD3_MAX_SURFACES	64	// [XR] was 32; the Slayer body ships 64 mesh parts and every one must be addressable by SurfaceSkin
 #define MIN_MODELS	4
 
 struct FSpriteModelFrame

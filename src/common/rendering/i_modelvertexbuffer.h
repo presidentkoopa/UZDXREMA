@@ -26,7 +26,7 @@ struct FModelVertex
 	unsigned packedNormal;	// normal vector as GL_INT_2_10_10_10_REV.
 	float lu, lv;	// lightmap texture coordinates
 	float lindex;	// lightmap texture index
-	uint8_t boneselector[4];
+	uint16_t boneselector[4];	// [XR] 16-bit so a rig may have more than 256 joints (VFmt_UShort4_UInt)
 	uint8_t boneweight[4];
 
 	void Set(float xx, float yy, float zz, float uu, float vv)

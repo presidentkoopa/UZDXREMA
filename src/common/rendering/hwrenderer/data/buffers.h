@@ -61,7 +61,21 @@ enum EVertexAttributeFormat
 	VFmt_Float,
 	VFmt_Byte4,
 	VFmt_Packed_A2R10G10B10,
-	VFmt_Byte4_UInt
+	VFmt_Byte4_UInt,
+	VFmt_UShort4_UInt,	// [XR] 16-bit unsigned integer x4: bone selectors for rigs past 255 joints (the Slayer has 924)
+
+	// Terminator, so each backend can static_assert that its own format table
+	// has an entry for every value here.
+	//
+	// Vulkan, GL and GLES each keep a POSITIONAL table indexed by this enum. Add
+	// a format and forget one of them and there is no compiler error and no log
+	// line -- the backend reads past the end of its table and hands the GPU a
+	// garbage vertex format. On Vulkan that surfaces as "Could not submit command
+	// buffer: device lost", which names neither the format nor the file.
+	//
+	// That is exactly how VFmt_UShort4_UInt shipped with GL and GLES updated and
+	// Vulkan missed. The asserts below make it a build failure instead.
+	VFmt_COUNT
 };
 
 struct FVertexBufferAttribute
