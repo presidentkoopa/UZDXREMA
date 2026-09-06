@@ -1254,6 +1254,32 @@ public:
 	// a headset before anything worked at all.
 	int				HardpointButtons;
 
+	// RS FORK -- WORN ON THE BODY, PLACED AT DRAW RATE.
+	//
+	// FollowBodyMode 1 draws this actor in the player's body frame -- head
+	// position and yaw, read fresh every frame through VRMode::GetHmdTransform --
+	// with FollowBodyOfs as its seat in that frame. 0, the default, leaves the
+	// actor placed the ordinary way and is what everything that never asks for
+	// this gets.
+	//
+	// WHY PER-ACTOR AND NOT A MODELDEF FLAG. MDL_FOLLOWMAINHAND works as a flag
+	// because there is one main hand and everything riding it wants the same
+	// transform. A worn rig is the opposite: a dozen props share one class and
+	// each sits at its own place on the body, chosen by the player. A per-class
+	// MODELDEF prefix cannot say "this one is on my left hip and that one is
+	// behind my shoulder", so the seat travels with the instance.
+	//
+	// WHAT IT REPLACES. Script could only sample the head pose once a tic and
+	// re-place each prop with SetOrigin, so between two samples the whole rig
+	// swam -- and a prop far from the anchor swept a wide arc for a small head
+	// movement, which is why the low ones looked worst. Interpolation cannot
+	// help: it smooths between two stale samples of a pose that moved at 90Hz.
+	//
+	// Offsets are in the body's own frame: X forward, Y right, Z up, in map
+	// units, matching _ofs_x/_ofs_y/_ofs_z everywhere else in this fork.
+	int				FollowBodyMode;
+	DVector3		FollowBodyOfs;
+
 	// RS FORK -- TRACE THIS ACTOR IN NEON, FROM ITS OWN SPRITE.
 	//
 	// The drawing is func_spriteoutline.fp: a Sobel edge detect over the

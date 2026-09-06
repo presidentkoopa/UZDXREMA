@@ -639,10 +639,10 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(AActor * actor, float x, float y
 	// a height for everything else.
 	const float bodyPivotZ = actor->VoxelOverride ? float(actor->Height * 0.5) : 0.f;
 
-	return ObjectToWorldMatrix(actor->Level, DVector3(x, y, z), DRotator(DAngle::fromDeg(pitch), DAngle::fromDeg(angle), DAngle::fromDeg(roll)), actor->InterpolatedScale(ticFrac), smf_flags, tic, bodyPivotZ);
+	return ObjectToWorldMatrix(actor->Level, DVector3(x, y, z), DRotator(DAngle::fromDeg(pitch), DAngle::fromDeg(angle), DAngle::fromDeg(roll)), actor->InterpolatedScale(ticFrac), smf_flags, tic, bodyPivotZ, actor->FollowBodyMode, actor->FollowBodyOfs);
 }
 
-VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic, float bodyPivotZ)
+VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic, float bodyPivotZ, int followBodyMode, DVector3 followBodyOfs)
 {
 	double rotateOffset = 0;
 
@@ -678,10 +678,37 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 	// history that ever worked, so this calls the exact function the working HUD
 	// path calls and takes the matrix whole -- no decomposition, no Euler round
 	// trip, nothing to get the axis order wrong in.
+	// AActor::FollowBodyMode -- the same idea one step out from the hand: the
+	// player's own frame, read at draw rate, with the actor's seat inside it.
+	// Taken WHOLE from GetHmdTransform rather than rebuilt, for the reason the
+	// hand path gives below -- re-deriving this basis by hand is what cost the
+	// two earlier attempts, and the body frame is built the same way the hand
+	// one is precisely so the two agree.
+	//
+	// The seat is applied in the body's frame BEFORE any of the model's own
+	// offsets, so MODELDEF Offset and the placement sliders keep meaning what
+	// they mean everywhere else: adjustments relative to where the thing sits.
 	bool followedHand = false;
+	if (followBodyMode > 0)
+	{
+		auto vrmode = VRMode::GetVRModeCached(true);
+		if (vrmode != nullptr && vrmode->IsVR() && vrmode->GetHmdTransform(&objectToWorldMatrix))
+		{
+			objectToWorldMatrix.translate((float)followBodyOfs.X,
+				(float)followBodyOfs.Z, (float)followBodyOfs.Y);
+			followedHand = true;
+		}
+		else
+		{
+			// Not in VR, or no pose this frame. Fall back to ordinary world
+			// placement rather than drawing everything at the origin.
+			objectToWorldMatrix.loadIdentity();
+		}
+	}
+
 	const int followHand = (flags & MDL_FOLLOWMAINHAND) ? VR_MAINHAND
 		: ((flags & MDL_FOLLOWOFFHAND) ? VR_OFFHAND : -1);
-	if (followHand >= 0)
+	if (!followedHand && followHand >= 0)
 	{
 		auto vrmode = VRMode::GetVRModeCached(true);
 		if (vrmode != nullptr && vrmode->IsVR() &&

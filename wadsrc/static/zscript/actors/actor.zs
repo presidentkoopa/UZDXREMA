@@ -377,6 +377,13 @@ class Actor : Thinker native
 	native bool VoxelOverride;
 	native bool ForceModelAngles;
 	native int HardpointButtons;
+	// Draw this actor in the player's body frame -- head position and yaw, read
+	// at DRAW rate -- with FollowBodyOfs as its seat in that frame (X forward,
+	// Y right, Z up, map units). Mode 0 is off and is the default. Per-actor
+	// rather than a MODELDEF flag because a dozen props share one class and each
+	// sits somewhere different on the body.
+	native int FollowBodyMode;
+	native Vector3 FollowBodyOfs;
 	// Trace this actor in neon, from its own sprite. See func_spriteoutline.fp
 	// and the note in actor.h. OutlineMode 0 is off and is the default; 1 keeps
 	// the body and adds a glowing edge, 2 erases the body and leaves the wire
