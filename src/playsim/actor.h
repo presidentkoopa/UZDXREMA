@@ -1254,6 +1254,30 @@ public:
 	// a headset before anything worked at all.
 	int				HardpointButtons;
 
+	// RS FORK -- TRACE THIS ACTOR IN NEON, FROM ITS OWN SPRITE.
+	//
+	// The drawing is func_spriteoutline.fp: a Sobel edge detect over the
+	// sprite the actor is already showing, so the outline is exactly the right
+	// size and shape for ANY actor, including one a mod added this morning.
+	// Nothing here names a monster and nothing measures a body.
+	//
+	// This lives per actor rather than per scene because the previous fork put
+	// it per scene -- one global cvar, bound in gldefs to fifteen hardcoded
+	// Doom sprite names -- and that could not light one corpse, could not fade,
+	// and knew nothing about anybody else's monsters.
+	//
+	// INERT UNTIL SET. OutlineMode 0 is off, which is the default, and off
+	// costs one float compare in the fragment shader. Read in
+	// HWSprite::DrawSprite.
+	PalEntry		OutlineColorA;
+	PalEntry		OutlineColorB;
+	double			OutlineStrength;	// master; 0 is off, and a fade passes through it
+	double			OutlineThickness;	// how wide the traced line is, in texels
+	double			OutlineThreshold;	// how much contrast counts as an edge
+	double			OutlineGlow;		// how far the halo reaches off the line
+	double			OutlinePulse;		// A-to-B crossfade speed; 0 holds on A
+	int				OutlineMode;		// 0 off, 1 edge, 2 wire, 3 ghost
+
 // interaction info
 	FBlockNode		*BlockNode;			// links in blocks (if needed)
 	struct sector_t	*Sector;

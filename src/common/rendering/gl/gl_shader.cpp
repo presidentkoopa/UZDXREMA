@@ -454,6 +454,10 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 		uniform int uFlatGlowFalloff;
 		uniform int uFlatGlowIsCeiling;
 		uniform float uDarknessExempt;
+		// [OUTLINE] Sprite outlines -- see func_spriteoutline.fp.
+		uniform vec4 uOutlineColorA;
+		uniform vec4 uOutlineColorB;
+		uniform vec4 uOutlineParms;
 		uniform float uFogDensityScale;
 		uniform int uFlatGlowLineCount;
 		uniform vec4 uFlatGlowLines[64];
@@ -629,6 +633,13 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 	if (stamp_lump == -1) I_Error("Unable to load 'shaders/glsl/func_surfacestamps.fp'");
 	fp_comb << GetStringFromLump(stamp_lump).GetChars() << "\n";
 	fp_comb << "#line 1\n";
+	// [OUTLINE] Same deal as the stamps above -- prepended so main.fp can call
+	// it with no forward declaration. It reads the `tex` sampler and timer from
+	// the preamble and takes its texture coordinate as a parameter, because
+	// vTexCoord is declared by main.fp and does not exist yet at this point.
+	int outline_lump = fileSystem.CheckNumForFullName("shaders/glsl/func_spriteoutline.fp", 0);
+	if (outline_lump == -1) I_Error("Unable to load 'shaders/glsl/func_spriteoutline.fp'");
+	fp_comb << GetStringFromLump(outline_lump).GetChars() << "\n";
 	fp_comb << RemoveLayoutLocationDecl(GetStringFromLump(fp_lump), "in").GetChars() << "\n";
 	FString placeholder = "\n";
 	TArray<FString> filenames_for_error;
@@ -889,6 +900,9 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 	muFlatGlowIsCeiling.Init(hShader, "uFlatGlowIsCeiling");
 	muDarknessExempt.Init(hShader, "uDarknessExempt");
 	muFogDensityScale.Init(hShader, "uFogDensityScale");
+	muOutlineColorA.Init(hShader, "uOutlineColorA");
+	muOutlineColorB.Init(hShader, "uOutlineColorB");
+	muOutlineParms.Init(hShader, "uOutlineParms");
 	muFlatGlowLineCount.Init(hShader, "uFlatGlowLineCount");
 	muFlatGlowLinesLoc = glGetUniformLocation(hShader, "uFlatGlowLines");
 	muGradientBottomPlane.Init(hShader, "uGradientBottomPlane");

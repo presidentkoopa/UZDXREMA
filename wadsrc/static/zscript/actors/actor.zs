@@ -377,6 +377,20 @@ class Actor : Thinker native
 	native bool VoxelOverride;
 	native bool ForceModelAngles;
 	native int HardpointButtons;
+	// Trace this actor in neon, from its own sprite. See func_spriteoutline.fp
+	// and the note in actor.h. OutlineMode 0 is off and is the default; 1 keeps
+	// the body and adds a glowing edge, 2 erases the body and leaves the wire
+	// figure, 3 flattens the body to the tint with the edge bright over it.
+	// Works on any actor, names no monster, and is unaffected by stairs -- the
+	// outline IS the sprite.
+	native color OutlineColorA;
+	native color OutlineColorB;
+	native double OutlineStrength;
+	native double OutlineThickness;
+	native double OutlineThreshold;
+	native double OutlineGlow;
+	native double OutlinePulse;
+	native int OutlineMode;
 	// WRITABLE FROM SCRIPT, 2026-08-30. These six were readonly, which was fine
 	// while the only thing that ever set them was the VR backend writing the
 	// controller pose -- but a WRIST-MOUNTED weapon fires from the mount along

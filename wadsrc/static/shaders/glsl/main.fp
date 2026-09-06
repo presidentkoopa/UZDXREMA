@@ -3257,6 +3257,11 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 	// normal because a shape that spins or tiles needs to know which way is
 	// round on the surface it is being painted on.
 	ApplySurfaceStamps(color.rgb, pixelpos.xyz, vWorldNormal.xyz);
+
+	// [OUTLINE] The traced edge, emissive for the same reason the stamps are:
+	// after the lighting equation and after DarknessAt, so a corpse stays lit
+	// in a room turned black. Zero unless this draw is an outlined sprite.
+	color.rgb += gOutlineEmissive;
 #endif
 	color = min(color, 1.0);
 
@@ -3396,6 +3401,14 @@ void main()
 #else
 	Material material = ProcessMaterial();
 #endif
+
+	// [OUTLINE] An actor traced in neon by its own sprite. HERE, before the
+	// alpha test below, because the wire mode erases the body by rewriting
+	// material.Base.a -- do it after the test and the body has already been
+	// kept. Off for every draw that is not an outlined sprite, and off is one
+	// float compare. The glowing half is left in gOutlineEmissive and spent in
+	// getLightColor with the stamps.
+	ApplySpriteOutline(material.Base, vTexCoord.st);
 	vec4 frag = material.Base;
 
 #ifndef NO_ALPHATEST

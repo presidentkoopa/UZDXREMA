@@ -459,9 +459,18 @@ static const char *shaderBindings = R"(
 		float uGlobalFadeGradient;
 		int uLightRangeLimit;
 
-		float uFogDensityScale;
+		int padding1;
 		int padding2;
 		int padding3;
+
+		vec4  uOutlineColorA;
+		vec4  uOutlineColorB;
+		vec4  uOutlineParms;
+
+		float uFogDensityScale;
+		int uFogPad0;
+		int uFogPad1;
+		int uFogPad2;
 	};
 
 	layout(set = 1, binding = 2, std140) uniform readonly StreamUBO {
@@ -578,6 +587,9 @@ static const char *shaderBindings = R"(
 	#define uFlatGlowIsCeiling data[uDataIndex].uFlatGlowIsCeiling
 	#define uDarknessExempt data[uDataIndex].uDarknessExempt
 	#define uFogDensityScale data[uDataIndex].uFogDensityScale
+	#define uOutlineColorA data[uDataIndex].uOutlineColorA
+	#define uOutlineColorB data[uDataIndex].uOutlineColorB
+	#define uOutlineParms data[uDataIndex].uOutlineParms
 	#define uFlatGlowLineCount data[uDataIndex].uFlatGlowLineCount
 	#define uFlatGlowLines data[uDataIndex].uFlatGlowLines
 	#define uGradientTopPlane data[uDataIndex].uGradientTopPlane
@@ -662,6 +674,9 @@ std::unique_ptr<VulkanShader> VkShaderManager::LoadFragShader(FString shadername
 	// gl_shader.cpp; both backends read the same lump.
 	code << "\n#line 1\n";
 	code << LoadPrivateShaderLump("shaders/glsl/func_surfacestamps.fp").GetChars() << "\n";
+
+	code << "\n#line 1\n";
+	code << LoadPrivateShaderLump("shaders/glsl/func_spriteoutline.fp").GetChars() << "\n";
 
 	code << "\n#line 1\n";
 	code << LoadPrivateShaderLump(frag_lump).GetChars() << "\n";

@@ -267,6 +267,9 @@ class FShader
 	FBufferedUniform1i muFlatGlowIsCeiling;
 	FBufferedUniform1f muDarknessExempt;
 	FBufferedUniform1f muFogDensityScale;
+	FBufferedUniform4f muOutlineColorA;
+	FBufferedUniform4f muOutlineColorB;
+	FBufferedUniform4f muOutlineParms;
 	FBufferedUniform1i muFlatGlowLineCount;
 	int muFlatGlowLinesLoc;
 	FUniform4f muGradientBottomPlane;

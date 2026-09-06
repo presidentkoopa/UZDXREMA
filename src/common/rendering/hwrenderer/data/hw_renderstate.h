@@ -280,6 +280,27 @@ struct StreamData
 	float uGlobalFadeGradient;
 	int uLightRangeLimit;
 
+	// These three stay. std140 aligns a vec4 to 16 bytes and C++ does not, so
+	// the outline block below MUST start on a lane boundary or the C++ struct
+	// and the shader's view of it silently disagree from here down.
+	int padding1;
+	int padding2;
+	int padding3;
+
+	// [OUTLINE] SPRITE OUTLINES, per draw call.
+	//
+	// An actor traced in neon by its own sprite -- see func_spriteoutline.fp for
+	// what the numbers mean. Set from the actor in HWSprite::DrawSprite, so this
+	// is per-sprite rather than scene-global: one corpse can be lit without every
+	// monster in the room lighting up with it.
+	//
+	// uOutlineParms is (thickness, threshold, glow, mode). Mode 0 is off and is
+	// what FRenderState::Reset leaves here, so every other draw in the level pays
+	// one float compare in the fragment shader and nothing else.
+	FVector4 uOutlineColorA;
+	FVector4 uOutlineColorB;
+	FVector4 uOutlineParms;
+
 	// [BB] FOG DENSITY SCALE FOR THIS DRAW. 1 is the slab as configured.
 	//
 	// The fog is one slab over the whole level, which cannot tell a courtyard
@@ -296,10 +317,10 @@ struct StreamData
 	// number applies and anything else that wants to thin or thicken the fog for
 	// one draw can use the same lane.
 	//
-	// This was padding1, so it costs nothing and StreamData's size is unchanged.
 	float uFogDensityScale;
-	int padding2;
-	int padding3;
+	int uFogPad0;
+	int uFogPad1;
+	int uFogPad2;
 };
 
 class FRenderState
@@ -416,6 +437,11 @@ public:
 		mStreamData.uFlatGlowFalloff = 0;
 		mStreamData.uFlatGlowIsCeiling = 0;
 		mStreamData.uDarknessExempt = 0.f;
+		// [OUTLINE] Off. Every draw that is not an outlined sprite lands here,
+		// and mode 0 is one float compare in the fragment shader.
+		mStreamData.uOutlineColorA = { 0.f, 0.f, 0.f, 0.f };
+		mStreamData.uOutlineColorB = { 0.f, 0.f, 0.f, 0.f };
+		mStreamData.uOutlineParms = { 0.f, 0.f, 0.f, 0.f };
 		mStreamData.uFogDensityScale = 1.f;
 		mStreamData.uFlatGlowLineCount = 0;
 		mStreamData.uGradientTopPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -680,6 +706,25 @@ public:
 	void SetDarknessExempt(float exempt)
 	{
 		mStreamData.uDarknessExempt = exempt;
+	}
+
+	// [OUTLINE] Trace a sprite in neon -- see func_spriteoutline.fp. Set per
+	// draw call from the actor in HWSprite::DrawSprite, which is what lets one
+	// corpse light up without every monster in the room lighting up with it.
+	//
+	// Strength rides in ColorA.w and pulse speed in ColorB.w, so the whole effect
+	// is three vec4s rather than a scatter of loose floats.
+	void SetSpriteOutline(PalEntry colA, PalEntry colB, float strength,
+		float thickness, float threshold, float glow, float pulse, int mode)
+	{
+		mStreamData.uOutlineColorA = { colA.r / 255.f, colA.g / 255.f, colA.b / 255.f, strength };
+		mStreamData.uOutlineColorB = { colB.r / 255.f, colB.g / 255.f, colB.b / 255.f, pulse };
+		mStreamData.uOutlineParms = { thickness, threshold, glow, (float)mode };
+	}
+
+	void ClearSpriteOutline()
+	{
+		mStreamData.uOutlineParms = { 0.f, 0.f, 0.f, 0.f };
 	}
 
 	// [BB] See uFogDensityScale. 1 is the slab as configured.

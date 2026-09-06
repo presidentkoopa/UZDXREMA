@@ -254,6 +254,31 @@ void HWSprite::DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent)
 		state.SetTextureMode(RenderStyle);
 		state.SetDepthBias(-1, -128);
 	}
+	// [OUTLINE] Neon outline traced from this actor's own sprite. HERE rather
+	// than earlier in the function because the alpha-func calls above are what
+	// the wire mode has to override, and they run inside the translucency
+	// branch.
+	//
+	// Per draw call, so one corpse can be traced without every monster in the
+	// room being traced with it. FRenderState::Reset puts mode back to 0 for
+	// everything else in the frame, and mode 0 is one float compare.
+	if (actor != nullptr && actor->OutlineMode > 0 && actor->OutlineStrength > 0.0)
+	{
+		state.SetSpriteOutline(actor->OutlineColorA, actor->OutlineColorB,
+			(float)actor->OutlineStrength, (float)actor->OutlineThickness,
+			(float)actor->OutlineThreshold, (float)actor->OutlineGlow,
+			(float)actor->OutlinePulse, actor->OutlineMode);
+
+		// Wire mode replaces the sprite's alpha with the traced edge, and the
+		// usual masked-sprite threshold would then cut off the soft half of
+		// every line -- which is the half that reads as glow.
+		if (actor->OutlineMode == 2) state.AlphaFunc(Alpha_GEqual, 0.f);
+	}
+	else
+	{
+		state.ClearSpriteOutline();
+	}
+
 	if (RenderStyle.BlendOp != STYLEOP_Shadow)
 	{
 		if (di->Level->HasDynamicLights && !di->isFullbrightScene() && !fullbright)
