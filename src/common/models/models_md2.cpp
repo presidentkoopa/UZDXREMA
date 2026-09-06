@@ -392,7 +392,7 @@ int FDMDModel::FindFrame(const char* name, bool nodefault)
 //
 //===========================================================================
 
-void FDMDModel::RenderFrame(FModelRenderer *renderer, FGameTexture * skin, int frameno, int frameno2, double inter, FTranslationID translation, const FTextureID*, int boneStartPosition)
+void FDMDModel::RenderFrame(FModelRenderer *renderer, FGameTexture * skin, int frameno, int frameno2, double inter, FTranslationID translation, const FTextureID*, int boneStartPosition, const FModelSurfaceOverrideList* surfov)
 {
 	if (frameno >= info.numFrames || frameno2 >= info.numFrames) return;
 

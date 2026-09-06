@@ -189,6 +189,15 @@ DEFINE_FIELD(DPSprite, ModelFramePart)      // RS fork
 DEFINE_FIELD(DPSprite, ModelFrameNextPart)  // RS fork
 DEFINE_FIELD(DPSprite, ModelFrameLerpPart)  // RS fork
 DEFINE_FIELD(DPSprite, ModelPartHidden)     // RS fork
+// RS fork -- per-SURFACE frame addressing; see p_pspr.h. One level finer than
+// the per-part arrays above: these reach a surface inside a model's own mesh,
+// which is where a slide, a pump and a revolver cylinder actually live.
+DEFINE_FIELD(DPSprite, SurfOvModel)         // RS fork
+DEFINE_FIELD(DPSprite, SurfOvSurface)       // RS fork
+DEFINE_FIELD(DPSprite, SurfOvFrame)         // RS fork
+DEFINE_FIELD(DPSprite, SurfOvNext)          // RS fork
+DEFINE_FIELD(DPSprite, SurfOvLerp)          // RS fork
+DEFINE_FIELD(DPSprite, SurfOvHidden)        // RS fork
 DEFINE_FIELD(DPSprite, x)
 DEFINE_FIELD(DPSprite, y)
 DEFINE_FIELD(DPSprite, oldx)
@@ -1539,6 +1548,16 @@ void DPSprite::Serialize(FSerializer &arc)
 	arc.Array("modelframenextpart", ModelFrameNextPart, RS_MODEL_PARTS);
 	arc.Array("modelframelerppart", ModelFrameLerpPart, RS_MODEL_PARTS);
 	arc.Array("modelparthidden",    ModelPartHidden,    RS_MODEL_PARTS);
+
+	// RS fork -- per-surface overrides. Same reasoning as the arrays above: an
+	// older save simply has no such keys and the in-class initialisers are
+	// what make that safe.
+	arc.Array("surfovmodel",   SurfOvModel,   RS_SURF_SLOTS);
+	arc.Array("surfovsurface", SurfOvSurface, RS_SURF_SLOTS);
+	arc.Array("surfovframe",   SurfOvFrame,   RS_SURF_SLOTS);
+	arc.Array("surfovnext",    SurfOvNext,    RS_SURF_SLOTS);
+	arc.Array("surfovlerp",    SurfOvLerp,    RS_SURF_SLOTS);
+	arc.Array("surfovhidden",  SurfOvHidden,  RS_SURF_SLOTS);
 }
 
 //------------------------------------------------------------------------

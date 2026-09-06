@@ -3173,6 +3173,108 @@ class PSprite : Object native play
 		ModelFrameLerpPart[part] = exact - lo;
 	}
 
+	// RS fork -- PER-SURFACE frame addressing. One level finer than the part
+	// arrays above, and the level a gun actually needs.
+	//
+	// A "part" above is a whole sub-model of a MODELDEF stack -- right for a
+	// magazine or a hand shipped as their own .md3, wrong for a slide, which
+	// is a SURFACE inside the pistol's own mesh alongside the frame, hammer
+	// and trigger. Same for a pump, a revolver cylinder, an ejecting shell.
+	// Those surfaces are already animated in the mesh; nothing could address
+	// them.
+	//
+	// SIXTEEN SLOTS, matched on (model, surface). A slot with SurfOvModel < 0
+	// is free. Sparse rather than a grid because most weapons drive nothing
+	// and a rectangular model x surface table would be state on every psprite
+	// for a feature almost nothing uses.
+	//
+	// SURFACES ARE ADDRESSED BY INDEX and that is forced, not preferred: a
+	// third of the model library names its surfaces "Cube", "Untitled" or
+	// "pCylinder10", and some models repeat a name. Run `modelsurfaces` in the
+	// console to print each loaded model's surfaces with their indices.
+	native int SurfOvModel[16];
+	native int SurfOvSurface[16];
+	native int SurfOvFrame[16];
+	native int SurfOvNext[16];
+	native float SurfOvLerp[16];
+	native bool SurfOvHidden[16];
+
+	// The slot already driving this surface, or a free one, or -1 when all
+	// sixteen are taken. Reusing the existing slot is what stops a per-tic
+	// caller -- which is what a hand-driven part is -- from filling the table
+	// on its second frame.
+	int FindModelSurfaceSlot(int model, int surface)
+	{
+		if (model < 0 || surface < 0) return -1;
+		int free = -1;
+		for (int i = 0; i < 16; i++)
+		{
+			if (SurfOvModel[i] == model && SurfOvSurface[i] == surface) return i;
+			if (free < 0 && SurfOvModel[i] < 0) free = i;
+		}
+		return free;
+	}
+
+	// Drive one surface. `lerp` below 0 leaves the surface on whatever blend
+	// the layer already had; 0..1 blends frame -> next explicitly.
+	void SetModelSurface(int model, int surface, int frame, int next = -1, double lerp = -1.0)
+	{
+		int i = FindModelSurfaceSlot(model, surface);
+		if (i < 0) return;
+		SurfOvModel[i]   = model;
+		SurfOvSurface[i] = surface;
+		SurfOvFrame[i]   = frame;
+		SurfOvNext[i]    = next;
+		SurfOvLerp[i]    = lerp;
+	}
+
+	// Scrub one surface along its own frame strip. `t` is 0..1 across frames
+	// `first`..`last` -- hand travel in, continuous part position out. This is
+	// the one that makes a slide feel racked rather than triggered.
+	void ScrubModelSurface(int model, int surface, int first, int last, double t)
+	{
+		if (t < 0.0) t = 0.0;
+		if (t > 1.0) t = 1.0;
+
+		int span = last - first;
+		double exact = first + span * t;
+		int lo = int(exact);
+		// Clamped so the last frame never blends toward one past the end,
+		// which the renderer would reject and draw as nothing.
+		int hi = (span >= 0) ? min(lo + 1, last) : max(lo - 1, last);
+
+		SetModelSurface(model, surface, lo, hi, exact - lo);
+	}
+
+	// Take a surface out of the draw entirely. This is what a magazine being
+	// out of the gun actually is.
+	void HideModelSurface(int model, int surface, bool hide = true)
+	{
+		int i = FindModelSurfaceSlot(model, surface);
+		if (i < 0) return;
+		SurfOvModel[i]   = model;
+		SurfOvSurface[i] = surface;
+		SurfOvHidden[i]  = hide;
+	}
+
+	// Release every surface back to the model's own animation. Call this when
+	// a weapon is deselected or a reload is abandoned: psprite layers are
+	// reused across weapon switches and these fields are saved, so a surface
+	// left driven stays driven -- a slide locked back on a gun you are no
+	// longer holding, with nothing anywhere saying why.
+	void ClearModelSurfaces()
+	{
+		for (int i = 0; i < 16; i++)
+		{
+			SurfOvModel[i]   = -1;
+			SurfOvSurface[i] = -1;
+			SurfOvFrame[i]   = -1;
+			SurfOvNext[i]    = -1;
+			SurfOvLerp[i]    = -1.0;
+			SurfOvHidden[i]  = false;
+		}
+	}
+
 	// Hide this layer without touching the weapon behind it. The weapon keeps
 	// its states, damage and slot; only the drawing stops.
 	native bool NoDraw;

@@ -37,6 +37,8 @@
 #include "v_video.h"
 #include "hw_bonebuffer.h"
 #include "hw_vrmodes.h"
+#include "c_dispatch.h"   // RS fork -- the modelsurfaces CCMD at the end of this file
+#include "v_text.h"       // RS fork -- TEXTCOLOR_* for the same
 
 
 #ifdef _MSC_VER
@@ -1910,7 +1912,38 @@ static inline void RenderModelFrame(FModelRenderer *renderer, int i, const FSpri
 		if (psp && boneData) HudAnchor_Store(psp, mdl, *boneData);
 	}
 
-	mdl->RenderFrame(renderer, tex, drawinfo.modelframe, nextFrame ? drawinfo.modelframenext : drawinfo.modelframe, nextFrame ? frameinfo.inter : -1.f, translation, ssidp, boneStartingPosition);
+	// RS FORK -- PER-SURFACE FRAME ADDRESSING (p_pspr.h, model.h).
+	//
+	// Collect THIS model's surface overrides out of the psprite's flat slot
+	// table and hand them down. Built on the stack per draw: sixteen entries,
+	// and the common case -- no weapon driving any surface -- is one test in
+	// AnySurfaceOverride() and no work at all.
+	//
+	// Filtered to model index i HERE rather than inside the model, because a
+	// model has no way to know its own place in the MODELDEF stack.
+	FModelSurfaceOverride surfItems[DPSprite::RS_SURF_SLOTS];
+	FModelSurfaceOverrideList surfList;
+	if (psp && psp->AnySurfaceOverride())
+	{
+		int n = 0;
+		for (int s = 0; s < DPSprite::RS_SURF_SLOTS; s++)
+		{
+			if (psp->SurfOvModel[s] != i || psp->SurfOvSurface[s] < 0) continue;
+			FModelSurfaceOverride& o = surfItems[n++];
+			o.surface   = psp->SurfOvSurface[s];
+			o.frame     = psp->SurfOvFrame[s];
+			o.frameNext = psp->SurfOvNext[s];
+			o.lerp      = psp->SurfOvLerp[s];
+			o.hidden    = psp->SurfOvHidden[s];
+		}
+		if (n)
+		{
+			surfList.items = surfItems;
+			surfList.count = n;
+		}
+	}
+
+	mdl->RenderFrame(renderer, tex, drawinfo.modelframe, nextFrame ? drawinfo.modelframenext : drawinfo.modelframe, nextFrame ? frameinfo.inter : -1.f, translation, ssidp, boneStartingPosition, surfList.items ? &surfList : nullptr);
 }
 
 void RenderFrameModels(FModelRenderer *renderer, FLevelLocals *Level, const FSpriteModelFrame *smf, const FState *curState, int curTics, double ticFrac, FTranslationID translation, AActor* actor, const DPSprite* psp)
@@ -2730,4 +2763,54 @@ bool IsHUDModelForPlayerAvailable (player_t * player)
 unsigned int FSpriteModelFrame::getFlags(class DActorModelData * defs) const
 {
 	return (defs && defs->flags & MODELDATA_OVERRIDE_FLAGS)? (flags | defs->overrideFlagsSet) & ~(defs->overrideFlagsClear) : flags;
+}
+
+//===========================================================================
+//
+// RS FORK -- what surfaces does a model have, and what are they called.
+//
+// Per-surface frame addressing (p_pspr.h) is driven by SURFACE INDEX, because
+// a third of the donor library names its surfaces `Cube`, `Untitled` or
+// `pCylinder10` and several models repeat a name. An index is unambiguous;
+// a name is not. But an index is also unguessable, so this prints the pairing
+// and a part map can be written from it.
+//
+// Every LOADED model rather than just the one in your hands: the answer does
+// not change with what is equipped, models are loaded on demand so the list is
+// already scoped to what this session has actually touched, and reaching the
+// held weapon's FSpriteModelFrame from here would duplicate the render path's
+// own lookup for no gain.
+//
+//===========================================================================
+
+CCMD(modelsurfaces)
+{
+	const char* filter = (argv.argc() > 1) ? argv[1] : nullptr;
+	int shown = 0;
+
+	for (unsigned m = 0; m < Models.Size(); m++)
+	{
+		FModel* mdl = Models[m];
+		if (!mdl) continue;
+
+		int ns = mdl->GetSurfaceCount();
+		if (ns <= 0) continue;   // formats with no surface concept
+
+		const char* fn = mdl->mFileName.GetChars();
+		if (filter && !strstr(fn, filter)) continue;
+
+		shown++;
+		Printf(TEXTCOLOR_GOLD "%s" TEXTCOLOR_NORMAL "  (%d surfaces)\n", fn, ns);
+		for (int s = 0; s < ns; s++)
+		{
+			FName sn = mdl->GetSurfaceName(s);
+			Printf("    surface %2d  %s\n", s, sn == NAME_None ? "(unnamed)" : sn.GetChars());
+		}
+	}
+
+	if (!shown)
+	{
+		if (filter) Printf("no loaded model matches \"%s\"\n", filter);
+		else        Printf("no surfaced models loaded yet -- models load on demand, so equip the weapon first\n");
+	}
 }

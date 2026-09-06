@@ -153,6 +153,19 @@ bool FMD3Model::Load(const char * path, int lumpnum, const char * buffer, int le
 
 		surf = (md3_surface_t *)(((char*)surf) + LittleLong(surf->Ofs_End));
 
+		// RS fork -- keep the surface's own name. Every other field of this
+		// header was already being read and this one was skipped, so the part
+		// names the artist authored ("slide", "m37a2_pump", "Magazine") lived
+		// in the file and nowhere in memory. Copied through a buffer because
+		// the MD3 field is not required to be null-terminated when the name
+		// fills it.
+		{
+			char nbuf[sizeof(ss->Name) + 1];
+			memcpy(nbuf, ss->Name, sizeof(ss->Name));
+			nbuf[sizeof(ss->Name)] = 0;
+			s->Name = nbuf;
+		}
+
 		s->numSkins = LittleLong(ss->Num_Shaders);
 		s->numTriangles = LittleLong(ss->Num_Triangles);
 		s->numVertices = LittleLong(ss->Num_Verts);
@@ -378,14 +391,59 @@ int FMD3Model::FindFrame(const char* name, bool nodefault)
 //
 //===========================================================================
 
-void FMD3Model::RenderFrame(FModelRenderer *renderer, FGameTexture * skin, int frameno, int frameno2, double inter, FTranslationID translation, const FTextureID* surfaceskinids, int boneStartPosition)
+void FMD3Model::RenderFrame(FModelRenderer *renderer, FGameTexture * skin, int frameno, int frameno2, double inter, FTranslationID translation, const FTextureID* surfaceskinids, int boneStartPosition, const FModelSurfaceOverrideList* surfov)
 {
 	if ((unsigned)frameno >= Frames.Size() || (unsigned)frameno2 >= Frames.Size()) return;
 
+	// RS FORK -- PER-SURFACE FRAME ADDRESSING (model.h, FModelSurfaceOverride).
+	//
+	// The loop below already worked out each surface's OWN place in the vertex
+	// buffer -- `surf->vindex + frameno * surf->numVertices` -- because MD3
+	// stores every surface's vertices separately for every frame. The only
+	// thing shared was `frameno` itself. Letting it vary per surface is
+	// therefore not new machinery: it is the same index arithmetic with a
+	// different number in it, which is why a slide can now travel while the
+	// frame it is mounted in stays still.
+	//
+	// The interpolation factor is renderer STATE rather than a draw argument,
+	// so it is re-set only when a surface actually wants a different one and
+	// restored for the next surface that does not. Without that bookkeeping
+	// one part's blend would leak onto every part drawn after it.
 	renderer->SetInterpolation(inter);
+	float baseInter = (float)inter;
+	float curInter  = baseInter;
+
 	for (unsigned i = 0; i < Surfaces.Size(); i++)
 	{
 		MD3Surface * surf = &Surfaces[i];
+
+		int sFrame = frameno, sFrameNext = frameno2;
+		const FModelSurfaceOverride* ov = surfov ? surfov->Find((int)i) : nullptr;
+		if (ov)
+		{
+			// Not drawn at all. This is what "the magazine is out of the gun"
+			// is, and it costs one branch rather than a junk frame index
+			// aimed at nothing.
+			if (ov->hidden) continue;
+
+			// Out of range is IGNORED rather than clamped: a silently clamped
+			// frame is a wrong pose that looks deliberate, where falling back
+			// to the caller's frame is at least the pose everything else is in.
+			if (ov->frame >= 0 && (unsigned)ov->frame < Frames.Size())
+			{
+				sFrame     = ov->frame;
+				sFrameNext = (ov->frameNext >= 0 && (unsigned)ov->frameNext < Frames.Size())
+					? ov->frameNext : ov->frame;
+			}
+
+			float want = (ov->lerp >= 0.f) ? (ov->lerp > 1.f ? 1.f : ov->lerp) : baseInter;
+			if (want != curInter) { renderer->SetInterpolation(want); curInter = want; }
+		}
+		else if (curInter != baseInter)
+		{
+			renderer->SetInterpolation(baseInter);
+			curInter = baseInter;
+		}
 
 		// [BB] In case no skin is specified via MODELDEF, check if the MD3 has a skin for the current surface.
 		// Note: Each surface may have a different skin.
@@ -408,7 +466,9 @@ void FMD3Model::RenderFrame(FModelRenderer *renderer, FGameTexture * skin, int f
 		}
 
 		renderer->SetMaterial(surfaceSkin, false, translation);
-		renderer->SetupFrame(this, surf->vindex + frameno * surf->numVertices, surf->vindex + frameno2 * surf->numVertices, surf->numVertices, -1);
+		// sFrame / sFrameNext, not frameno / frameno2 -- this is the whole of
+		// per-surface addressing. Everything else above is bookkeeping.
+		renderer->SetupFrame(this, surf->vindex + sFrame * surf->numVertices, surf->vindex + sFrameNext * surf->numVertices, surf->numVertices, -1);
 		renderer->DrawElements(surf->numTriangles * 3, surf->iindex * sizeof(unsigned int));
 	}
 	renderer->SetInterpolation(0.f);

@@ -338,6 +338,55 @@ public:
 		return false;
 	}
 
+	// RS FORK -- PER-SURFACE FRAME ADDRESSING. One level finer than the arrays
+	// above, and the level a gun actually needs.
+	//
+	// ModelFramePart addresses a whole sub-model of a MODELDEF stack, which is
+	// right for the pieces an author shipped as their own file -- Rusted
+	// Legacy's magazine and hand are separate .md3s and this reaches them. It
+	// is NOT enough for the slide, because the slide is a SURFACE inside the
+	// pistol's own mesh, sharing the file with the frame, hammer and trigger.
+	// So is the shotgun's pump, and so is nearly every mechanical part in the
+	// ModelSwapper donor library: 32 of its 33 meshes are multi-surface and
+	// every one already animates those surfaces independently. The data was
+	// always there; nothing could address it.
+	//
+	// A SPARSE LIST, NOT A GRID. Addressing (model, surface) as a rectangular
+	// array would be 12 models x 64 surfaces of state on every psprite for a
+	// feature most weapons never touch. A handful of slots costs nothing when
+	// empty, which is the common case, and sixteen driven parts on one gun at
+	// one instant is already far past anything real.
+	//
+	// SLOTS ARE MATCHED ON (model, surface). SurfOvModel < 0 means the slot is
+	// unused; there is no ordering requirement and no need to pack them.
+	//
+	// BY INDEX, and that is forced by the assets rather than chosen. A third
+	// of the donor library names its surfaces `Cube`, `Untitled`,
+	// `pCylinder10` or `python.004`, and several models repeat a name --
+	// `Sights` twice on one shotgun, `Runko` three times on one chaingun. An
+	// index is always unambiguous. FModel::GetSurfaceName exists so the
+	// meaningful names can still be read off when authoring the map that says
+	// which index is the slide.
+	static constexpr int RS_SURF_SLOTS = 16;
+
+	int   SurfOvModel  [RS_SURF_SLOTS] = { -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1 };
+	int   SurfOvSurface[RS_SURF_SLOTS] = { -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1 };
+	int   SurfOvFrame  [RS_SURF_SLOTS] = { -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1 };
+	int   SurfOvNext   [RS_SURF_SLOTS] = { -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1 };
+	float SurfOvLerp   [RS_SURF_SLOTS] =
+		{ -1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f };
+	bool  SurfOvHidden [RS_SURF_SLOTS] = {};   // zero-init is false, i.e. drawn
+
+	// Does this layer drive any surface at all. Same reason as
+	// AnyModelPartActive: the render path asks once instead of sixteen times,
+	// and a weapon that never uses the feature pays a single test.
+	bool AnySurfaceOverride() const
+	{
+		for (int i = 0; i < RS_SURF_SLOTS; i++)
+			if (SurfOvModel[i] >= 0) return true;
+		return false;
+	}
+
 	// RS FORK -- SCRIPT-SUPPRESSED LAYER.
 	//
 	// Hides this layer in both psprite passes while leaving the weapon itself

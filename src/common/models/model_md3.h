@@ -45,6 +45,15 @@ class FMD3Model : public FModel
 
 	struct MD3Surface
 	{
+		// RS fork -- the surface's own name out of the MD3. The loader read
+		// every other field of the surface header and skipped this one, so
+		// the names the artist gave the parts ("slide", "m37a2_pump",
+		// "Magazine") sat in the file and existed nowhere in memory. Kept so
+		// a part map can be authored against something legible; the render
+		// path itself matches on index, because a third of the donor library
+		// names its surfaces "Cube".
+		FName Name = NAME_None;
+
 		unsigned numVertices;
 		unsigned numTriangles;
 		unsigned numSkins;
@@ -94,7 +103,12 @@ public:
 
 	virtual bool Load(const char * fn, int lumpnum, const char * buffer, int length) override;
 	virtual int FindFrame(const char* name, bool nodefault) override;
-	virtual void RenderFrame(FModelRenderer *renderer, FGameTexture * skin, int frame, int frame2, double inter, FTranslationID translation, const FTextureID* surfaceskinids, int boneStartPosition) override;
+	virtual void RenderFrame(FModelRenderer *renderer, FGameTexture * skin, int frame, int frame2, double inter, FTranslationID translation, const FTextureID* surfaceskinids, int boneStartPosition, const FModelSurfaceOverrideList* surfov = nullptr) override;
+	int   GetSurfaceCount() override { return (int)Surfaces.Size(); }
+	FName GetSurfaceName(int surface) override
+	{
+		return (surface >= 0 && (unsigned)surface < Surfaces.Size()) ? Surfaces[surface].Name : NAME_None;
+	}
 	void LoadGeometry();
 	void LoadGeometry(FileSys::FileData* lumpData) override;
 	void BuildVertexBuffer(FModelRenderer *renderer);

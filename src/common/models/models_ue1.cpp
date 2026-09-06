@@ -230,7 +230,7 @@ int FUE1Model::FindFrame(const char* name, bool nodefault)
 	return index;
 }
 
-void FUE1Model::RenderFrame( FModelRenderer *renderer, FGameTexture *skin, int frame, int frame2, double inter, FTranslationID translation, const FTextureID* surfaceskinids, int boneStartPosition)
+void FUE1Model::RenderFrame( FModelRenderer *renderer, FGameTexture *skin, int frame, int frame2, double inter, FTranslationID translation, const FTextureID* surfaceskinids, int boneStartPosition, const FModelSurfaceOverrideList* surfov)
 {
 	// the moment of magic
 	if ( (frame < 0) || (frame2 < 0) || (frame >= numFrames) || (frame2 >= numFrames) ) return;

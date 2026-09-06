@@ -158,6 +158,54 @@ enum EFrameError
 	FErr_Singleframe = -3
 };
 
+// RS FORK -- PER-SURFACE FRAME ADDRESSING.
+//
+// A model's frame number applies to the WHOLE FILE, which is one number for
+// every surface in it. That is what stops a gun's slide from moving while its
+// body stays put -- and MD3 has stored the data to do it all along: every
+// surface owns its own vertex block per frame (models_md3.cpp, the draw loop
+// already computes `surf->vindex + frameno * surf->numVertices` per surface).
+// The frame was simply never allowed to vary between them.
+//
+// This is the MD3 answer to a skeleton, and for a fork whose weapons are all
+// MD3 -- and whose Quest target will never have the bone API -- it is the only
+// articulation available. It is the same split-mesh technique Quake 3 used for
+// head/torso/legs, driven from script instead of from an animation.
+//
+// ADDRESSED BY INDEX, NOT NAME, and that is a decision the asset library
+// forced rather than a preference. Across the donor meshes here, a third of
+// the surfaces are named `Cube`, `Untitled`, `pCylinder10`, `basic boot` or
+// `python.004` -- exporter defaults with no meaning -- and several models
+// repeat a name (`Sights` twice, `Runko` three times). Index always works;
+// GetSurfaceName below exists so the meaningful names can still be read off
+// when authoring the map that says which index is the slide.
+struct FModelSurfaceOverride
+{
+	int   surface   = -1;     // which surface index this applies to
+	int   frame     = -1;     // <0 leaves the caller's frame alone
+	int   frameNext = -1;     // <0 means "same as frame", i.e. no blend
+	float lerp      = -1.f;   // <0 keeps the caller's interpolation
+	bool  hidden    = false;  // skip this surface entirely
+};
+
+// Passed as one pointer so adding this to the RenderFrame virtual costs every
+// model format a single defaulted parameter it can ignore.
+struct FModelSurfaceOverrideList
+{
+	const FModelSurfaceOverride* items = nullptr;
+	int count = 0;
+
+	// Linear, over a handful of entries. A map would cost more to build every
+	// frame than this costs to walk.
+	const FModelSurfaceOverride* Find(int surface) const
+	{
+		if (!items) return nullptr;
+		for (int i = 0; i < count; i++)
+			if (items[i].surface == surface) return &items[i];
+		return nullptr;
+	}
+};
+
 class FModel
 {
 public:
@@ -195,7 +243,18 @@ public:
 	virtual int FindLastFrame(FName name) { return FErr_NotFound; }
 	virtual double FindFramerate(FName name) { return FErr_NotFound; }
 
-	virtual void RenderFrame(FModelRenderer *renderer, FGameTexture * skin, int frame, int frame2, double inter, FTranslationID translation, const FTextureID* surfaceskinids, int boneStartPosition) = 0;
+	// RS fork -- the trailing surfov is the per-surface frame override list
+	// (see FModelSurfaceOverride above). Defaulted, so every existing caller
+	// and every format that does not implement it are untouched; only MD3
+	// honours it today.
+	virtual void RenderFrame(FModelRenderer *renderer, FGameTexture * skin, int frame, int frame2, double inter, FTranslationID translation, const FTextureID* surfaceskinids, int boneStartPosition, const FModelSurfaceOverrideList* surfov = nullptr) = 0;
+
+	// RS fork -- how many surfaces this model has, and what they are called.
+	// Not used by rendering: this is how a human finds out that surface 2 of
+	// the Beretta is the slide, so a part map can be written against indices.
+	// Default 0/None for formats with no surface concept.
+	virtual int   GetSurfaceCount() { return 0; }
+	virtual FName GetSurfaceName(int surface) { return NAME_None; }
 	virtual void BuildVertexBuffer(FModelRenderer *renderer) = 0;
 	virtual void AddSkins(uint8_t *hitlist, const FTextureID* surfaceskinids) = 0;
 	virtual float getAspectFactor(float vscale) { return 1.f; }

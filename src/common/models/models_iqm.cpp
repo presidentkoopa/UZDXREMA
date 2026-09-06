@@ -525,7 +525,7 @@ double IQMModel::FindFramerate(FName name)
 	return FErr_NotFound;
 }
 
-void IQMModel::RenderFrame(FModelRenderer* renderer, FGameTexture* skin, int frame1, int frame2, double inter, FTranslationID translation, const FTextureID* surfaceskinids, int boneStartPosition)
+void IQMModel::RenderFrame(FModelRenderer* renderer, FGameTexture* skin, int frame1, int frame2, double inter, FTranslationID translation, const FTextureID* surfaceskinids, int boneStartPosition, const FModelSurfaceOverrideList* surfov)
 {
 
 	renderer->SetupFrame(this, 0, 0, NumVertices, boneStartPosition >= 0 ? boneStartPosition : screen->mBones->UploadBones(boneData));

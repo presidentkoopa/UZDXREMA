@@ -390,7 +390,7 @@ float FVoxelModel::getAspectFactor(float stretch)
 //
 //===========================================================================
 
-void FVoxelModel::RenderFrame(FModelRenderer *renderer, FGameTexture * skin, int frame, int frame2, double inter, FTranslationID translation, const FTextureID*, int boneStartPosition)
+void FVoxelModel::RenderFrame(FModelRenderer *renderer, FGameTexture * skin, int frame, int frame2, double inter, FTranslationID translation, const FTextureID*, int boneStartPosition, const FModelSurfaceOverrideList* surfov)
 {
 	renderer->SetMaterial(skin, true, translation);
 	renderer->SetupFrame(this, 0, 0, 0, -1);
