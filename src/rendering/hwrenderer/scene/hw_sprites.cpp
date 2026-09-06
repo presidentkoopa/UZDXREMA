@@ -202,7 +202,10 @@ void HWSprite::DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent)
 		// below), and fullbright is implemented as lightlevel = 255 -- which
 		// arrives here indistinguishable from a brightly lit surface and gets
 		// scaled to nothing along with everything else.
-		state.SetDarknessExempt(fullbright);
+		// Fullbright things are exempt outright; everything else takes as much
+		// of the darkening as the level says actors should. See
+		// FLevelLocals::DarkActorExempt.
+		state.SetDarknessExempt(fullbright ? 1.f : (float)di->Level->DarkActorExempt);
 		if (translucentCanvas)
 		{
 			state.SetTextureMode(TM_NORMAL);
@@ -474,7 +477,7 @@ void HWSprite::DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent)
 	state.SetAddColor(0);
 	state.EnableTexture(true);
 	state.SetDynLight(0, 0, 0);
-	state.SetDarknessExempt(false);
+	state.SetDarknessExempt(0.f);
 }
 
 //==========================================================================

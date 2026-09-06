@@ -261,7 +261,7 @@ struct StreamData
 	// [BB] DARKNESS EXEMPTION, per draw. Not flat-glow business despite the
 	// company it keeps -- it sits here because this was uFlatGlowPad2, so it
 	// costs nothing and MAX_STREAM_DATA is unchanged. See SetDarknessExempt.
-	int uDarknessExempt;
+	float uDarknessExempt;
 	FVector4 uFlatGlowLines[64];
 
 	FVector4 uGradientTopPlane;
@@ -398,7 +398,7 @@ public:
 		mStreamData.uFlatGlowFar = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uFlatGlowFalloff = 0;
 		mStreamData.uFlatGlowIsCeiling = 0;
-		mStreamData.uDarknessExempt = 0;
+		mStreamData.uDarknessExempt = 0.f;
 		mStreamData.uFlatGlowLineCount = 0;
 		mStreamData.uGradientTopPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uGradientBottomPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -655,9 +655,13 @@ public:
 	// Additive and default-off: nothing is exempt until something asks, so
 	// every existing caller is untouched. Any draw that is emissive rather
 	// than lit can use it, not only sprites.
-	void SetDarknessExempt(bool exempt)
+	// PARTIAL, not all-or-nothing. 0 = darkened with everything else, 1 =
+	// untouched by it, and anything between is a partial. It was a yes/no;
+	// actors need the middle, because a room taken to black takes its monsters
+	// with it and a thing you cannot see at all is not atmosphere.
+	void SetDarknessExempt(float exempt)
 	{
-		mStreamData.uDarknessExempt = exempt ? 1 : 0;
+		mStreamData.uDarknessExempt = exempt;
 	}
 
 	void SetFlatGlowParams(float r, float g, float b, float reach, const FVector4 &farColor, int falloff, int lineCount, const FVector4* lines, int isCeiling = 0)

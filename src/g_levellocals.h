@@ -1613,6 +1613,17 @@ public:
 	double DarkHeightRef = 0;       // world Z the pooling starts from
 	double DarkHeightRange = 256;
 
+	// [BB] HOW MUCH OF THE DARKNESS ACTORS ARE SPARED, 0 to 1.
+	//
+	// The darkness pass takes the whole scene down together, which takes the
+	// monsters with it -- correct for a wall and wrong for the thing walking
+	// towards you, which simply stops existing. 0 is the old behaviour, 1
+	// leaves actors at full brightness, and the useful settings are between.
+	//
+	// Per level rather than per actor: it is a property of how dark the ROOM
+	// has been made, not of any one thing standing in it.
+	double DarkActorExempt = 0;
+
 	// [BB] FOG SLAB -- fog with a TOP.
 	//
 	// Sector fog is a distance tint on surfaces: the further a wall is, the

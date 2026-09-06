@@ -3938,6 +3938,24 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetDarknessSpace, SetDarknessSpace)
 	return 0;
 }
 
+// [BB] HOW MUCH OF THE DARKNESS ACTORS ARE SPARED.
+//
+// The darkness pass takes the scene down as a whole, monsters included, so a
+// room dark enough to be worth lighting is a room you cannot see anything
+// coming in. 0 is the old behaviour and stays the default.
+static void SetDarknessActors(FLevelLocals *self, double exempt)
+{
+	self->DarkActorExempt = clamp(exempt, 0.0, 1.0);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetDarknessActors, SetDarknessActors)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(exempt);
+	SetDarknessActors(self, exempt);
+	return 0;
+}
+
 // [BB] FOG WITH A TOP.
 //
 // Sector fog tints surfaces by distance and simulates nothing in the air, so

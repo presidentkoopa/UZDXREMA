@@ -453,7 +453,7 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 		uniform vec4 uFlatGlowFar;
 		uniform int uFlatGlowFalloff;
 		uniform int uFlatGlowIsCeiling;
-		uniform int uDarknessExempt;
+		uniform float uDarknessExempt;
 		uniform int uFlatGlowLineCount;
 		uniform vec4 uFlatGlowLines[64];
 

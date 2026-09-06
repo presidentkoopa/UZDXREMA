@@ -440,7 +440,7 @@ static const char *shaderBindings = R"(
 		int uFlatGlowFalloff;
 		int uFlatGlowLineCount;
 		int uFlatGlowIsCeiling;
-		int uDarknessExempt;
+		float uDarknessExempt;
 		vec4 uFlatGlowLines[64];
 
 		vec4 uGradientTopPlane;

@@ -1153,6 +1153,11 @@ struct LevelLocals native
 	// Mode 0 = off. Clearscope for the same reason as above.
 	native clearscope void SetDarkness(int mode, double adjust, double minLight, double preGain, double postGain);
 	native clearscope void SetDarknessSpace(double distDepth, double distRange, double heightDepth, double heightRef, double heightRange);
+	// [BB] How much of the darkness actors are spared, 0 to 1. The darkness pass
+	// takes the whole scene down together, monsters included; 0 is that old
+	// behaviour, 1 leaves actors at full brightness, and the useful settings are
+	// in between.
+	native clearscope void SetDarknessActors(double exempt);
 	native clearscope void ClearDarkness();
 
 	// [BB] Fog with a top -- a horizontal slab of mist with a world-space

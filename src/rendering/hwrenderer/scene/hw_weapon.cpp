@@ -174,6 +174,17 @@ void HWDrawInfo::DrawPSprite(HUDSprite *huds, FRenderState &state)
 		}
 		state.SetAddColor(add);
 	}
+	// [BB] THE PSPRITE PATH TAKES THE SAME EXEMPTION THE SPRITE PATH DOES.
+	//
+	// Set only in HWSprite::DrawSprite before this, so the Spare-actors setting
+	// reached world actors and stopped at anything drawn as a player sprite --
+	// while the render state's default left psprites taking the darkening in
+	// full. That is invisible until you can switch between the two, and the VR
+	// hands can be either: world actors or psprites, toggled at runtime. The
+	// same hands would darken differently depending on which mode they were in,
+	// with nothing to explain why.
+	state.SetDarknessExempt((float)Level->DarkActorExempt);
+
 	state.SetDynLight(huds->dynrgb[0], huds->dynrgb[1], huds->dynrgb[2]);
 	state.EnableBrightmap(!(huds->RenderStyle.Flags & STYLEF_ColorIsFixed));
 

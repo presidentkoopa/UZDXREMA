@@ -2908,10 +2908,14 @@ vec4 getLightColor(Material material, float fogdist, float fogfactor)
 	// and every HUD element gets darkened by its OWN brightness. The fallback
 	// is right for fog, where the colour genuinely is the light. It is wrong
 	// for a status bar, which was never in the world to be dark.
-	if (uDarkness.x > 0.0 && uFogEnabled != -3 && uDarknessExempt == 0)
+	if (uDarkness.x > 0.0 && uFogEnabled != -3 && uDarknessExempt < 1.0)
 	{
 		float dl = (uLightLevel >= 0.0) ? uLightLevel : grayscale(vec4(color.rgb, 1.0));
-		color.rgb *= DarknessAt(dl);
+		// Partial, not all-or-nothing. uDarknessExempt is how much of the
+		// darkening this draw is spared -- 0 takes all of it, 1 takes none,
+		// and actors sit somewhere in between so a blacked-out room still has
+		// things visible moving in it.
+		color.rgb *= mix(DarknessAt(dl), 1.0, clamp(uDarknessExempt, 0.0, 1.0));
 	}
 
 	//
