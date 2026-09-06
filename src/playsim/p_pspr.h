@@ -271,6 +271,73 @@ public:
 	int   ModelFrameNext = -1;   // frame to blend toward
 	float ModelFrameLerp = -1.f; // 0..1 blend factor; <0 = use stock timing
 
+	// RS FORK -- PER-PART FRAME ADDRESSING. The MD3 answer to a skeleton.
+	//
+	// ModelFrame above is ONE number applied to EVERY sub-model in the stack.
+	// That is right for a donor mesh playing a single animation across its
+	// parts, and wrong for a gun.
+	//
+	// A MODELDEF block already carries a weapon as SEPARATE models -- Rusted
+	// Legacy's pistol is berreta.md3 + berreta_mag.md3 + hand.md3, three
+	// stacked models each with their own FrameIndex rows. But one shared frame
+	// number means the only way to show "slide back AND magazine out" is a
+	// baked frame for that exact combination, so an author ends up hand-
+	// authoring the cross product of every part's every position. That
+	// explosion is what stopped the mod those models came from: six duplicate
+	// MODELDEF blocks per weapon and a state-machine call on every frame line.
+	//
+	// Addressed per part, each gets its own short frame strip and script drives
+	// them independently -- the slide follows the hand racking it while the
+	// magazine is already gone. No bones, no rig, no IQM: the same split-mesh
+	// technique Quake 3 used for head/torso/legs, reachable from ZScript. It is
+	// also the only articulation MD3 can express at all, which matters because
+	// the Quest engine will never have the bone API.
+	//
+	// PER-PART OVERRIDES THE SCALAR, FOR ITS OWN INDEX ONLY. A caller that sets
+	// both gets per-part where it asked for it and the scalar everywhere else.
+	// ModelSwapper sets only the scalar and is untouched by all of this.
+	//
+	// ModelPartHidden drops a part from the draw entirely, which is what "the
+	// magazine is out of the gun" actually is. Rusted Legacy faked that by
+	// pointing the magazine at a junk frame index (its MODELDEF really does say
+	// `FrameIndex PISG K 1 99`) and relying on an out-of-range frame drawing
+	// nothing. A real switch costs nothing and does not depend on that.
+	//
+	// IN-CLASS INITIALISERS, SPELLED OUT, for exactly the reason Tint/Glow and
+	// ModelFrame above give: the private savegame constructor runs no
+	// constructor body, and a garbage frame number indexes a model's frame
+	// array with whatever happened to be in that memory.
+	//
+	// TWELVE is a working ceiling, not a format limit -- FSpriteModelFrame
+	// holds modelsAmount in a uint8_t. A gun split into body, slide, magazine,
+	// hammer, trigger and two hands is seven. Parts at or past this index fall
+	// through to the scalar path rather than failing.
+	static constexpr int RS_MODEL_PARTS = 12;
+
+	int   ModelFramePart    [RS_MODEL_PARTS] = { -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1 };
+	int   ModelFrameNextPart[RS_MODEL_PARTS] = { -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1 };
+	float ModelFrameLerpPart[RS_MODEL_PARTS] =
+		{ -1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f };
+	bool  ModelPartHidden   [RS_MODEL_PARTS] = {};   // zero-init is false, i.e. drawn
+
+	// Is ANY per-part field live on this layer.
+	//
+	// Exists so the two places that need the answer -- CalcModelFrame deciding
+	// whether a blend target is required, and the render loop deciding whether
+	// to consult the arrays at all -- ask one short question instead of twelve,
+	// and so the whole mechanism costs a single test on every weapon that never
+	// uses it. Computed rather than cached: a stored flag is one more thing to
+	// keep true across a savegame, and the loop is twelve iterations.
+	bool AnyModelPartActive() const
+	{
+		for (int i = 0; i < RS_MODEL_PARTS; i++)
+		{
+			if (ModelFramePart[i] >= 0 || ModelFrameLerpPart[i] >= 0.f || ModelPartHidden[i])
+				return true;
+		}
+		return false;
+	}
+
 	// RS FORK -- SCRIPT-SUPPRESSED LAYER.
 	//
 	// Hides this layer in both psprite passes while leaving the weapon itself
@@ -321,6 +388,7 @@ public:
 	// different fits of one model.
 	DVector3 AnchorOfs    = { 0, 0, 0 };
 	DVector3 AnchorAngles = { 0, 0, 0 };   // yaw, pitch, roll
+
 
 	// Where the anchored bone actually resolved to, as an offset from its
 	// weapon's origin in the model's axes, in map units. Written by the

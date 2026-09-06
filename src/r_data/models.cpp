@@ -1534,6 +1534,22 @@ bool CalcModelOverrides(int i, const FSpriteModelFrame *smf, DActorModelData* da
 	out.skinid.SetNull();
 	out.surfaceskinids.Clear();
 
+	// [RS] A part dropped from the draw entirely -- which is what "the magazine
+	// is out of the gun" actually is. The alternative a MODELDEF has to reach
+	// for is pointing the part at a junk frame index and relying on an
+	// out-of-range frame drawing nothing; a real switch costs nothing and does
+	// not depend on that.
+	//
+	// CAVEAT FOR RIGGED MODELS: RenderModelFrame threads boneStartingPosition
+	// and evaluatedSingle across iterations, so skipping a part of an IQM whose
+	// bones are evaluated once for the whole stack can leave later parts reading
+	// a bone offset that was never written. MD3 has no bones and is the case
+	// this exists for; hiding a part of a skinned model is untested.
+	if (psp && i >= 0 && i < DPSprite::RS_MODEL_PARTS && psp->ModelPartHidden[i])
+	{
+		return false;
+	}
+
 	if (data)
 	{
 		//modelID
@@ -1585,6 +1601,30 @@ bool CalcModelOverrides(int i, const FSpriteModelFrame *smf, DActorModelData* da
 				out.modelframe = smf->modelframes[i];
 				if (info.smfNext) out.modelframenext = info.smfNext->modelframes[i];
 			}
+		}
+
+		// [RS] PER-PART FRAME ADDRESSING, and it OVERRIDES everything above for
+		// its own index only. A caller that sets both gets per-part where it
+		// asked for it and the scalar everywhere else, so anything setting only
+		// the scalar is untouched.
+		//
+		// ModelFrame is ONE number applied to EVERY sub-model in the stack --
+		// right for a donor mesh playing a single animation across its parts,
+		// wrong for a gun. A weapon is already SEPARATE models in MODELDEF, each
+		// with its own FrameIndex rows, but one shared frame number means the
+		// only way to show "slide back AND magazine out" is a baked frame for
+		// that exact combination: the cross product of every part's every
+		// position, hand-authored.
+		//
+		// Out of range is deliberately not clamped. FMD3Model::RenderFrame
+		// rejects an impossible frame and draws nothing, which is a visible
+		// failure rather than a silent wrong pose.
+		if (psp && i >= 0 && i < DPSprite::RS_MODEL_PARTS && psp->ModelFramePart[i] >= 0)
+		{
+			out.modelframe     = psp->ModelFramePart[i];
+			out.modelframenext = (psp->ModelFrameNextPart[i] >= 0)
+				? psp->ModelFrameNextPart[i] : psp->ModelFramePart[i];
+			out.modelframe_explicit = true;
 		}
 
 		//skinID
@@ -1891,8 +1931,32 @@ void RenderFrameModels(FModelRenderer *renderer, FLevelLocals *Level, const FSpr
 	int boneStartingPosition = -1;
 	bool evaluatedSingle = false;
 
+	// [RS] Per-part interpolation. frameinfo.inter is one number for the whole
+	// stack, so a part driven to its own frame pair also needs its own blend
+	// position -- otherwise the slide racks at whatever rate the shared
+	// animation happens to be at.
+	//
+	// baseInter is captured because the loop below overwrites frameinfo.inter
+	// per part and every part that does NOT set one must get the shared value
+	// back rather than the previous part's. AnyModelPartActive() keeps the whole
+	// thing out of the way when nothing is using it, which is every existing
+	// caller.
+	const float baseInter = frameinfo.inter;
+	const bool  anyPart   = (psp && psp->AnyModelPartActive());
+
 	for (unsigned i = 0; i < frameinfo.modelsamount; i++)
 	{
+		if (anyPart)
+		{
+			frameinfo.inter = baseInter;
+			if (i < (unsigned)DPSprite::RS_MODEL_PARTS && psp->ModelFrameLerpPart[i] >= 0.f)
+			{
+				float f = psp->ModelFrameLerpPart[i];
+				if (f > 1.f) f = 1.f;
+				frameinfo.inter = f;
+			}
+		}
+
 		if (CalcModelOverrides(i, smf, modelData, frameinfo, drawinfo, is_decoupled, psp))
 		{
 			RenderModelFrame(renderer, i, smf, modelData, frameinfo, drawinfo, is_decoupled, tic, translation, boneStartingPosition, evaluatedSingle, psp);

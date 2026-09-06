@@ -3100,6 +3100,79 @@ class PSprite : Object native play
 	native int ModelFrameNext;
 	native float ModelFrameLerp;
 
+	// RS fork -- PER-PART frame addressing. The three fields above are ONE
+	// number applied to EVERY sub-model in a MODELDEF stack; these address one
+	// sub-model each, by its model index, and override the scalar for that
+	// index only.
+	//
+	// This is what lets a gun be animated as PARTS instead of as poses. Declare
+	// the body, slide, magazine and hand as separate models in MODELDEF, then
+	// drive them independently -- the slide can travel with the hand racking it
+	// while the magazine is already gone -- without pre-baking a frame for
+	// every combination of every part's position. It is the only articulation
+	// MD3 can express, and it needs no bones, no rig and no IQM.
+	//
+	// ModelPartHidden removes a part from the draw entirely, which is what a
+	// magazine being out of the gun actually is.
+	//
+	// All -1 (and hidden all false) = inactive, and every existing weapon is
+	// exactly that, so nothing that does not opt in changes at all.
+	//
+	// 12 is DPSprite::RS_MODEL_PARTS; parts past that index fall through to the
+	// scalar path rather than failing. Indices outside 0..11 are ignored.
+	native int ModelFramePart[12];
+	native int ModelFrameNextPart[12];
+	native float ModelFrameLerpPart[12];
+	native bool ModelPartHidden[12];
+
+	// Put every part back on the scalar path. Worth calling when a weapon is
+	// deselected or a reload is aborted: a psprite layer is reused across
+	// weapon switches and these fields are serialised, so a part left driven
+	// stays driven -- a slide locked back on a gun that is no longer in your
+	// hand, and no state anywhere saying why.
+	void ClearModelParts()
+	{
+		for (int i = 0; i < 12; i++)
+		{
+			ModelFramePart[i]     = -1;
+			ModelFrameNextPart[i] = -1;
+			ModelFrameLerpPart[i] = -1.0;
+			ModelPartHidden[i]    = false;
+		}
+	}
+
+	// Drive one part. `lerp` below 0 leaves the part on whatever blend the
+	// layer already had; 0..1 blends frame -> next explicitly, which is what
+	// makes a hand-driven slide travel rather than snap between poses.
+	void SetModelPart(int part, int frame, int next = -1, double lerp = -1.0)
+	{
+		if (part < 0 || part >= 12) return;
+		ModelFramePart[part]     = frame;
+		ModelFrameNextPart[part] = next;
+		ModelFrameLerpPart[part] = lerp;
+	}
+
+	// Scrub one part along its own frame strip. `t` is 0..1 across frames
+	// `first`..`last`, which is the shape a pull gesture wants: hand travel in,
+	// continuous part position out.
+	void SetModelPartScrub(int part, int first, int last, double t)
+	{
+		if (part < 0 || part >= 12) return;
+		if (t < 0.0) t = 0.0;
+		if (t > 1.0) t = 1.0;
+
+		int span = last - first;
+		double exact = first + span * t;
+		int lo = int(exact);
+		// Clamped so the final frame never blends toward one past the end,
+		// which FMD3Model::RenderFrame would reject and draw as nothing.
+		int hi = (span >= 0) ? min(lo + 1, last) : max(lo - 1, last);
+
+		ModelFramePart[part]     = lo;
+		ModelFrameNextPart[part] = hi;
+		ModelFrameLerpPart[part] = exact - lo;
+	}
+
 	// Hide this layer without touching the weapon behind it. The weapon keeps
 	// its states, damage and slot; only the drawing stops.
 	native bool NoDraw;
