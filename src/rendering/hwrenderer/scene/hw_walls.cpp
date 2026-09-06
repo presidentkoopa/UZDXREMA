@@ -115,6 +115,23 @@ extern int lightsWallPerEye;
 
 bool IsDistanceCulled(seg_t *line);
 
+// [BB] HOW MUCH FOG THIS SECTOR GETS.
+//
+// A sky ceiling is outdoors -- the marker every Doom map already carries, so
+// this needs no new mapping work and no new flag. Shared by the wall, flat and
+// sprite paths the same way SetGlowPlanes is, because all three have to agree
+// or the boundary lands in the wrong place.
+//
+// Both scales default to 1, so a level that never asks for this is fogged
+// exactly as it was.
+float FogScaleForSector(FLevelLocals *Level, sector_t *sec)
+{
+	if (Level == nullptr) return 1.f;
+	if (sec == nullptr) return (float)Level->FogIndoorScale;
+	const bool outdoor = sec->GetTexture(sector_t::ceiling) == skyflatnum;
+	return (float)(outdoor ? Level->FogOutdoorScale : Level->FogIndoorScale);
+}
+
 void SetGlowPlanes(FRenderState &state, const secplane_t& top, const secplane_t& bottom)
 {
 	auto& tn = top.Normal();
@@ -311,6 +328,7 @@ void HWWall::RenderTexturedWall(HWWallDispatcher*di, FRenderState &state, int rf
 	// draws anyway. Setting them unconditionally costs two stores on the
 	// draws that previously skipped them, and buys a fog surface that does not
 	// vanish the moment a wall happens to have no glow on it.
+	state.SetFogDensityScale(FogScaleForSector(di->Level, frontsector));
 	SetGlowPlanes(state, frontsector->ceilingplane, frontsector->floorplane);
 
 	state.SetMaterial(texture, UF_Texture, 0, flags & 3, NO_TRANSLATION, -1);

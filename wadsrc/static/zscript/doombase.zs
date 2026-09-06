@@ -1158,6 +1158,9 @@ struct LevelLocals native
 	// behaviour, 1 leaves actors at full brightness, and the useful settings are
 	// in between.
 	native clearscope void SetDarknessActors(double exempt);
+	// [BB] Fog by room type. A sky ceiling is outdoors, anything else indoors.
+	// Both default to 1, which is the fog exactly as configured.
+	native clearscope void SetFogZones(double indoor, double outdoor);
 	native clearscope void ClearDarkness();
 
 	// [BB] Fog with a top -- a horizontal slab of mist with a world-space

@@ -454,6 +454,7 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 		uniform int uFlatGlowFalloff;
 		uniform int uFlatGlowIsCeiling;
 		uniform float uDarknessExempt;
+		uniform float uFogDensityScale;
 		uniform int uFlatGlowLineCount;
 		uniform vec4 uFlatGlowLines[64];
 
@@ -887,6 +888,7 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 	muFlatGlowFalloff.Init(hShader, "uFlatGlowFalloff");
 	muFlatGlowIsCeiling.Init(hShader, "uFlatGlowIsCeiling");
 	muDarknessExempt.Init(hShader, "uDarknessExempt");
+	muFogDensityScale.Init(hShader, "uFogDensityScale");
 	muFlatGlowLineCount.Init(hShader, "uFlatGlowLineCount");
 	muFlatGlowLinesLoc = glGetUniformLocation(hShader, "uFlatGlowLines");
 	muGradientBottomPlane.Init(hShader, "uGradientBottomPlane");

@@ -393,8 +393,11 @@ void HWFlat::DrawFloodPlanes(HWDrawInfo *di, FRenderState &state)
 //
 //
 //==========================================================================
+float FogScaleForSector(FLevelLocals *Level, sector_t *sec);
+
 void HWFlat::DrawFlat(HWDrawInfo *di, FRenderState &state, bool translucent)
 {
+	state.SetFogDensityScale(FogScaleForSector(di->Level, sector));
 #ifdef _DEBUG
 	if (sector->sectornum == gl_breaksec)
 	{

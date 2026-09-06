@@ -129,8 +129,11 @@ CUSTOM_CVAR(Int, gl_fuzztype, 8, CVAR_ARCHIVE)
 // not in a header because until now nothing outside that file wanted it.
 void SetGlowPlanes(FRenderState &state, const secplane_t& top, const secplane_t& bottom);
 
+float FogScaleForSector(FLevelLocals *Level, sector_t *sec);
+
 void HWSprite::DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent)
 {
+	state.SetFogDensityScale(FogScaleForSector(di->Level, actor ? actor->Sector : nullptr));
 	bool additivefog = false;
 	bool foglayer = false;
 	int rel = fullbright ? 0 : getExtraLight();

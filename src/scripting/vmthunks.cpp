@@ -3956,6 +3956,23 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetDarknessActors, SetDarknessActors
 	return 0;
 }
 
+// [BB] Fog by room type -- see FLevelLocals::FogIndoorScale. A sky ceiling is
+// outdoors, anything else is indoors, which is the marker every Doom map
+// already carries.
+static void SetFogZones(FLevelLocals *self, double indoor, double outdoor)
+{
+	self->FogIndoorScale = max(indoor, 0.0);
+	self->FogOutdoorScale = max(outdoor, 0.0);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogZones, SetFogZones)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(indoor); PARAM_FLOAT(outdoor);
+	SetFogZones(self, indoor, outdoor);
+	return 0;
+}
+
 // [BB] FOG WITH A TOP.
 //
 // Sector fog tints surfaces by distance and simulates nothing in the air, so

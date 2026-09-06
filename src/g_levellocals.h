@@ -1726,6 +1726,13 @@ public:
 	double   FogFollowTop = 0;
 	double   FogFollowBottom = 0;
 
+	// [BB] FOG BY ROOM TYPE. A sky ceiling is outdoors and anything else is
+	// indoors -- the marker every Doom map already carries, so this needs no new
+	// mapping work and no new flag. Both default to 1, so a level that never asks
+	// is fogged exactly as it was.
+	double   FogIndoorScale = 1.0;
+	double   FogOutdoorScale = 1.0;
+
 	// [BB] What survives the colour drain. Threshold 0 = the old all-or-nothing
 	// behaviour, exactly.
 	double   DesatKeep = 0;

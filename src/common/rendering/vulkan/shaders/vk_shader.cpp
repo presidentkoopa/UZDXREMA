@@ -459,7 +459,7 @@ static const char *shaderBindings = R"(
 		float uGlobalFadeGradient;
 		int uLightRangeLimit;
 
-		int padding1;
+		float uFogDensityScale;
 		int padding2;
 		int padding3;
 	};
@@ -577,6 +577,7 @@ static const char *shaderBindings = R"(
 	#define uFlatGlowFalloff data[uDataIndex].uFlatGlowFalloff
 	#define uFlatGlowIsCeiling data[uDataIndex].uFlatGlowIsCeiling
 	#define uDarknessExempt data[uDataIndex].uDarknessExempt
+	#define uFogDensityScale data[uDataIndex].uFogDensityScale
 	#define uFlatGlowLineCount data[uDataIndex].uFlatGlowLineCount
 	#define uFlatGlowLines data[uDataIndex].uFlatGlowLines
 	#define uGradientTopPlane data[uDataIndex].uGradientTopPlane

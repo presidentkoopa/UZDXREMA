@@ -2422,7 +2422,9 @@ vec4 FogSlabAt(vec3 fragPos)
 	// fragment. The fog for a pixel is an integral along that whole line, and
 	// sampling at the far end makes the field appear pinned to the walls --
 	// you would walk through a bank and see it stay where the geometry is.
-	float dens = uFogSlab.y;
+	// Scaled per draw -- a courtyard and a cellar want opposite amounts of this,
+	// and the sector picked which. 1 is the slab as configured.
+	float dens = uFogSlab.y * uFogDensityScale;
 	if (uFogNoise.y > 0.0)
 	{
 		vec2 mid = mix(eye.xz, fragPos.xz, 0.5) + uFogNoise.zw * timer;
@@ -2544,7 +2546,11 @@ vec4 FogSlabAt(vec3 fragPos)
 	// constant -- a tendril growing out of a rolling surface has to roll with
 	// it or it hangs unattached in the air above the mist.
 	if (haveTend)
-		amount = clamp(amount + FogTendrilAt(fragPos, topFrag), 0.0, 1.0);
+		// SCALED WITH THE SLAB. The body honours the indoor/outdoor split and the
+		// wisps did not, so a preset that is thick indoors and almost nothing
+		// outdoors put full-strength tendrils standing in clear air the moment you
+		// stepped outside.
+		amount = clamp(amount + FogTendrilAt(fragPos, topFrag) * uFogDensityScale, 0.0, 1.0);
 
 	vec3 col = uFogSlabColor.rgb;
 

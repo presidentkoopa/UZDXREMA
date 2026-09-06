@@ -181,6 +181,7 @@ bool FGLRenderState::ApplyShader()
 	activeShader->muFlatGlowFalloff.Set(mStreamData.uFlatGlowFalloff);
 	activeShader->muFlatGlowIsCeiling.Set(mStreamData.uFlatGlowIsCeiling);
 	activeShader->muDarknessExempt.Set(mStreamData.uDarknessExempt);
+	activeShader->muFogDensityScale.Set(mStreamData.uFogDensityScale);
 	activeShader->muFlatGlowLineCount.Set(mStreamData.uFlatGlowLineCount);
 	if (mStreamData.uFlatGlowLineCount > 0 && activeShader->muFlatGlowLinesLoc >= 0)
 	{

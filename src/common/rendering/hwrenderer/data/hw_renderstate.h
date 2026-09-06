@@ -280,7 +280,24 @@ struct StreamData
 	float uGlobalFadeGradient;
 	int uLightRangeLimit;
 
-	int padding1;
+	// [BB] FOG DENSITY SCALE FOR THIS DRAW. 1 is the slab as configured.
+	//
+	// The fog is one slab over the whole level, which cannot tell a courtyard
+	// from a cellar -- and those want opposite things. Doom already marks
+	// outdoors: a sky ceiling. So the sector picks a multiplier and the shader
+	// scales its own density by it.
+	//
+	// PER DRAW rather than per fragment, so the boundary is the surface, not a
+	// blend. That reads correctly through a window: the far wall outside is an
+	// outdoor draw and fogs like one, while the near wall of the room you are
+	// standing in does not, so looking out sees weather you are not standing in.
+	//
+	// A plain scale rather than an indoor/outdoor flag, so the CPU picks which
+	// number applies and anything else that wants to thin or thicken the fog for
+	// one draw can use the same lane.
+	//
+	// This was padding1, so it costs nothing and StreamData's size is unchanged.
+	float uFogDensityScale;
 	int padding2;
 	int padding3;
 };
@@ -399,6 +416,7 @@ public:
 		mStreamData.uFlatGlowFalloff = 0;
 		mStreamData.uFlatGlowIsCeiling = 0;
 		mStreamData.uDarknessExempt = 0.f;
+		mStreamData.uFogDensityScale = 1.f;
 		mStreamData.uFlatGlowLineCount = 0;
 		mStreamData.uGradientTopPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uGradientBottomPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -662,6 +680,12 @@ public:
 	void SetDarknessExempt(float exempt)
 	{
 		mStreamData.uDarknessExempt = exempt;
+	}
+
+	// [BB] See uFogDensityScale. 1 is the slab as configured.
+	void SetFogDensityScale(float s)
+	{
+		mStreamData.uFogDensityScale = s;
 	}
 
 	void SetFlatGlowParams(float r, float g, float b, float reach, const FVector4 &farColor, int falloff, int lineCount, const FVector4* lines, int isCeiling = 0)
