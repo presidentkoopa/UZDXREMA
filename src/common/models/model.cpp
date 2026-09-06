@@ -25,6 +25,7 @@
 #include "model_ue1.h"
 #include "model_obj.h"
 #include "model_md2.h"
+#include "model_mdl.h"
 #include "model_md3.h"
 #include "model_kvx.h"
 #include "model_iqm.h"
@@ -196,6 +197,13 @@ unsigned FindModel(const char * path, const char * modelfile, bool silent)
 	else if (!memcmp(buffer, "IDP2", 4))
 	{
 		model = new FMD2Model;
+	}
+	// [XR] Quake 1 alias models. MD2's direct ancestor -- same packed-vertex
+	// animation and the same avertexnormals table -- so FMDLModel derives from
+	// FDMDModel exactly as FMD2Model does. See model_mdl.h.
+	else if (!memcmp(buffer, "IDPO", 4))
+	{
+		model = new FMDLModel;
 	}
 	else if (!memcmp(buffer, "IDP3", 4))
 	{

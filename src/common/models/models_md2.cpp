@@ -27,10 +27,11 @@
 #pragma warning(disable:4244) // warning C4244: conversion from 'double' to 'float', possible loss of data
 #endif
 
-enum { VX, VZ, VY };
-#define NUMVERTEXNORMALS	162
 
-static float   avertexnormals[NUMVERTEXNORMALS][3] = {
+// [XR] NOT static any more: Quake 1 MDL indexes this same 162-entry table with
+// the same meaning, so models_mdl.cpp shares it rather than carrying a second
+// copy that could drift. Declared in model_md2.h.
+float   avertexnormals[NUMVERTEXNORMALS][3] = {
 #include "tab_anorms.h"
 };
 

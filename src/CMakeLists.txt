@@ -1180,6 +1180,7 @@ set (PCH_SOURCES
 	common/textures/hires/hqresize.cpp
 	common/models/models_md3.cpp
 	common/models/models_md2.cpp
+	common/models/models_mdl.cpp
 	common/models/models_voxel.cpp
 	common/models/models_ue1.cpp
 	common/models/models_obj.cpp

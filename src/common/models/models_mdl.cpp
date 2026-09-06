@@ -1,0 +1,467 @@
+/*
+** models_mdl.cpp
+**
+** Quake 1 alias model (.mdl) support.
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+** See model_mdl.h for why this derives from FDMDModel and what MDL does that
+** MD2 does not. The short version: same packed-vertex animation and the same
+** avertexnormals table, but the skin is embedded in Quake's own palette and
+** seam vertices need two texcoords where DMD allows one.
+**
+*/
+
+#include "filesystem.h"
+#include "model_mdl.h"
+#include "texturemanager.h"
+#include "modelrenderer.h"
+#include "printf.h"
+#include "m_swap.h"
+#include "image.h"
+#include "imagehelpers.h"
+#include "bitmap.h"
+
+//===========================================================================
+//
+// QUAKE'S PALETTE, EMBEDDED.
+//
+// An MDL skin is 8-bit indexed and the indices mean nothing without this. It is
+// not Doom's palette and it is not derivable from anything already in the tree,
+// so it is written out: 256 RGB triples, the standard Quake 1 palette from
+// gfx/palette.lmp.
+//
+// The last 32 entries are the fullbright range. Quake treats 224..255 as
+// self-lit, which is why lava and screens glow in that engine. Nothing here
+// acts on that -- the skin is converted to plain truecolour and lit like any
+// other model skin -- but the range is noted because a model whose skin uses it
+// will look flat compared to how it looks in Quake, and that is the reason.
+//
+//===========================================================================
+
+static const uint8_t QuakePalette[768] = {
+	  0,  0,  0,  15, 15, 15,  31, 31, 31,  47, 47, 47,  63, 63, 63,  75, 75, 75,
+	 91, 91, 91, 107,107,107, 123,123,123, 139,139,139, 155,155,155, 171,171,171,
+	187,187,187, 203,203,203, 219,219,219, 235,235,235,  15, 11,  7,  23, 15, 11,
+	 31, 23, 11,  39, 27, 15,  47, 35, 19,  55, 43, 23,  63, 47, 23,  75, 55, 27,
+	 83, 59, 27,  91, 67, 31,  99, 75, 31, 107, 83, 31, 115, 87, 31, 123, 95, 35,
+	131,103, 35, 143,111, 35,  11, 11, 15,  19, 19, 27,  27, 27, 39,  39, 39, 51,
+	 47, 47, 63,  55, 55, 75,  63, 63, 87,  71, 71,103,  79, 79,115,  91, 91,127,
+	 99, 99,139, 107,107,151, 115,115,163, 123,123,175, 131,131,187, 139,139,203,
+	  0,  0,  0,   7,  7,  0,  11, 11,  0,  19, 19,  0,  27, 27,  0,  35, 35,  0,
+	 43, 43,  7,  47, 47,  7,  55, 55,  7,  63, 63,  7,  71, 71,  7,  75, 75, 11,
+	 83, 83, 11,  91, 91, 11,  99, 99, 11, 107,107, 15,   7,  0,  0,  15,  0,  0,
+	 23,  0,  0,  31,  0,  0,  39,  0,  0,  47,  0,  0,  55,  0,  0,  63,  0,  0,
+	 71,  0,  0,  79,  0,  0,  87,  0,  0,  95,  0,  0, 103,  0,  0, 111,  0,  0,
+	119,  0,  0, 127,  0,  0,  19, 19,  0,  27, 27,  0,  35, 35,  0,  47, 43,  0,
+	 55, 47,  0,  67, 55,  0,  75, 59,  7,  87, 67,  7,  95, 71,  7, 107, 75, 11,
+	119, 83, 15, 131, 87, 19, 139, 91, 19, 151, 95, 27, 163, 99, 31, 175,103, 35,
+	 35, 19,  7,  47, 23, 11,  59, 31, 15,  75, 35, 19,  87, 43, 23,  99, 43, 23,
+	115, 47, 31, 131, 51, 35, 143, 51, 39, 159, 55, 43, 175, 55, 47, 191, 55, 47,
+	207, 55, 47, 223, 59, 43, 239, 59, 39, 255, 59, 35, 235,155, 39, 227,151, 35,
+	219,147, 35, 211,143, 31, 203,139, 31, 195,135, 27, 187,131, 27, 179,127, 23,
+	171,123, 23, 163,119, 23, 155,115, 19, 147,111, 19, 139,107, 19, 131,103, 15,
+	123, 99, 15, 115, 95, 15, 111,103, 39, 119,111, 47, 127,119, 55, 135,127, 63,
+	143,135, 71, 151,143, 79, 159,151, 87, 167,159, 95, 175,167,103, 183,175,111,
+	191,183,119, 199,191,127, 207,199,135, 215,207,143, 223,215,151, 231,223,159,
+	  7,  7,  0,  15, 15,  0,  23, 23,  0,  31, 31,  0,  39, 39,  0,  47, 47,  0,
+	 55, 55,  0,  63, 63,  0,  71, 71,  0,  79, 79,  0,  87, 87,  0,  95, 95,  0,
+	103,103,  0, 111,111,  0, 119,119,  0, 127,127,  0,  19, 19, 19,  27, 27, 27,
+	 35, 35, 35,  43, 43, 43,  51, 51, 51,  59, 59, 59,  67, 67, 67,  75, 75, 75,
+	 83, 83, 83,  91, 91, 91,  99, 99, 99, 107,107,107, 115,115,115, 123,123,123,
+	131,131,131, 139,139,139, 155,155,155, 163,163,163, 171,171,171, 179,179,179,
+	187,187,187, 195,195,195, 203,203,203, 211,211,211, 219,219,219, 227,227,227,
+	235,235,235, 243,243,243, 251,251,251,   0,  0,  0,  35,  0,  0,  47,  0,  0,
+	 59,  0,  0,  71,  0,  0,  83,  0,  0,  95,  0,  0, 107,  0,  0, 119,  0,  0,
+	131,  0,  0, 143,  0,  0, 155,  0,  0, 167,  0,  0, 179,  0,  0, 191,  0,  0,
+	203,  0,  0, 215,  0,  0, 227,  0,  0, 239,  0,  0, 251,  0,  0, 255,  0,  0,
+	255,  0,  0, 255,  0,  0, 255,  0,  0, 255, 51, 51, 255,103,103, 255,155,155,
+	255,207,207, 255,255,255, 159, 91, 83
+};
+
+//===========================================================================
+//
+// The embedded skin as an image source.
+//
+// Truecolour out, because the indices are Quake's and mean nothing to Doom's
+// palette. CreatePalettedPixels maps through the game palette so the software
+// and paletted paths still get something sensible rather than garbage.
+//
+//===========================================================================
+
+class FMDLSkinTexture : public FImageSource
+{
+public:
+	FMDLSkinTexture(const uint8_t *pixels, int w, int h)
+	{
+		Width = w;
+		Height = h;
+		bUseGamePalette = false;
+		mPixels.Resize(w * h);
+		memcpy(mPixels.Data(), pixels, w * h);
+	}
+
+	int CopyPixels(FBitmap *bmp, int conversion, int frame = 0) override
+	{
+		TArray<uint32_t> rgba(Width * Height, true);
+		for (int i = 0; i < Width * Height; i++)
+		{
+			const uint8_t *c = &QuakePalette[mPixels[i] * 3];
+			rgba[i] = MAKEARGB(255, c[0], c[1], c[2]);
+		}
+		bmp->CopyPixelDataRGB((int)0, (int)0, (const uint8_t*)rgba.Data(), Width, Height,
+			4, Width * 4, 0, CF_RGBA);
+		return 0;
+	}
+
+	PalettedPixels CreatePalettedPixels(int conversion, int frame = 0) override
+	{
+		PalettedPixels pixels(Width * Height);
+		// Column-major, which is what the paletted path expects.
+		for (int x = 0; x < Width; x++)
+		{
+			for (int y = 0; y < Height; y++)
+			{
+				const uint8_t *c = &QuakePalette[mPixels[y * Width + x] * 3];
+				pixels[x * Height + y] = ImageHelpers::RGBToPalette(false, c[0], c[1], c[2]);
+			}
+		}
+		return pixels;
+	}
+
+private:
+	TArray<uint8_t> mPixels;
+};
+
+//===========================================================================
+//
+// The on-disk layout. Everything is little-endian and packed; there is no
+// offset table, so Load() walks it.
+//
+//===========================================================================
+
+#define MDL_MAGIC 0x4F504449	// "IDPO"
+
+struct mdl_header_t
+{
+	int   magic;
+	int   version;		// always 6
+	float scale[3];		// packed byte -> world, per axis
+	float origin[3];
+	float radius;
+	float eyePosition[3];
+	int   numSkins;
+	int   skinWidth;
+	int   skinHeight;
+	int   numVertices;
+	int   numTriangles;
+	int   numFrames;
+	int   syncType;
+	int   flags;
+	float size;
+};
+
+struct mdl_texcoord_t { int onseam, s, t; };
+struct mdl_triangle_t { int facesFront, vertex[3]; };
+struct mdl_vertex_t   { uint8_t v[3], normalIndex; };
+
+
+//===========================================================================
+//
+// FMDLModel::Load
+//
+//===========================================================================
+
+bool FMDLModel::Load(const char * path, int lumpnum, const char * buffer, int length)
+{
+	if (length < (int)sizeof(mdl_header_t)) return false;
+
+	const mdl_header_t *hdr = (const mdl_header_t *)buffer;
+	if (LittleLong(hdr->magic) != MDL_MAGIC || LittleLong(hdr->version) != 6)
+		return false;
+
+	const int numskins  = LittleLong(hdr->numSkins);
+	const int skinw     = LittleLong(hdr->skinWidth);
+	const int skinh     = LittleLong(hdr->skinHeight);
+	const int numverts  = LittleLong(hdr->numVertices);
+	const int numtris   = LittleLong(hdr->numTriangles);
+	const int numframes = LittleLong(hdr->numFrames);
+
+	if (numverts <= 0 || numtris <= 0 || numframes <= 0 || skinw <= 0 || skinh <= 0)
+	{
+		Printf("LoadModel: '%s' has no usable geometry\n", path);
+		return false;
+	}
+
+	for (int i = 0; i < 3; i++)
+	{
+		mScale[i]  = hdr->scale[i];
+		mOrigin[i] = hdr->origin[i];
+	}
+	mVertexCount = numverts;
+
+	const uint8_t *p   = (const uint8_t*)buffer + sizeof(mdl_header_t);
+	const uint8_t *end = (const uint8_t*)buffer + length;
+
+	// ---- skins -----------------------------------------------------------
+	// Each is a group flag then the pixels. A group (flag 1) is an animated
+	// skin: a count, that many float intervals, then that many images. The
+	// first image is taken and the rest skipped -- see the note in the header.
+	skins = new FTextureID[max(numskins, 1)];
+	for (int i = 0; i < numskins; i++)
+	{
+		if (p + 4 > end) { Printf("LoadModel: '%s' truncated in skins\n", path); return false; }
+		const int group = LittleLong(*(const int*)p); p += 4;
+
+		int count = 1;
+		if (group != 0)
+		{
+			if (p + 4 > end) return false;
+			count = LittleLong(*(const int*)p); p += 4;
+			if (count < 1) return false;
+			p += count * 4;		// the interval table
+		}
+		if (p + (ptrdiff_t)skinw * skinh * count > end)
+		{
+			Printf("LoadModel: '%s' truncated in skin %d\n", path, i);
+			return false;
+		}
+
+		FStringf texname("%s_skin%d", path, i);
+		auto tex = MakeGameTexture(new FImageTexture(new FMDLSkinTexture(p, skinw, skinh)),
+			texname.GetChars(), ETextureType::Override);
+		skins[i] = TexMan.AddGameTexture(tex);
+
+		p += (ptrdiff_t)skinw * skinh * count;
+	}
+	if (numskins == 0) skins[0].SetInvalid();
+
+	// ---- texcoords -------------------------------------------------------
+	if (p + (ptrdiff_t)numverts * sizeof(mdl_texcoord_t) > end)
+	{
+		Printf("LoadModel: '%s' truncated in texcoords\n", path);
+		return false;
+	}
+	const mdl_texcoord_t *stverts = (const mdl_texcoord_t *)p;
+	p += (ptrdiff_t)numverts * sizeof(mdl_texcoord_t);
+
+	// ---- triangles -------------------------------------------------------
+	if (p + (ptrdiff_t)numtris * sizeof(mdl_triangle_t) > end)
+	{
+		Printf("LoadModel: '%s' truncated in triangles\n", path);
+		return false;
+	}
+	const mdl_triangle_t *tris = (const mdl_triangle_t *)p;
+	p += (ptrdiff_t)numtris * sizeof(mdl_triangle_t);
+
+	mFrameDataOfs = (int)(p - (const uint8_t*)buffer);
+
+	// ---- SEAM EXPANSION --------------------------------------------------
+	//
+	// A vertex flagged onseam sits on the texture's wrap line and needs a
+	// different s depending on whether the triangle using it faces front or
+	// back. DMD has one texcoord per vertex, so the back copy becomes a second
+	// vertex: same packed position, s shifted by half the skin width.
+	//
+	// Built lazily -- a model whose triangles all face front (or which has no
+	// seam vertices at all) allocates no duplicates and ends up with exactly
+	// the file's vertex count.
+	TArray<int> backCopy(numverts, true);
+	for (int i = 0; i < numverts; i++) backCopy[i] = -1;
+
+	mSourceVert.Clear();
+	mSourceVert.Reserve(numverts);
+	for (int i = 0; i < numverts; i++) mSourceVert[i] = i;
+
+	TArray<FTexCoord> tc(numverts, true);
+	for (int i = 0; i < numverts; i++)
+	{
+		tc[i].s = (short)LittleLong(stverts[i].s);
+		tc[i].t = (short)LittleLong(stverts[i].t);
+	}
+
+	TArray<unsigned int> indices;
+	indices.Reserve(numtris * 3);
+	for (int i = 0; i < numtris; i++)
+	{
+		const bool front = LittleLong(tris[i].facesFront) != 0;
+		for (int j = 0; j < 3; j++)
+		{
+			int v = LittleLong(tris[i].vertex[j]);
+			if (v < 0 || v >= numverts) { Printf("LoadModel: '%s' bad vertex index\n", path); return false; }
+
+			if (!front && LittleLong(stverts[v].onseam) != 0)
+			{
+				if (backCopy[v] < 0)
+				{
+					FTexCoord shifted;
+					shifted.s = (short)(LittleLong(stverts[v].s) + skinw / 2);
+					shifted.t = (short)LittleLong(stverts[v].t);
+					backCopy[v] = (int)tc.Push(shifted);
+					mSourceVert.Push(v);
+				}
+				v = backCopy[v];
+			}
+			indices[i * 3 + j] = (unsigned)v;
+		}
+	}
+
+	// ---- fill the DMD structures FDMDModel renders from ------------------
+	header.magic   = MDL_MAGIC;
+	header.version = 6;
+	header.flags   = 0;
+
+	info.skinWidth    = skinw;
+	info.skinHeight   = skinh;
+	info.numLODs      = 1;
+	info.numSkins     = max(numskins, 1);
+	info.numVertices  = (int)tc.Size();		// AFTER seam expansion
+	info.numTexCoords = (int)tc.Size();
+	info.numFrames    = numframes;
+	info.frameSize    = 0;					// MDL frames are not fixed-size; unused here
+	lodInfo[0].numTriangles = numtris;
+
+	texCoords = new FTexCoord[tc.Size()];
+	memcpy(texCoords, tc.Data(), tc.Size() * sizeof(FTexCoord));
+
+	lods[0].triangles = new FTriangle[numtris];
+	for (int i = 0; i < numtris; i++)
+		for (int j = 0; j < 3; j++)
+			lods[0].triangles[i].vertexIndices[j] = indices[i * 3 + j];
+
+	// ---- frame names, so FindFrame and MODELDEF FrameIndex work ----------
+	//
+	// Walked rather than indexed: a group frame carries a count, an interval
+	// table and that many sub-frames, so the stride is not constant and the
+	// only way to the next frame is through this one.
+	frames = new ModelFrame[numframes];
+	const uint8_t *fp = (const uint8_t*)buffer + mFrameDataOfs;
+	for (int i = 0; i < numframes; i++)
+	{
+		if (fp + 4 > end) { Printf("LoadModel: '%s' truncated in frames\n", path); return false; }
+		const int ftype = LittleLong(*(const int*)fp); fp += 4;
+
+		int sub = 1;
+		if (ftype != 0)
+		{
+			if (fp + 12 > end) return false;
+			sub = LittleLong(*(const int*)fp); fp += 4;
+			if (sub < 1) return false;
+			fp += 8;				// group bbox
+			fp += sub * 4;			// intervals
+		}
+
+		// Take the first sub-frame's name; skip the rest.
+		if (fp + 8 + 16 > end) return false;
+		fp += 8;					// this frame's bbox
+		memcpy(frames[i].name, fp, 16);
+		frames[i].name[15] = 0;
+		fp += 16;
+		fp += (ptrdiff_t)numverts * sizeof(mdl_vertex_t);
+
+		for (int s = 1; s < sub; s++)
+		{
+			if (fp + 24 > end) return false;
+			fp += 8 + 16 + (ptrdiff_t)numverts * sizeof(mdl_vertex_t);
+		}
+
+		frames[i].vindex = UINT_MAX;
+	}
+
+	mLumpNum = lumpnum;
+	return true;
+}
+
+//===========================================================================
+//
+// FMDLModel::LoadGeometry
+//
+// Expands every frame's packed bytes with the model's GLOBAL scale and origin.
+// A duplicated seam vertex reads its original's packed position, which is what
+// mSourceVert is for.
+//
+//===========================================================================
+
+void FMDLModel::LoadGeometry()
+{
+	if (framevtx != NULL) return;
+	auto lumpdata = fileSystem.ReadFile(mLumpNum);
+	LoadGeometry(&lumpdata);
+}
+
+void FMDLModel::LoadGeometry(FileSys::FileData* lumpData)
+{
+	static const int axis[3] = { VX, VY, VZ };
+	auto buffer = lumpData->string();
+	const uint8_t *fp = (const uint8_t*)buffer + mFrameDataOfs;
+
+	framevtx = new ModelFrameVertexData[info.numFrames];
+
+	for (int i = 0; i < info.numFrames; i++)
+	{
+		const int ftype = LittleLong(*(const int*)fp); fp += 4;
+		int sub = 1;
+		if (ftype != 0)
+		{
+			sub = LittleLong(*(const int*)fp); fp += 4;
+			fp += 8;
+			fp += sub * 4;
+		}
+		fp += 8 + 16;		// bbox + name
+
+		const mdl_vertex_t *packed = (const mdl_vertex_t *)fp;
+
+		ModelFrameVertexData *framev = &framevtx[i];
+		framev->vertices = new DMDModelVertex[info.numVertices];
+		framev->normals  = new DMDModelVertex[info.numVertices];
+
+		for (int k = 0; k < info.numVertices; k++)
+		{
+			const int src = mSourceVert[k];
+			const mdl_vertex_t &pv = packed[src];
+
+			memcpy(framev->normals[k].xyz, avertexnormals[pv.normalIndex], sizeof(float) * 3);
+
+			for (int c = 0; c < 3; c++)
+				framev->vertices[k].xyz[axis[c]] = pv.v[c] * mScale[c] + mOrigin[c];
+		}
+
+		fp += (ptrdiff_t)mVertexCount * sizeof(mdl_vertex_t);
+		for (int s = 1; s < sub; s++)
+			fp += 8 + 16 + (ptrdiff_t)mVertexCount * sizeof(mdl_vertex_t);
+	}
+}
+
+//===========================================================================
+//
+// FMDLModel::AddSkins
+//
+// The skin is ours -- built from the embedded pixels in Load -- so it is
+// registered here rather than resolved by name. A MODELDEF Skin directive still
+// overrides it, which is how a converted or hand-painted replacement is used.
+//
+//===========================================================================
+
+void FMDLModel::AddSkins(uint8_t *hitlist, const FTextureID* surfaceskinids)
+{
+	if (surfaceskinids && surfaceskinids[0].isValid())
+	{
+		hitlist[surfaceskinids[0].GetIndex()] |= FTextureManager::HIT_Flat;
+		return;
+	}
+	for (int i = 0; i < info.numSkins; i++)
+	{
+		if (skins[i].isValid())
+			hitlist[skins[i].GetIndex()] |= FTextureManager::HIT_Flat;
+	}
+}
+
+FMDLModel::~FMDLModel()
+{
+}

@@ -22,6 +22,17 @@
 #define DMD_MAGIC			0x4D444D44
 #define MAX_LODS 4
 
+// [XR] The axis swizzle every Quake-family loader writes vertices through.
+// NOTE THE ORDER: VX=0, VZ=1, VY=2. Quake is Z-up and Doom's renderer is not,
+// so the second and third components trade places on the way in. Shared with
+// the MDL loader, which needs the identical mapping for identical data.
+enum { VX, VZ, VY };
+
+// [XR] Quake's 162 lighting normals, defined in models_md2.cpp. Shared with the
+// MDL loader, which indexes the same table by the same convention.
+#define NUMVERTEXNORMALS 162
+extern float avertexnormals[NUMVERTEXNORMALS][3];
+
 class FDMDModel : public FModel
 {
 protected:
