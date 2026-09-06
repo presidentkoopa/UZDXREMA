@@ -2549,16 +2549,11 @@ class PlayerPawn : Actor
 		let weap = hand == 0 ? player.OffhandWeapon : player.ReadyWeapon;
 		if (weap != null && !weap.bNoHandSwitch && player.playerstate == PST_LIVE)
 		{
-			bool instant = HandSwitchIsInstant();
 			let nextweap = player.mo.PickNextWeapon(1 - hand);
 			player.OffhandWeapon = player.ReadyWeapon = null;
 			weap.bOffhandWeapon = hand == 1;
 			player.PendingWeapon = weap;
 			player.mo.BringUpWeapon();
-			// Neither of these weapons was put away, so neither needs drawing.
-			// See SeatWeaponReady -- without this the hand costs 16 tics of
-			// A_Raise before it can fire.
-			if (instant) player.mo.SeatWeaponReady(hand);
 			// nextweap must be told which hand it is going to.
 			//
 			// BringUpWeapon picks the slot from bOffhandWeapon, and nothing
@@ -2580,89 +2575,8 @@ class PlayerPawn : Actor
 				nextweap.bOffhandWeapon = (hand != 1);
 				player.PendingWeapon = nextweap;
 				player.mo.BringUpWeapon();
-				if (instant) player.mo.SeatWeaponReady(1 - hand);
 			}
 		}
-	}
-
-	//===========================================================================
-	//
-	// PlayerPawn :: SeatWeaponReady
-	//
-	// Put the weapon a hand is holding straight into its ready state, with the
-	// psprite already fully raised.
-	//
-	// A WEAPON CHANGING HANDS WAS NEVER PUT AWAY. BringUpWeapon cannot know
-	// that: it starts every weapon at WEAPONBOTTOM and hands it to the Select
-	// state, so A_Raise walks the psprite up six units a tic from 128 to 32 --
-	// sixteen tics, near half a second, during which the gun will not fire.
-	// Paid twice when a hand also has to be emptied first. Passing a shotgun
-	// from one hand to the other should not cost what drawing it from a
-	// holster costs, and in a headset that half second is spent with both
-	// hands committed and nothing to shoot with.
-	//
-	// THIS IS A FINISHING MOVE, NOT A REPLACEMENT FOR BringUpWeapon. Call it
-	// after, once the weapon is seated in its slot: OnSelect() has run, the up
-	// sound has played and the hand flags agree. Only the draw ANIMATION is
-	// skipped -- which does mean a Select state that does real work beyond
-	// A_Raise does not get to run it, and that is what the cvar is for.
-	//
-	// General on purpose. Anything that puts a weapon in a hand it was already
-	// holding wants this: hand switching today, and a scripted hand-off, a
-	// disarm-and-recover or a quick-swap tomorrow.
-	//
-	// hand is 0 for the main hand and 1 for the off hand. Safe on an empty
-	// hand; it does nothing.
-	//
-	//===========================================================================
-
-	void SeatWeaponReady(int hand = 0)
-	{
-		let player = self.player;
-		if (player == null)
-		{
-			return;
-		}
-		let weap = (hand == 1) ? player.OffhandWeapon : player.ReadyWeapon;
-		if (weap == null)
-		{
-			return;
-		}
-		let layer = (hand == 1) ? PSP_OFFHANDWEAPON : PSP_WEAPON;
-		let psp = player.GetPSprite(layer);
-		if (psp == null)
-		{
-			return;
-		}
-		// A_Raise resets the psprite on its first call, when it still sits at
-		// WEAPONBOTTOM. Skipping the raise means doing that here instead, or
-		// the new weapon inherits the last one's scale, pivot and alignment.
-		weap.ResetPSprite(psp);
-		psp.y = WEAPONTOP;
-		player.SetPsprite(layer, weap.GetReadyState());
-	}
-
-	//===========================================================================
-	//
-	// PlayerPawn :: HandSwitchIsInstant
-	//
-	// May a hand-to-hand move skip the draw animation?
-	//
-	// Fenced behind !multiplayer for the same reason vr_momentum is, a few
-	// hundred lines up in this file: the cvar is client-local and psprite
-	// state is playsim. Two peers reading different values would run different
-	// states for the same weapon, and a mod that fires, spends ammo or spawns
-	// an overlay out of its Select state would then disagree across the wire.
-	// Making this work in a netgame is a one-word change -- CVAR_SERVERINFO on
-	// the declaration, so every peer reads one value -- and is deliberately
-	// not made here, because it is a decision about netplay rather than about
-	// weapons.
-	//
-	//===========================================================================
-
-	bool HandSwitchIsInstant()
-	{
-		return !multiplayer && vr_handswitch_instant;
 	}
 
 	static bool WeaponsMatch(Weapon a, Weapon b)
@@ -2688,15 +2602,7 @@ class PlayerPawn : Actor
 		return false;
 	}
 
-	// exactInstance -- match `weap` against what the hands hold by POINTER
-	// IDENTITY instead of WeaponsMatch's class/sister equivalence. Default
-	// off, so the wheel and the net path keep "same class = same weapon". A
-	// caller that manages distinct instances of one class -- a matched pair
-	// with one in each hand, a second fist of the class already seated
-	// opposite -- needs this, because for it the class test is true exactly
-	// when the seat is wanted, and the reroute into SwitchWeaponHand (a no-op
-	// under NOHANDSWITCH) left the instance un-seated with no report.
-	virtual void MoveWeaponToHand(Weapon weap, int hand = 0, bool exactInstance = false)
+	virtual void MoveWeaponToHand(Weapon weap, int hand = 0)
 	{
 		if (weap == null || player.playerstate != PST_LIVE)
 		{
@@ -2709,14 +2615,14 @@ class PlayerPawn : Actor
 		}
 
 		let sourceweap = hand == 1 ? player.ReadyWeapon : player.OffhandWeapon;
-		if (exactInstance ? (sourceweap == weap) : WeaponsMatch(sourceweap, weap))
+		if (WeaponsMatch(sourceweap, weap))
 		{
 			SwitchWeaponHand(hand);
 			return;
 		}
 
 		let targetweap = hand == 1 ? player.OffhandWeapon : player.ReadyWeapon;
-		if (exactInstance ? (targetweap == weap) : WeaponsMatch(targetweap, weap))
+		if (WeaponsMatch(targetweap, weap))
 		{
 			return;
 		}
@@ -2728,46 +2634,12 @@ class PlayerPawn : Actor
 			weap.SisterWeapon.bOffhandWeapon = weap.bOffhandWeapon;
 		}
 		player.PendingWeapon = weap;
-		bool instant = HandSwitchIsInstant();
 		if (targetcurrent != null)
 		{
-			if (instant)
-			{
-				// EMPTY THE HAND NOW. The normal path plays the occupant's
-				// holster animation and only brings the pending weapon up when
-				// A_Lower finally reaches the bottom -- sixteen tics of
-				// putting away in front of sixteen tics of drawing, with the
-				// hand dead for both.
-				//
-				// DropWeapon's bookkeeping still happens, just without the
-				// wait: the switch-disable flag is cleared and OnDeselect()
-				// runs, so a mod that tears down state when a weapon leaves is
-				// still told it left. Slot and layer are cleared together the
-				// way BringUpWeapon itself clears them, so nothing reads a
-				// hand holding two weapons.
-				player.WeaponState &= ~(hand ? WF_OFFHANDDISABLESWITCH : WF_DISABLESWITCH);
-				targetcurrent.OnDeselect();
-				player.SetPsprite(hand ? PSP_OFFHANDWEAPON : PSP_WEAPON, null);
-				if (hand == 1)
-				{
-					player.OffhandWeapon = null;
-				}
-				else
-				{
-					player.ReadyWeapon = null;
-				}
-				BringUpWeapon();
-				SeatWeaponReady(hand);
-				return;
-			}
 			DropWeapon(hand);
 			return;
 		}
 		BringUpWeapon();
-		if (instant)
-		{
-			SeatWeaponReady(hand);
-		}
 	}
 
 	//===========================================================================
@@ -3228,79 +3100,6 @@ class PSprite : Object native play
 	native int ModelFrameNext;
 	native float ModelFrameLerp;
 
-	// RS fork -- PER-PART frame addressing. The three fields above are ONE
-	// number applied to EVERY sub-model in a MODELDEF stack; these address one
-	// sub-model each, by its model index, and override the scalar for that
-	// index only.
-	//
-	// This is what lets a gun be animated as PARTS instead of as poses. Declare
-	// the body, slide, magazine and hand as separate models in MODELDEF, then
-	// drive them independently -- the slide can travel with the hand racking it
-	// while the magazine is already gone -- without pre-baking a frame for
-	// every combination of every part's position. It is the only articulation
-	// MD3 can express, and it needs no bones, no rig and no IQM.
-	//
-	// ModelPartHidden removes a part from the draw entirely, which is what a
-	// magazine being out of the gun actually is.
-	//
-	// All -1 (and hidden all false) = inactive, and every existing weapon is
-	// exactly that, so nothing that does not opt in changes at all.
-	//
-	// 12 is DPSprite::RS_MODEL_PARTS; parts past that index fall through to the
-	// scalar path rather than failing. Indices outside 0..11 are ignored.
-	native int ModelFramePart[12];
-	native int ModelFrameNextPart[12];
-	native float ModelFrameLerpPart[12];
-	native bool ModelPartHidden[12];
-
-	// Put every part back on the scalar path. Worth calling when a weapon is
-	// deselected or a reload is aborted: a psprite layer is reused across
-	// weapon switches and these fields are serialised, so a part left driven
-	// stays driven -- a slide locked back on a gun that is no longer in your
-	// hand, and no state anywhere saying why.
-	void ClearModelParts()
-	{
-		for (int i = 0; i < 12; i++)
-		{
-			ModelFramePart[i]     = -1;
-			ModelFrameNextPart[i] = -1;
-			ModelFrameLerpPart[i] = -1.0;
-			ModelPartHidden[i]    = false;
-		}
-	}
-
-	// Drive one part. `lerp` below 0 leaves the part on whatever blend the
-	// layer already had; 0..1 blends frame -> next explicitly, which is what
-	// makes a hand-driven slide travel rather than snap between poses.
-	void SetModelPart(int part, int frame, int next = -1, double lerp = -1.0)
-	{
-		if (part < 0 || part >= 12) return;
-		ModelFramePart[part]     = frame;
-		ModelFrameNextPart[part] = next;
-		ModelFrameLerpPart[part] = lerp;
-	}
-
-	// Scrub one part along its own frame strip. `t` is 0..1 across frames
-	// `first`..`last`, which is the shape a pull gesture wants: hand travel in,
-	// continuous part position out.
-	void SetModelPartScrub(int part, int first, int last, double t)
-	{
-		if (part < 0 || part >= 12) return;
-		if (t < 0.0) t = 0.0;
-		if (t > 1.0) t = 1.0;
-
-		int span = last - first;
-		double exact = first + span * t;
-		int lo = int(exact);
-		// Clamped so the final frame never blends toward one past the end,
-		// which FMD3Model::RenderFrame would reject and draw as nothing.
-		int hi = (span >= 0) ? min(lo + 1, last) : max(lo - 1, last);
-
-		ModelFramePart[part]     = lo;
-		ModelFrameNextPart[part] = hi;
-		ModelFrameLerpPart[part] = exact - lo;
-	}
-
 	// Hide this layer without touching the weapon behind it. The weapon keeps
 	// its states, damage and slot; only the drawing stops.
 	native bool NoDraw;
@@ -3319,7 +3118,6 @@ class PSprite : Object native play
 	// AnchorAngles is (yaw, pitch, roll).
 	native Vector3 AnchorOfs;
 	native Vector3 AnchorAngles;
-
 
 	// Where a bone of a DRAWN weapon actually is, as an offset from that
 	// weapon's origin, in the model's own axes (+X along the barrel, +Z up) and

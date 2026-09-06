@@ -409,7 +409,6 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 			vec4 uSurfaceStampCol[16];
 			vec4 uSurfaceStampArg[16];
 			vec4 uSurfaceStampMod[16];
-			vec4 uSurfaceStampCol2[16];
 			vec4 uSurfaceStampParams;
 		};
 
@@ -454,7 +453,7 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 		uniform vec4 uFlatGlowFar;
 		uniform int uFlatGlowFalloff;
 		uniform int uFlatGlowIsCeiling;
-		uniform float uDarknessExempt;
+		uniform int uDarknessExempt;
 		uniform int uFlatGlowLineCount;
 		uniform vec4 uFlatGlowLines[64];
 
@@ -478,12 +477,6 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 		uniform float uGlobalFadeGradient;
 		uniform vec4 uGlobalFadeColor;
 		uniform int uLightRangeLimit;
-
-		// [OUTLINE] Sprite outlines -- see func_spriteoutline.fp.
-		uniform vec4 uOutlineColorA;
-		uniform vec4 uOutlineColorB;
-		uniform vec4 uOutlineParms;
-		uniform float uFogDensityScale;
 
 		// dynamic lights
 		uniform int uLightIndex;
@@ -634,14 +627,6 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 	int stamp_lump = fileSystem.CheckNumForFullName("shaders/glsl/func_surfacestamps.fp", 0);
 	if (stamp_lump == -1) I_Error("Unable to load 'shaders/glsl/func_surfacestamps.fp'");
 	fp_comb << GetStringFromLump(stamp_lump).GetChars() << "\n";
-	// [OUTLINE] Same deal as the stamps above -- prepended so main.fp can call
-	// it with no forward declaration. It reads the `tex` sampler and timer from
-	// the preamble and takes its texture coordinate as a parameter, because
-	// vTexCoord is declared by main.fp and does not exist yet at this point.
-	fp_comb << "#line 1\n";
-	int outline_lump = fileSystem.CheckNumForFullName("shaders/glsl/func_spriteoutline.fp", 0);
-	if (outline_lump == -1) I_Error("Unable to load 'shaders/glsl/func_spriteoutline.fp'");
-	fp_comb << GetStringFromLump(outline_lump).GetChars() << "\n";
 	fp_comb << "#line 1\n";
 	fp_comb << RemoveLayoutLocationDecl(GetStringFromLump(fp_lump), "in").GetChars() << "\n";
 	FString placeholder = "\n";
@@ -926,10 +911,6 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 	muGlobalFadeGradient.Init(hShader, "uGlobalFadeGradient");
 	muGlobalFadeColor.Init(hShader, "uGlobalFadeColor");
 	muLightRangeLimit.Init(hShader, "uLightRangeLimit");
-	muOutlineColorA.Init(hShader, "uOutlineColorA");
-	muOutlineColorB.Init(hShader, "uOutlineColorB");
-	muOutlineParms.Init(hShader, "uOutlineParms");
-	muFogDensityScale.Init(hShader, "uFogDensityScale");
 
 	lights_index = glGetUniformLocation(hShader, "lights");
 	modelmatrix_index = glGetUniformLocation(hShader, "ModelMatrix");

@@ -253,18 +253,6 @@ struct FBillboard
 	int      payload = 0;          // EBillboardPayload
 	int      data = 0;             // payload-specific packed int
 
-	// [BB] WHICH PART of its texture a BB_TEXTURE billboard shows, as fractions
-	// of the whole. All of it by default, so every existing caller is untouched.
-	//
-	// It exists so a picture can be CUT INTO STRIPS and each strip placed on its
-	// own. That is what lets a flat mark follow a staircase: one quad has one
-	// height and must either clip into the step above it or float over the step
-	// below, but eight strips can each sit on the floor actually beneath them.
-	// A sprite laid flat on the ground was the one thing the old death effects
-	// could never get right, and this is the whole of the fix -- four floats,
-	// rather than the runtime texture atlas the alternative would have needed.
-	float    u0 = 0.f, v0 = 0.f, u1 = 1.f, v1 = 1.f;
-
 	// [BB] Which typeface, for the distance-field payloads. 0 is the default
 	// face and is what every existing call site gets by not setting this;
 	// 1..N index the rolled roster. See FSDFFontRoster in hw_sdffont.h --
@@ -304,18 +292,6 @@ struct FBillboard
 
 	double   glowRadius = 0.0;
 	double   glowStrength = 0.0;   // 0 = off, 1 = halo as bright as the core
-
-	// [BB] How far the CORE of a distance-field glyph is pushed toward white,
-	// leaving the colour to the halo around it. 0 keeps the whole glyph one
-	// flat colour, which is what every existing caller gets.
-	//
-	// This is the difference between a coloured letter with a soft edge and a
-	// NEON TUBE. Real neon does not glow in its own colour at the centre: the
-	// filament is too bright for an eye or a sensor to resolve as anything but
-	// white, and the colour is what bleeds out around it. GITD's kill badge
-	// built exactly that -- an over-bright white core with a saturated bleed --
-	// and without it a glyph reads as painted-on rather than as lit.
-	double   coreWhite = 0.0;
 
 	PalEntry color;
 
@@ -1263,47 +1239,18 @@ public:
 	// [BB] Volumetric beam -- a cone of visible light in the air, for a
 	// flashlight. Published from script each tic and consumed by the
 	// renderer, which resolves it into view space per eye.
-	// [BB] VOLUMETRIC BEAMS -- lit air rather than lit surfaces.
-	//
-	// FOUR OF THEM, and it used to be one. A singleton meant every caller was
-	// really the same caller: the weapon wheel's laser, RS_Lance and anything
-	// else all wrote the same fields, so whoever set it last won and whoever
-	// finished first called Clear and took everyone else's light out with it.
-	// A flashlight was impossible to add for exactly that reason -- open the
-	// wheel and your torch would go dark.
-	//
-	// Four because these are not free: each is a raymarch. They cost nothing
-	// when off-screen -- the pass bounds every one with an analytic ray/cone
-	// intersection and returns black in a few dot products -- but four beams
-	// lighting the same corridor is four marches over the same pixels. Four is
-	// a torch, a wheel laser, a weapon effect and one spare, which is the set
-	// that actually comes up.
-	//
-	// Slot 0 is what a caller that never heard of slots gets, so every existing
-	// call site keeps working unchanged.
-	static const int MAX_VOL_BEAMS = 4;
-
-	bool     VolBeamActive[MAX_VOL_BEAMS] = {};
-	DVector3 VolBeamPos[MAX_VOL_BEAMS] = {};
-	DVector3 VolBeamDir[MAX_VOL_BEAMS] = {};
-	PalEntry VolBeamColor[MAX_VOL_BEAMS] = {};
-	double   VolBeamInner[MAX_VOL_BEAMS] = {};   // degrees, full brightness inside
-	double   VolBeamOuter[MAX_VOL_BEAMS] = {};   // degrees, faded out by here
-	double   VolBeamLength[MAX_VOL_BEAMS] = {};
-	double   VolBeamDensity[MAX_VOL_BEAMS] = {};
-	double   VolBeamFalloff[MAX_VOL_BEAMS] = {};
-	double   VolBeamDust[MAX_VOL_BEAMS] = {};    // 0 clean, 1 heavily mottled
-	double   VolBeamDustScale[MAX_VOL_BEAMS] = {};
-	double   VolBeamDustDrift[MAX_VOL_BEAMS] = {};
-
-	// The first live beam, or -1. The fog reads a single torch cone (it has one
-	// set of mFogBeam uniforms), so it takes the lowest live slot rather than
-	// silently taking whichever happened to be written last.
-	int FirstVolBeam() const
-	{
-		for (int i = 0; i < MAX_VOL_BEAMS; i++) if (VolBeamActive[i]) return i;
-		return -1;
-	}
+	bool VolBeamActive = false;
+	DVector3 VolBeamPos;
+	DVector3 VolBeamDir;
+	PalEntry VolBeamColor;
+	double VolBeamInner = 10.0;    // degrees, full brightness inside this
+	double VolBeamOuter = 25.0;    // degrees, faded to nothing by here
+	double VolBeamLength = 1024.0;
+	double VolBeamDensity = 1.0;
+	double VolBeamFalloff = 1.5;
+	double VolBeamDust = 0.0;      // 0 = clean beam, 1 = heavily mottled
+	double VolBeamDustScale = 0.04;// higher = finer motes
+	double VolBeamDustDrift = 0.0; // world units per second the dust settles
 
 	// Up to eight bands travel at once, so a train of them can chase each
 	// other with their own colours and spacing.
@@ -1508,8 +1455,6 @@ public:
 	int      StampShape[MAX_SURFACE_STAMPS] = {};
 	int      StampTex[MAX_SURFACE_STAMPS] = {};    // 0 = no second layer
 	double   StampTexStrength[MAX_SURFACE_STAMPS] = {};
-	PalEntry StampColor2[MAX_SURFACE_STAMPS] = {}; // graded toward across life
-	double   StampFadeAt[MAX_SURFACE_STAMPS] = {}; // 0..1 of life; 1 = no fade
 	int      StampAge[MAX_SURFACE_STAMPS] = {};    // tics since spawn
 	int      StampLife[MAX_SURFACE_STAMPS] = {};   // tics total; 0 = slot free
 
@@ -1528,15 +1473,9 @@ public:
 	// because more than script publishes these -- the `stamp` CCMD does too,
 	// and native gameplay code is the obvious next caller.
 	void SpawnSurfaceStamp(int shape, const DVector3 &pos, double radius,
-		PalEntry color, int life, const DVector3 &axis, int tex, double texStrength,
-		PalEntry color2 = 0, double fadeAt = 1.0)
+		PalEntry color, int life, const DVector3 &axis, int tex, double texStrength)
 	{
 		if (radius <= 0.0 || life <= 0) return;
-		// Alpha 0 on the second colour means "no gradient", so it takes the
-		// first colour and the mix in the shader collapses to a no-op. Chosen
-		// so a caller that never heard of gradients gets exactly what it always
-		// got, rather than grading toward black.
-		if (color2.a == 0) color2 = color;
 
 		int slot = -1;
 		for (int i = 0; i < MAX_SURFACE_STAMPS; i++)
@@ -1558,8 +1497,6 @@ public:
 		StampAxis[slot] = axis;
 		StampRadius[slot] = radius;
 		StampColor[slot] = color;
-		StampColor2[slot] = color2;
-		StampFadeAt[slot] = clamp(fadeAt, 0.0, 1.0);
 		StampTex[slot] = tex;
 		StampTexStrength[slot] = texStrength;
 		StampAge[slot] = 0;
@@ -1775,17 +1712,6 @@ public:
 	// Which reference each fog edge follows, and how gently. 0 is absolute
 	// world Z; positive follows the FLOOR by that fraction, negative follows
 	// the CEILING. The magnitude is what turns a staircase into a slope.
-	// [BB] HOW MUCH FOG A ROOM GETS BY WHETHER IT HAS SKY OVER IT.
-	//
-	// One slab over the whole level cannot tell a courtyard from a cellar, and
-	// those want opposite things -- outdoor weather rolling in, indoor damp
-	// pooling on the floor. A sky ceiling is how Doom has always marked
-	// outdoors, so it costs no mapping work and no new marker.
-	//
-	// Both 1 is the old behaviour: one fog everywhere.
-	double   FogIndoorScale = 1.0;
-	double   FogOutdoorScale = 1.0;
-
 	double   FogFollowTop = 0;
 	double   FogFollowBottom = 0;
 
@@ -1803,17 +1729,6 @@ public:
 	// monochrome world had to walk every sector in the map and mutate it,
 	// exactly the way DarkDoomZ had to walk every sector to darken one.
 	//
-	// [BB] HOW MUCH OF THE DARKNESS ACTORS ARE SPARED, 0 to 1.
-	//
-	// The darkness pass takes the whole scene down together, which takes the
-	// monsters with it -- correct for a wall and wrong for the thing walking
-	// towards you, which simply stops existing. 0 is the old behaviour, 1
-	// leaves actors at full brightness, and the useful settings are between.
-	//
-	// Per level rather than per actor: it is a property of how dark the ROOM
-	// has been made, not of any one thing standing in it.
-	double DarkActorExempt = 0;
-
 	// Same fix as SetDarkness: one number for the frame, applied per fragment.
 	// max()'d against the per-sector factor in the shader rather than
 	// replacing it, so a sector a mapper deliberately drained harder stays
@@ -1841,12 +1756,6 @@ public:
 	double   GlowReact = 0;      // the walls take the disturbance array too
 	double   GlowPulse = 0;      // depth of the state pulse
 	double   GlowPulseLevel = 0; // and how alarmed the room currently is
-	// [BB] HOW FAST THE THROB BEATS, as a multiplier on the rate the level
-	// implies. The shader derives rate from the LEVEL -- rate = 1 + 6*level --
-	// so a preset that wants a bright alarm gets a fast one whether it wants
-	// it or not, and there was no way to ask for slow and bright. 1 is the old
-	// behaviour exactly, so nothing that does not set it changes.
-	double   GlowPulseRate = 1.0;
 
 	// [BB] THE HEATMAP.
 	//

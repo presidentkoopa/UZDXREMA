@@ -240,18 +240,6 @@ public:
 		return Joints.SSize() > 0 ? (TRSData.SSize() / Joints.SSize()) : 0;
 	}
 	virtual const TArray<VSMatrix>* GetBasePose() { return &baseframe; }
-
-	// [XR] Case-INSENSITIVE joint-name lookup (see FModel::FindJointByNameCI). Linear scan;
-	// callers resolve once per loaded model and cache, so the cost is paid once.
-	int FindJointByNameCI(FName name) override
-	{
-		const char* target = name.GetChars();
-		for (unsigned i = 0; i < Joints.Size(); i++)
-		{
-			if (stricmp(Joints[i].Name.GetChars(), target) == 0) return (int)i;
-		}
-		return -1;
-	}
 };
 
 struct IQMReadErrorException { };

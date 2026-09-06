@@ -66,19 +66,5 @@ vec4 ProcessTexel()
 	}
 
 	float a = max(core, halo);
-
-	// [BB] THE CORE GOES WHITE, the halo keeps the colour. uAddColor.b carries
-	// how far, 0 being the flat single-colour glyph this always drew.
-	//
-	// Neon is not one colour throughout. The tube's centre is brighter than
-	// anything can resolve as a hue and reads white; the colour is the bleed
-	// around it. GITD's kill badge is built on exactly that split -- an
-	// over-bright white filament plus a saturated halo -- and a glyph without
-	// it reads as painted on a surface rather than as a light on its own.
-	//
-	// Applied against `core` and not against alpha, so it whitens only the
-	// solid interior and leaves the falloff coloured all the way out.
-	vec3 rgb = mix(uObjectColor.rgb, vec3(1.0), clamp(uAddColor.b * core, 0.0, 1.0));
-
-	return vec4(rgb, a * uObjectColor.a);
+	return vec4(uObjectColor.rgb, a * uObjectColor.a);
 }

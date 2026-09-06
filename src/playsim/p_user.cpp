@@ -733,9 +733,6 @@ size_t player_t::PropagateMark()
 	GC::Mark(MUSINFOactor);
 	GC::Mark(PremorphWeapon);
 	GC::Mark(PremorphWeaponOffhand);
-	GC::Mark(vr_body_actor);
-	GC::Mark(vr_body_hand_actor[0]);
-	GC::Mark(vr_body_hand_actor[1]);
 	GC::Mark(psprites);
 	if (PendingWeapon != WP_NOCHANGE)
 	{
@@ -1811,7 +1808,6 @@ void P_PlayerThink (player_t *player)
 	}
 
 	previous_health = player->health;
-
 }
 
 void P_PredictionLerpReset()

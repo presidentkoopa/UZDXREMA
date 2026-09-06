@@ -6009,43 +6009,6 @@ bool VKOpenXRDeviceMode::RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage
 	return true;
 }
 
-// THE BODY FRAME AT DRAW RATE. Head position and yaw, never pitch or roll.
-//
-// Deliberately the same construction as GetHandTransform below, minus the hand:
-// the same CenterEyePos, the same vr_vunits_per_meter, the same pixelstretch
-// division and the same doomYaw. Anything worn on the body has to land in the
-// frame the hands already land in, and the only way to be sure of that is to
-// build it the same way rather than to derive it a second time -- the comment
-// on MDL_FOLLOWMAINHAND in models.cpp records what re-deriving this basis by
-// hand cost the last two times someone tried.
-//
-// No hand offset and no hand angles, so what comes back is where YOU are and
-// which way you are facing. Pitch and roll are left out on purpose: a holster
-// does not tip when you look down.
-bool VKOpenXRDeviceMode::GetHmdTransform(VSMatrix* mat) const
-{
-	double pixelstretch = r_viewpoint.ViewLevel ? r_viewpoint.ViewLevel->pixelstretch : 1.2;
-	player_t* player = &players[consoleplayer];
-	if (!player)
-		return false;
-
-	mat->loadIdentity();
-	mat->translate((float)r_viewpoint.CenterEyePos.X, (float)r_viewpoint.CenterEyePos.Z - GetDoomPlayerHeightWithoutCrouch(player), (float)r_viewpoint.CenterEyePos.Y);
-	mat->scale((float)vr_vunits_per_meter, (float)vr_vunits_per_meter, (float)-vr_vunits_per_meter);
-
-	mat->translate(0.f, (hmdPosition[1] + (float)vr_height_adjust) / (float)pixelstretch, 0.f);
-	mat->scale(1, 1 / (float)pixelstretch, 1);
-
-	// The cinematic screen layer takes its heading from the viewpoint for the
-	// same reason the hand path does -- doomYaw is not the drawn heading there.
-	if (VR_UseCinematicScreenLayer())
-		mat->rotate(-90 + r_viewpoint.Angles.Yaw.Degrees(), 0, 1, 0);
-	else
-		mat->rotate(-90 + doomYaw, 0, 1, 0);
-
-	return true;
-}
-
 bool VKOpenXRDeviceMode::GetHandTransform(int hand, VSMatrix* mat) const
 {
 	double pixelstretch = r_viewpoint.ViewLevel ? r_viewpoint.ViewLevel->pixelstretch : 1.2;

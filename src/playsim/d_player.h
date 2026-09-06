@@ -40,7 +40,6 @@
 #include "doomdef.h"
 #include "doomstat.h"
 #include "p_pspr.h"
-#include "TRS.h"
 
 class player_t;
 
@@ -537,56 +536,6 @@ public:
 	DRotator angleOffsetTargets;
 
 	bool PlayInVR = false;	// Identifies if this player is playing in VR
-
-	// [XR] VR body avatar. The native arm IK that used to drive this is GONE --
-	// what is left is body PLACEMENT and the rig description a mod supplies.
-	// TRANSIENT / CLIENT-PRESENTATION-ONLY: none of this is serialized or sent over the net.
-	// It is rebuilt every tic from the LOCAL headset, so it is only ever meaningful for the
-	// console player on this machine.
-	TObjPtr<AActor*> vr_body_actor = MakeObjPtr<AActor*>(nullptr); // the actor drawn/posed as this player's VR body; null = the pawn itself
-	float       vr_body_facing_yaw = 0.f;         // decoupled body heading; the renderer draws the body at this, not the HMD yaw
-	bool        vr_body_facing_valid = false;
-
-	// [XR] Rig description for the VR body, supplied by the mod that owns the body (Actor.SetVRBody*).
-	// Maps a joint ROLE to a joint name on whatever rig is loaded. Empty table = the built-in
-	// marine names. Every change bumps vr_body_rig_gen so cached joint indices are re-resolved.
-	TMap<FName, FName> vr_body_bone_roles;
-	int          vr_body_rig_gen = 0;
-	FVector3     vr_body_grip_axis = FVector3(1.f, 0.f, 0.f); // finger flex axis in joint-local space (marine: +X)
-	// [XR] How far the player has physically crouched below their standing height, in map units,
-	// measured by the renderer (models.cpp) against a standing high-water mark. Zero when standing.
-	// The renderer holds the body at STANDING height while this is non-zero, so the IK is the only
-	// thing that may lower it -- by dropping the hips and bending the knees, feet planted.
-	float        vr_body_crouch_drop = 0.f;
-	TArray<FName> vr_body_hidden_bones;                       // joints collapsed to zero scale in the procedural pose (head, from inside)
-	float        vr_body_neck_z = 0.f;                        // neck height read off the rig via the "neck" role (baseframe Z); 0 = use vr_body_neck_height
-	// Hand pose frames, per VR_MAINHAND/VR_OFFHAND: the body's own finger joints are seeded from this
-	// frame of the body model's pose clip instead of the bind pose (-1 = bind + grip curl). The mod
-	// keeps these equal to whatever frame it is showing on its hand models, so both rigs pose alike.
-	int          vr_body_hand_pose_frame[2] = { -1, -1 };
-	int          vr_body_hand_pose_next[2]  = { -1, -1 };
-	float        vr_body_hand_pose_lerp[2]  = { 0.f, 0.f };
-	// External hand target, per VR_MAINHAND/VR_OFFHAND (Doom world x, y, z-up). When valid the arm IK
-	// solves the wrist onto THIS point instead of the raw controller -- e.g. the exact point another
-	// hand model is drawn at. The wrist orientation still comes from the controller.
-	bool         vr_body_hand_target_valid[2] = { false, false };
-	DVector3     vr_body_hand_target_pos[2] = {};
-	// The hand model's drawn axes (GL world directions of its model +X, +Y, +Z) and a per-hand
-	// alignment quaternion (that model's palm frame -> this body's hand-bone palm frame, both in
-	// their own file spaces). With both set the wrist copies the hand model's orientation exactly.
-	bool         vr_body_hand_frame_valid[2] = { false, false };
-	FVector3     vr_body_hand_frame_ax[2] = {};
-	FVector3     vr_body_hand_frame_ay[2] = {};
-	FVector3     vr_body_hand_frame_az[2] = {};
-	// The hand MODEL ACTORS the body's hands follow (Actor.SetVRBodyHandActor): every frame the
-	// renderer takes that actor's live object matrix, so the wrist target and orientation are exact
-	// at render rate, not tic rate. palm bone = the joint the wrist lands on; offset = a fixed nudge
-	// in that model's own file space (the hand sliders).
-	TObjPtr<AActor*> vr_body_hand_actor[2] = { MakeObjPtr<AActor*>(nullptr), MakeObjPtr<AActor*>(nullptr) };
-	FName        vr_body_hand_palm_bone[2] = { NAME_None, NAME_None };
-	FVector3     vr_body_hand_offset_model[2] = {};
-	bool         vr_body_hand_align_set[2] = { false, false };
-	FQuaternion  vr_body_hand_align[2] = { FQuaternion(0.f,0.f,0.f,1.f), FQuaternion(0.f,0.f,0.f,1.f) };
 };
 
 // Bookkeeping on players - state.

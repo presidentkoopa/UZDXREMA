@@ -5186,13 +5186,6 @@ static void EnsureModelData(AActor * mobj)
 	}
 }
 
-// [XR] The file-static EnsureModelData, exported for the
-// procedural-pose thunks (vmthunks_actors.cpp) so there is exactly one allocator.
-void P_EnsureActorModelData(AActor * mobj)
-{
-	EnsureModelData(mobj);
-}
-
 static void CleanupModelData(AActor * mobj)
 {
 	if ( !(mobj->flags9 & MF9_DECOUPLEDANIMATIONS)

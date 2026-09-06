@@ -200,10 +200,10 @@ void GLBuffer::GPUWaitSync()
 
 void GLVertexBuffer::SetFormat(int numBindingPoints, int numAttributes, size_t stride, const FVertexBufferAttribute *attrs)
 {
-	static int VFmtToGLFmt[] = { GL_FLOAT, GL_FLOAT, GL_FLOAT, GL_FLOAT, GL_UNSIGNED_BYTE, GL_INT_2_10_10_10_REV, GL_UNSIGNED_BYTE, GL_UNSIGNED_SHORT };
-	static uint8_t VFmtToSize[] = { 4, 3, 2, 1, 4, 4, 4, 4 };
-	static bool VFmtToNormalize[] = { false, false, false, false, true, true, false, false };
-	static bool VFmtToIntegerType[] = { false, false, false, false, false, false, true, true };
+	static int VFmtToGLFmt[] = { GL_FLOAT, GL_FLOAT, GL_FLOAT, GL_FLOAT, GL_UNSIGNED_BYTE, GL_INT_2_10_10_10_REV, GL_UNSIGNED_BYTE };
+	static uint8_t VFmtToSize[] = { 4, 3, 2, 1, 4, 4, 4 };
+	static bool VFmtToNormalize[] = { false, false, false, false, true, true, false };
+	static bool VFmtToIntegerType[] = { false, false, false, false, false, false, true };
 
 	mStride = stride;
 	mNumBindingPoints = numBindingPoints;

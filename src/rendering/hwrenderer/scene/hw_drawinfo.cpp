@@ -319,10 +319,6 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 				VPUniforms.mStampMod[ns] = {
 					(float)Level->StampTex[st],
 					(float)Level->StampTexStrength[st], 0.f, 0.f };
-				const PalEntry c2 = Level->StampColor2[st];
-				VPUniforms.mStampCol2[ns] = {
-					c2.r / 255.f, c2.g / 255.f, c2.b / 255.f,
-					(float)Level->StampFadeAt[st] };
 				ns++;
 			}
 			VPUniforms.mStampParams = { (float)ns, 0.f, 0.f, 0.f };
@@ -492,21 +488,7 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 		// you looked at a wall on the floor above.
 		{
 			double eyeFloor = 0.0, eyeCeil = 0.0;
-			// [BB] Only ask for a sector when there is geometry to find one in.
-			//
-			// PointInSubsector answers a null gamenode with &subsectors[0], and
-			// PointInSector reads ->sector straight off that. On a level whose
-			// map has been freed the array is empty, so that is a read through a
-			// null data pointer at offset 4 rather than a missing fog value.
-			//
-			// This path is reached exactly when something has ALREADY gone
-			// wrong: I_Error frees the map and then the error screen still has
-			// to draw, which comes back through here via AdjustBlend with no
-			// map loaded. Without this the engine dies with an access violation
-			// instead of showing the error that actually caused the problem.
-			auto vsec = Level->subsectors.Size() > 0
-				? Level->PointInSector(Viewpoint.Pos)
-				: nullptr;
+			auto vsec = Level->PointInSector(Viewpoint.Pos);
 			if (vsec)
 			{
 				eyeFloor = vsec->floorplane.ZatPoint(Viewpoint.Pos);
@@ -693,8 +675,7 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 			(float)Level->GlowCellScale, (float)Level->GlowCellSpeed,
 			(float)Level->GlowCellWidth };
 		VPUniforms.mGlowTex4 = { (float)Level->GlowReact,
-			(float)Level->GlowPulse, (float)Level->GlowPulseLevel,
-			(float)Level->GlowPulseRate };
+			(float)Level->GlowPulse, (float)Level->GlowPulseLevel, 0.f };
 
 		VPUniforms.mFogColor2 = { Level->FogColor2.r / 255.f,
 			Level->FogColor2.g / 255.f, Level->FogColor2.b / 255.f,
@@ -704,24 +685,19 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 		// volumetric beam pass gets its own copy in VIEW space and cannot
 		// share -- see hw_viewpointuniforms.h. Outside the slab gate too:
 		// a tornado standing in clear air is exactly the case that needs it.
-		// The fog carries ONE torch cone -- there is a single set of mFogBeam
-		// uniforms -- so with several beams live it takes the lowest slot
-		// rather than whichever was written most recently. Deterministic, and
-		// slot 0 is the one a flashlight would naturally hold.
-		const int fogBeam = Level->FirstVolBeam();
-		if (fogBeam >= 0)
+		if (Level->VolBeamActive)
 		{
 			VPUniforms.mFogBeamPos = {
-				(float)Level->VolBeamPos[fogBeam].X, (float)Level->VolBeamPos[fogBeam].Z,
-				(float)Level->VolBeamPos[fogBeam].Y, (float)Level->VolBeamLength[fogBeam] };
+				(float)Level->VolBeamPos.X, (float)Level->VolBeamPos.Z,
+				(float)Level->VolBeamPos.Y, (float)Level->VolBeamLength };
 			VPUniforms.mFogBeamDir = {
-				(float)Level->VolBeamDir[fogBeam].X, (float)Level->VolBeamDir[fogBeam].Z,
-				(float)Level->VolBeamDir[fogBeam].Y,
-				(float)cos(Level->VolBeamInner[fogBeam] * M_PI / 180.0) };
+				(float)Level->VolBeamDir.X, (float)Level->VolBeamDir.Z,
+				(float)Level->VolBeamDir.Y,
+				(float)cos(Level->VolBeamInner * M_PI / 180.0) };
 			VPUniforms.mFogBeamCol = {
-				Level->VolBeamColor[fogBeam].r / 255.f, Level->VolBeamColor[fogBeam].g / 255.f,
-				Level->VolBeamColor[fogBeam].b / 255.f,
-				(float)cos(Level->VolBeamOuter[fogBeam] * M_PI / 180.0) };
+				Level->VolBeamColor.r / 255.f, Level->VolBeamColor.g / 255.f,
+				Level->VolBeamColor.b / 255.f,
+				(float)cos(Level->VolBeamOuter * M_PI / 180.0) };
 		}
 		else
 		{
@@ -979,13 +955,11 @@ angle_t HWDrawInfo::FrustumAngle()
 
 void HWDrawInfo::SetupVolumetricBeam()
 {
-	if (Level == nullptr)
+	if (Level == nullptr || !Level->VolBeamActive)
 	{
-		hw_postprocess.volbeam.ClearBeams();
+		hw_postprocess.volbeam.ClearBeam();
 		return;
 	}
-
-	hw_postprocess.volbeam.ClearBeams();
 
 	auto worldToView = [this](const DVector3 &w, bool isDirection) -> FVector3
 	{
@@ -995,31 +969,24 @@ void HWDrawInfo::SetupVolumetricBeam()
 		return FVector3(out[0], out[1], out[2]);
 	};
 
-	// Every live slot gets its own uniform set. The pass draws them one after
-	// another and is ADDITIVE, so they composite correctly with no blending
-	// work and no shader change -- each pass contributes only its own light.
-	for (int bi = 0; bi < FLevelLocals::MAX_VOL_BEAMS; bi++)
-	{
-	if (!Level->VolBeamActive[bi]) continue;
-
 	VolumetricBeamUniforms u = {};
-	u.BeamPos = worldToView(Level->VolBeamPos[bi], false);
+	u.BeamPos = worldToView(Level->VolBeamPos, false);
 
-	FVector3 dir = worldToView(Level->VolBeamDir[bi], true);
+	FVector3 dir = worldToView(Level->VolBeamDir, true);
 	float dl = dir.Length();
 	u.BeamDir = (dl > 0.0001f) ? dir / dl : FVector3(0, 0, -1);
 
-	u.BeamColor = FVector3(Level->VolBeamColor[bi].r / 255.f,
-		Level->VolBeamColor[bi].g / 255.f,
-		Level->VolBeamColor[bi].b / 255.f);
+	u.BeamColor = FVector3(Level->VolBeamColor.r / 255.f,
+		Level->VolBeamColor.g / 255.f,
+		Level->VolBeamColor.b / 255.f);
 
 	// Half-angles arrive in degrees; the shader compares cosines, so convert
 	// once here rather than per pixel.
-	u.CosInner = (float)cos(Level->VolBeamInner[bi] * M_PI / 180.0);
-	u.CosOuter = (float)cos(Level->VolBeamOuter[bi] * M_PI / 180.0);
-	u.BeamLength = (float)Level->VolBeamLength[bi];
-	u.Density = (float)Level->VolBeamDensity[bi];
-	u.Falloff = (float)Level->VolBeamFalloff[bi];
+	u.CosInner = (float)cos(Level->VolBeamInner * M_PI / 180.0);
+	u.CosOuter = (float)cos(Level->VolBeamOuter * M_PI / 180.0);
+	u.BeamLength = (float)Level->VolBeamLength;
+	u.Density = (float)Level->VolBeamDensity;
+	u.Falloff = (float)Level->VolBeamFalloff;
 
 	// Rebuilding the pixel ray in the shader needs the view frustum's shape,
 	// which is exactly what the projection matrix's first two diagonals hold.
@@ -1032,9 +999,9 @@ void HWDrawInfo::SetupVolumetricBeam()
 
 	// Dust is sampled in world space, so the shader needs a way back out of
 	// view space. Without this the motes would ride along with the camera.
-	u.DustAmount = (float)Level->VolBeamDust[bi];
-	u.DustScale = (float)Level->VolBeamDustScale[bi];
-	u.DustDrift = (float)Level->VolBeamDustDrift[bi];
+	u.DustAmount = (float)Level->VolBeamDust;
+	u.DustScale = (float)Level->VolBeamDustScale;
+	u.DustDrift = (float)Level->VolBeamDustDrift;
 	u.DustTime = (float)(screen->FrameTime * 0.001);
 	u.AxisFade = (float)clamp<double>(vol_beam_axisfade, 0.0, 1.0);
 
@@ -1050,8 +1017,7 @@ void HWDrawInfo::SetupVolumetricBeam()
 	if (!VPUniforms.mViewMatrix.inverseMatrix(inv)) inv.loadIdentity();
 	memcpy(u.ViewToWorld, inv.get(), sizeof(float) * 16);
 
-	hw_postprocess.volbeam.AddBeam(u);
-	}
+	hw_postprocess.volbeam.SetBeam(u);
 }
 
 //-----------------------------------------------------------------------------
@@ -1505,28 +1471,6 @@ void HWDrawInfo::RenderScene(FRenderState &state)
 	RenderAll.Clock();
 
 	state.SetDepthMask(true);
-
-	// [BB] A DEFINED FOG SCALE FOR EVERYTHING, not just walls, flats and
-	// sprites.
-	//
-	// Only those three set it, and FRenderState::Reset runs once at startup --
-	// so anything drawn outside them inherited whatever the previous draw left,
-	// including across frames. The sky is the worst case: it is drawn BEFORE
-	// this, so it took the last draw of the previous frame. In VR each eye is
-	// its own pass, so the two eyes disagreed about the sky -- binocular
-	// rivalry on the largest surface in view.
-	//
-	// Reset here so the default is 1, and the sky portal sets the outdoor
-	// value for itself, a sky being the outdoor case by definition.
-	state.SetFogDensityScale(1.0f);
-
-	// [BB] And flat glow, for the same reason. It is written by the flat path
-	// and main.fp applies it to ANY surface, so every path that neither sets
-	// nor clears it inherits the last flat drawn -- which is what made walls
-	// light and unlight as the viewpoint moved. The wall, sprite and weapon
-	// paths decide for themselves now; this covers everything else, including
-	// whatever is drawn before the first flat of the frame.
-	state.ClearFlatGlow();
 
 	// [BB] Sweep: set once for the whole scene rather than per draw. It is a
 	// world-space band, not a property of any sector or surface, so every

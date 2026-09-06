@@ -419,20 +419,6 @@ void IQMModel::LoadBlendIndexes(IQMFileReader& reader, const IQMVertexArray& ver
 			v.SetBoneSelector(x, y, z, w);
 		}
 	}
-	else if (vertexArray.Format == IQM_USHORT && vertexArray.Size == 4)
-	{
-		// [XR] 16-bit joint indices: a rig with more than 256 joints (the Slayer has 924) cannot be
-		// addressed by the one-byte indices the IQM spec assumes. Our iqm_export writes USHORT for
-		// such rigs; FModelVertex::boneselector is 16-bit to carry them to the GPU.
-		for (FModelVertex& v : Vertices)
-		{
-			int x = reader.ReadUInt16();
-			int y = reader.ReadUInt16();
-			int z = reader.ReadUInt16();
-			int w = reader.ReadUInt16();
-			v.SetBoneSelector(x, y, z, w);
-		}
-	}
 	else if (vertexArray.Format == IQM_INT && vertexArray.Size == 4)
 	{
 		for (FModelVertex& v : Vertices)

@@ -261,11 +261,7 @@ struct StreamData
 	// [BB] DARKNESS EXEMPTION, per draw. Not flat-glow business despite the
 	// company it keeps -- it sits here because this was uFlatGlowPad2, so it
 	// costs nothing and MAX_STREAM_DATA is unchanged. See SetDarknessExempt.
-	// 0 = darkened with everything else, 1 = untouched by it, and anything
-	// between is a partial. It was a yes/no; actors need the middle, because
-	// a room taken to black takes its monsters with it and a thing you cannot
-	// see at all is not atmosphere.
-	float uDarknessExempt;
+	int uDarknessExempt;
 	FVector4 uFlatGlowLines[64];
 
 	FVector4 uGradientTopPlane;
@@ -287,42 +283,6 @@ struct StreamData
 	int padding1;
 	int padding2;
 	int padding3;
-
-	// [OUTLINE] SPRITE OUTLINES, per draw call.
-	//
-	// An actor traced in neon by its own sprite -- see func_spriteoutline.fp
-	// for what the numbers mean and where the effect came from. Set from the
-	// actor in HWSprite::DrawSprite, so this is per-sprite rather than
-	// scene-global: one corpse can be lit without every monster in the room
-	// lighting up with it.
-	//
-	// uOutlineParms is (thickness, threshold, glow, mode). Mode 0 is off and is
-	// what FRenderState::Reset leaves here, so every other draw in the level
-	// pays one float compare in the fragment shader and nothing else.
-	FVector4 uOutlineColorA;
-	FVector4 uOutlineColorB;
-	FVector4 uOutlineParms;
-
-	// [BB] FOG DENSITY SCALE FOR THIS DRAW. 1 is the slab as configured.
-	//
-	// The fog is one slab over the whole level, which cannot tell a courtyard
-	// from a cellar -- and those want opposite things. Doom already marks
-	// outdoors: a sky ceiling. So the sector picks a multiplier and the shader
-	// scales its own density by it.
-	//
-	// PER DRAW rather than per fragment, so the boundary is the surface, not a
-	// blend. That reads correctly through a window: the far wall outside is an
-	// outdoor draw and fogs like one, while the near wall of the room you are
-	// standing in does not, so looking out sees weather you are not standing
-	// in.
-	//
-	// A plain scale rather than an indoor/outdoor flag, so the CPU picks which
-	// number applies and anything else that wants to thin or thicken the fog
-	// for one draw can use the same lane.
-	float uFogDensityScale;
-	int uFogPad0;
-	int uFogPad1;
-	int uFogPad2;
 };
 
 class FRenderState
@@ -438,7 +398,7 @@ public:
 		mStreamData.uFlatGlowFar = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uFlatGlowFalloff = 0;
 		mStreamData.uFlatGlowIsCeiling = 0;
-		mStreamData.uDarknessExempt = 0.f;
+		mStreamData.uDarknessExempt = 0;
 		mStreamData.uFlatGlowLineCount = 0;
 		mStreamData.uGradientTopPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
 		mStreamData.uGradientBottomPlane = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -457,43 +417,10 @@ public:
 		mStreamData.uGlobalFadeGradient = 1.5f;
 		mStreamData.uLightRangeLimit = 64;
 
-		// [OUTLINE] Off. Every draw that is not an outlined sprite lands here,
-		// and mode 0 is one float compare in the fragment shader.
-		mStreamData.uOutlineColorA = { 0.f, 0.f, 0.f, 0.f };
-		mStreamData.uOutlineColorB = { 0.f, 0.f, 0.f, 0.f };
-		mStreamData.uOutlineParms = { 0.f, 0.f, 0.f, 0.f };
-		mStreamData.uFogDensityScale = 1.f;
-
 		mModelMatrix.loadIdentity();
 		mTextureMatrix.loadIdentity();
 		ClearClipSplit();
 	}
-
-	// [OUTLINE] Trace a sprite in neon -- see func_spriteoutline.fp. Set per
-	// draw call from the actor in HWSprite::DrawSprite, which is what lets one
-	// corpse light up without every monster in the room lighting up with it.
-	//
-	// Strength rides in ColorA.w and pulse speed in ColorB.w, so the whole
-	// effect is three vec4s rather than a scatter of loose floats.
-	void SetSpriteOutline(PalEntry colA, PalEntry colB, float strength,
-		float thickness, float threshold, float glow, float pulse, int mode)
-	{
-		mStreamData.uOutlineColorA = { colA.r / 255.f, colA.g / 255.f, colA.b / 255.f, strength };
-		mStreamData.uOutlineColorB = { colB.r / 255.f, colB.g / 255.f, colB.b / 255.f, pulse };
-		mStreamData.uOutlineParms = { thickness, threshold, glow, (float)mode };
-	}
-
-	// [BB] See uFogDensityScale. 1 is the slab as configured.
-	void SetFogDensityScale(float s)
-	{
-		mStreamData.uFogDensityScale = s;
-	}
-
-	void ClearSpriteOutline()
-	{
-		mStreamData.uOutlineParms = { 0.f, 0.f, 0.f, 0.f };
-	}
-
 
 	void SetNormal(FVector3 norm)
 	{
@@ -728,9 +655,9 @@ public:
 	// Additive and default-off: nothing is exempt until something asks, so
 	// every existing caller is untouched. Any draw that is emissive rather
 	// than lit can use it, not only sprites.
-	void SetDarknessExempt(float exempt)
+	void SetDarknessExempt(bool exempt)
 	{
-		mStreamData.uDarknessExempt = exempt;
+		mStreamData.uDarknessExempt = exempt ? 1 : 0;
 	}
 
 	void SetFlatGlowParams(float r, float g, float b, float reach, const FVector4 &farColor, int falloff, int lineCount, const FVector4* lines, int isCeiling = 0)

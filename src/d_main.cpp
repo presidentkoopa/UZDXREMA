@@ -89,6 +89,7 @@
 #include "md5.h"
 #include "menu.h"
 #include "p_local.h"
+#include "p_physics.h"
 #include "p_setup.h"
 #include "po_man.h"
 #include "printf.h"
@@ -1889,6 +1890,7 @@ void D_DoomLoop ()
 			// defaults to OpenGL and falls back to it silently on Vulkan
 			// failure, and because screen wipes -- every level transition --
 			// never reach screen->BeginFrame() at all.
+			P_PhysicsFrame();
 
 			// Update display, next frame, with current state.
 			I_StartTic ();

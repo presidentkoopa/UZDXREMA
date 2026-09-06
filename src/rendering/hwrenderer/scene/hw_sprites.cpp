@@ -129,11 +129,6 @@ CUSTOM_CVAR(Int, gl_fuzztype, 8, CVAR_ARCHIVE)
 // not in a header because until now nothing outside that file wanted it.
 void SetGlowPlanes(FRenderState &state, const secplane_t& top, const secplane_t& bottom);
 
-// [BB] Defined in hw_flats.cpp, beside the flat glow it mirrors.
-FVector3 FlatGlowAtPoint(sector_t *sector, const DVector3 &at, FLevelLocals *Level, double timeSec);
-void SplitRoomGlow(const FVector3 &glow, FVector3 &tintOut, FVector3 &addOut);
-float FogScaleForSector(FLevelLocals *Level, sector_t *sec);
-
 void HWSprite::DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent)
 {
 	bool additivefog = false;
@@ -167,15 +162,6 @@ void HWSprite::DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent)
 		if (fogsec != nullptr)
 			SetGlowPlanes(state, fogsec->ceilingplane, fogsec->floorplane);
 	}
-
-	// [BB] FLAT GLOW IS NOT A SPRITE'S BUSINESS. Set in the flat path and read
-	// by main.fp on ANY surface, so a sprite drawn after the flat pass with no
-	// masked wall in between inherited the last flat's colour and its sector's
-	// edge list. Monsters and items lit up in rooms that had a glowing floor
-	// somewhere behind them, and stopped when the draw order happened to put a
-	// wall in front. Cleared here so it is decided rather than inherited.
-	state.ClearFlatGlow();
-	state.SetFogDensityScale(FogScaleForSector(di->Level, actor ? actor->Sector : nullptr));
 
 	if (translucent)
 	{
@@ -216,10 +202,7 @@ void HWSprite::DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent)
 		// below), and fullbright is implemented as lightlevel = 255 -- which
 		// arrives here indistinguishable from a brightly lit surface and gets
 		// scaled to nothing along with everything else.
-		// Fullbright things are exempt outright; everything else takes as much
-		// of the darkening as the level says actors should. See
-		// FLevelLocals::DarkActorExempt.
-		state.SetDarknessExempt(fullbright ? 1.f : (float)di->Level->DarkActorExempt);
+		state.SetDarknessExempt(fullbright);
 		if (translucentCanvas)
 		{
 			state.SetTextureMode(TM_NORMAL);
@@ -265,32 +248,6 @@ void HWSprite::DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent)
 		state.SetTextureMode(RenderStyle);
 		state.SetDepthBias(-1, -128);
 	}
-	// [OUTLINE] Neon outline traced from this actor's own sprite. HERE rather
-	// than earlier in the function because the alpha-func calls above are what
-	// the wire mode has to override, and they run inside the translucency
-	// branch.
-	//
-	// Per draw call, so one corpse can be traced without every monster in the
-	// room being traced with it. FRenderState::Reset puts mode back to 0 for
-	// everything else in the frame, and mode 0 is one float compare.
-	if (actor != nullptr && actor->OutlineMode > 0 && actor->OutlineStrength > 0.0)
-	{
-		state.SetSpriteOutline(actor->OutlineColorA, actor->OutlineColorB,
-			(float)actor->OutlineStrength, (float)actor->OutlineThickness,
-			(float)actor->OutlineThreshold, (float)actor->OutlineGlow,
-			(float)actor->OutlinePulse, actor->OutlineMode);
-
-		// Wire mode replaces the sprite's alpha with the traced edge, and the
-		// usual masked-sprite threshold would then cut off the soft half of
-		// every line -- which is the half that reads as glow.
-		if (actor->OutlineMode == 2) state.AlphaFunc(Alpha_GEqual, 0.f);
-	}
-	else
-	{
-		state.ClearSpriteOutline();
-	}
-
-
 	if (RenderStyle.BlendOp != STYLEOP_Shadow)
 	{
 		if (di->Level->HasDynamicLights && !di->isFullbrightScene() && !fullbright)
@@ -305,45 +262,12 @@ void HWSprite::DrawSprite(HWDrawInfo *di, FRenderState &state, bool translucent)
 		sector_t *cursec = actor ? actor->Sector : particle ? particle->subsector->sector : nullptr;
 		if (cursec != nullptr)
 		{
-			PalEntry finalcol = fullbright
+			const PalEntry finalcol = fullbright
 				? ThingColor
 				: ThingColor.Modulate(cursec->SpecialColors[sector_t::sprites]);
-			// [BB] LIT BY THE ROOM IT IS STANDING IN.
-			//
-			// A glowing floor should light what is on it -- monsters, barrels,
-			// pickups, the player's hands -- or it reads as a decal painted on
-			// the floor rather than as light. Evaluated at this actor's OWN
-			// position, so each thing is lit by the room it is actually in.
-			//
-			// THE SAME FUNCTION THE PSPRITE PATH USES, deliberately. Hands can
-			// be world actors or psprites and the player can toggle between
-			// them; two mechanisms would mean the hands changed appearance
-			// when toggled. One function, evaluated at whatever position the
-			// caller has, keeps both readings identical.
-			//
-			// Not the shader's flat-glow term: that is cleared just below,
-			// because it would measure this sprite against whichever sector's
-			// linedefs were last uploaded rather than its own.
-			PalEntry spriteAdd = cursec->AdditiveColors[sector_t::sprites] | 0xff000000;
-			if (actor != nullptr)
-			{
-				const FVector3 roomGlow = FlatGlowAtPoint(cursec, actor->Pos(), di->Level,
-					(screen->FrameTime - state.firstFrame) / 1000.0);
-				FVector3 tint, gadd;
-				SplitRoomGlow(roomGlow, tint, gadd);
 
-				// The tint MULTIPLIES, so the thing takes the room's colour
-				// rather than the room's brightness -- see SplitRoomGlow.
-				finalcol.r = (uint8_t)clamp<int>(int(finalcol.r * tint.X), 0, 255);
-				finalcol.g = (uint8_t)clamp<int>(int(finalcol.g * tint.Y), 0, 255);
-				finalcol.b = (uint8_t)clamp<int>(int(finalcol.b * tint.Z), 0, 255);
-
-				spriteAdd.r = min<int>(255, spriteAdd.r + int(gadd.X));
-				spriteAdd.g = min<int>(255, spriteAdd.g + int(gadd.Y));
-				spriteAdd.b = min<int>(255, spriteAdd.b + int(gadd.Z));
-			}
 			state.SetObjectColor(finalcol);
-			state.SetAddColor(spriteAdd);
+			state.SetAddColor(cursec->AdditiveColors[sector_t::sprites] | 0xff000000);
 		}
 		else if (isBillboard)
 		{
@@ -2461,9 +2385,7 @@ void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double
 		FTextureID tid;
 		tid.SetIndex(bb->data);
 		if (!tid.isValid()) return;
-		FBillboardUV uv;
-		uv.u0 = bb->u0; uv.v0 = bb->v0; uv.u1 = bb->u1; uv.v1 = bb->v1;
-		emit(0.0, 0.0, halfw, halfh, TexMan.GetGameTexture(tid, true), tint, uv);
+		emit(0.0, 0.0, halfw, halfh, TexMan.GetGameTexture(tid, true), tint, FBillboardUV());
 		return;
 	}
 
@@ -2627,12 +2549,8 @@ void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double
 	// manages to punch its digits out of its own plate.
 	case BB_WG13:
 	{
-		// The FONT ATLAS, not the white stand-in. This shader samples it -- the
-		// digits are real distance-field glyphs, which is what the original did
-		// and what the 7-segment version that stood in here did not need.
-		FSDFFont* sdf = FSDFFontRoster::Slot(bb->font);
-		FGameTexture* atlas = sdf ? sdf->Atlas() : nullptr;
-		if (atlas == nullptr) return;
+		FGameTexture* white = GetBillboardShape("bbwhite");
+		if (white == nullptr) return;
 
 		// Progress in red, the number as 24 bits across the rest. The original
 		// packed both into its glow spot the same way.
@@ -2644,7 +2562,7 @@ void HWSprite::EmitBillboardPayload(HWDrawInfo* di, const FBillboard* bb, double
 
 		const int savedShader = OverrideShader;
 		OverrideShader = SHADER_WG13;
-		emit(0.0, 0.0, halfw, halfh, atlas, tint, FBillboardUV());
+		emit(0.0, 0.0, halfw, halfh, white, tint, FBillboardUV());
 		OverrideShader = savedShader;
 		bbGlow = savedWG;
 		return;
@@ -2711,18 +2629,7 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 	particle = nullptr;
 	lightlist = nullptr;
 	translation = NO_TRANSLATION;
-	// [BB] BB_WG13 IS ADDED, NOT BLENDED OVER.
-	//
-	// The original was a glow spot -- its result went into `color.rgb +=`
-	// inside the lighting function, so it was light added to the scene. Drawn
-	// translucent instead, a halo at 30% alpha is 30% glyph and 70% dark floor,
-	// which is grey. That single choice is the difference between a lamp and a
-	// sticker, and no amount of work inside the shader can undo it, because the
-	// blend happens after.
-	//
-	// Only this payload. A panel or a label is an object and should occlude
-	// what is behind it; a neon number is a light and should not.
-	RenderStyle = (bb->payload == BB_WG13) ? STYLE_Add : STYLE_Translucent;
+	RenderStyle = STYLE_Translucent;
 	hw_styleflags = STYLEHW_NoAlphaTest;
 	dynlightindex = -1;
 	polyoffset = false;
@@ -2845,15 +2752,7 @@ void HWSprite::ProcessBillboard(HWDrawInfo *di, const FBillboard *bb, const DVec
 				const int bor = clamp((bb->data >> 8) & 0xFF, 0, 15);
 				alpha = (rad << 4) | bor;
 			}
-			// [BB] BLUE carries the white-core amount for BB_TEXT, and BBFL_VOID
-			// for BB_SEAM. They share the byte because they can never share a
-			// payload: a seam is an opening, not a glyph, and has no core to
-			// whiten. Anything that is neither leaves it zero and is unchanged.
-			int blue = vd;
-			if (bb->payload == BB_TEXT)
-				blue = (int)(clamp(bb->coreWhite, 0.0, 1.0) * 255.0 + 0.5);
-
-			bbGlow = PalEntry((uint8_t)alpha, (uint8_t)gr, (uint8_t)gs, (uint8_t)blue);
+			bbGlow = PalEntry((uint8_t)alpha, (uint8_t)gr, (uint8_t)gs, (uint8_t)vd);
 		}
 		else
 		{

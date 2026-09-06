@@ -3213,9 +3213,8 @@ void Net_DoCommand(int cmd, TArrayView<uint8_t>& stream, int player)
 					{
 						IFVIRTUALPTRNAME(players[player].mo, NAME_PlayerPawn, MoveWeaponToHand)
 						{
-							// Fourth argument is exactInstance (see PlayerPawn.MoveWeaponToHand).
-							VMValue param[] = { players[player].mo, item, hand, 0 };
-							VMCall(func, param, 4, nullptr, 0);
+							VMValue param[] = { players[player].mo, item, hand };
+							VMCall(func, param, 3, nullptr, 0);
 						}
 					}
 				}

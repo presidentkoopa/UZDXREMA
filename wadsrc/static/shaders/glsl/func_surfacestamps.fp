@@ -72,16 +72,6 @@
 //                               second layer; 0 for none
 //                        y      that layer's strength, 0..1
 //                        zw     spare
-//   uSurfaceStampCol2[i] rgb    the colour it grades TOWARD across its life;
-//                               equal to the first colour means no gradient
-//                        w      fade start, 0..1 of life; 1 = never fade
-//
-// The gradient and the fade are here rather than driven per tic by the caller
-// because a stamp is spawned once and then owned by the engine. The original
-// implementation recomputed its colour every single tic and re-pushed the whole
-// effect, which is also why it had to ring-buffer its own slots. Handing the
-// shader both endpoints and letting it read its own progress gets the same
-// picture with one call and no bookkeeping.
 //
 // The axis is world space and not surface space on purpose. A caller knows the
 // direction a shot travelled, or the way a blade swept; it cannot know the
@@ -237,14 +227,7 @@ vec3 StampBar(vec3 col, vec2 uv, vec2 axis, float rad, float p)
 }
 
 // Jagged directional tear, with the original's red bleed along its edges.
-//
-// `org` is the stamp's own world position -- x and z, the two the original
-// used. It seeds all four of the noise lanes below, and it has to be the RAW
-// coordinate rather than a hash of it: the original multiplies it by 0.01 in
-// one lane and by 2.3 in another, and those two numbers only mean anything
-// against a world coordinate. Hashing it first and inventing new multipliers
-// gives a jagged tear, but not THIS jagged tear.
-vec3 StampGouge(vec3 col, vec2 uv, vec2 axis, vec2 org, float rad, float p)
+vec3 StampGouge(vec3 col, vec2 uv, vec2 axis, float seed, float rad, float p)
 {
 	float along = dot(uv, axis);
 	float perp  = dot(uv, vec2(-axis.y, axis.x));
@@ -253,12 +236,12 @@ vec3 StampGouge(vec3 col, vec2 uv, vec2 axis, vec2 org, float rad, float p)
 	float anB  = clamp(abs(along) / halfLen, 0.0, 1.0);
 	float taper = 1.0 - anB * anB;
 
-	float sdB = along * 0.045 + org.x * 0.01;
+	float sdB = along * 0.045 + seed * 6.4;
 	float siB = floor(sdB), sfB = fract(sdB);
 	float h0 = fract(sin(siB * 12.9898) * 43758.5453);
 	float h1 = fract(sin((siB + 1.0) * 12.9898) * 43758.5453);
 	float wob = mix(h0, h1, sfB * sfB * (3.0 - 2.0 * sfB)) - 0.5;
-	float jag = fract(sin(along * 0.9 + org.y) * 43758.5453) - 0.5;
+	float jag = fract(sin(along * 0.9 + seed * 31.7) * 43758.5453) - 0.5;
 
 	float wHalf  = rad * 0.06 * taper + 0.001;
 	float centre = wob * wHalf * 1.6;
@@ -268,9 +251,9 @@ vec3 StampGouge(vec3 col, vec2 uv, vec2 axis, vec2 org, float rad, float p)
 	float body = (1.0 - smoothstep(wj * 0.45, wj, pj)) * onB;
 	float core = (1.0 - smoothstep(0.0, wj * 0.4, pj)) * onB;
 	float scratch = 0.55 + 0.45 * smoothstep(0.1, 0.4,
-		fract(sin(floor(along * 0.3) * 7.31 + org.x) * 43758.5453));
+		fract(sin(floor(along * 0.3) * 7.31 + seed * 19.3) * 43758.5453));
 	float halo = (1.0 - smoothstep(wj, wj * 2.8, pj)) * onB;
-	halo *= (0.35 + 0.65 * fract(sin(along * 1.27 + org.y * 2.3) * 43758.5453));
+	halo *= (0.35 + 0.65 * fract(sin(along * 1.27 + seed * 44.1) * 43758.5453));
 	float bleed = max(halo - body, 0.0);
 
 	return (col * body + vec3(core * 0.7)) * scratch
@@ -525,9 +508,8 @@ vec3 StampTexture(int tex, vec3 col, float t, float u, float v, float p, float s
 // returning a sum the caller adds. That one shape is why this is not a pure
 // function, exactly as in the original.
 //
-void ApplySurfaceStamps(inout vec3 color, out vec3 addOut, vec3 worldPos, vec3 worldNormal)
+void ApplySurfaceStamps(inout vec3 color, vec3 worldPos, vec3 worldNormal)
 {
-	addOut = vec3(0.0);
 	int count = int(uSurfaceStampParams.x + 0.5);
 	if (count <= 0) return;
 
@@ -553,19 +535,10 @@ void ApplySurfaceStamps(inout vec3 color, out vec3 addOut, vec3 worldPos, vec3 w
 
 		vec4 sc = uSurfaceStampCol[i];
 		vec4 sa = uSurfaceStampArg[i];
-		vec4 s2 = uSurfaceStampCol2[i];
 
+		vec3  col = sc.rgb;
 		float t   = dist / rad;
 		float p   = clamp(sc.w, 0.0, 1.0);
-
-		// Grade toward the second colour across the stamp's life, then fade out
-		// over whatever tail is left after fadeStart. Both are inert at their
-		// defaults -- an equal second colour and a fade start of 1 leave a stamp
-		// exactly as it was before either existed.
-		vec3 col = mix(sc.rgb, s2.rgb, p);
-		float fadeAt = clamp(s2.w, 0.0, 1.0);
-		if (p > fadeAt && fadeAt < 1.0)
-			col *= 1.0 - (p - fadeAt) / max(1.0 - fadeAt, 0.0001);
 		vec2  uv  = vec2(dot(rel, tx), dot(rel, ty));
 		vec2  nrm = uv / rad;
 		vec4 sm = uSurfaceStampMod[i];
@@ -598,7 +571,7 @@ void ApplySurfaceStamps(inout vec3 color, out vec3 addOut, vec3 worldPos, vec3 w
 		}
 
 		if      (shape == STAMP_BAR)      add += StampBar(col, uv, axis, rad, p);
-		else if (shape == STAMP_GOUGE)    add += StampGouge(col, uv, axis, vec2(sp.x, sp.z), rad, p);
+		else if (shape == STAMP_GOUGE)    add += StampGouge(col, uv, axis, seed, rad, p);
 		else if (shape == STAMP_RING)     add += StampRing(col, dist, rad, p);
 		else if (shape == STAMP_HEXFIELD) add += StampHexField(col, uv, rad, p);
 		else if (shape == STAMP_HEXRING)  add += StampHexRing(col, nrm, p);
@@ -612,17 +585,5 @@ void ApplySurfaceStamps(inout vec3 color, out vec3 addOut, vec3 worldPos, vec3 w
 	}
 
 	if (hit) add += StampDither();
-
-	// HANDED BACK, NOT ADDED. The original ended on
-	//     color.rgb += desaturate(vec4(wgAdd, 1.0)).rgb;
-	// so a stamp in a sector the mapper drained of colour drained with it.
-	// That desaturate had been dropped, which left stamps fully saturated in
-	// rooms where nothing else is -- the effect visibly ignoring the map.
-	//
-	// It cannot be called from in here: this lump is prepended AHEAD of
-	// main.fp, so main.fp's desaturate() does not exist yet. So the light goes
-	// back to the caller and main.fp applies the real function to it, one line
-	// after the call. INVERT is the exception and still writes `color`
-	// directly, because it replaces the surface rather than lighting it.
-	addOut = add;
+	color += add;
 }

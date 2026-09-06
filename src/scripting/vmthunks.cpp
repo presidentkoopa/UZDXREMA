@@ -3595,48 +3595,25 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, RemoveBillboardGroup, RemoveBillboar
 static void SetVolumetricBeam(FLevelLocals *self, double px, double py, double pz,
 	double dx, double dy, double dz, int color,
 	double inner, double outer, double length, double density, double falloff,
-	double dust, double dustScale, double dustDrift, int slot)
+	double dust, double dustScale, double dustDrift)
 {
-	// Slot 0 for anything that never heard of slots, which is every caller
-	// that existed before there were any.
-	if (slot < 0 || slot >= FLevelLocals::MAX_VOL_BEAMS) slot = 0;
-
-	self->VolBeamActive[slot] = true;
-	self->VolBeamDust[slot] = dust;
-	self->VolBeamDustScale[slot] = dustScale;
-	self->VolBeamDustDrift[slot] = dustDrift;
-	self->VolBeamPos[slot] = DVector3(px, py, pz);
+	self->VolBeamActive = true;
+	self->VolBeamDust = dust;
+	self->VolBeamDustScale = dustScale;
+	self->VolBeamDustDrift = dustDrift;
+	self->VolBeamPos = DVector3(px, py, pz);
 	DVector3 d(dx, dy, dz);
 	double len = d.Length();
-	self->VolBeamDir[slot] = (len > 0.0) ? d / len : DVector3(1, 0, 0);
-	self->VolBeamColor[slot] = (PalEntry)color;
-	self->VolBeamInner[slot] = inner;
-	self->VolBeamOuter[slot] = outer;
-	self->VolBeamLength[slot] = length;
-	self->VolBeamDensity[slot] = density;
-	self->VolBeamFalloff[slot] = falloff;
+	self->VolBeamDir = (len > 0.0) ? d / len : DVector3(1, 0, 0);
+	self->VolBeamColor = (PalEntry)color;
+	self->VolBeamInner = inner;
+	self->VolBeamOuter = outer;
+	self->VolBeamLength = length;
+	self->VolBeamDensity = density;
+	self->VolBeamFalloff = falloff;
 }
 
-// NATIVE0, NOT NATIVE -- and this is not a style choice.
-//
-// The plain _NATIVE macro also registers a DIRECT-CALL pointer, which the JIT
-// uses to emit a straight call to the C++ function. asmjit caps that at 16
-// arguments (kFuncArgCount in libraries/asmjit/asmjit/base/func.h). This one
-// needs seventeen: self, two Vector3s at three floats each, the colour, five
-// doubles, three dust doubles and the slot. Over the cap the JIT blows up while
-// compiling at load -- the process dies with no window, no dialog, no script
-// error and nothing written to any log.
-//
-// It sat at exactly sixteen until `slot` was added, which is why this only
-// started when beams gained slots, and why it broke every caller at once rather
-// than only the one that passed the new argument: the JIT builds the direct call
-// from the FUNCTION signature, not from the call site, so leaving `slot` to its
-// default did not help anybody.
-//
-// _NATIVE0 registers the same function with no direct-call pointer. The VM
-// calling convention has no such limit. If you add a parameter to any native,
-// count the VM arguments first -- a Vector3 is three.
-DEFINE_ACTION_FUNCTION_NATIVE0(FLevelLocals, SetVolumetricBeam, SetVolumetricBeam)
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetVolumetricBeam, SetVolumetricBeam)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
 	PARAM_FLOAT(px); PARAM_FLOAT(py); PARAM_FLOAT(pz);
@@ -3650,31 +3627,19 @@ DEFINE_ACTION_FUNCTION_NATIVE0(FLevelLocals, SetVolumetricBeam, SetVolumetricBea
 	PARAM_FLOAT(dust);
 	PARAM_FLOAT(dustScale);
 	PARAM_FLOAT(dustDrift);
-	PARAM_INT(slot);
-	SetVolumetricBeam(self, px, py, pz, dx, dy, dz, color, inner, outer, length, density, falloff, dust, dustScale, dustDrift, slot);
+	SetVolumetricBeam(self, px, py, pz, dx, dy, dz, color, inner, outer, length, density, falloff, dust, dustScale, dustDrift);
 	return 0;
 }
 
-// Clear ONE slot, or every slot with -1. Defaulting to slot 0 rather than to
-// all of them is deliberate: a caller that never heard of slots is turning off
-// the beam it turned on, not everyone else's -- which was the whole failure the
-// slots exist to fix.
-static void ClearVolumetricBeam(FLevelLocals *self, int slot)
+static void ClearVolumetricBeam(FLevelLocals *self)
 {
-	if (slot < 0)
-	{
-		for (int i = 0; i < FLevelLocals::MAX_VOL_BEAMS; i++)
-			self->VolBeamActive[i] = false;
-		return;
-	}
-	if (slot < FLevelLocals::MAX_VOL_BEAMS) self->VolBeamActive[slot] = false;
+	self->VolBeamActive = false;
 }
 
 DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearVolumetricBeam, ClearVolumetricBeam)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
-	PARAM_INT(slot);
-	ClearVolumetricBeam(self, slot);
+	ClearVolumetricBeam(self);
 	return 0;
 }
 
@@ -3964,41 +3929,6 @@ static void SetDarknessSpace(FLevelLocals *self, double distDepth, double distRa
 	self->DarkHeightRange = heightRange;
 }
 
-// [BB] HOW MUCH OF THE DARKNESS ACTORS ARE SPARED.
-//
-// The darkness pass takes the scene down as a whole, monsters included, so a
-// room dark enough to be worth lighting is a room you cannot see anything
-// coming in. 0 is the old behaviour and stays the default.
-static void SetDarknessActors(FLevelLocals *self, double exempt)
-{
-	self->DarkActorExempt = clamp(exempt, 0.0, 1.0);
-}
-
-DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetDarknessActors, SetDarknessActors)
-{
-	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
-	PARAM_FLOAT(exempt);
-	SetDarknessActors(self, exempt);
-	return 0;
-}
-
-// [BB] Fog by room type -- see FLevelLocals::FogIndoorScale. A sky ceiling is
-// outdoors, anything else is indoors, which is the marker every Doom map
-// already carries.
-static void SetFogZones(FLevelLocals *self, double indoor, double outdoor)
-{
-	self->FogIndoorScale = max(indoor, 0.0);
-	self->FogOutdoorScale = max(outdoor, 0.0);
-}
-
-DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogZones, SetFogZones)
-{
-	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
-	PARAM_FLOAT(indoor); PARAM_FLOAT(outdoor);
-	SetFogZones(self, indoor, outdoor);
-	return 0;
-}
-
 DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetDarknessSpace, SetDarknessSpace)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
@@ -4198,19 +4128,18 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetGlowCells, SetGlowCells)
 // room's own alarm. Kept together because both are "the glow responding to
 // something" rather than "the glow having a texture".
 static void SetGlowReact(FLevelLocals *self, double react, double pulse,
-	double level, double rate)
+	double level)
 {
 	self->GlowReact = react;
 	self->GlowPulse = pulse;
 	self->GlowPulseLevel = level;
-	self->GlowPulseRate = rate;
 }
 
 DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetGlowReact, SetGlowReact)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
-	PARAM_FLOAT(react); PARAM_FLOAT(pulse); PARAM_FLOAT(level); PARAM_FLOAT(rate);
-	SetGlowReact(self, react, pulse, level, rate);
+	PARAM_FLOAT(react); PARAM_FLOAT(pulse); PARAM_FLOAT(level);
+	SetGlowReact(self, react, pulse, level);
 	return 0;
 }
 
@@ -5059,68 +4988,15 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetSweepBandFill, SetSweepBandFill)
 //
 // Set the count, then each beam. Beams persist until changed or cleared, so a
 // tripwire grid is set once and a weapon beam is re-set as it moves.
-// [BB] How far a distance-field glyph's core is pushed toward white, 0..1,
-// leaving the colour to the halo. 0 is a flat single-colour glyph.
-//
-// A setter and not an argument on the spawn calls: AddBillboardPersistent is
-// already at twelve parameters and this is wanted by roughly one caller in ten.
-static void SetBillboardCore(FLevelLocals *self, int id, double amount)
-{
-	for (unsigned i = 0; i < self->Billboards.Size(); i++)
-	{
-		if (self->Billboards[i].id != id) continue;
-		self->Billboards[i].coreWhite = amount;
-		return;
-	}
-}
-
-DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetBillboardCore, SetBillboardCore)
-{
-	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
-	PARAM_INT(id);
-	PARAM_FLOAT(amount);
-	SetBillboardCore(self, id, amount);
-	return 0;
-}
-
-// [BB] Which part of its texture a BB_TEXTURE billboard shows, as a fraction of
-// the whole: (0,0)-(1,1) is all of it, which is what every billboard has unless
-// told otherwise.
-//
-// The reason this is worth a native at all: a picture cut into strips, each
-// strip placed at its own height, is a flat mark that FOLLOWS THE GROUND. One
-// quad cannot -- it has a single height and a staircase does not.
-static void SetBillboardUV(FLevelLocals *self, int id, double u0, double v0, double u1, double v1)
-{
-	for (unsigned i = 0; i < self->Billboards.Size(); i++)
-	{
-		if (self->Billboards[i].id != id) continue;
-		self->Billboards[i].u0 = (float)u0;
-		self->Billboards[i].v0 = (float)v0;
-		self->Billboards[i].u1 = (float)u1;
-		self->Billboards[i].v1 = (float)v1;
-		return;
-	}
-}
-
-DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetBillboardUV, SetBillboardUV)
-{
-	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
-	PARAM_INT(id);
-	PARAM_FLOAT(u0); PARAM_FLOAT(v0); PARAM_FLOAT(u1); PARAM_FLOAT(v1);
-	SetBillboardUV(self, id, u0, v0, u1, v1);
-	return 0;
-}
-
 // [STAMP] Script's way in to FLevelLocals::SpawnSurfaceStamp. The policy --
 // slot choice, eviction, ageing -- lives on the level, not here, because the
 // `stamp` CCMD and native gameplay code publish these too.
 static void SpawnSurfaceStamp(FLevelLocals *self, int shape, double x, double y, double z,
 	double radius, int color, int life, double ax, double ay, double az,
-	int tex, double texStrength, int color2, double fadeAt)
+	int tex, double texStrength)
 {
 	self->SpawnSurfaceStamp(shape, DVector3(x, y, z), radius, (PalEntry)color, life,
-		DVector3(ax, ay, az), tex, texStrength, (PalEntry)color2, fadeAt);
+		DVector3(ax, ay, az), tex, texStrength);
 }
 
 DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SpawnSurfaceStamp, SpawnSurfaceStamp)
@@ -5133,9 +5009,7 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SpawnSurfaceStamp, SpawnSurfaceStamp
 	PARAM_INT(life);
 	PARAM_FLOAT(ax); PARAM_FLOAT(ay); PARAM_FLOAT(az);
 	PARAM_INT(tex); PARAM_FLOAT(texStrength);
-	PARAM_COLOR(color2); PARAM_FLOAT(fadeAt);
-	SpawnSurfaceStamp(self, shape, x, y, z, radius, color, life, ax, ay, az,
-		tex, texStrength, color2, fadeAt);
+	SpawnSurfaceStamp(self, shape, x, y, z, radius, color, life, ax, ay, az, tex, texStrength);
 	return 0;
 }
 

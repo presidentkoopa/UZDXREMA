@@ -1544,35 +1544,7 @@ bool PIT_CheckThing(FMultiBlockThingsIterator &it, FMultiBlockThingsIterator::Ch
 	// Call the script callback. This must be done before any other checks that perform some actual action or may already return a 'block'.
 	// The checks here are to do this only for conditions that would later result in an action, calling this for everything would be too much of a drag if
 	// too many scripted overrides were being used, as PIT_CheckThing is even called for touching all the monster corpses lying around.
-	//
-	// RS FORK -- A MISSILE STRIKING A SHOOTABLE ACTOR IS ALSO SUCH A CONDITION.
-	//
-	// The gate above was SOLID-only, which left one whole class of collision
-	// with no script veto at all: a NON-SOLID but SHOOTABLE actor. Such an
-	// actor still stops a missile dead -- the shootable branch below damages it
-	// and returns blocked (see the MF_SHOOTABLE test further down this
-	// function, and P_DoMissileDamage just above it) -- but nothing in ZScript
-	// could ever say "not this one, let it through". CanCollideWith is exactly
-	// the "may these two touch" question and reads as though it should already
-	// cover this; it simply was not being asked.
-	//
-	// That gap is why a shield, a phasing enemy, a friendly-fire-immune turret
-	// or any pass-through prop had to be built out of flag-toggling hacks that
-	// fight the engine instead of one honest override. Reusing CanCollideWith
-	// rather than adding a second victim-side hook keeps one idiom, not two.
-	//
-	// ADDITIVE AND INERT BY DEFAULT. An actor with no CanCollideWith override
-	// behaves exactly as before -- P_CanCollideWith finds no virtual and
-	// returns true. The only cost is one VM call per missile-vs-shootable
-	// overlap, far rarer than the solid case the gate already pays for.
-	//
-	// NETPLAY: safe. PIT_CheckThing is playsim and runs identically on every
-	// peer, this adds no state, no serialisation and no demo format change, and
-	// the call is deterministic on exactly the same terms as the SOLID case
-	// above -- an override that reads client-local state (consoleplayer, the
-	// view, a ui cvar) desyncs, and that was already true before this change.
-	if (((thing->flags & MF_SOLID) || (thing->flags6 & (MF6_TOUCHY | MF6_BUMPSPECIAL))
-			|| ((thing->flags & MF_SHOOTABLE) && (tm.thing->flags & MF_MISSILE))) &&
+	if (((thing->flags & MF_SOLID) || (thing->flags6 & (MF6_TOUCHY | MF6_BUMPSPECIAL))) &&
 		((tm.thing->flags & (MF_SOLID|MF_MISSILE)) || (tm.thing->flags2 & MF2_BLASTED) || (tm.thing->flags6 & MF6_BLOCKEDBYSOLIDACTORS) || (tm.thing->BounceFlags & BOUNCE_MBF)))
 	{
 		if (!P_CanCollideWith(tm.thing, thing)) return true;

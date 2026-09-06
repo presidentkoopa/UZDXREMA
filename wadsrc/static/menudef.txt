@@ -371,6 +371,10 @@ OptionMenu CommandLineProfileMenu protected
 
 OptionMenu "OptionsMenu" protected
 {
+	// RS FORK -- promoted to the top level. These are FEEL values, dialled in
+	// while wearing the headset, and burying them under VR -> 3D mode meant
+	// taking it off to go and find them.
+	Submenu "Physics Options", "VRPhysicsMenu"
 	Title "$OPTMNU_TITLE"
 	Submenu "$OPTMNU_INFOCREDITS", 		"InfoAndCreditsMenu"
 	Submenu "$OPTMNU_QUICKMENU",		"QuickMenu"
@@ -1769,11 +1773,10 @@ OptionMenu VRWeaponOptions protected
 	StaticText ""
 	StaticText "$VRWEAPONMNU_GLOBAL_OPTIONS", gold
 	Option "$VRWEAPONMNU_RECOIL",		        "vr_recoil", "OnOff"
-	Option "$VRWEAPONMNU_INSTANT_HANDSWITCH",	"vr_handswitch_instant", "OnOff"
 	Slider "$VRWEAPONMNU_PITCH_ADJUST",			"vr_weaponRotate", -45, 45, 5, 2
 	Slider "$VRWEAPONMNU_SPRITE_MODEL_SCALE",	"vr_weaponScale", 0.1, 3.0, 0.1, 2
 	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_recoil vr_handswitch_instant vr_weaponRotate vr_weaponScale"
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_recoil vr_weaponRotate vr_weaponScale"
 
 	StaticText " "
 	StaticText "$VRWEAPONMNU_3D_MODEL_OPTIONS", gold
@@ -1876,9 +1879,17 @@ OptionMenu VRLaserSightOptions protected
 	Option "$VRLASERMNU_COLOR_CYCLE_DOT",		"vr_laser_color_cycle_dot", "OnOff"
 	StaticText " "
 
+	// Reacts on top of BOTH tiers above -- a lined-up headshot always wins
+	// the pixel. What counts as a head is gameplay-mod data (see the
+	// Headshots mod); this only controls how the engine shows it.
+	StaticText "$VRLASERMNU_HEADSHOT_OPTIONS", gold
+	Option "$VRLASERMNU_HEADSHOT_REACT",		"vr_laser_headshot_react", "OnOff"
+	ColorPicker "$VRLASERMNU_HEADSHOT_COLOR",	"vr_laser_headshot_color"
+	Option "$VRLASERMNU_HEADSHOT_PULSE",		"vr_laser_headshot_pulse", "OnOff"
+	Slider "$VRLASERMNU_HEADSHOT_PULSE_SPEED",	"vr_laser_headshot_pulse_speed", 0.5, 20.0, 0.5, 1
 	StaticText " "
 
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_laser_sight vr_laser_show_melee vr_laser_hide_on_wheel vr_laser_beam vr_laser_other_players_beam vr_laser_other_players_pointer vr_laser_color vr_laser_beam_alpha vr_laser_beam_width vr_laser_beam_glow vr_laser_beam_emissive vr_laser_beam_taper vr_laser_beam_fade vr_laser_pointer_scale vr_laser_pointer_alpha vr_laser_pointer_glow vr_laser_pointer_glow_scale vr_laser_pointer_glow_intensity vr_laser_beam_length vr_laser_fixed_length vr_laser_source_offset_x vr_laser_source_offset_y vr_laser_source_offset_z vr_laser_lock vr_laser_lock_tighten vr_laser_lock_rate vr_laser_dot_range vr_laser_color_mode vr_laser_color_offhand vr_laser_dot_color vr_laser_dot_color_offhand vr_laser_color_per_slot vr_laser_color_slot1 vr_laser_color_slot2 vr_laser_color_slot3 vr_laser_color_slot4 vr_laser_color_slot5 vr_laser_color_slot6 vr_laser_color_slot7 vr_laser_color_slot8 vr_laser_color_slot9 vr_laser_color_slot0 vr_laser_color_cycle vr_laser_color_cycle_speed vr_laser_color_cycle_dot"
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_laser_sight vr_laser_show_melee vr_laser_hide_on_wheel vr_laser_beam vr_laser_other_players_beam vr_laser_other_players_pointer vr_laser_color vr_laser_beam_alpha vr_laser_beam_width vr_laser_beam_glow vr_laser_beam_emissive vr_laser_beam_taper vr_laser_beam_fade vr_laser_pointer_scale vr_laser_pointer_alpha vr_laser_pointer_glow vr_laser_pointer_glow_scale vr_laser_pointer_glow_intensity vr_laser_beam_length vr_laser_fixed_length vr_laser_source_offset_x vr_laser_source_offset_y vr_laser_source_offset_z vr_laser_lock vr_laser_lock_tighten vr_laser_lock_rate vr_laser_dot_range vr_laser_color_mode vr_laser_color_offhand vr_laser_dot_color vr_laser_dot_color_offhand vr_laser_color_per_slot vr_laser_color_slot1 vr_laser_color_slot2 vr_laser_color_slot3 vr_laser_color_slot4 vr_laser_color_slot5 vr_laser_color_slot6 vr_laser_color_slot7 vr_laser_color_slot8 vr_laser_color_slot9 vr_laser_color_slot0 vr_laser_color_cycle vr_laser_color_cycle_speed vr_laser_color_cycle_dot vr_laser_headshot_react vr_laser_headshot_color vr_laser_headshot_pulse vr_laser_headshot_pulse_speed"
 }
 
 // Ten slots is too many rows to sit inside the main page without pushing
@@ -2548,6 +2559,80 @@ OptionMenu "VR3DMenu" protected
 	Slider "$GLPREFMNU_VRSCREENDIST",     vr_screendist,          0.2, 10.0, 0.1, 1
 	StaticText " "
 	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_mode vr_enable_quadbuffered vr_ipd vr_screendist"
+	StaticText " "
+	Submenu "Object physics", "VRPhysicsMenu"
+}
+
+/*=======================================*
+ *
+ * RS FORK -- VR object physics
+ *
+ * Reachable from a headset, which is the point: these are feel values, and
+ * feel is dialled in while wearing the thing, not guessed at from a desk.
+ *
+ *=======================================*/
+
+OptionMenu "VRPhysicsMenu" protected
+{
+	Title "Object physics"
+
+	StaticText ""
+	// OFF by default. P_PhysicsFrame is called unconditionally from D_DoomLoop,
+	// so with nothing using the module that is a solver iterating an empty list
+	// every frame plus a report line in the log every second, forever.
+	Option "VR object physics", vr_physics, OnOff
+
+	StaticText "How dropped and thrown objects behave.", gold
+	StaticText " "
+
+	Slider "Bounciness",        vr_physics_restitution,  0.0, 0.8, 0.05, 2
+	Slider "Grip on surfaces",  vr_physics_friction,     0.0, 1.5, 0.05, 2
+	StaticText " "
+	StaticText "Damping bleeds off energy so things settle", gold
+	StaticText "instead of shivering forever.", gold
+	Slider "Slowing (moving)",  vr_physics_lineardamp,   0.0, 2.0, 0.05, 2
+	Slider "Slowing (spin)",    vr_physics_angulardamp,  0.0, 3.0, 0.05, 2
+	StaticText " "
+	StaticText "Stops things turning on the spot after they", gold
+	StaticText "land. Raise if they pirouette on the floor.", gold
+	Slider "Twist resistance",  vr_physics_contactspindamp, 0.0, 15.0, 0.5, 1
+	StaticText " "
+	Slider "Gravity (m/s2)",    vr_physics_gravity,      0.0, 25.0, 0.5, 1
+	StaticText " "
+	Slider "Simulation rate",   vr_physics_hz,           30, 240, 10, 0
+	StaticText " "
+	StaticText " "
+	StaticText "Your hands are solid to loose objects, so you", gold
+	StaticText "can knock them around. They pass through walls.", gold
+	StaticText " "
+	StaticText "A throw leaves at the FASTEST moment of the last", gold
+	StaticText "180ms, not the speed at release -- a person is already", gold
+	StaticText "braking by then. Strength scales that peak; below the", gold
+	StaticText "threshold it is a release, not a throw, and it leaves at", gold
+	StaticText "hand speed instead of inheriting a tracking spike.", gold
+	Slider "Throw strength",    vr_physics_throwscale,   0.05, 2.0, 0.05, 2
+	Slider "Throw threshold",   vr_physics_throwmin,     0.0, 4.0, 0.1, 1
+	StaticText " "
+	Option "Hands are solid",   vr_physics_hands,        OnOff
+	Slider "Hand size",         vr_physics_handsize,     0.25, 4.0, 0.05, 2
+	StaticText " "
+	StaticText "A held T77 is now a solid placeholder box --", gold
+	StaticText "real per-part shapes come with the real model.", gold
+	Slider "Weapon length",     vr_physics_weaponlen,     0.02, 0.6, 0.01, 2
+	Slider "Weapon width",      vr_physics_weaponwidth,   0.005, 0.2, 0.005, 3
+	Slider "Weapon height",     vr_physics_weaponheight,  0.02, 0.4, 0.01, 2
+	Slider "Weapon fwd offset", vr_physics_weapon_ofs_fwd, -0.3, 0.3, 0.01, 2
+	Slider "Weapon up offset",  vr_physics_weapon_ofs_up,  -0.2, 0.2, 0.01, 2
+	StaticText " "
+	StaticText "How much a turning wrist steers a throw.", gold
+	StaticText "Lower = throws go where you point them.", gold
+	Slider "Wrist spin on throw", vr_physics_throwspin,  0.0, 2.0, 0.05, 2
+	StaticText " "
+	StaticText "Diagnostics -- written to the log file.", gold
+	Option "Log summary",       vr_physics_debug,        OnOff
+	Slider "Trace (per sec)",   vr_physics_trace,        0, 20, 1, 0
+	StaticText " "
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_physics_weaponlen vr_physics_weaponwidth vr_physics_weaponheight vr_physics_weapon_ofs_fwd vr_physics_weapon_ofs_up vr_physics_throwspin vr_physics_restitution vr_physics_friction vr_physics_lineardamp vr_physics_angulardamp vr_physics_contactspindamp vr_physics_gravity vr_physics_hz vr_physics_trace"
 }
 
 OptionMenu "PostProcessMenu" protected
