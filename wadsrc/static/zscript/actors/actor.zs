@@ -391,6 +391,25 @@ class Actor : Thinker native
 	native double OutlineGlow;
 	native double OutlinePulse;
 	native int OutlineMode;
+
+	// [BB] A SWEEP FRONT JUST REACHED THIS ACTOR.
+	//
+	// Called once, at the moment a travelling band's front crosses it -- not
+	// while it is inside the band, and not when the band was fired.
+	//
+	// EMPTY HERE ON PURPOSE, and the engine never calls it. This exists so the
+	// thing that DRAWS a sweep never has to know what a monster is, and the
+	// thing that knows what a monster is never has to know a sweep exists. A
+	// lighting mod calls it on whatever it crosses; a monster mod overrides it
+	// and re-tiers. Neither has to be loaded for the other to compile, which is
+	// the whole point -- an earlier draft put the monster tier table inside the
+	// lighting mod and made it fail to load without a monster mod present.
+	//
+	// The tint is the band's colour AT THAT MOMENT, so a band carrying a second
+	// colour hands out a different one at the near edge than at the far edge --
+	// which is what lets one sweep leave a gradient behind it rather than one
+	// flat answer.
+	virtual void OnSweepCrossed(Vector3 origin, double front, Color tint) {}
 	// WRITABLE FROM SCRIPT, 2026-08-30. These six were readonly, which was fine
 	// while the only thing that ever set them was the VR backend writing the
 	// controller pose -- but a WRIST-MOUNTED weapon fires from the mount along
