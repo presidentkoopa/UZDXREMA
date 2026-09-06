@@ -1486,6 +1486,20 @@ void HWDrawInfo::RenderScene(FRenderState &state)
 
 	state.SetDepthMask(true);
 
+	// [BB] A DEFINED FOG SCALE FOR EVERYTHING, not just walls, flats and
+	// sprites.
+	//
+	// Only those three set it, and FRenderState::Reset runs once at startup --
+	// so anything drawn outside them inherited whatever the previous draw left,
+	// including across frames. The sky is the worst case: it is drawn BEFORE
+	// this, so it took the last draw of the previous frame. In VR each eye is
+	// its own pass, so the two eyes disagreed about the sky -- binocular
+	// rivalry on the largest surface in view.
+	//
+	// Reset here so the default is 1, and the sky portal sets the outdoor
+	// value for itself, a sky being the outdoor case by definition.
+	state.SetFogDensityScale(1.0f);
+
 	// [BB] Sweep: set once for the whole scene rather than per draw. It is a
 	// world-space band, not a property of any sector or surface, so every
 	// draw that follows inherits it and the band stays continuous across
