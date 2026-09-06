@@ -782,11 +782,33 @@ float SweepBandAttenAt(int sb)
 	int smode = int(sorg.w);
 	if (smode <= 0) return 0.0;
 
+	// [BB] SIGNED SHAPES -- an actual sweep.
+	//
+	// Modes 2 and 3 are abs(), which makes them TWO planes moving apart from
+	// the origin. That is a split, not a sweep: the word means one front that
+	// starts at one end of the level and travels to the other, and until these
+	// were added the only signed shape in here was 5, which is vertical only.
+	// A band could rise through a map and could not cross one.
+	//
+	// Signed, so the band is a single plane at origin + radius and everything
+	// behind it has already been passed. Put the origin off the near edge and
+	// give it the map's span as its reach and it crosses the whole level once.
+	//
+	//   6  along +X          7  along +Y
+	//   8  along -X          9  along -Y
+	//
+	// The negative pair exists so a sweep can come from either side without the
+	// caller having to move the origin to the far edge and invert its own reach,
+	// which is arithmetic every caller would otherwise repeat.
 	float sdist;
 	if (smode == 1)      sdist = length(pixelpos.xz - sorg.xz);
 	else if (smode == 2) sdist = abs(pixelpos.x - sorg.x);
 	else if (smode == 3) sdist = abs(pixelpos.z - sorg.z);
 	else if (smode == 5) sdist = pixelpos.y - sorg.y;
+	else if (smode == 6) sdist = pixelpos.x - sorg.x;
+	else if (smode == 7) sdist = pixelpos.z - sorg.z;
+	else if (smode == 8) sdist = sorg.x - pixelpos.x;
+	else if (smode == 9) sdist = sorg.z - pixelpos.z;
 	else                 sdist = length(pixelpos.xyz - sorg.xyz);
 
 	float ssigned = sdist - sband.x;
@@ -1884,9 +1906,21 @@ vec3 BeamAirGlow(vec3 fragPos)
 // lattice paths -- painted and in the air -- next to the code they belong to.
 float SweepLineAxis(float coord, float spacing, float width, float soft, float t);
 
-vec3 SweepAirLattice(vec3 fragPos)
+// [BB] Returns the light the lattice ADDS, and writes how much of the view it
+// OCCLUDES into occOut with the colour to occlude toward in occColOut.
+//
+// Additive alone can only ever brighten, so a band could be a wall of light and
+// never a wall of darkness -- adding cannot subtract. A band whose draw mode is
+// CRUSH now blends the scene toward its own colour instead of adding to it,
+// which is the same thing crush already means on a surface, applied in the air.
+//
+// That is what makes a solid band something you cannot see through: black to
+// hide what is coming, or any colour for a wall of it.
+vec3 SweepAirLattice(vec3 fragPos, out float occOut, out vec3 occColOut)
 {
 	vec3 sum = vec3(0.0);
+	occOut = 0.0;
+	occColOut = vec3(0.0);
 	if (uSweepCount <= 0) return sum;
 	if (uSweepAir.x <= 0.0) return sum;
 	if (uSweepFill.x <= 0.0 && uSweepFill.y <= 0.0) return sum;
@@ -2058,8 +2092,20 @@ vec3 SweepAirLattice(vec3 fragPos)
 			if (bfill == 3) cov = 1.0;
 		}
 
-		sum += uSweepFillCol.rgb * cov * slab * uSweepColors[sb].a
-		     * uSweepAir.x * roomFade;
+		float amt = cov * slab * uSweepColors[sb].a * uSweepAir.x * roomFade;
+
+		// CRUSH OCCLUDES INSTEAD OF ADDING. Same meaning the mode already has
+		// on a surface -- take light away rather than put it in -- so a solid
+		// slab in crush is a wall you cannot see through.
+		if (int(uSweepBands[sb].w) == 3)
+		{
+			float o = clamp(amt, 0.0, 1.0);
+			if (o > occOut) { occOut = o; occColOut = uSweepFillCol.rgb; }
+		}
+		else
+		{
+			sum += uSweepFillCol.rgb * amt;
+		}
 	}
 	return sum;
 }
@@ -2815,8 +2861,8 @@ float SweepFillAt(int fill, int shape, vec3 origin)
 
 	// Pick the band's two tangent axes.
 	vec2 uv;
-	if (shape == 2)       uv = vec2(pixelpos.z, pixelpos.y);
-	else if (shape == 3)  uv = vec2(pixelpos.x, pixelpos.y);
+	if (shape == 2 || shape == 6 || shape == 8)  uv = vec2(pixelpos.z, pixelpos.y);
+	else if (shape == 3 || shape == 7 || shape == 9) uv = vec2(pixelpos.x, pixelpos.y);
 	else if (shape == 5)  uv = vec2(pixelpos.x, pixelpos.z);
 	else
 	{
@@ -3507,7 +3553,13 @@ void main()
 		// thing should -- without a light, a sprite, or a quad.
 		// [BB] And the sweep's own lattice, hanging in the air inside the band
 		// rather than painted on what the band lands on.
-		frag.rgb += SweepAirLattice(pixelpos.xyz);
+		{
+			float airOcc; vec3 airOccCol;
+			frag.rgb += SweepAirLattice(pixelpos.xyz, airOcc, airOccCol);
+			// Blended AFTER the additive term, so a band that occludes hides
+			// what is behind it rather than being washed out by its own light.
+			if (airOcc > 0.0) frag.rgb = mix(frag.rgb, airOccCol, airOcc);
+		}
 
 		// [BB] Shapes drawn onto surfaces. Emissive, so they go here with the
 		// rest of the light rather than through the lighting equation -- a
