@@ -880,6 +880,27 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 	objectToWorldMatrix.rotate(pitchoffset + wPlaceRot[1], 0, 0, 1);
 	objectToWorldMatrix.rotate(-(rolloffset + wPlaceRot[2]), 1, 0, 0);
 
+	// 6) The pivot: the point the model turns about, in its own space.
+	//
+	// VSMatrix post-multiplies, so the LAST operation written is the FIRST one
+	// applied to the vertex. Written here, after step 5, it therefore lands on
+	// the vertex BEFORE the rotations -- which is the whole feature. Move these
+	// three lines above the rotations and they silently become another Offset:
+	// still compiling, still looking plausible, and no longer doing anything.
+	//
+	// Same axis order and the same division by scale as step 4, so a pivot and
+	// an offset are stated in the same units and can be read against each other.
+	//
+	// The compare is not an optimisation. The common case is a model with no
+	// pivot at all, and three float compares are cheaper than a matrix multiply
+	// on every drawn model in the level.
+	if (pivotx != 0.f || pivoty != 0.f || pivotz != 0.f)
+	{
+		objectToWorldMatrix.translate(-pivotx / xscale,
+			-pivotz / (zscale * stretch),
+			-pivoty / yscale);
+	}
+
 	if (!(flags & MDL_CORRECTPIXELSTRETCH) && modelIDs.Size() > 0)
 	{
 		stretch = (modelIDs[0] >= 0 ? Models[modelIDs[0]]->getAspectFactor(Level->info->pixelstretch) : 1.f) / Level->info->pixelstretch;
@@ -1181,6 +1202,19 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	objectToWorldMatrix.rotate(-(smf->angleoffset + placeRot[0] + seatYaw), 0, 1, 0);
 	objectToWorldMatrix.rotate(smf->pitchoffset + placeRot[1] + seatPitch, 0, 0, 1);
 	objectToWorldMatrix.rotate(-(smf->rolloffset + placeRot[2] + seatRoll), 1, 0, 0);
+
+	// The pivot, on the HUD path too -- see the field note in model.h.
+	//
+	// Present on BOTH paths deliberately. A model tuned on one and moved to the
+	// other silently losing a correction is the worst kind of asymmetry, and a
+	// pivot is the worst one to lose: being wrong shows up as a wobble while
+	// turning rather than as a static misplacement anyone would spot at once.
+	//
+	// No division by scale here, matching the offset call on this path above.
+	if (smf->pivotx != 0.f || smf->pivoty != 0.f || smf->pivotz != 0.f)
+	{
+		objectToWorldMatrix.translate(-smf->pivotx, -smf->pivotz, -smf->pivoty);
+	}
 
 	// THE HAND SLIDERS ARE APPLIED HERE, IN THE MODEL'S OWN ORIENTED FRAME,
 	// and NOT summed into the three calls above. They used to be summed, on
@@ -2083,6 +2117,20 @@ void ParseModelDefLump(int Lump)
 				{
 					sc.MustGetFloat();
 					smf.zoffset=sc.Float;
+				}
+				// [BB] PivotOffset -- the point the model TURNS ABOUT, in its own
+				// space. Same three axes and the same units as Offset below, and
+				// deliberately spelled to sit next to it, because the two are
+				// constantly confused: Offset moves the model, PivotOffset moves
+				// what it rotates around. See the field note in model.h.
+				else if (sc.Compare("pivotoffset"))
+				{
+					sc.MustGetFloat();
+					smf.pivotx = sc.Float;
+					sc.MustGetFloat();
+					smf.pivoty = sc.Float;
+					sc.MustGetFloat();
+					smf.pivotz = sc.Float;
 				}
 				// Offset reading.
 				else if (sc.Compare("offset"))

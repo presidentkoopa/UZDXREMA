@@ -62,6 +62,25 @@ struct FSpriteModelFrame
 	// [BB] Added zoffset, rotation parameters and flags.
 	// Added xoffset, yoffset
 	float xoffset, yoffset, zoffset;
+
+	// [BB] THE POINT THE MODEL TURNS ABOUT, IN ITS OWN SPACE.
+	//
+	// Offset above cannot express this, and the difference is not a nicety.
+	// Offset is applied AFTER the rotations, which makes it a rigid displacement
+	// in the parent frame: it moves the model without moving the point the model
+	// SPINS about. A mesh whose own origin is not where it ought to turn from
+	// therefore ORBITS that origin instead of rotating in place, and no value of
+	// Offset shrinks that orbit -- it only moves the whole circle somewhere else.
+	//
+	// This is subtracted BEFORE the rotations instead, which is the ordinary
+	// v' = R * (v - p). It is the only way to say "turn about HERE" for a mesh
+	// that was not authored centred on the point it should turn from.
+	//
+	// Zero by default, so every existing model is untouched. MODELDEF keyword is
+	// PivotOffset, deliberately spelled to sit next to Offset because the two get
+	// confused constantly: Offset moves the model, PivotOffset moves what it
+	// rotates around.
+	float pivotx = 0.f, pivoty = 0.f, pivotz = 0.f;
 	float xrotate, yrotate, zrotate;
 	float rotationCenterX, rotationCenterY, rotationCenterZ;
 	float rotationSpeed;
