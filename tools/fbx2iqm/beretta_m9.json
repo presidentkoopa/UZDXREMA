@@ -1,0 +1,405 @@
+{
+  "name": "beretta_m9",
+  "source_fbx": "C:/Users/Command/Desktop/b92f/Beretta_M9_Separated.fbx",
+  "out_dir": "E:/UZDXREMA/tools/fbx2iqm/out",
+  "out_name": "beretta_m9.iqm",
+  "orientation": "fbx_native",
+  "join_meshes": true,
+  "exclude_meshes": [
+    "geoGun_bullet_body01",
+    "geoGun_bullet_head01"
+  ],
+  "meshes": [
+    "geoGun_bottom01",
+    "geoGun_muzzle01",
+    "geoGun_barrel01",
+    "geoGun_disassembly_latch01",
+    "geoGun_extractor01",
+    "geoGun_front_sight01",
+    "geoGun_grips01",
+    "geoGun_hammer01",
+    "geoGun_inside_part_a01",
+    "geoGun_inside_part_b01",
+    "geoGun_inside_part_c01",
+    "geoGun_led01",
+    "geoGun_long_magazine_catch_bushing01",
+    "geoGun_magazine01",
+    "geoGun_magazine_bottom01",
+    "geoGun_magazine_catch01",
+    "geoGun_rear_sight01",
+    "geoGun_recoil_spring_guide01",
+    "geoGun_safety01",
+    "geoGun_safety_lever01",
+    "geoGun_safety_lever_part01",
+    "geoGun_screws01",
+    "geoGun_short_magazine_catch_bushing01",
+    "geoGun_slide01",
+    "geoGun_slide_catch01",
+    "geoGun_slide_screw_a01",
+    "geoGun_slide_screw_b01",
+    "geoGun_small_button01",
+    "geoGun_small_holder01",
+    "geoGun_small_screw01",
+    "geoGun_spring01",
+    "geoGun_trigger",
+    "geoGun_trigger_bar01"
+  ],
+  "rig": {
+    "mode": "build",
+    "name": "M9_rig",
+    "tail_offset": [
+      0.0,
+      1.0,
+      0.0
+    ],
+    "bind_default": "frame",
+    "bones": [
+      {
+        "name": "ROOT",
+        "parent": null,
+        "head": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "frame",
+        "parent": "ROOT",
+        "head": {
+          "centroid_of": [
+            "geoGun_bottom01"
+          ]
+        }
+      },
+      {
+        "name": "barrel",
+        "parent": "frame",
+        "head": {
+          "centroid_of": [
+            "geoGun_barrel01"
+          ]
+        }
+      },
+      {
+        "name": "muzzle_device",
+        "parent": "barrel",
+        "head": {
+          "centroid_of": [
+            "geoGun_muzzle01"
+          ]
+        }
+      },
+      {
+        "name": "MARKER_muzzle",
+        "parent": "muzzle_device",
+        "head": {
+          "pick_of": [
+            "geoGun_muzzle01"
+          ],
+          "axis": "z",
+          "extreme": "max"
+        }
+      },
+      {
+        "name": "MARKER_crown",
+        "parent": "barrel",
+        "head": {
+          "pick_of": [
+            "geoGun_barrel01"
+          ],
+          "axis": "z",
+          "extreme": "max"
+        }
+      },
+      {
+        "name": "slide",
+        "parent": "frame",
+        "head": {
+          "centroid_of": [
+            "geoGun_slide01"
+          ]
+        }
+      },
+      {
+        "name": "extractor",
+        "parent": "slide",
+        "head": {
+          "centroid_of": [
+            "geoGun_extractor01"
+          ]
+        }
+      },
+      {
+        "name": "front_sight",
+        "parent": "slide",
+        "head": {
+          "centroid_of": [
+            "geoGun_front_sight01"
+          ]
+        }
+      },
+      {
+        "name": "rear_sight",
+        "parent": "slide",
+        "head": {
+          "centroid_of": [
+            "geoGun_rear_sight01"
+          ]
+        }
+      },
+      {
+        "name": "safety",
+        "parent": "slide",
+        "head": {
+          "centroid_of": [
+            "geoGun_safety01"
+          ]
+        }
+      },
+      {
+        "name": "safety_lever",
+        "parent": "slide",
+        "head": {
+          "centroid_of": [
+            "geoGun_safety_lever01"
+          ]
+        }
+      },
+      {
+        "name": "safety_lever_pt",
+        "parent": "safety_lever",
+        "head": {
+          "centroid_of": [
+            "geoGun_safety_lever_part01"
+          ]
+        }
+      },
+      {
+        "name": "slide_pin_top",
+        "parent": "slide",
+        "head": {
+          "centroid_of": [
+            "geoGun_slide_screw_b01"
+          ]
+        }
+      },
+      {
+        "name": "slide_pin_l",
+        "parent": "slide",
+        "head": [
+          0.226,
+          2.26,
+          -2.254
+        ]
+      },
+      {
+        "name": "slide_pin_r",
+        "parent": "slide",
+        "head": [
+          -0.226,
+          2.26,
+          -2.253
+        ]
+      },
+      {
+        "name": "frame_pin_mid",
+        "parent": "frame",
+        "head": [
+          0.294,
+          0.93,
+          -0.691
+        ]
+      },
+      {
+        "name": "trigger",
+        "parent": "frame",
+        "head": {
+          "centroid_of": [
+            "geoGun_trigger"
+          ]
+        }
+      },
+      {
+        "name": "trigger_bar",
+        "parent": "frame",
+        "head": {
+          "centroid_of": [
+            "geoGun_trigger_bar01"
+          ]
+        }
+      },
+      {
+        "name": "hammer",
+        "parent": "frame",
+        "head": {
+          "centroid_of": [
+            "geoGun_hammer01"
+          ]
+        }
+      },
+      {
+        "name": "slide_catch",
+        "parent": "frame",
+        "head": {
+          "centroid_of": [
+            "geoGun_slide_catch01"
+          ]
+        }
+      },
+      {
+        "name": "mag_catch",
+        "parent": "frame",
+        "head": {
+          "centroid_of": [
+            "geoGun_magazine_catch01"
+          ]
+        }
+      },
+      {
+        "name": "disassembly",
+        "parent": "frame",
+        "head": {
+          "centroid_of": [
+            "geoGun_disassembly_latch01"
+          ]
+        }
+      },
+      {
+        "name": "magazine",
+        "parent": "frame",
+        "head": {
+          "centroid_of": [
+            "geoGun_magazine01"
+          ]
+        }
+      },
+      {
+        "name": "mag_floorplate",
+        "parent": "magazine",
+        "head": {
+          "centroid_of": [
+            "geoGun_magazine_bottom01"
+          ]
+        }
+      },
+      {
+        "name": "mag_floor_pin",
+        "parent": "magazine",
+        "head": [
+          -0.001,
+          -2.48,
+          -2.972
+        ]
+      },
+      {
+        "name": "MARKER_grip",
+        "parent": "frame",
+        "head": {
+          "centroid_of": [
+            "geoGun_grips01"
+          ]
+        }
+      },
+      {
+        "name": "MARKER_magwell",
+        "parent": "frame",
+        "head": {
+          "pick_of": [
+            "geoGun_magazine01"
+          ],
+          "axis": "y",
+          "extreme": "min"
+        }
+      },
+      {
+        "name": "MARKER_ejection",
+        "parent": "slide",
+        "head": {
+          "pick_of": [
+            "geoGun_extractor01"
+          ],
+          "axis": "z",
+          "extreme": "min"
+        }
+      }
+    ],
+    "bind": {
+      "geoGun_barrel01": "barrel",
+      "geoGun_muzzle01": "muzzle_device",
+      "geoGun_slide01": "slide",
+      "geoGun_extractor01": "extractor",
+      "geoGun_front_sight01": "front_sight",
+      "geoGun_rear_sight01": "rear_sight",
+      "geoGun_safety01": "safety",
+      "geoGun_safety_lever01": "safety_lever",
+      "geoGun_safety_lever_part01": "safety_lever_pt",
+      "geoGun_slide_screw_b01": "slide_pin_top",
+      "geoGun_trigger": "trigger",
+      "geoGun_trigger_bar01": "trigger_bar",
+      "geoGun_hammer01": "hammer",
+      "geoGun_slide_catch01": "slide_catch",
+      "geoGun_magazine_catch01": "mag_catch",
+      "geoGun_disassembly_latch01": "disassembly",
+      "geoGun_magazine01": "magazine",
+      "geoGun_magazine_bottom01": "mag_floorplate"
+    },
+    "splits": [
+      {
+        "mesh": "geoGun_slide_screw_a01",
+        "assign": [
+          {
+            "bone": "slide_pin_l",
+            "nearest": [
+              0.226,
+              2.26,
+              -2.254
+            ]
+          },
+          {
+            "bone": "slide_pin_r",
+            "nearest": [
+              -0.226,
+              2.26,
+              -2.253
+            ]
+          },
+          {
+            "bone": "frame_pin_mid",
+            "nearest": [
+              0.294,
+              0.93,
+              -0.691
+            ]
+          },
+          {
+            "bone": "mag_floor_pin",
+            "nearest": [
+              -0.001,
+              -2.48,
+              -2.972
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "target": {
+    "axis": "y",
+    "metres": 0.14,
+    "tolerance_pct": 0.25
+  },
+  "materials": {
+    "lambert1": "models/weapons/m9/M9_BaseColor",
+    "muzzle_mat01": "models/weapons/m9/M9_Suppressor_BaseColor"
+  },
+  "modeldef": {
+    "actor": "DXRBerettaM9",
+    "path": "models/weapons/m9",
+    "map_units_per_metre": 34.0
+  },
+  "expect": {
+    "joints": 29,
+    "max_centroid_pct": 15.0
+  }
+}

@@ -1,0 +1,225 @@
+/*
+** model.h
+**
+** General model handling code
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 2013-2016 Christoph Oelckers
+** Copyright 2017-2025 GZDoom Maintainers and Contributors
+** Copyright 2025-2026 UZDoom Maintainers and Contributors
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+**
+*/
+
+#pragma once
+
+#include <stdint.h>
+#include "textureid.h"
+#include "i_modelvertexbuffer.h"
+#include "matrix.h"
+#include "palettecontainer.h"
+#include "TRS.h"
+#include "tarray.h"
+#include "name.h"
+#include "fs_files.h"
+
+#include "bonecomponents.h"
+
+class DBoneComponents;
+class FModelRenderer;
+class FGameTexture;
+class IModelVertexBuffer;
+class FModel;
+class PClass;
+class AActor;
+struct FSpriteModelFrame;
+struct FLevelLocals;
+
+FTextureID LoadSkin(const char* path, const char* fn);
+void FlushModels();
+
+
+extern TDeletingArray<FModel*> Models;
+extern TArray<FSpriteModelFrame> SpriteModelFrames;
+extern TMap<const PClass*, FSpriteModelFrame> BaseSpriteModelFrames;
+
+#define MD3_MAX_SURFACES	32
+#define MIN_MODELS	4
+
+struct FSpriteModelFrame
+{
+	uint8_t modelsAmount = 0;
+	TArray<int> modelIDs;
+	TArray<FTextureID> skinIDs;
+	TArray<FTextureID> surfaceskinIDs;
+	TArray<int> modelframes;
+	TArray<int> animationIDs;
+	float xscale, yscale, zscale;
+	// [BB] Added zoffset, rotation parameters and flags.
+	// Added xoffset, yoffset
+	float xoffset, yoffset, zoffset;
+	float xrotate, yrotate, zrotate;
+	float rotationCenterX, rotationCenterY, rotationCenterZ;
+	float rotationSpeed;
+	float viewModelFOV;
+private:
+	unsigned int flags;
+public:
+	const void* type;	// used for hashing, must point to something usable as identifier for the model's owner.
+	short sprite;
+	short frame;
+	int hashnext;
+	float angleoffset;
+
+	// RS FORK -- MOD-OWNED PLACEMENT.
+	//
+	// Names a CVAR prefix. The six placement values are then read live from
+	// <prefix>_ofs_x/_ofs_y/_ofs_z and <prefix>_yaw/_pitch/_roll.
+	//
+	// The point is WHERE those CVARs live: in the mod's own CVARINFO, with the
+	// mod's own MENUDEF page, so adding a tunable weapon needs nothing in the
+	// engine and does not put a per-weapon slider in the engine's option tree.
+	FName placementCVars = NAME_None;
+	// added pithoffset, rolloffset.
+	float pitchoffset, rolloffset; // I don't want to bother with type transformations, so I made this variables float.
+
+	// RS FORK -- HAND-FRAME ORIENTATION, the bakeable twin of vr_hand_*.
+	//
+	// angleoffset/pitchoffset/rolloffset above are applied as one intrinsic
+	// triple that orients the model itself. These three are applied AFTER
+	// that, in the frame the oriented model leaves behind, and are summed
+	// with the live vr_hand_yaw/_pitch/_roll sliders -- the same position,
+	// the same order, the same sign.
+	//
+	// That is the whole point of them existing separately. A value dialled in
+	// on a slider can be written into the matching keyword here and mean
+	// EXACTLY the same thing, which is what makes a tuning pass permanent.
+	// Summing the sliders into pitchoffset instead cannot do that: a model
+	// carrying a 90 degree pitchoffset puts that rotation between the yaw and
+	// the roll, and a 90 degree turn about Z lands the roll axis on top of the
+	// yaw axis -- so both sliders drive one rotation and neither drives the
+	// other. Applied here, past the baked pitch, the three stay orthogonal.
+	float handangleoffset = 0.f, handpitchoffset = 0.f, handrolloffset = 0.f;
+	bool isVoxel;
+	unsigned int getFlags(class DActorModelData * defs) const;
+
+	// RS FORK -- read straight off the MODELDEF flags, with no per-actor
+	// override applied. The draw path needs this before it has resolved an
+	// actor's model data, and no actor overrides it anyway.
+	bool ignoresSkinAlpha() const { return !!(flags & (1 << 18)); }
+	friend void InitModels();
+	friend void ParseModelDefLump(int Lump);
+
+	VSMatrix ObjectToWorldMatrix(AActor * actor, float x, float y, float z, double ticFrac);
+	// bodyPivotZ: height above the actor's origin to turn about, in map units.
+	// Zero keeps the historical behaviour of turning about the origin itself --
+	// which for anything standing on a floor is the point between its feet, so a
+	// held object swings through an arc instead of turning in place. Only the
+	// held-voxel path passes anything else.
+	VSMatrix ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic, float bodyPivotZ = 0.f);
+};
+
+
+enum ModelRendererType
+{
+	GLModelRendererType,
+	SWModelRendererType,
+	PolyModelRendererType,
+	NumModelRendererTypes
+};
+
+enum EFrameError
+{
+	FErr_NotFound = -1,
+	FErr_Voxel = -2,
+	FErr_Singleframe = -3
+};
+
+class FModel
+{
+public:
+	enum LoadState
+	{
+		NONE = 0,
+		LOADING = 1,
+		READY = 2
+	};
+
+	FModel();
+	virtual ~FModel();
+
+	virtual bool Load(const char * fn, int lumpnum, const char * buffer, int length) = 0;
+
+	virtual int FindFrame(const char * name, bool nodefault = false) = 0;
+
+	virtual int NumJoints() { return 0; }
+	virtual int FindJoint(FName name) { return -1; }
+
+	virtual int GetJointParent(int joint) { return -1; }
+	virtual FName GetJointName(int joint) { return NAME_None; }
+	virtual FQuaternion GetJointRotation(int joint) { return FQuaternion(0.0f,0.0f,0.0f,1.0f); }
+	virtual FVector3 GetJointPosition(int joint) { return FVector3(0.0f,0.0f,0.0f); }
+	virtual TRS GetJointBaseTRS(int joint) { return {}; }
+	virtual TRS GetJointPose(int joint, int frame) { return {}; }
+	virtual int NumFrames() { return -1; }
+
+	virtual void GetJointChildren(int joint, TArray<int> &out) {}
+
+	virtual void GetRootJoints(TArray<int> &out) {}
+
+	// [RL0] these are used for decoupled iqm animations
+	virtual int FindFirstFrame(FName name) { return FErr_NotFound; }
+	virtual int FindLastFrame(FName name) { return FErr_NotFound; }
+	virtual double FindFramerate(FName name) { return FErr_NotFound; }
+
+	virtual void RenderFrame(FModelRenderer *renderer, FGameTexture * skin, int frame, int frame2, double inter, FTranslationID translation, const FTextureID* surfaceskinids, int boneStartPosition) = 0;
+	virtual void BuildVertexBuffer(FModelRenderer *renderer) = 0;
+	virtual void AddSkins(uint8_t *hitlist, const FTextureID* surfaceskinids) = 0;
+	virtual float getAspectFactor(float vscale) { return 1.f; }
+	virtual const TArray<TRS>* AttachAnimationData() { return nullptr; };
+
+	virtual ModelAnimFrame PrecalculateFrame(const ModelAnimFrame &from, const ModelAnimFrameInterp &to, float inter, const TArray<TRS>* animationData) { return nullptr; };
+
+	virtual const TArray<VSMatrix>* CalculateBones(const ModelAnimFrame &from, const ModelAnimFrameInterp &to, float inter, const TArray<TRS>* animationData, TArray<BoneOverride> *in, BoneInfo *out, double time) { return nullptr; };
+	virtual const TArray<VSMatrix>* CalculateBonesOnlyOffsets(TArray<BoneOverride> *in, BoneInfo *out, double time) { return nullptr; };
+
+	virtual const TArray<VSMatrix>* GetBasePose() {return nullptr;}
+
+	// Largest |X|/|Y|/|Z| across the model's own raw local-space vertices,
+	// tracked independently per axis (not necessarily from the same vertex --
+	// a conservative bounding proxy, not a tight AABB). Unscaled by the
+	// MODELDEF's own Scale block; the caller (GetModelBoundsHint) applies
+	// that the same way GetModelWorldOffset applies actor scale to an
+	// offset -- this just answers the one thing script has no other way to
+	// see: how big the raw mesh actually is. False/zero for any format that
+	// does not override this; a holster falling back to a flat guess for an
+	// unmeasured model is no worse off than it is today.
+	virtual bool GetLocalExtent(float *outMaxAbsX, float *outMaxAbsY, float *outMaxAbsZ) { return false; }
+
+	void SetVertexBuffer(int type, IModelVertexBuffer *buffer) { mVBuf[type] = buffer; }
+	IModelVertexBuffer *GetVertexBuffer(int type) const { return mVBuf[type]; }
+	void DestroyVertexBuffer();
+	LoadState GetLoadState() const { return loadState; }
+	void SetLoadState(LoadState state) { loadState = state; }
+	virtual void LoadGeometry(FileSys::FileData* lumpData);
+	int GetLumpNum() const { return mLumpNum; }
+
+	bool hasSurfaces = false;
+
+	FString mFileName;
+	std::pair<FString, FString> mFilePath;
+
+	FSpriteModelFrame *baseFrame;
+private:
+	IModelVertexBuffer *mVBuf[NumModelRendererTypes];
+	LoadState loadState = NONE;
+protected:
+	int mLumpNum = -1;
+};
+
+int ModelFrameHash(FSpriteModelFrame* smf);
+unsigned FindModel(const char* path, const char* modelfile, bool silent = false);
