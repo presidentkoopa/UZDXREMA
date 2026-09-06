@@ -3213,8 +3213,11 @@ void Net_DoCommand(int cmd, TArrayView<uint8_t>& stream, int player)
 					{
 						IFVIRTUALPTRNAME(players[player].mo, NAME_PlayerPawn, MoveWeaponToHand)
 						{
-							VMValue param[] = { players[player].mo, item, hand };
-							VMCall(func, param, 3, nullptr, 0);
+							// Fourth argument is exactInstance (see PlayerPawn.MoveWeaponToHand).
+							// FALSE: the net path names a weapon by class, so class
+							// equivalence is what it means by "the same weapon".
+							VMValue param[] = { players[player].mo, item, hand, 0 };
+							VMCall(func, param, 4, nullptr, 0);
 						}
 					}
 				}

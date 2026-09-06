@@ -261,8 +261,11 @@ namespace
 
 		IFVIRTUALPTRNAME(player->mo, NAME_PlayerPawn, MoveWeaponToHand)
 		{
-			VMValue param[] = { player->mo, weapon, targetOffhand ? 1 : 0 };
-			VMCall(func, param, 3, nullptr, 0);
+			// Fourth argument is exactInstance (see PlayerPawn.MoveWeaponToHand).
+			// FALSE here deliberately: the native wheel lists one card per class,
+			// so class equivalence is the match it wants.
+			VMValue param[] = { player->mo, weapon, targetOffhand ? 1 : 0, 0 };
+			VMCall(func, param, 4, nullptr, 0);
 		}
 	}
 

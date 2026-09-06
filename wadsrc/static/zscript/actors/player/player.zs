@@ -2602,7 +2602,15 @@ class PlayerPawn : Actor
 		return false;
 	}
 
-	virtual void MoveWeaponToHand(Weapon weap, int hand = 0)
+	// exactInstance -- match `weap` against what the hands hold by POINTER
+	// IDENTITY instead of WeaponsMatch's class/sister equivalence. Default
+	// off, so every existing caller keeps "same class = same weapon". A
+	// caller that manages distinct instances of one class -- a matched pair
+	// with one in each hand, a second fist of the class already seated
+	// opposite -- needs this, because for it the class test is true exactly
+	// when the seat is wanted, and the reroute into SwitchWeaponHand (a no-op
+	// under NOHANDSWITCH) left the instance un-seated with no report.
+	virtual void MoveWeaponToHand(Weapon weap, int hand = 0, bool exactInstance = false)
 	{
 		if (weap == null || player.playerstate != PST_LIVE)
 		{
@@ -2615,14 +2623,14 @@ class PlayerPawn : Actor
 		}
 
 		let sourceweap = hand == 1 ? player.ReadyWeapon : player.OffhandWeapon;
-		if (WeaponsMatch(sourceweap, weap))
+		if (exactInstance ? (sourceweap == weap) : WeaponsMatch(sourceweap, weap))
 		{
 			SwitchWeaponHand(hand);
 			return;
 		}
 
 		let targetweap = hand == 1 ? player.OffhandWeapon : player.ReadyWeapon;
-		if (WeaponsMatch(targetweap, weap))
+		if (exactInstance ? (targetweap == weap) : WeaponsMatch(targetweap, weap))
 		{
 			return;
 		}
