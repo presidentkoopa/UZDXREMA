@@ -1277,7 +1277,20 @@ public:
 	//
 	// Offsets are in the body's own frame: X forward, Y right, Z up, in map
 	// units, matching _ofs_x/_ofs_y/_ofs_z everywhere else in this fork.
+	// Mode 1: the body frame's heading is the renderer's own (doomYaw).
+	// Mode 2: the heading is FollowBodyYaw below, supplied by the caller.
+	//
+	// Mode 2 exists because doomYaw IS NOT REACHABLE FROM SCRIPT and is not the
+	// same number as AActor::HmdYaw -- doomYaw accumulates the per-frame head-turn
+	// delta on top of it. A caller that filters its own heading (hips that do not
+	// follow every glance) cannot express a seat in the renderer's basis, because
+	// it cannot see that basis; projecting onto HmdYaw instead leaves everything
+	// out by exactly the head turn, so a filtered body still tracks the head and
+	// the filter appears to do nothing.
+	//
+	// So the caller owns the heading rather than trying to match it.
 	int				FollowBodyMode;
+	double			FollowBodyYaw;
 	DVector3		FollowBodyOfs;
 
 	// RS FORK -- TRACE THIS ACTOR IN NEON, FROM ITS OWN SPRITE.

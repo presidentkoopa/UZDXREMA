@@ -261,6 +261,16 @@ static void HudAnchor_Store(const DPSprite *psp, FModel *mdl, const TArray<VSMat
 // invisible: a pose that never applies looks exactly like a pose that was
 // never set. Prints only on change, so a held pose reports once.
 CVAR(Bool, vr_pose_debug, false, 0)
+
+// RS FORK -- watch per-surface overrides arrive at the renderer.
+//
+// Everything script-side about surface driving can be printed from ZScript,
+// but whether the override actually REACHES the draw cannot -- and "the part
+// did not move" looks the same whether the write never landed, the model index
+// was wrong, or the frame was out of range. This prints what the renderer is
+// actually about to do with each driven surface. On change only, or it is
+// several hundred lines a second.
+CVAR(Bool, vr_surf_debug, false, 0)
 // RS FORK -- MODEL DIAGNOSTICS.
 //
 // Every check here cost a headset session to find by eye, and every one of them
@@ -639,10 +649,10 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(AActor * actor, float x, float y
 	// a height for everything else.
 	const float bodyPivotZ = actor->VoxelOverride ? float(actor->Height * 0.5) : 0.f;
 
-	return ObjectToWorldMatrix(actor->Level, DVector3(x, y, z), DRotator(DAngle::fromDeg(pitch), DAngle::fromDeg(angle), DAngle::fromDeg(roll)), actor->InterpolatedScale(ticFrac), smf_flags, tic, bodyPivotZ, actor->FollowBodyMode, actor->FollowBodyOfs);
+	return ObjectToWorldMatrix(actor->Level, DVector3(x, y, z), DRotator(DAngle::fromDeg(pitch), DAngle::fromDeg(angle), DAngle::fromDeg(roll)), actor->InterpolatedScale(ticFrac), smf_flags, tic, bodyPivotZ, actor->FollowBodyMode, actor->FollowBodyOfs, actor->FollowBodyYaw);
 }
 
-VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic, float bodyPivotZ, int followBodyMode, DVector3 followBodyOfs)
+VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic, float bodyPivotZ, int followBodyMode, DVector3 followBodyOfs, double followBodyYaw)
 {
 	double rotateOffset = 0;
 
@@ -698,7 +708,8 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 		auto vrmode = VRMode::GetVRModeCached(true);
 		float bodyYaw = 0.f;
 		if (vrmode != nullptr && vrmode->IsVR() &&
-			vrmode->GetHmdTransform(&objectToWorldMatrix, followBodyOfs, &bodyYaw))
+			vrmode->GetHmdTransform(&objectToWorldMatrix, followBodyOfs, &bodyYaw,
+				followBodyMode == 2 ? followBodyYaw : NAN))
 		{
 			// The actor's Angles are WORLD angles -- a caller writes body yaw
 			// plus its own offset, because the same numbers have to drive the
@@ -1997,6 +2008,39 @@ static inline void RenderModelFrame(FModelRenderer *renderer, int i, const FSpri
 			// Negative is the opt-out, and a deliberately pinned pose takes
 			// that path: a slide held at locked-back wants to be exactly
 			// there, not eased toward it.
+			if (vr_surf_debug)
+			{
+				// ONE SLOT PER (model, surface), NOT ONE SHARED SLOT.
+				//
+				// A single static here produced 11,572 lines from a session
+				// with about ten real events: two surfaces are driven at once,
+				// they alternate every draw, and each one's key always differs
+				// from the other's -- so "has it changed" was true on every
+				// single frame forever. The flood was the watcher, not the
+				// thing being watched.
+				//
+				// THE LERP IS DELIBERATELY OUT OF THE KEY. With smoothing on it
+				// changes every drawn frame by design, so including it puts the
+				// flood straight back. The frame pair and the hidden flag are
+				// what a human is actually looking for; the sub-frame position
+				// is printed but not keyed on.
+				static int lastKey[16 * 64];
+				static bool keyInit = false;
+				if (!keyInit) { for (int k = 0; k < 16 * 64; k++) lastKey[k] = -0x7fffffff; keyInit = true; }
+
+				int slot = (i * 64 + o.surface) & (16 * 64 - 1);
+				int key = (o.frame * 131) ^ (o.frameNext * 17)
+				        ^ (o.hidden ? 0x40000000 : 0);
+				if (key != lastKey[slot])
+				{
+					lastKey[slot] = key;
+					Printf("[SURF] model %d surface %d -> frame %d..%d lerp %.3f%s  (pos %.3f prev %.3f ticFrac %.3f)\n",
+						i, o.surface, o.frame, o.frameNext, o.lerp,
+						o.hidden ? "  HIDDEN" : "",
+						psp->SurfOvPos[s], psp->SurfOvPosPrev[s], ticFrac);
+				}
+			}
+
 			if (psp->SurfOvPos[s] >= 0.f)
 			{
 				float prev = psp->SurfOvPosPrev[s];

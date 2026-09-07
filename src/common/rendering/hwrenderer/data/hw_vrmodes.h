@@ -221,7 +221,11 @@ struct VRMode
 	// outBodyYaw reports the heading the frame was built on, in degrees, so a
 	// caller holding WORLD angles can subtract it rather than applying the
 	// heading twice. Both parameters are optional and default to inert.
-	virtual bool GetHmdTransform(VSMatrix* out, DVector3 bodyOfs = DVector3(0, 0, 0), float* outBodyYaw = nullptr) const { return false; }
+	// yawOverride replaces the frame's own heading when it is not NaN. A caller
+	// that filters its heading cannot express anything in the renderer's basis,
+	// because that basis is not visible from script -- so it supplies the heading
+	// instead of trying to match it.
+	virtual bool GetHmdTransform(VSMatrix* out, DVector3 bodyOfs = DVector3(0, 0, 0), float* outBodyYaw = nullptr, double yawOverride = NAN) const { return false; }
 	virtual bool GetWeaponTransform(VSMatrix* out, int hand = 0, bool allowAutoReverse = true) const;
 	virtual bool RenderPlayerSpritesInScene() const;
 	virtual bool GetTeleportLocation(DVector3 &out) const { return false; }

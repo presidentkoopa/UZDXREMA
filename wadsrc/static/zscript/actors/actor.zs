@@ -382,7 +382,11 @@ class Actor : Thinker native
 	// Y right, Z up, map units). Mode 0 is off and is the default. Per-actor
 	// rather than a MODELDEF flag because a dozen props share one class and each
 	// sits somewhere different on the body.
+	// 1 = the renderer's own heading. 2 = FollowBodyYaw below.
+	// Use 2 whenever the caller filters its own heading: the renderer's heading
+	// is not readable from here and is NOT the same as HmdYaw.
 	native int FollowBodyMode;
+	native double FollowBodyYaw;
 	native Vector3 FollowBodyOfs;
 	// Trace this actor in neon, from its own sprite. See func_spriteoutline.fp
 	// and the note in actor.h. OutlineMode 0 is off and is the default; 1 keeps

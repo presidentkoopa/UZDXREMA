@@ -6075,7 +6075,7 @@ bool VKOpenXRDeviceMode::RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage
 // No hand offset and no hand angles, so what comes back is where YOU are and
 // which way you are facing. Pitch and roll are left out on purpose: a holster
 // does not tip when you look down.
-bool VKOpenXRDeviceMode::GetHmdTransform(VSMatrix* mat, DVector3 bodyOfs, float* outBodyYaw) const
+bool VKOpenXRDeviceMode::GetHmdTransform(VSMatrix* mat, DVector3 bodyOfs, float* outBodyYaw, double yawOverride) const
 {
 	double pixelstretch = r_viewpoint.ViewLevel ? r_viewpoint.ViewLevel->pixelstretch : 1.2;
 	player_t* player = &players[consoleplayer];
@@ -6091,9 +6091,11 @@ bool VKOpenXRDeviceMode::GetHmdTransform(VSMatrix* mat, DVector3 bodyOfs, float*
 
 	// The cinematic screen layer takes its heading from the viewpoint for the
 	// same reason the hand path does -- doomYaw is not the drawn heading there.
-	const float bodyYawDeg = VR_UseCinematicScreenLayer()
-		? (float)r_viewpoint.Angles.Yaw.Degrees()
-		: doomYaw;
+	const float bodyYawDeg = !isnan(yawOverride)
+		? (float)yawOverride
+		: (VR_UseCinematicScreenLayer()
+			? (float)r_viewpoint.Angles.Yaw.Degrees()
+			: doomYaw);
 	mat->rotate(-90 + bodyYawDeg, 0, 1, 0);
 
 	if (outBodyYaw)
