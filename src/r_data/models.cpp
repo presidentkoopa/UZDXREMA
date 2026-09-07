@@ -1016,8 +1016,86 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	// is precisely the "absolutely massive" hands, and why only the ANCHORED
 	// ones were affected while a hand holding a magazine (deliberately
 	// unanchored by the hands mod) stayed correct.
+	// RS FORK -- MOD-OWNED PLACEMENT, read live from CVARs the MOD declares.
+	//
+	// Looked up by name every frame rather than resolved once at parse time,
+	// because MODELDEF is parsed before a mod's CVARINFO is guaranteed to have
+	// run, and a cached null would be permanent. Six hash lookups for a handful
+	// of drawn models is not worth optimising away.
+	float placeOfs[3] = { 0.0f, 0.0f, 0.0f };
+	float placeRot[3] = { 0.0f, 0.0f, 0.0f };
+	float placeScale = 1.0f;
+	// Per-axis, same as the world path -- kept in step so a prefix behaves the
+	// same whichever path draws it. A model tuned on one and moved to the other
+	// silently losing an axis is the kind of asymmetry that costs a session.
+	float placeAxis[3] = { 1.0f, 1.0f, 1.0f };
+	if (smf->placementCVars != NAME_None)
+	{
+		static const char *sufOfs[3] = { "_ofs_x", "_ofs_y", "_ofs_z" };
+		static const char *sufRot[3] = { "_yaw", "_pitch", "_roll" };
+		FString nm;
+		for (int i = 0; i < 3; ++i)
+		{
+			nm.Format("%s%s", smf->placementCVars.GetChars(), sufOfs[i]);
+			GetPlacementCVar(nm.GetChars(), placeOfs[i]);
+			nm.Format("%s%s", smf->placementCVars.GetChars(), sufRot[i]);
+			GetPlacementCVar(nm.GetChars(), placeRot[i]);
+		}
+
+		// Scale defaults to 1, NOT to the 0 an absent CVAR would read as -- a
+		// missing or zeroed slider must leave the model alone, not collapse it
+		// to a point.
+		nm.Format("%s_scale", smf->placementCVars.GetChars());
+		{
+			float sv = 0.0f;
+			if (GetPlacementCVar(nm.GetChars(), sv) && sv > 0.0f) placeScale = sv;
+		}
+		static const char *sufAxis[3] = { "_scale_x", "_scale_y", "_scale_z" };
+		for (int i = 0; i < 3; ++i)
+		{
+			nm.Format("%s%s", smf->placementCVars.GetChars(), sufAxis[i]);
+			{
+				float v = 0.0f;
+				if (GetPlacementCVar(nm.GetChars(), v) && v > 0.0f) placeAxis[i] = v;
+			}
+		}
+	}
+
 	float hudUnitScale = 1.0f;
-	if (vrmode->GetWeaponTransform(&objectToWorldMatrix, hand, !(smf_flags & MDL_NOAUTOREVERSE)))
+	const bool followBody = !!(smf_flags & MDL_FOLLOWBODY);
+	// THE SEAT, WITH THE LIVE SLIDERS FOLDED IN.
+	//
+	// placeOfs is read from the mod's own CVARs every frame the model is drawn,
+	// so folding it into the body seat here is what makes a slider move a worn
+	// thing WHILE THE MENU IS OPEN -- exactly what UseHandOffsets does for a
+	// hand, and the reason RS_Hands' sliders have always moved live.
+	//
+	// Script cannot do this. A mod writes BodyOfs from its playsim tic, and the
+	// playsim does not tick while a menu is up, so a script-driven seat is frozen
+	// for as long as you are looking at the slider you are dragging.
+	//
+	// Added in the BODY's axes (X forward, Y right, Z up) because that is what
+	// the seat is, and zeroed afterwards so the model-space application further
+	// down does not apply it a second time.
+	DVector3 bodySeat = psp->BodyOfs;
+	if (followBody)
+	{
+		bodySeat.X += placeOfs[0];
+		bodySeat.Y += placeOfs[1];
+		bodySeat.Z += placeOfs[2];
+		placeOfs[0] = placeOfs[1] = placeOfs[2] = 0.0f;
+	}
+
+	if (followBody && vrmode->GetHmdTransform(&objectToWorldMatrix, bodySeat, nullptr, psp->BodyYaw))
+	{
+		// GetHmdTransform already returns a MAP-UNIT frame and has applied the
+		// seat itself, so this takes NEITHER the 0.01 nor the translate(0,5,30)
+		// the controller branch below needs. Those two exist to convert and
+		// place a hand-frame model; a body-frame one arrives already converted
+		// and already placed.
+		hudUnitScale = 1.0f;
+	}
+	else if (!followBody && vrmode->GetWeaponTransform(&objectToWorldMatrix, hand, !(smf_flags & MDL_NOAUTOREVERSE)))
 	{
 		float scale = 0.01f;
 		objectToWorldMatrix.scale(scale, scale, scale);
@@ -1077,51 +1155,6 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	// makes a CVAR value and a MODELDEF value genuinely interchangeable, so a
 	// number found on a slider can be folded into MODELDEF and the slider zeroed
 	// with nothing moving.
-	// RS FORK -- MOD-OWNED PLACEMENT, read live from CVARs the MOD declares.
-	//
-	// Looked up by name every frame rather than resolved once at parse time,
-	// because MODELDEF is parsed before a mod's CVARINFO is guaranteed to have
-	// run, and a cached null would be permanent. Six hash lookups for a handful
-	// of drawn models is not worth optimising away.
-	float placeOfs[3] = { 0.0f, 0.0f, 0.0f };
-	float placeRot[3] = { 0.0f, 0.0f, 0.0f };
-	float placeScale = 1.0f;
-	// Per-axis, same as the world path -- kept in step so a prefix behaves the
-	// same whichever path draws it. A model tuned on one and moved to the other
-	// silently losing an axis is the kind of asymmetry that costs a session.
-	float placeAxis[3] = { 1.0f, 1.0f, 1.0f };
-	if (smf->placementCVars != NAME_None)
-	{
-		static const char *sufOfs[3] = { "_ofs_x", "_ofs_y", "_ofs_z" };
-		static const char *sufRot[3] = { "_yaw", "_pitch", "_roll" };
-		FString nm;
-		for (int i = 0; i < 3; ++i)
-		{
-			nm.Format("%s%s", smf->placementCVars.GetChars(), sufOfs[i]);
-			GetPlacementCVar(nm.GetChars(), placeOfs[i]);
-			nm.Format("%s%s", smf->placementCVars.GetChars(), sufRot[i]);
-			GetPlacementCVar(nm.GetChars(), placeRot[i]);
-		}
-
-		// Scale defaults to 1, NOT to the 0 an absent CVAR would read as -- a
-		// missing or zeroed slider must leave the model alone, not collapse it
-		// to a point.
-		nm.Format("%s_scale", smf->placementCVars.GetChars());
-		{
-			float sv = 0.0f;
-			if (GetPlacementCVar(nm.GetChars(), sv) && sv > 0.0f) placeScale = sv;
-		}
-		static const char *sufAxis[3] = { "_scale_x", "_scale_y", "_scale_z" };
-		for (int i = 0; i < 3; ++i)
-		{
-			nm.Format("%s%s", smf->placementCVars.GetChars(), sufAxis[i]);
-			{
-				float v = 0.0f;
-				if (GetPlacementCVar(nm.GetChars(), v) && v > 0.0f) placeAxis[i] = v;
-			}
-		}
-	}
-
 	// RS FORK -- HUD BONE ANCHORING, applied.
 	//
 	// Everything above positioned this model at a controller. If it is anchored
@@ -2664,6 +2697,10 @@ void ParseModelDefLump(int Lump)
 				else if (sc.Compare("forcecullbackfaces"))
 				{
 					smf.flags |= MDL_FORCECULLBACKFACES;
+				}
+				else if (sc.Compare("followbody"))
+				{
+					smf.flags |= MDL_FOLLOWBODY;
 				}
 				else if (sc.Compare("usehandoffsets"))
 				{

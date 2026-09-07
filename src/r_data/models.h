@@ -77,6 +77,25 @@ enum
 	MDL_FOLLOWMAINHAND				= 1<<19,	// world model rides the main hand's controller transform, at draw rate
 	MDL_FOLLOWOFFHAND				= 1<<20,	// world model rides the off hand's controller transform, at draw rate
 	MDL_VOXELBODYAXIS				= 1<<21,	// held voxel: wrap pitch/roll in vr_voxel_bodyyaw. Set at runtime, never from MODELDEF
+
+	// PSPRITE worn on the BODY rather than on a controller.
+	//
+	// The two flags above and MDL_USEHANDOFFSETS anchor to a hand, and that is
+	// every anchor a psprite had. A torso, a holster or a boot belongs on none
+	// of them.
+	//
+	// IT HAS TO BE A PSPRITE AT ALL because a world model is drawn in a
+	// DIFFERENT PASS from the weapons and the hands, so the two cannot occlude
+	// each other: a hand and a gun pass straight through a world-model torso and
+	// nothing can be done about it from content. One pass is the only way
+	// anything worn looks solid against anything held.
+	//
+	// The seat and the heading come from the PSPRITE (DPSprite::BodyOfs and
+	// BodyYaw), not from MODELDEF, because a dozen worn things share one MODELDEF
+	// entry and each needs its own place on the body. Heading is supplied by the
+	// caller for the reason AActor::FollowBodyYaw exists: the renderer's own
+	// heading is not visible to script and is not the same number as HmdYaw.
+	MDL_FOLLOWBODY					= 1<<22,	// psprite rides the body frame at draw rate; seat from DPSprite::BodyOfs
 };
 
 FSpriteModelFrame * FindModelFrame(AActor * thing, int sprite, int frame, bool dropped);

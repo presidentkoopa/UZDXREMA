@@ -466,6 +466,13 @@ public:
 	//
 	// The anchored layer must have a HIGHER id than its target: psprites draw in
 	// id order and the target's bones are only known once it has been drawn.
+	// MDL_FOLLOWBODY: where on the body this layer sits, and which way the body
+	// faces. Map units, body axes -- X forward, Y right, Z up, the same
+	// convention as AActor::FollowBodyOfs. BodyYaw is supplied by the caller
+	// because the renderer's own heading is not visible from script.
+	DVector3 BodyOfs      = DVector3(0, 0, 0);
+	double   BodyYaw      = 0.0;
+
 	int   AnchorLayer    = -1;
 	FName AnchorBone     = NAME_None;
 

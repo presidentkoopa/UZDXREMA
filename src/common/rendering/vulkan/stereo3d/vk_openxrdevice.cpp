@@ -200,6 +200,24 @@ XrSessionState xrSessionState = XR_SESSION_STATE_UNKNOWN;
 // For diagnostics that would otherwise have to guess. A pose refusal that names
 // the session state is the difference between "your controller is broken" and
 // "you had the dashboard open", and those two send you to very different places.
+// THE BODY FRAME, WATCHED.
+//
+// Everything about a body-worn thing can be printed from script EXCEPT the one
+// number that decides where it lands: the heading the renderer actually rotates
+// by. doomYaw is not readable from ZScript and is NOT AActor::HmdYaw -- it
+// accumulates the per-frame head-turn delta on top of it -- so a mod that
+// filters its own heading has no way to check its own work.
+//
+// That gap cost a full session. The filter was correct, the transform cancelled
+// it, the holsters tracked the head anyway, and NOTHING anywhere was wrong
+// enough to report. This is the line that would have said so in one glance.
+//
+// ONCE A SECOND, not per call: GetHmdTransform runs once per body-followed
+// actor per frame, so a dozen worn parts at ninety frames is a thousand lines a
+// second. A watcher that floods does not merely add noise -- it buries the thing
+// it was built to show.
+CVAR(Bool, vr_body_debug, false, 0)
+
 static const char *XrSessionStateName(XrSessionState s)
 {
 	switch (s)
@@ -6096,6 +6114,29 @@ bool VKOpenXRDeviceMode::GetHmdTransform(VSMatrix* mat, DVector3 bodyOfs, float*
 		: (VR_UseCinematicScreenLayer()
 			? (float)r_viewpoint.Angles.Yaw.Degrees()
 			: doomYaw);
+
+	if (vr_body_debug)
+	{
+		static uint64_t lastReport = 0;
+		static int calls = 0;
+		++calls;
+		const uint64_t now = I_nsTime();
+		if (now - lastReport > 1000000000ull)
+		{
+			lastReport = now;
+			player_t *pl = &players[consoleplayer];
+			const double hmdYaw = (pl && pl->mo) ? pl->mo->HmdYaw.Degrees() : 0.0;
+			double drift = hmdYaw - doomYaw;
+			while (drift >  180.0) drift -= 360.0;
+			while (drift < -180.0) drift += 360.0;
+			Printf("[VRBODY] heading: doom=%.1f  hmd=%.1f  drift=%.1f%s  |  used=%.1f (%s)  |  seat=(%.1f %.1f %.1f)  |  %d calls/s\n",
+				doomYaw, hmdYaw, drift,
+				fabs(drift) > 1.0 ? "  <-- THESE DIFFER" : "",
+				bodyYawDeg, isnan(yawOverride) ? "renderer" : "CALLER",
+				bodyOfs.X, bodyOfs.Y, bodyOfs.Z, calls);
+			calls = 0;
+		}
+	}
 	mat->rotate(-90 + bodyYawDeg, 0, 1, 0);
 
 	if (outBodyYaw)

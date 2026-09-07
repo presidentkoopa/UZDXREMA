@@ -3333,6 +3333,16 @@ class PSprite : Object native play
 	// offsets then apply relative to that bone. The anchored layer must have a
 	// HIGHER id than its target, because psprites are drawn in id order and the
 	// target's bones are not known until it has been drawn.
+	// MDL_FOLLOWBODY (MODELDEF keyword "FollowBody"): where on the BODY this
+	// layer sits and which way the body faces. Map units, body axes -- X
+	// forward, Y right, Z up.
+	//
+	// A worn thing must be a PSPRITE to occlude against held weapons at all: a
+	// world model is drawn in a separate pass, so a hand or a gun passes
+	// straight through it and no content can fix that.
+	native Vector3 BodyOfs;
+	native double BodyYaw;
+
 	native int AnchorLayer;
 	native Name AnchorBone;
 

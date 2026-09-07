@@ -161,6 +161,8 @@ DEFINE_FIELD(DPSprite, processPending)
 DEFINE_FIELD(DPSprite, Tint)             // RS fork
 DEFINE_FIELD(DPSprite, Glow)             // RS fork
 DEFINE_FIELD(DPSprite, NoDraw)           // RS fork
+DEFINE_FIELD(DPSprite, BodyOfs)          // RS fork
+DEFINE_FIELD(DPSprite, BodyYaw)          // RS fork
 DEFINE_FIELD(DPSprite, AnchorLayer)      // RS fork
 DEFINE_FIELD(DPSprite, AnchorBone)       // RS fork
 // Where a drawn weapon's bone actually is, as an offset from the weapon's own
