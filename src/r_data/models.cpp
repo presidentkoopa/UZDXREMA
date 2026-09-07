@@ -151,8 +151,8 @@ static void HudAnchor_Store(const DPSprite *psp, FModel *mdl, const TArray<VSMat
 			// gives where the MODEL ORIGIN lands, not where the bone is. At
 			// rest every skinning matrix is identity, so every bone reported
 			// the same point -- the model origin -- and a magazine anchored to
-			// the magwell spawned wherever the model origin happened to sit
-			// (on the T77, right at the trigger).
+			// the magwell spawned wherever the model origin happened to sit,
+			// which on a pistol mesh is typically at the trigger.
 			//
 			// The bone's real position is that matrix applied to the joint's
 			// BIND position, which is what GetJointPosition returns (an
@@ -194,14 +194,14 @@ static void HudAnchor_Store(const DPSprite *psp, FModel *mdl, const TArray<VSMat
 			// described above: at rest it is the MODEL ORIGIN, the same point
 			// for every bone. So a hand anchored to a pistol's grip bone and a
 			// hand anchored to its slide both landed at the model's origin --
-			// which on the T77 is nowhere near either, and reads in the headset
+			// which is nowhere near either of them, and reads in the headset
 			// as hands floating off the gun entirely.
 			//
 			// Fixing e.offset/AnchorBoneWorld earlier only fixed what SCRIPT
 			// reads. This fixes what the RENDERER draws, which is a separate
 			// consumer of the same wrong number -- and it fixes every anchored
-			// hand on every weapon, not just this one, since nothing about it
-			// is T77-specific.
+			// hand on every weapon, not just the one it was found on, since
+			// nothing about it is specific to any single mesh.
 			//
 			// Rotation is deliberately untouched: only the translation was
 			// ever wrong, and orientation does not depend on which point of
@@ -999,8 +999,8 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	// anchoring block below replaces the whole matrix (loadMatrix), which
 	// silently discarded it and drew anchored models at 100x size.
 	//
-	// It went unnoticed on weapons because a weapon cancels it: the T77 carries
-	// MODELDEF Scale 100, and 0.01 * 100 = 1. The VR hands carry Scale 1.0, so
+	// It went unnoticed on weapons because a weapon cancels it: a weapon mesh
+	// carrying MODELDEF Scale 100 gives 0.01 * 100 = 1. VR hands carry Scale 1.0, so
 	// they have nothing to cancel with and take the full factor of 100 -- which
 	// is precisely the "absolutely massive" hands, and why only the ANCHORED
 	// ones were affected while a hand holding a magazine (deliberately

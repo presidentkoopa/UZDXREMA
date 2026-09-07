@@ -186,8 +186,8 @@ CUSTOM_CVAR(Float, vr_physics_handsize, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 // eventually turns the magwell into an actual hole a magazine enters. Until
 // that model work lands, this single box is what makes a held weapon solid at
 // all -- clank two pistols together, feel one against your other palm, bump a
-// magazine off it -- while the T77 mesh stands in for whichever real model ends
-// up in the grip.
+// magazine off it -- while a placeholder mesh stands in for whichever real
+// model ends up in the grip.
 //
 // Local +X is forward (out the muzzle), +Y is width, +Z is height -- the same
 // axis convention the rest of this engine builds a facing vector from out of
@@ -1857,7 +1857,7 @@ void UpdateHands(float dt)
 // ---------------------------------------------------------------------------
 // The weapon in each hand -- a solid object, nothing more.
 //
-// Slice 4. One box per hand that currently holds a T77, rigidly attached to
+// Slice 4. One box per hand that currently holds a weapon, rigidly attached to
 // that hand's own body exactly the way a held object rides it, kinematic for
 // the same reason hands are: the gun follows the controller exactly and is
 // never blocked by level geometry, but it pushes everything that is not
@@ -1867,7 +1867,7 @@ void UpdateHands(float dt)
 //
 // Detected by class name substring, matched cross-pk3 the same way
 // rs_hands.zs matches weapons without a compile-time reference to any of
-// them -- this file cannot name RS_T77 and does not need to.
+// them -- this file cannot name a specific weapon class and does not need to.
 //
 // PLACEHOLDER SHAPE. One box for the whole gun, sized and positioned from the
 // vr_physics_weapon* cvars, not from the mesh. Real per-bone weapon colliders
