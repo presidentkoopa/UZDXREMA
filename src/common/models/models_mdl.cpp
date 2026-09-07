@@ -346,10 +346,30 @@ bool FMDLModel::Load(const char * path, int lumpnum, const char * buffer, int le
 	texCoords = new FTexCoord[tc.Size()];
 	memcpy(texCoords, tc.Data(), tc.Size() * sizeof(FTexCoord));
 
+	// BOTH INDEX ARRAYS, AND THEY ARE THE SAME NUMBER.
+	//
+	// DMD and MD2 address a position and a texcoord SEPARATELY -- FTriangle
+	// carries vertexIndices[] and textureIndices[] and BuildVertexBuffer reads
+	// texCoords[tri->textureIndices[j]] (models_md2.cpp). MDL has no such split:
+	// one index per corner addresses both, which is exactly why a vertex sitting
+	// on the skin seam has to be DUPLICATED at load rather than given a second
+	// texcoord. That duplication is already done above, so by here the expanded
+	// arrays are parallel and one index is correct for both.
+	//
+	// Setting only vertexIndices leaves textureIndices at whatever new[] left
+	// there and every texcoord lookup reads an unrelated entry. The geometry and
+	// the colours come out perfect and the skin is shattered across the mesh --
+	// which reads as a broken model or a bad export, not as a missing assignment.
 	lods[0].triangles = new FTriangle[numtris];
 	for (int i = 0; i < numtris; i++)
+	{
 		for (int j = 0; j < 3; j++)
-			lods[0].triangles[i].vertexIndices[j] = indices[i * 3 + j];
+		{
+			const int idx = indices[i * 3 + j];
+			lods[0].triangles[i].vertexIndices[j]  = idx;
+			lods[0].triangles[i].textureIndices[j] = idx;
+		}
+	}
 
 	// ---- frame names, so FindFrame and MODELDEF FrameIndex work ----------
 	//
