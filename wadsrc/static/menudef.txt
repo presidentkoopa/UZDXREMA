@@ -2616,7 +2616,7 @@ OptionMenu "VRPhysicsMenu" protected
 	Option "Hands are solid",   vr_physics_hands,        OnOff
 	Slider "Hand size",         vr_physics_handsize,     0.25, 4.0, 0.05, 2
 	StaticText " "
-	StaticText "A held T77 is now a solid placeholder box --", gold
+	StaticText "A held weapon is now a solid placeholder box --", gold
 	StaticText "real per-part shapes come with the real model.", gold
 	Slider "Weapon length",     vr_physics_weaponlen,     0.02, 0.6, 0.01, 2
 	Slider "Weapon width",      vr_physics_weaponwidth,   0.005, 0.2, 0.005, 3
