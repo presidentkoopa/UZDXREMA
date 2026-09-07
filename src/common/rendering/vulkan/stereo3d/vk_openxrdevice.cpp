@@ -197,6 +197,25 @@ constexpr XrViewConfigurationType viewType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_
 constexpr XrEnvironmentBlendMode environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
 XrSessionState xrSessionState = XR_SESSION_STATE_UNKNOWN;
 
+// For diagnostics that would otherwise have to guess. A pose refusal that names
+// the session state is the difference between "your controller is broken" and
+// "you had the dashboard open", and those two send you to very different places.
+static const char *XrSessionStateName(XrSessionState s)
+{
+	switch (s)
+	{
+		case XR_SESSION_STATE_IDLE:         return "IDLE";
+		case XR_SESSION_STATE_READY:        return "READY";
+		case XR_SESSION_STATE_SYNCHRONIZED: return "SYNCHRONIZED";
+		case XR_SESSION_STATE_VISIBLE:      return "VISIBLE";
+		case XR_SESSION_STATE_FOCUSED:      return "FOCUSED";
+		case XR_SESSION_STATE_STOPPING:     return "STOPPING";
+		case XR_SESSION_STATE_LOSS_PENDING: return "LOSS_PENDING";
+		case XR_SESSION_STATE_EXITING:      return "EXITING";
+		default:                            return "UNKNOWN";
+	}
+}
+
 using PFN_xrGetVulkanGraphicsRequirementsKHR_t = XrResult (XRAPI_PTR *)(XrInstance, XrSystemId, XrGraphicsRequirementsVulkanKHR*);
 using PFN_xrGetVulkanGraphicsDeviceKHR_t = XrResult (XRAPI_PTR *)(XrInstance, XrSystemId, VkInstance, VkPhysicalDevice*);
 using PFN_xrGetVulkanGraphicsRequirements2KHR_t = XrResult (XRAPI_PTR *)(XrInstance, XrSystemId, XrGraphicsRequirementsVulkanKHR*);
@@ -3428,11 +3447,45 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		if (XR_FAILED(xrLocateSpace(xrHandSpaces[hand], xrSpace, xrFrameState.predictedDisplayTime, &location)))
 			return refuse("xrLocateSpace failed -- runtime could not place this hand");
 
-		const bool valid = (location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0 &&
-			(location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0;
+		// REPORT WHAT THE RUNTIME ACTUALLY SAID, NOT ONE GUESS AT WHY.
+		//
+		// This used to print "tracking lost" for every clear VALID bit, which is
+		// only one of the reasons those bits go clear and is the alarming one.
+		// The common causes are mundane: the session is not FOCUSED because a
+		// system overlay or dashboard is up, the headset is off your head, or the
+		// app has not finished coming up yet. A controller sitting on the desk
+		// tracking perfectly well produces the identical message.
+		//
+		// It cost a real debugging session -- the log insisted the controllers
+		// were not tracking while the same log showed grip transitions firing.
+		// VALID and TRACKED are also different questions and both are worth
+		// having: VALID clear means no usable pose at all, while VALID set with
+		// TRACKED clear means the runtime is extrapolating from a lost sensor and
+		// the pose is stale but usable.
+		const bool posValid   = (location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0;
+		const bool rotValid   = (location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0;
+		const bool posTracked = (location.locationFlags & XR_SPACE_LOCATION_POSITION_TRACKED_BIT) != 0;
+		const bool rotTracked = (location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT) != 0;
+
+		const bool valid = posValid && rotValid;
 		xrHandPoseValid[hand] = valid;
 		if (!valid)
-			return refuse("runtime reported the pose as not valid this frame (tracking lost)");
+		{
+			char why[384];
+			snprintf(why, sizeof(why),
+				"no usable pose this frame -- position %s, orientation %s "
+				"(tracked: pos %s, rot %s); session is %s%s",
+				posValid ? "valid" : "INVALID",
+				rotValid ? "valid" : "INVALID",
+				posTracked ? "yes" : "no",
+				rotTracked ? "yes" : "no",
+				XrSessionStateName(xrSessionState),
+				(xrSessionState != XR_SESSION_STATE_FOCUSED)
+					? ". NOT FOCUSED -- a dashboard/overlay is up, the headset is off, "
+					  "or the app is still starting. This is normal and is NOT a hardware fault."
+					: ". Focused, so this one is worth looking at.");
+			return refuse(why);
+		}
 
 		xrHandPoses[hand] = location.pose;
 

@@ -121,8 +121,18 @@ public:
 			const uint8_t *c = &QuakePalette[mPixels[i] * 3];
 			rgba[i] = MAKEARGB(255, c[0], c[1], c[2]);
 		}
+		// CF_BGRA, NOT CF_RGBA. MAKEARGB builds a uint32_t, and on a little-endian
+		// machine that lands in memory as B,G,R,A -- so the bytes handed over here
+		// are BGRA even though the variable is called rgba. CF_RGBA reads byte 0
+		// as red, which swaps red and blue: Quake's browns and oranges come out
+		// as blues, and its dark tones go to black. It renders, it just renders
+		// the wrong colour, so nothing anywhere reports a problem.
+		//
+		// This is the engine's own convention, not a guess -- FBitmap::Blit
+		// (bitmap.h) and the font sheet path (font.cpp) both pass CF_BGRA for
+		// four-byte-per-pixel data.
 		bmp->CopyPixelDataRGB((int)0, (int)0, (const uint8_t*)rgba.Data(), Width, Height,
-			4, Width * 4, 0, CF_RGBA);
+			4, Width * 4, 0, CF_BGRA);
 		return 0;
 	}
 
