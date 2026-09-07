@@ -205,7 +205,23 @@ struct VRMode
 	// holster does not tip when you look at the floor; a body-worn thing that
 	// pitched and rolled with the headset would be attached to your face rather
 	// than to you.
-	virtual bool GetHmdTransform(VSMatrix* out) const { return false; }
+	// bodyOfs seats something INSIDE that frame, in MAP UNITS, on the body's own
+	// axes: X forward, Y right, Z up -- the same convention as
+	// AActor::FollowBodyOfs and as _ofs_x/_ofs_y/_ofs_z everywhere else here.
+	//
+	// IT IS APPLIED BY THE IMPLEMENTATION, NOT BY THE CALLER, and that is the
+	// entire reason it is a parameter instead of a translate() the caller makes
+	// afterwards. Placing it correctly needs three things that only exist inside
+	// the function that built the basis: the metres-per-map-unit scale, the extra
+	// pixelstretch on the vertical axis alone, and the fact that after the
+	// heading rotation the local axes are (right, up, backward) rather than
+	// (forward, up, right). A caller outside has to re-derive all three, and the
+	// first one to try got all three wrong at once.
+	//
+	// outBodyYaw reports the heading the frame was built on, in degrees, so a
+	// caller holding WORLD angles can subtract it rather than applying the
+	// heading twice. Both parameters are optional and default to inert.
+	virtual bool GetHmdTransform(VSMatrix* out, DVector3 bodyOfs = DVector3(0, 0, 0), float* outBodyYaw = nullptr) const { return false; }
 	virtual bool GetWeaponTransform(VSMatrix* out, int hand = 0, bool allowAutoReverse = true) const;
 	virtual bool RenderPlayerSpritesInScene() const;
 	virtual bool GetTeleportLocation(DVector3 &out) const { return false; }

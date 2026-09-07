@@ -688,15 +688,28 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 	// The seat is applied in the body's frame BEFORE any of the model's own
 	// offsets, so MODELDEF Offset and the placement sliders keep meaning what
 	// they mean everywhere else: adjustments relative to where the thing sits.
+	// followedBody and followedHand are SEPARATE because they want opposite
+	// things from the actor's rotation, and collapsing them into one flag is
+	// what drew every holstered weapon barrel-forward instead of barrel-down.
+	bool followedBody = false;
 	bool followedHand = false;
 	if (followBodyMode > 0)
 	{
 		auto vrmode = VRMode::GetVRModeCached(true);
-		if (vrmode != nullptr && vrmode->IsVR() && vrmode->GetHmdTransform(&objectToWorldMatrix))
+		float bodyYaw = 0.f;
+		if (vrmode != nullptr && vrmode->IsVR() &&
+			vrmode->GetHmdTransform(&objectToWorldMatrix, followBodyOfs, &bodyYaw))
 		{
-			objectToWorldMatrix.translate((float)followBodyOfs.X,
-				(float)followBodyOfs.Z, (float)followBodyOfs.Y);
-			followedHand = true;
+			// The actor's Angles are WORLD angles -- a caller writes body yaw
+			// plus its own offset, because the same numbers have to drive the
+			// no-headset path where SetOrigin places the actor for real. The
+			// frame has already applied that heading, so subtract it here or it
+			// counts twice and the thing swings out as you turn.
+			//
+			// PITCH AND ROLL PASS THROUGH UNTOUCHED. They are frame-independent,
+			// and they are the whole reason a holstered gun hangs barrel-down.
+			rotation.Yaw -= DAngle::fromDeg(bodyYaw);
+			followedBody = true;
 		}
 		else
 		{
@@ -708,7 +721,7 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 
 	const int followHand = (flags & MDL_FOLLOWMAINHAND) ? VR_MAINHAND
 		: ((flags & MDL_FOLLOWOFFHAND) ? VR_OFFHAND : -1);
-	if (!followedHand && followHand >= 0)
+	if (!followedBody && followHand >= 0)
 	{
 		auto vrmode = VRMode::GetVRModeCached(true);
 		if (vrmode != nullptr && vrmode->IsVR() &&
@@ -724,7 +737,12 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 		}
 	}
 
-	if (followedHand)
+	if (followedBody)
+	{
+		// Placed in the body frame above; its own rotation still applies, and it
+		// must NOT be translated into world space again.
+	}
+	else if (followedHand)
 	{
 		// The controller supplies orientation, so the actor's own Angles must not
 		// be applied on top. Zeroing them here rather than branching around the

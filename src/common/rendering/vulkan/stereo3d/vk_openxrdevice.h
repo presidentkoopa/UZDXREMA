@@ -183,7 +183,7 @@ public:
 	virtual bool IsInitialized() const override;
 	bool HasActiveInputSession() const;
 	
-	virtual bool GetHmdTransform(VSMatrix* out) const override;
+	virtual bool GetHmdTransform(VSMatrix* out, DVector3 bodyOfs = DVector3(0, 0, 0), float* outBodyYaw = nullptr) const override;
 	virtual bool GetHandTransform(int hand, VSMatrix* out) const override;
 	virtual bool RenderPlayerSpritesInScene() const { return true; }
 	virtual bool GetTeleportLocation(DVector3 &out) const override;

@@ -6022,7 +6022,7 @@ bool VKOpenXRDeviceMode::RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage
 // No hand offset and no hand angles, so what comes back is where YOU are and
 // which way you are facing. Pitch and roll are left out on purpose: a holster
 // does not tip when you look down.
-bool VKOpenXRDeviceMode::GetHmdTransform(VSMatrix* mat) const
+bool VKOpenXRDeviceMode::GetHmdTransform(VSMatrix* mat, DVector3 bodyOfs, float* outBodyYaw) const
 {
 	double pixelstretch = r_viewpoint.ViewLevel ? r_viewpoint.ViewLevel->pixelstretch : 1.2;
 	player_t* player = &players[consoleplayer];
@@ -6038,10 +6038,41 @@ bool VKOpenXRDeviceMode::GetHmdTransform(VSMatrix* mat) const
 
 	// The cinematic screen layer takes its heading from the viewpoint for the
 	// same reason the hand path does -- doomYaw is not the drawn heading there.
-	if (VR_UseCinematicScreenLayer())
-		mat->rotate(-90 + r_viewpoint.Angles.Yaw.Degrees(), 0, 1, 0);
-	else
-		mat->rotate(-90 + doomYaw, 0, 1, 0);
+	const float bodyYawDeg = VR_UseCinematicScreenLayer()
+		? (float)r_viewpoint.Angles.Yaw.Degrees()
+		: doomYaw;
+	mat->rotate(-90 + bodyYawDeg, 0, 1, 0);
+
+	if (outBodyYaw)
+		*outBodyYaw = bodyYawDeg;
+
+	// THE SEAT, in map units on the body's axes. Three corrections, and every
+	// one of them was a separate live bug before this moved in here:
+	//
+	//   THE UNIT. Everything from the scale() above onward is stated in METRES.
+	//   VSMatrix::translate post-multiplies, so its arguments are scaled by the
+	//   basis columns already in the matrix. A map-unit offset pushed in raw is
+	//   multiplied by vr_vunits_per_meter -- 34 by default. A hip holster asked
+	//   for 9 units to the side arrived 306 units out and 600 below the floor,
+	//   outside any sector, and was culled rather than drawn.
+	//
+	//   THE VERTICAL IS NOT THE SAME SCALE AS THE OTHER TWO. The Y column
+	//   carries an extra 1/pixelstretch from the scale() two lines up, so it
+	//   needs pixelstretch multiplied back in on its own. Dividing all three
+	//   axes by vr_vunits_per_meter uniformly is the obvious fix and it is
+	//   wrong: a 21-unit hip drop still lands 3.6 units low.
+	//
+	//   THE AXIS ROLES. After the heading rotation the local axes are the body's
+	//   RIGHT, UP and BACKWARD -- not forward, up, right. Feeding (forward, up,
+	//   right) straight in turns the whole rig a quarter circle, which reads as
+	//   holsters on the wrong sides rather than as an obviously broken transform.
+	if (bodyOfs.X != 0. || bodyOfs.Y != 0. || bodyOfs.Z != 0.)
+	{
+		const double vu = vr_vunits_per_meter;
+		mat->translate((float)( bodyOfs.Y / vu),
+		               (float)( bodyOfs.Z * pixelstretch / vu),
+		               (float)(-bodyOfs.X / vu));
+	}
 
 	return true;
 }
