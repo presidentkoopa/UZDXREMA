@@ -6066,13 +6066,34 @@ bool VKOpenXRDeviceMode::GetHmdTransform(VSMatrix* mat, DVector3 bodyOfs, float*
 	//   RIGHT, UP and BACKWARD -- not forward, up, right. Feeding (forward, up,
 	//   right) straight in turns the whole rig a quarter circle, which reads as
 	//   holsters on the wrong sides rather than as an obviously broken transform.
+	const double vu = vr_vunits_per_meter;
 	if (bodyOfs.X != 0. || bodyOfs.Y != 0. || bodyOfs.Z != 0.)
 	{
-		const double vu = vr_vunits_per_meter;
 		mat->translate((float)( bodyOfs.Y / vu),
 		               (float)( bodyOfs.Z * pixelstretch / vu),
 		               (float)(-bodyOfs.X / vu));
 	}
+
+	// AND NOW HAND BACK A MAP-UNIT FRAME, because the caller draws a MODEL in it
+	// and a model's vertices are map units like every other world model's.
+	//
+	// Without this the metres scale above multiplies the MESH too, not just the
+	// seat: a weapon solved to a 4.4-unit radius is drawn with a 4.4-METRE one,
+	// which puts the camera inside it, and a mesh seen from the inside back-face
+	// culls to nothing. That is the "not drawn" half of the holster report, and
+	// it is not a distance or a culling problem at all.
+	//
+	// The alternative -- leaving the frame in metres and dividing in MODELDEF, as
+	// the hand-frame models do -- bakes vr_vunits_per_meter into content, so
+	// moving that slider would silently resize every worn thing. The hand path
+	// carries that debt already because its content depends on it; the body path
+	// is new and does not have to.
+	//
+	// The three factors are the exact inverses of the column lengths above: vu on
+	// X and Z, vu/pixelstretch on Y. Z stays POSITIVE so the negative-Z handedness
+	// of the frame is preserved -- flipping it here would silently invert triangle
+	// winding on everything worn.
+	mat->scale(1.f / (float)vu, (float)pixelstretch / (float)vu, 1.f / (float)vu);
 
 	return true;
 }
