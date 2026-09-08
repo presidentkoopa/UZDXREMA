@@ -964,9 +964,31 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 		(yoffset + wPlaceOfs[1]) / yscale);
 
 	// 5) Applying model rotations.
-	objectToWorldMatrix.rotate(-(angleoffset + wPlaceRot[0]), 0, 1, 0);
-	objectToWorldMatrix.rotate(pitchoffset + wPlaceRot[1], 0, 0, 1);
-	objectToWorldMatrix.rotate(-(rolloffset + wPlaceRot[2]), 1, 0, 0);
+	// THE MESH'S BASE ORIENTATION AND THE MOD'S SLIDERS ARE SEPARATE ROTATIONS.
+	//
+	// They used to be SUMMED into these same three. That works until a mesh needs
+	// a base pitch of 90 to sit right -- and then the mod's sliders start life
+	// AT THE EULER SINGULARITY, where the yaw and roll axes point the same way
+	// and moving either one does the same thing. Two of the three sliders become
+	// one, and no amount of tuning gets the third axis back.
+	//
+	// Applied in sequence instead, the base puts the mesh where the artist meant
+	// and the placement rotations then act in that already-oriented frame,
+	// starting from zero. All three stay independent wherever the base happens
+	// to be.
+	//
+	// This DOES change the meaning of an existing non-zero placement rotation
+	// paired with a non-zero MODELDEF offset -- summing and sequencing agree only
+	// while one of them is zero. Nothing shipped in this tree had both until now,
+	// and the previous behaviour made the sliders unusable on exactly the models
+	// that needed them most.
+	objectToWorldMatrix.rotate(-angleoffset, 0, 1, 0);
+	objectToWorldMatrix.rotate(pitchoffset,  0, 0, 1);
+	objectToWorldMatrix.rotate(-rolloffset,  1, 0, 0);
+
+	objectToWorldMatrix.rotate(-wPlaceRot[0], 0, 1, 0);
+	objectToWorldMatrix.rotate(wPlaceRot[1],  0, 0, 1);
+	objectToWorldMatrix.rotate(-wPlaceRot[2], 1, 0, 0);
 
 	// 6) The pivot: the point the model turns about, in its own space.
 	//
@@ -1320,9 +1342,31 @@ void RenderHUDModel(FModelRenderer *renderer, DPSprite *psp, FVector3 translatio
 	const float seatPitch = isAnchored ? (float)psp->AnchorAngles.Y : 0.0f;
 	const float seatRoll  = isAnchored ? (float)psp->AnchorAngles.Z : 0.0f;
 
-	objectToWorldMatrix.rotate(-(smf->angleoffset + placeRot[0] + seatYaw), 0, 1, 0);
-	objectToWorldMatrix.rotate(smf->pitchoffset + placeRot[1] + seatPitch, 0, 0, 1);
-	objectToWorldMatrix.rotate(-(smf->rolloffset + placeRot[2] + seatRoll), 1, 0, 0);
+	// THE MESH'S BASE ORIENTATION AND THE MOD'S SLIDERS ARE SEPARATE ROTATIONS.
+	//
+	// They used to be SUMMED into these same three. That works until a mesh needs
+	// a base pitch of 90 to sit right -- and then the mod's sliders start life
+	// AT THE EULER SINGULARITY, where the yaw and roll axes point the same way
+	// and moving either one does the same thing. Two of the three sliders become
+	// one, and no amount of tuning gets the third axis back.
+	//
+	// Applied in sequence instead, the base puts the mesh where the artist meant
+	// and the placement rotations then act in that already-oriented frame,
+	// starting from zero. All three stay independent wherever the base happens
+	// to be.
+	//
+	// This DOES change the meaning of an existing non-zero placement rotation
+	// paired with a non-zero MODELDEF offset -- summing and sequencing agree only
+	// while one of them is zero. Nothing shipped in this tree had both until now,
+	// and the previous behaviour made the sliders unusable on exactly the models
+	// that needed them most.
+	objectToWorldMatrix.rotate(-(smf->angleoffset + seatYaw),  0, 1, 0);
+	objectToWorldMatrix.rotate(smf->pitchoffset + seatPitch,   0, 0, 1);
+	objectToWorldMatrix.rotate(-(smf->rolloffset + seatRoll),  1, 0, 0);
+
+	objectToWorldMatrix.rotate(-placeRot[0], 0, 1, 0);
+	objectToWorldMatrix.rotate(placeRot[1],  0, 0, 1);
+	objectToWorldMatrix.rotate(-placeRot[2], 1, 0, 0);
 
 	// The pivot, on the HUD path too -- see the field note in model.h.
 	//
