@@ -368,6 +368,9 @@ EXTERN_CVAR(Float, vr_weaponScale)
 EXTERN_CVAR(Float, vr_3dweaponOffsetX);
 EXTERN_CVAR(Float, vr_3dweaponOffsetY);
 EXTERN_CVAR(Float, vr_3dweaponOffsetZ);
+// Defined here rather than externed: the only consumer is the placement trace
+// below, and an earlier diagnostic that owned it elsewhere was removed.
+CVAR(Bool, vr_place_debug, false, 0)
 EXTERN_CVAR(Float, vr_hand_ofs_x);
 EXTERN_CVAR(Float, vr_hand_ofs_y);
 EXTERN_CVAR(Float, vr_hand_ofs_z);
@@ -905,6 +908,33 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 			nm.Format("%s%s", placementCVars.GetChars(), sufRot[i]);
 			GetPlacementCVar(nm.GetChars(), wPlaceRot[i]);
 		}
+		if (vr_place_debug)
+		{
+			// WHAT THE RENDERER READ, per prefix, on change only.
+			//
+			// Five readings of the MODELDEF, the cvar declarations and the menu
+			// wiring all said the hands were wired correctly, and all five were
+			// right. Reading the source answers "is it wired". Only the renderer
+			// can answer "is this the entry I am drawing from, and are these the
+			// numbers I am using" -- and those kept being mistaken for each other.
+			static FName lastPrefix = NAME_None;
+			static int   lastKey = -0x7fffffff;
+			const int key = int(wPlaceOfs[0] * 1000) ^ int(wPlaceOfs[1] * 977)
+			              ^ int(wPlaceOfs[2] * 953) ^ int(wPlaceRot[0] * 31);
+			if (placementCVars != lastPrefix || key != lastKey)
+			{
+				lastPrefix = placementCVars; lastKey = key;
+				Printf("[VRPLACE] %s  ofs=(%.3f %.3f %.3f)  rot=(%.0f %.0f %.0f)  xscale=%.4f  applied=(%.3f %.3f %.3f)\n",
+					placementCVars.GetChars(),
+					wPlaceOfs[0], wPlaceOfs[1], wPlaceOfs[2],
+					wPlaceRot[0], wPlaceRot[1], wPlaceRot[2],
+					xscale,
+					xscale != 0.f ? wPlaceOfs[0] / xscale : 0.f,
+					zscale != 0.f ? wPlaceOfs[2] / zscale : 0.f,
+					yscale != 0.f ? wPlaceOfs[1] / yscale : 0.f);
+			}
+		}
+
 		// Defaults to 1, NOT the 0 an absent cvar reads as -- a missing slider
 		// must leave the model alone, not collapse it to a point.
 		nm.Format("%s_scale", placementCVars.GetChars());
