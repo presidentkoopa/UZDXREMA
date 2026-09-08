@@ -764,6 +764,57 @@ public:
 	// and binds re-register the table on load anyway.
 	TMap<intptr_t, int64_t>		stateRemap;
 
+	// RS FORK -- PER-SURFACE OVERRIDES FOR A WORLD MODEL.
+	//
+	// The same feature DPSprite carries, in the same names, for a model that is
+	// NOT on a psprite. A gun held in world space has no psprite to hang these
+	// on, so without them a world weapon's slide cannot move at all -- which is
+	// the single thing standing between a VR gun in the hand and a VR gun you
+	// can operate.
+	//
+	// SAME NAMES ON PURPOSE. Script that pulls a slide should read identically
+	// whichever way the gun is drawn; a parallel world-only vocabulary is two
+	// APIs that drift apart the first time one of them gains a feature.
+	//
+	// HERE RATHER THAN ON AActor because this class is already the per-actor
+	// model state, is already handed to CalcModelOverrides, is allocated only
+	// for actors that use models at all, and already serializes -- so a save
+	// keeps a half-pulled slide where it was left. Sixteen slots times eight
+	// arrays on every actor in a map would be real memory for nothing.
+	//
+	// THE UNIT OF SurfOvPos IS FRAMES: 3.5 is halfway between mesh frame 3 and
+	// mesh frame 4. Not map units, not a 0..1 fraction. Stated here because
+	// nothing downstream can check it -- see the same note on DPSprite.
+	static constexpr int RS_SURF_SLOTS = 16;
+
+	int   SurfOvModel  [RS_SURF_SLOTS] = { -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1 };
+	int   SurfOvSurface[RS_SURF_SLOTS] = { -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1 };
+	int   SurfOvFrame  [RS_SURF_SLOTS] = { -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1 };
+	int   SurfOvNext   [RS_SURF_SLOTS] = { -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1 };
+	float SurfOvLerp   [RS_SURF_SLOTS] =
+		{ -1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f };
+	bool  SurfOvHidden [RS_SURF_SLOTS] = {};
+	float SurfOvPos    [RS_SURF_SLOTS] =
+		{ -1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f };
+	float SurfOvPosPrev[RS_SURF_SLOTS] =
+		{ -1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f };
+
+	bool AnySurfaceOverride() const
+	{
+		for (int i = 0; i < RS_SURF_SLOTS; i++)
+			if (SurfOvModel[i] >= 0) return true;
+		return false;
+	}
+
+	// Once per tic, before script runs, so the renderer has both ends to blend
+	// between. Without it a slide your own hand is pulling steps at 35 Hz
+	// instead of gliding -- the exact problem SurfOvPos exists to solve, and it
+	// does not solve it unless somebody keeps last tic's value.
+	void ShiftSurfacePositions()
+	{
+		for (int i = 0; i < RS_SURF_SLOTS; i++) SurfOvPosPrev[i] = SurfOvPos[i];
+	}
+
 	DActorModelData() = default;
 	virtual void Serialize(FSerializer& arc) override;
 	virtual void OnDestroy() override;

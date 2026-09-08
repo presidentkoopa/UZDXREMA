@@ -1612,6 +1612,19 @@ class Actor : Thinker native
 	// per-tick script. Registration fails (returns false) until modelData
 	// exists, i.e. call A_ChangeModel first.
 	native bool RegisterModelStateFrame(State st, int frameNum, int frameNext);
+
+	// Drive one SURFACE of this actor's model. The psprite equivalent is a set
+	// of fields; DActorModelData is not exposed to script, so a world model
+	// goes through these.
+	//
+	// pos IS A FRACTIONAL FRAME INDEX -- 27.4 is 40% of the way from mesh frame
+	// 27 to 28. Not map units, not 0..1. Nothing downstream can catch this
+	// being wrong; it only ever shows up as motion that looks slightly off.
+	//
+	// Needs A_ChangeModel to have run on this actor first.
+	native bool SetModelSurfacePos(int slot, int modelindex, int surface, double pos);
+	native bool SetModelSurfaceHidden(int slot, int modelindex, int surface, bool hidden);
+	native void ClearModelSurfaces();
 	native void ClearModelStateFrames();
 
 	// Full state-label enumeration, sorted by state address (= source

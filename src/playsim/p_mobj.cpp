@@ -1956,6 +1956,18 @@ void DActorModelData::Serialize(FSerializer& arc)
 		("overrideFlagsClear", overrideFlagsClear)
 		("curAnim", anims.curAnim)
 		("prevAnim", anims.prevAnim);
+
+	// RS FORK -- per-surface overrides, so a save keeps a half-pulled slide or
+	// a dropped magazine exactly where it was left. Arrays rather than a loop
+	// because the serializer handles fixed-size C arrays directly.
+	arc.Array("SurfOvModel",   SurfOvModel,   RS_SURF_SLOTS)
+	   .Array("SurfOvSurface", SurfOvSurface, RS_SURF_SLOTS)
+	   .Array("SurfOvFrame",   SurfOvFrame,   RS_SURF_SLOTS)
+	   .Array("SurfOvNext",    SurfOvNext,    RS_SURF_SLOTS)
+	   .Array("SurfOvLerp",    SurfOvLerp,    RS_SURF_SLOTS)
+	   .Array("SurfOvHidden",  SurfOvHidden,  RS_SURF_SLOTS)
+	   .Array("SurfOvPos",     SurfOvPos,     RS_SURF_SLOTS)
+	   .Array("SurfOvPosPrev", SurfOvPosPrev, RS_SURF_SLOTS);
 }
 
 void DActorModelData::OnDestroy()
@@ -4555,6 +4567,18 @@ void AActor::GetObjectToWorldMatrix(double *outMat)
 //
 void AActor::Tick ()
 {
+	// RS FORK -- keep last tic's surface positions, before script can change
+	// them, so the renderer has both ends of the tic to blend between.
+	//
+	// Without this a slide your own hand is pulling advances once per tic and
+	// is then drawn two or three times at the same value, which steps visibly
+	// at headset rate. DPSprite does the same thing in ResetInterpolation; a
+	// world model has no psprite, so it happens here.
+	//
+	// Guarded on the model data existing at all, which is the common case for
+	// almost every actor in a map.
+	if (modelData) modelData->ShiftSurfacePositions();
+
 	// [RH] Data for Heretic/Hexen scrolling sectors
 	static const int8_t HexenCompatSpeeds[] = {-25, 0, -10, -5, 0, 5, 10, 0, 25 };
 	static const int8_t HexenScrollies[24][2] =

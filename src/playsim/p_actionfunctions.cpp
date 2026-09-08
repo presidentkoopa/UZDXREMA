@@ -7021,6 +7021,80 @@ DEFINE_ACTION_FUNCTION(AActor, RegisterModelStateFrame)
 	ACTION_RETURN_BOOL(true);
 }
 
+// RS FORK -- PER-SURFACE OVERRIDES ON A WORLD MODEL.
+//
+// The psprite carries these as script-visible fields; DActorModelData is not
+// exposed to ZScript, so a world model drives them through these three instead.
+// Same table, same names, same units -- see the block in actor.h.
+//
+// THE UNIT OF pos IS FRAMES. 27.4 means "between mesh frame 27 and 28, 40% of
+// the way". Not map units, not a 0..1 fraction of the travel. Nothing anywhere
+// downstream can catch a wrong unit here: the compiler takes any double and so
+// does the VM, and it shows up only as motion that looks subtly off.
+//
+// Requires modelData, i.e. A_ChangeModel must have run on this actor first --
+// same precondition RegisterModelStateFrame has, for the same reason.
+DEFINE_ACTION_FUNCTION(AActor, SetModelSurfacePos)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_INT(slot);
+	PARAM_INT(modelindex);
+	PARAM_INT(surface);
+	PARAM_FLOAT(pos);
+
+	if (self->modelData == nullptr || slot < 0 || slot >= DActorModelData::RS_SURF_SLOTS)
+	{
+		ACTION_RETURN_BOOL(false);
+	}
+	self->modelData->SurfOvModel[slot]   = modelindex;
+	self->modelData->SurfOvSurface[slot] = surface;
+	self->modelData->SurfOvPos[slot]     = (float)pos;
+	// The explicit frame/next/lerp path is what pos REPLACES, so clear it or a
+	// stale pinned pose from an earlier call silently wins over the live one.
+	self->modelData->SurfOvFrame[slot]   = -1;
+	self->modelData->SurfOvNext[slot]    = -1;
+	self->modelData->SurfOvLerp[slot]    = -1.f;
+	ACTION_RETURN_BOOL(true);
+}
+
+DEFINE_ACTION_FUNCTION(AActor, SetModelSurfaceHidden)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_INT(slot);
+	PARAM_INT(modelindex);
+	PARAM_INT(surface);
+	PARAM_BOOL(hidden);
+
+	if (self->modelData == nullptr || slot < 0 || slot >= DActorModelData::RS_SURF_SLOTS)
+	{
+		ACTION_RETURN_BOOL(false);
+	}
+	self->modelData->SurfOvModel[slot]   = modelindex;
+	self->modelData->SurfOvSurface[slot] = surface;
+	self->modelData->SurfOvHidden[slot]  = hidden;
+	ACTION_RETURN_BOOL(true);
+}
+
+DEFINE_ACTION_FUNCTION(AActor, ClearModelSurfaces)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	if (self->modelData != nullptr)
+	{
+		for (int i = 0; i < DActorModelData::RS_SURF_SLOTS; i++)
+		{
+			self->modelData->SurfOvModel[i]   = -1;
+			self->modelData->SurfOvSurface[i] = -1;
+			self->modelData->SurfOvFrame[i]   = -1;
+			self->modelData->SurfOvNext[i]    = -1;
+			self->modelData->SurfOvLerp[i]    = -1.f;
+			self->modelData->SurfOvHidden[i]  = false;
+			self->modelData->SurfOvPos[i]     = -1.f;
+			self->modelData->SurfOvPosPrev[i] = -1.f;
+		}
+	}
+	return 0;
+}
+
 DEFINE_ACTION_FUNCTION(AActor, ClearModelStateFrames)
 {
 	PARAM_SELF_PROLOGUE(AActor);

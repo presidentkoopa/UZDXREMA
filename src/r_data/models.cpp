@@ -2012,18 +2012,45 @@ static inline void RenderModelFrame(FModelRenderer *renderer, int i, const FSpri
 	// model has no way to know its own place in the MODELDEF stack.
 	FModelSurfaceOverride surfItems[DPSprite::RS_SURF_SLOTS];
 	FModelSurfaceOverrideList surfList;
+	// EITHER A PSPRITE OR A WORLD ACTOR OWNS THESE.
+	//
+	// A weapon on a psprite hangs its overrides there; a weapon held in WORLD
+	// space has no psprite at all, so DActorModelData carries the identical
+	// table under the identical names. Same feature, two homes, one reader --
+	// a second code path here is how the two would drift the first time either
+	// gained anything.
+	//
+	// The psprite wins when there is one: a HUD weapon that also has model data
+	// is still a HUD weapon.
+	const int   *ovModel = nullptr, *ovSurface = nullptr, *ovFrame = nullptr, *ovNext = nullptr;
+	const float *ovLerp = nullptr, *ovPos = nullptr, *ovPosPrev = nullptr;
+	const bool  *ovHidden = nullptr;
 	if (psp && psp->AnySurfaceOverride())
 	{
+		ovModel = psp->SurfOvModel; ovSurface = psp->SurfOvSurface;
+		ovFrame = psp->SurfOvFrame; ovNext    = psp->SurfOvNext;
+		ovLerp  = psp->SurfOvLerp;  ovHidden  = psp->SurfOvHidden;
+		ovPos   = psp->SurfOvPos;   ovPosPrev = psp->SurfOvPosPrev;
+	}
+	else if (!psp && modelData && modelData->AnySurfaceOverride())
+	{
+		ovModel = modelData->SurfOvModel; ovSurface = modelData->SurfOvSurface;
+		ovFrame = modelData->SurfOvFrame; ovNext    = modelData->SurfOvNext;
+		ovLerp  = modelData->SurfOvLerp;  ovHidden  = modelData->SurfOvHidden;
+		ovPos   = modelData->SurfOvPos;   ovPosPrev = modelData->SurfOvPosPrev;
+	}
+	if (ovModel)
+{
 		int n = 0;
 		for (int s = 0; s < DPSprite::RS_SURF_SLOTS; s++)
 		{
-			if (psp->SurfOvModel[s] != i || psp->SurfOvSurface[s] < 0) continue;
+			if (ovModel[s] != i || ovSurface[s] < 0) continue;
 			FModelSurfaceOverride& o = surfItems[n++];
-			o.surface   = psp->SurfOvSurface[s];
-			o.frame     = psp->SurfOvFrame[s];
-			o.frameNext = psp->SurfOvNext[s];
-			o.lerp      = psp->SurfOvLerp[s];
-			o.hidden    = psp->SurfOvHidden[s];
+			o.surface   = ovSurface[s];
+			o.frame     = ovFrame[s];
+			o.frameNext = ovNext[s];
+			o.lerp      = ovLerp[s];
+			o.hidden    = ovHidden[s];
 
 			// RS FORK -- DISPLAY-RATE PART MOTION (p_pspr.h, SurfOvPos).
 			//
@@ -2070,25 +2097,25 @@ static inline void RenderModelFrame(FModelRenderer *renderer, int i, const FSpri
 					Printf("[SURF] model %d surface %d -> frame %d..%d lerp %.3f%s  (pos %.3f prev %.3f ticFrac %.3f)\n",
 						i, o.surface, o.frame, o.frameNext, o.lerp,
 						o.hidden ? "  HIDDEN" : "",
-						psp->SurfOvPos[s], psp->SurfOvPosPrev[s], ticFrac);
+						ovPos[s], ovPosPrev[s], ticFrac);
 				}
 			}
 
-			if (psp->SurfOvPos[s] >= 0.f)
+			if (ovPos[s] >= 0.f)
 			{
-				float prev = psp->SurfOvPosPrev[s];
+				float prev = ovPosPrev[s];
 
 				// A slot that has only just become active has no previous
 				// position. Interpolating from the -1 sentinel would fling the
 				// part in from before the start of the mesh on its first drawn
 				// frame; starting still is the honest answer.
-				if (prev < 0.f) prev = psp->SurfOvPos[s];
+				if (prev < 0.f) prev = ovPos[s];
 
 				float f = (float)ticFrac;
 				if (f < 0.f) f = 0.f;
 				if (f > 1.f) f = 1.f;
 
-				float p = prev + (psp->SurfOvPos[s] - prev) * f;
+				float p = prev + (ovPos[s] - prev) * f;
 				if (p < 0.f) p = 0.f;
 
 				int lo = (int)p;
