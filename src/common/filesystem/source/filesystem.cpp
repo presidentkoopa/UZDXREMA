@@ -30,6 +30,8 @@
 #include <ctype.h>
 #include <string.h>
 #include <inttypes.h>
+#include <sys/stat.h>
+#include <time.h>
 
 #include "resourcefile.h"
 #include "fs_filesystem.h"
@@ -364,7 +366,38 @@ void FileSystem::AddFile (const char *filename, FileReader *filer, LumpFilterInf
 	if (resfile != NULL)
 	{
 		if (Printf)
-			Printf(FSMessageLevel::Message, "adding %s, %d lumps\n", filename, resfile->EntryCount());
+		{
+			// RS FORK -- SAY WHICH BUILD OF EACH FILE WAS LOADED.
+			//
+			// The name and the lump count do not identify a pk3. Every package in
+			// this project is rebuilt many times an hour, and a log saying only
+			// "adding RS_TestPistol.pk3, 27 lumps" is compatible with any build of
+			// it ever made -- so reading a log against the wrong source is possible,
+			// silent, and costs a whole test cycle when it happens. It has happened.
+			//
+			// The size and modification time settle it. Both are meaningful for
+			// every resource the game loads rather than for one mod, and they turn
+			// "which build is this log from" from a guess into a lookup.
+			//
+			// Directories have no single meaningful size or mtime, so they keep the
+			// original line.
+			struct stat st;
+			struct tm* when = nullptr;
+			if (!isdir && stat(filename, &st) == 0)
+				when = localtime(&st.st_mtime);
+			
+			if (when)
+			{
+				char stamp[32];
+				strftime(stamp, sizeof(stamp), "%Y-%m-%d %H:%M:%S", when);
+				Printf(FSMessageLevel::Message, "adding %s, %d lumps  [%lld bytes, built %s]\n",
+					filename, resfile->EntryCount(), (long long)st.st_size, stamp);
+			}
+			else
+			{
+				Printf(FSMessageLevel::Message, "adding %s, %d lumps\n", filename, resfile->EntryCount());
+			}
+		}
 
 		uint32_t lumpstart = (uint32_t)FileInfo.size();
 
