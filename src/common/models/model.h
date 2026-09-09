@@ -142,7 +142,9 @@ public:
 	// followBodyMode/followBodyOfs come from the ACTOR, not from MODELDEF, so
 	// they arrive as arguments rather than as flags -- see AActor::FollowBodyMode.
 	// Defaulted off: every caller written before this existed is unaffected.
-	VSMatrix ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic, float bodyPivotZ = 0.f, int followBodyMode = 0, DVector3 followBodyOfs = DVector3(0, 0, 0), double followBodyYaw = 0.0);
+	// followHandMode/followHandOfs are the hand-frame twins of the two above and
+	// arrive the same way, for the same reason -- see AActor::FollowHandMode.
+	VSMatrix ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic, float bodyPivotZ = 0.f, int followBodyMode = 0, DVector3 followBodyOfs = DVector3(0, 0, 0), double followBodyYaw = 0.0, int followHandMode = 0, DVector3 followHandOfs = DVector3(0, 0, 0), FName placementPrefix = NAME_None);
 };
 
 

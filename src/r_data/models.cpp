@@ -652,10 +652,10 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(AActor * actor, float x, float y
 	// a height for everything else.
 	const float bodyPivotZ = actor->VoxelOverride ? float(actor->Height * 0.5) : 0.f;
 
-	return ObjectToWorldMatrix(actor->Level, DVector3(x, y, z), DRotator(DAngle::fromDeg(pitch), DAngle::fromDeg(angle), DAngle::fromDeg(roll)), actor->InterpolatedScale(ticFrac), smf_flags, tic, bodyPivotZ, actor->FollowBodyMode, actor->FollowBodyOfs, actor->FollowBodyYaw);
+	return ObjectToWorldMatrix(actor->Level, DVector3(x, y, z), DRotator(DAngle::fromDeg(pitch), DAngle::fromDeg(angle), DAngle::fromDeg(roll)), actor->InterpolatedScale(ticFrac), smf_flags, tic, bodyPivotZ, actor->FollowBodyMode, actor->FollowBodyOfs, actor->FollowBodyYaw, actor->FollowHandMode, actor->FollowHandOfs, actor->PlacementPrefix);
 }
 
-VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic, float bodyPivotZ, int followBodyMode, DVector3 followBodyOfs, double followBodyYaw)
+VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic, float bodyPivotZ, int followBodyMode, DVector3 followBodyOfs, double followBodyYaw, int followHandMode, DVector3 followHandOfs, FName placementPrefix)
 {
 	double rotateOffset = 0;
 
@@ -733,14 +733,57 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 		}
 	}
 
-	const int followHand = (flags & MDL_FOLLOWMAINHAND) ? VR_MAINHAND
+	// WHICH HAND, and the ACTOR gets the last word.
+	//
+	// The MODELDEF flag is per CLASS and says which controller this kind of
+	// thing normally rides. AActor::FollowHandMode is per INSTANCE and says
+	// which one it is riding right now, because that is a property of the
+	// moment rather than of the class -- an off hand reaching for a slide has to
+	// be drawn in the MAIN hand's frame, since that is the frame the gun and its
+	// slide live in, while the player's real off hand stays somewhere it will
+	// not knock against the other controller.
+	//
+	// 0 defers to the MODELDEF, so everything written before this existed keeps
+	// exactly the behaviour it had. See AActor::FollowHandMode.
+	int followHand = (flags & MDL_FOLLOWMAINHAND) ? VR_MAINHAND
 		: ((flags & MDL_FOLLOWOFFHAND) ? VR_OFFHAND : -1);
+	if (followHandMode == 1)      followHand = VR_MAINHAND;
+	else if (followHandMode == 2) followHand = VR_OFFHAND;
 	if (!followedBody && followHand >= 0)
 	{
 		auto vrmode = VRMode::GetVRModeCached(true);
 		if (vrmode != nullptr && vrmode->IsVR() &&
 			vrmode->GetWeaponTransform(&objectToWorldMatrix, followHand, !(flags & MDL_NOAUTOREVERSE)))
 		{
+			// THE MODEL-UNIT CONVERSION, WHICH THIS BRANCH WAS MISSING.
+			//
+			// GetWeaponTransform hands back a frame scaled by vr_vunits_per_meter
+			// -- 34 map units to the metre -- and NOT in model units. The HUD path
+			// converts immediately after calling it (RenderHUDModel, `float scale
+			// = 0.01f`); this one never did. So the two branches disagreed by
+			// exactly 100 for the same mesh at the same MODELDEF Scale.
+			//
+			// That is the whole "100x" class of bug in this fork, and it is not
+			// occasional: EVERY world actor put on a controller takes this path --
+			// a gun prop, a held magazine, a wireframe reticle -- so every one of
+			// them came out a hundred times too large. A model at 100x fills the
+			// room and one at 1/100 is a speck, and both read as "it did not
+			// appear", which is indistinguishable from the actor never spawning.
+			// Four separate scale values were dialled around this before anyone
+			// compared the two branches.
+			//
+			// THE 0.01 ONLY. The HUD path also translates (0, 5, 30) afterwards,
+			// which is where a VIEW model sits in front of an eye. A world actor
+			// following a controller wants no such seat -- it places itself from
+			// its own offsets further down.
+			//
+			// EVERY MODELDEF Scale ON THIS PATH MOVES BY 100 WITH THIS. They were
+			// all tuned against the missing conversion; see the MODELDEF blocks in
+			// RS_TestPistol, RS_WorldHands and RS_VRBody, corrected in the same
+			// change.
+			const float followHandUnitScale = 0.01f;
+			objectToWorldMatrix.scale(followHandUnitScale, followHandUnitScale, followHandUnitScale);
+
 			followedHand = true;
 		}
 		else
@@ -896,16 +939,46 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 	// was handed. Axes are stated in ACTOR terms, matching _ofs_x/_y/_z:
 	// x = forward, y = sideways, z = up.
 	float wPlaceAxis[3] = { 1.0f, 1.0f, 1.0f };
-	if (placementCVars != NAME_None)
+	// WHOSE SLIDERS. The MODELDEF names a prefix for the CLASS; an actor may
+	// name a different one for the MOMENT -- see AActor::PlacementPrefix. The
+	// actor wins when it has one, which is what lets a hand pinned to a slide be
+	// tuned on the pistol's own page, live, while the menu is open.
+	//
+	// Read here rather than anywhere in script on purpose: this runs on the
+	// RENDER path, every frame it draws, and the render path does not stop for a
+	// menu. That is the entire reason this is the only placement channel whose
+	// sliders move a model while you are looking at them.
+	// A PREFIX THAT NAMES NOTHING FALLS BACK. IT DOES NOT BLANK THE MODEL OUT.
+	//
+	// placementPrefix is set from script, and script has exactly one way to say
+	// "go back to normal": clear the field. In ZScript the obvious spelling of
+	// that is `a.PlacementPrefix = 'None'` -- which does NOT produce NAME_None,
+	// it produces the literal name "None". The renderer then looked up
+	// None_ofs_x, None_yaw and so on, found nothing, and every placement value
+	// silently read as zero.
+	//
+	// The result: one grab of the pistol's slide permanently killed the world
+	// hand's own placement sliders, because the hand never got its prefix back.
+	// Nothing in the log, nothing at load -- the sliders simply stopped moving
+	// the hand.
+	//
+	// So "None" is treated as no prefix, and the MODELDEF's own is used. Costs
+	// one comparison and removes a whole class of silent failure: a mod that
+	// sets a prefix it later mis-spells gets its own sliders back rather than
+	// a model that cannot be placed at all.
+	FName activePrefix = placementCVars;
+	if (placementPrefix != NAME_None && stricmp(placementPrefix.GetChars(), "None") != 0)
+		activePrefix = placementPrefix;
+	if (activePrefix != NAME_None)
 	{
 		static const char *sufOfs[3] = { "_ofs_x", "_ofs_y", "_ofs_z" };
 		static const char *sufRot[3] = { "_yaw", "_pitch", "_roll" };
 		FString nm;
 		for (int i = 0; i < 3; ++i)
 		{
-			nm.Format("%s%s", placementCVars.GetChars(), sufOfs[i]);
+			nm.Format("%s%s", activePrefix.GetChars(), sufOfs[i]);
 			GetPlacementCVar(nm.GetChars(), wPlaceOfs[i]);
-			nm.Format("%s%s", placementCVars.GetChars(), sufRot[i]);
+			nm.Format("%s%s", activePrefix.GetChars(), sufRot[i]);
 			GetPlacementCVar(nm.GetChars(), wPlaceRot[i]);
 		}
 		if (vr_place_debug)
@@ -921,11 +994,11 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 			static int   lastKey = -0x7fffffff;
 			const int key = int(wPlaceOfs[0] * 1000) ^ int(wPlaceOfs[1] * 977)
 			              ^ int(wPlaceOfs[2] * 953) ^ int(wPlaceRot[0] * 31);
-			if (placementCVars != lastPrefix || key != lastKey)
+			if (activePrefix != lastPrefix || key != lastKey)
 			{
-				lastPrefix = placementCVars; lastKey = key;
+				lastPrefix = activePrefix; lastKey = key;
 				Printf("[VRPLACE] %s  ofs=(%.3f %.3f %.3f)  rot=(%.0f %.0f %.0f)  xscale=%.4f  applied=(%.3f %.3f %.3f)\n",
-					placementCVars.GetChars(),
+					activePrefix.GetChars(),
 					wPlaceOfs[0], wPlaceOfs[1], wPlaceOfs[2],
 					wPlaceRot[0], wPlaceRot[1], wPlaceRot[2],
 					xscale,
@@ -937,7 +1010,7 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 
 		// Defaults to 1, NOT the 0 an absent cvar reads as -- a missing slider
 		// must leave the model alone, not collapse it to a point.
-		nm.Format("%s_scale", placementCVars.GetChars());
+		nm.Format("%s_scale", activePrefix.GetChars());
 		{
 			float sc = 0.0f;
 			if (GetPlacementCVar(nm.GetChars(), sc) && sc > 0.0f) wPlaceScale = sc;
@@ -945,7 +1018,7 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 		static const char *sufAxis[3] = { "_scale_x", "_scale_y", "_scale_z" };
 		for (int i = 0; i < 3; ++i)
 		{
-			nm.Format("%s%s", placementCVars.GetChars(), sufAxis[i]);
+			nm.Format("%s%s", activePrefix.GetChars(), sufAxis[i]);
 			{
 				float sc = 0.0f;
 				if (GetPlacementCVar(nm.GetChars(), sc) && sc > 0.0f) wPlaceAxis[i] = sc;
@@ -959,9 +1032,20 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 		scaleFactorY * wPlaceScale * wPlaceAxis[1]);
 
 	// 4) Aplying model offsets (model offsets do not depend on model scalings).
-	objectToWorldMatrix.translate((xoffset + wPlaceOfs[0]) / xscale,
-		(zoffset + wPlaceOfs[2]) / (zscale*stretch),
-		(yoffset + wPlaceOfs[1]) / yscale);
+	//
+	// AActor::FollowHandOfs RIDES ALONG WITH THE OTHER TWO, and that placement is
+	// the whole point of it. MODELDEF's own Offset and the placement cvars are
+	// already summed here; adding the per-actor seat to the same sum means it
+	// carries the same units, the same axis order and the same division by scale
+	// as the sliders a human tunes by hand. There is no second convention to
+	// learn and no conversion to get wrong -- whatever number moves a slider one
+	// unit moves this field one unit.
+	//
+	// Zero by default, so every actor that never sets it lands on exactly the
+	// arithmetic that was here before.
+	objectToWorldMatrix.translate((xoffset + wPlaceOfs[0] + (float)followHandOfs.X) / xscale,
+		(zoffset + wPlaceOfs[2] + (float)followHandOfs.Z) / (zscale*stretch),
+		(yoffset + wPlaceOfs[1] + (float)followHandOfs.Y) / yscale);
 
 	// 5) Applying model rotations.
 	// THE MESH'S BASE ORIENTATION AND THE MOD'S SLIDERS ARE SEPARATE ROTATIONS.
@@ -982,13 +1066,30 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 	// while one of them is zero. Nothing shipped in this tree had both until now,
 	// and the previous behaviour made the sliders unusable on exactly the models
 	// that needed them most.
-	objectToWorldMatrix.rotate(-angleoffset, 0, 1, 0);
-	objectToWorldMatrix.rotate(pitchoffset,  0, 0, 1);
-	objectToWorldMatrix.rotate(-rolloffset,  1, 0, 0);
-
+	// ORDER IS REVERSED FROM WHAT IT LOOKS LIKE. VSMatrix::multMatrix computes
+	// res = mMatrix * aMatrix (matrix.cpp:92), so rotate() composes on the RIGHT
+	// and the LAST call written is the FIRST one applied to a vertex.
+	//
+	// That is why these two blocks are in this order and not the other one. The
+	// intent -- stated at length above and, until 2026-09-08, not what the code
+	// did -- is that the MODELDEF base orientation puts the mesh where the artist
+	// meant, and the mod's placement sliders then act in that already-oriented
+	// frame. To get that on the vertex, the placement rotations must be written
+	// FIRST so they are applied LAST.
+	//
+	// Written the other way round, the sliders turned the RAW mesh and the base's
+	// 90 degree pitch and -90 roll were then layered on top of all three. On a
+	// model with a large base orientation -- every hand in this fork -- that maps
+	// three separate slider axes through one shared rotation, and they stop
+	// reading as three separate controls. Reported from a headset as "roll yaw
+	// pitch all do the same thing".
 	objectToWorldMatrix.rotate(-wPlaceRot[0], 0, 1, 0);
 	objectToWorldMatrix.rotate(wPlaceRot[1],  0, 0, 1);
 	objectToWorldMatrix.rotate(-wPlaceRot[2], 1, 0, 0);
+
+	objectToWorldMatrix.rotate(-angleoffset, 0, 1, 0);
+	objectToWorldMatrix.rotate(pitchoffset,  0, 0, 1);
+	objectToWorldMatrix.rotate(-rolloffset,  1, 0, 0);
 
 	// 6) The pivot: the point the model turns about, in its own space.
 	//

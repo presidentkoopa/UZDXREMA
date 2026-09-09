@@ -388,6 +388,43 @@ class Actor : Thinker native
 	native int FollowBodyMode;
 	native double FollowBodyYaw;
 	native Vector3 FollowBodyOfs;
+
+	// RS FORK -- HELD IN A HAND, PLACED AT DRAW RATE. The hand-frame twin of
+	// FollowBodyMode/FollowBodyOfs above.
+	//
+	// FollowHandMode overrides WHICH controller this model rides, regardless of
+	// what its MODELDEF says:
+	//     0  the MODELDEF decides (FollowMainHand / FollowOffHand). The default.
+	//     1  the main hand.    2  the off hand.
+	//
+	// The case it exists for: an off hand reaching for a pistol's slide. The
+	// slide belongs to the gun and the gun rides the MAIN controller, so the
+	// hand has to be drawn in the MAIN frame to touch it -- while the player's
+	// real off hand stays somewhere the two controllers do not collide.
+	//
+	// FollowHandOfs is where in that frame it sits. It is ADDED TO the model's
+	// own placement offsets, so it is in the same units and axes as MODELDEF
+	// Offset and the _ofs_x/_ofs_y/_ofs_z placement cvars: whatever number moves
+	// a slider one unit moves this one unit. Zero changes nothing.
+	native int FollowHandMode;
+	native Vector3 FollowHandOfs;
+
+	// WHOSE PLACEMENT SLIDERS THIS ACTOR USES RIGHT NOW.
+	//
+	// A MODELDEF names a PlacementCVars prefix for the whole class. This names
+	// one for this actor, this moment, and the RENDERER reads it -- so the six
+	// values under <prefix>_ofs_x/_y/_z, _yaw/_pitch/_roll (and _scale) move the
+	// model WHILE THE MENU IS OPEN. Nothing script-driven can do that: the
+	// playsim is frozen behind a menu, so a script-read number only lands once
+	// you close it, which looks exactly like a dead slider.
+	//
+	// 'None' (the default) uses the MODELDEF's own prefix and changes nothing.
+	//
+	// Pair it with FollowHandOfs, not against it: this prefix is the TUNING,
+	// owned by the player and never written by script; FollowHandOfs is the
+	// ANIMATION, owned by script and never touched by a slider. The renderer
+	// adds them. One writer each.
+	native name PlacementPrefix;
 	// Trace this actor in neon, from its own sprite. See func_spriteoutline.fp
 	// and the note in actor.h. OutlineMode 0 is off and is the default; 1 keeps
 	// the body and adds a glowing edge, 2 erases the body and leaves the wire

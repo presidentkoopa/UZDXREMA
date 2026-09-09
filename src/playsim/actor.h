@@ -1344,6 +1344,91 @@ public:
 	double			FollowBodyYaw;
 	DVector3		FollowBodyOfs;
 
+	// RS FORK -- HELD IN A HAND, PLACED AT DRAW RATE. The hand-frame twin of
+	// FollowBodyMode/FollowBodyOfs above, and deliberately the same shape.
+	//
+	// FollowHandMode overrides WHICH controller a model rides:
+	//     0  the MODELDEF decides (MDL_FOLLOWMAINHAND / MDL_FOLLOWOFFHAND).
+	//        The default, and what every existing caller keeps getting.
+	//     1  the main hand, whatever the MODELDEF says.
+	//     2  the off hand, whatever the MODELDEF says.
+	//
+	// WHY AN OVERRIDE AND NOT JUST AN OFFSET. A MODELDEF flag is per CLASS, and
+	// which hand a thing is in is a property of the MOMENT. The case that forced
+	// this: an off hand reaching for a pistol's slide. The slide is part of the
+	// gun, the gun rides the MAIN controller, so for the off hand to be drawn
+	// touching the slide it has to be placed in the MAIN hand's frame -- while
+	// the player's real off hand is somewhere more comfortable. Expressed the
+	// other way round, script would have to recompute the gap between two
+	// controllers every tic and rebuild the off hand's basis to express it,
+	// which is the hand-rolled-basis trap that has cost this tree twice.
+	//
+	// This is not a favour to one gun. "Draw this thing as though it were in
+	// that hand" is the same primitive a magazine carried to a weapon needs, and
+	// a holstered gun being drawn, and a two-handed grip's support hand.
+	//
+	// FollowHandOfs is where in that hand's frame it sits. It is added to the
+	// model's own placement offsets -- the same numbers MODELDEF Offset and the
+	// _ofs_x/_ofs_y/_ofs_z placement cvars drive -- so it means exactly what the
+	// sliders mean and there is no second convention to learn. Zero, the
+	// default, changes nothing.
+	//
+	// Kept separate from FollowBodyOfs rather than reusing it: the two frames
+	// are different, an actor may legitimately want one and not the other, and
+	// collapsing them is the same mistake as collapsing followedBody and
+	// followedHand -- see the note in models.cpp.
+	//
+	// THE ONE TRAP, AND IT IS WORTH READING BEFORE USING THIS ON A NEW MODEL.
+	// The two hand frames are not necessarily the same handedness.
+	// VRMode::GetWeaponTransform (hw_vrmodes.cpp) applies scale(-1, 1, 1) to the
+	// OFF hand's frame and not the main one, so on a model that allows auto
+	// reverse, moving it between the frames MIRRORS IT and flips the sign of
+	// FollowHandOfs.X with it.
+	//
+	// A model carrying MODELDEF's NOAUTOREVERSE is exempt -- the mirror is
+	// skipped in both frames, the handedness matches, and an X offset keeps its
+	// meaning across a mode change. The RS world hands are all NOAUTOREVERSE
+	// (they are purpose-built left and right meshes and do their own mirroring
+	// with a negative Scale), which is why the first user of this field did not
+	// have to think about it. The second one might.
+	int				FollowHandMode;
+	DVector3		FollowHandOfs;
+
+	// AND WHERE ITS TUNING NUMBERS COME FROM.
+	//
+	// THE SLIDERS HAVE TO MOVE THE MODEL WHILE THE MENU IS OPEN. That is the
+	// hard requirement, it has cost this project more time than any other single
+	// thing, and it rules out every design where script holds the number: the
+	// playsim does not tick while a menu is up, so a script-read value only
+	// lands once the menu closes -- which is indistinguishable from a slider
+	// that does nothing. See EngineDocs5.0.x/PLACEMENT.md.
+	//
+	// Only ONE channel in this engine satisfies it: MODELDEF's PlacementCVars,
+	// read by the RENDERER out of <prefix>_ofs_x/_y/_z, _yaw/_pitch/_roll and
+	// _scale on every frame it draws. So the fix is not another field for script
+	// to write -- it is letting an actor say WHICH PREFIX the renderer should
+	// read for it right now.
+	//
+	// Empty (the default) means use the MODELDEF's own, so nothing that never
+	// sets this changes at all. Set it and that actor's placement is tunable
+	// live, on its own sliders, in its own mod's menu -- the same mechanism the
+	// world hands and the grab ovals already use, which is the one everybody
+	// knows works.
+	//
+	// The case it was built for: an off hand pinned to a pistol's slide adopts
+	// 'rs_tp_slide', so the six numbers that say where on the slide the hand
+	// sits and how the wrist is turned are ordinary sliders on the pistol's own
+	// menu page. A hand pinned to a magazine adopts 'rs_tp_mag' and gets a
+	// second, independent set. Neither needs an engine change to add.
+	//
+	// TWO CHANNELS, ONE WRITER EACH, and keeping them apart is the whole design.
+	// This prefix is the TUNING -- owned by the player, never written by script.
+	// FollowHandOfs above is the ANIMATION -- the travel of a slide being
+	// dragged, owned by script, never touched by a slider. They are added
+	// together by the renderer. Putting both in one number is what "two writers
+	// on one transform" means, and it reads as the slider being dead.
+	FName			PlacementPrefix = NAME_None;
+
 	// RS FORK -- TRACE THIS ACTOR IN NEON, FROM ITS OWN SPRITE.
 	//
 	// The drawing is func_spriteoutline.fp: a Sobel edge detect over the
