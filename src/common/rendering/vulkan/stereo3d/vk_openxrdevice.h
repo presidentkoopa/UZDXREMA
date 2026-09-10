@@ -271,6 +271,23 @@ protected:
 	mutable XrAction xrSecondaryAction = XR_NULL_HANDLE;
 	mutable XrAction xrThumbTouchAction = XR_NULL_HANDLE;
 	mutable XrAction xrTriggerTouchAction = XR_NULL_HANDLE;
+
+	// ANALOG TRIGGER AND SQUEEZE, alongside the boolean ones above rather
+	// than replacing them.
+	//
+	// The .../trigger/value and .../squeeze/value input paths were already
+	// bound -- to xrSelectAction and xrGripAction, which are BOOLEAN actions,
+	// so the runtime thresholded a continuous 0..1 down to pressed/not and
+	// the rest was thrown away before anything could see it. Every mechanic
+	// that wants how HARD or how FAR, rather than merely whether -- trigger
+	// travel with a distinct release point, a grip that tightens, a partial
+	// pull that never reaches the shot -- needs the value that was being
+	// discarded.
+	//
+	// Both actions stay: nothing that reads the booleans today has to change,
+	// and OpenXR is content to have two actions bound to one input path.
+	mutable XrAction xrTriggerValueAction = XR_NULL_HANDLE;
+	mutable XrAction xrGripValueAction = XR_NULL_HANDLE;
 	mutable XrPath xrLeftHandPath = XR_NULL_PATH;
 	mutable XrPath xrRightHandPath = XR_NULL_PATH;
 	mutable XrPosef xrHandPoses[2] = { { {0,0,0,1}, {0,0,0} }, { {0,0,0,1}, {0,0,0} } };

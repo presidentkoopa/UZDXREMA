@@ -1032,6 +1032,14 @@ struct OpenXRHandInputState
 	bool triggerTouch = false;
 	XrVector2f thumbstick = { 0.0f, 0.0f };
 	XrVector2f trackpad = { 0.0f, 0.0f };
+
+	// 0..1, how far each is actually pulled -- see the action declarations in
+	// the header for why these exist next to the booleans rather than
+	// instead of them. Zero on a runtime or controller that only reports a
+	// click: a caller reading these still gets a usable answer (0 or 1 from
+	// the click binding), just without the travel in between.
+	float triggerValue = 0.0f;
+	float gripValue = 0.0f;
 };
 
 static void PostControllerKeyTransition(bool oldState, bool newState, int key)
@@ -1247,6 +1255,21 @@ static bool GetActionBoolean(XrSession session, XrAction action, XrPath subactio
 	if (XR_FAILED(xrGetActionStateBoolean(session, &getInfo, &state)))
 		return false;
 	return state.currentState != XR_FALSE;
+}
+
+static float GetActionFloat(XrSession session, XrAction action, XrPath subactionPath)
+{
+	if (session == XR_NULL_HANDLE || action == XR_NULL_HANDLE)
+		return 0.0f;
+
+	XrActionStateGetInfo getInfo{ XR_TYPE_ACTION_STATE_GET_INFO };
+	getInfo.action = action;
+	getInfo.subactionPath = subactionPath;
+
+	XrActionStateFloat state{ XR_TYPE_ACTION_STATE_FLOAT };
+	if (XR_FAILED(xrGetActionStateFloat(session, &getInfo, &state)))
+		return 0.0f;
+	return state.currentState;
 }
 
 static XrVector2f GetActionVector2f(XrSession session, XrAction action, XrPath subactionPath)
@@ -2115,6 +2138,8 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	createAction("secondary", "Secondary", XR_ACTION_TYPE_BOOLEAN_INPUT, xrSecondaryAction);
 	createAction("thumb_touch", "Thumb Touch", XR_ACTION_TYPE_BOOLEAN_INPUT, xrThumbTouchAction);
 	createAction("trigger_touch", "Trigger Touch", XR_ACTION_TYPE_BOOLEAN_INPUT, xrTriggerTouchAction);
+	createAction("trigger_value", "Trigger Value", XR_ACTION_TYPE_FLOAT_INPUT, xrTriggerValueAction);
+	createAction("grip_value", "Grip Value", XR_ACTION_TYPE_FLOAT_INPUT, xrGripValueAction);
 	createAction("haptic", "Haptic", XR_ACTION_TYPE_VIBRATION_OUTPUT, xrHapticAction);
 
 	XrPath leftTriggerClickPath = XR_NULL_PATH;
@@ -2245,6 +2270,14 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	AddBinding(viveBindings, xrSelectAction, rightTriggerClickPath);
 	AddBinding(viveBindings, xrGripAction, leftSqueezeClickPath);
 	AddBinding(viveBindings, xrGripAction, rightSqueezeClickPath);
+	// The Vive wand has a real analog trigger; its squeeze is a click only, so
+	// the float action there resolves to 0 or 1. That is the correct answer
+	// for that hardware rather than a gap -- a caller gets the ends of the
+	// travel and simply has nothing in between to read.
+	AddBinding(viveBindings, xrTriggerValueAction, leftTriggerValuePath);
+	AddBinding(viveBindings, xrTriggerValueAction, rightTriggerValuePath);
+	AddBinding(viveBindings, xrGripValueAction, leftSqueezeClickPath);
+	AddBinding(viveBindings, xrGripValueAction, rightSqueezeClickPath);
 	AddBinding(viveBindings, xrTrackpadAction, leftTrackpadPath);
 	AddBinding(viveBindings, xrTrackpadAction, rightTrackpadPath);
 	AddBinding(viveBindings, xrThumbClickAction, leftTrackpadClickPath);
@@ -2264,6 +2297,10 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	AddBinding(touchBindings, xrSelectAction, rightTriggerValuePath);
 	AddBinding(touchBindings, xrGripAction, leftSqueezeValuePath);
 	AddBinding(touchBindings, xrGripAction, rightSqueezeValuePath);
+	AddBinding(touchBindings, xrTriggerValueAction, leftTriggerValuePath);
+	AddBinding(touchBindings, xrTriggerValueAction, rightTriggerValuePath);
+	AddBinding(touchBindings, xrGripValueAction, leftSqueezeValuePath);
+	AddBinding(touchBindings, xrGripValueAction, rightSqueezeValuePath);
 	AddBinding(touchBindings, xrThumbClickAction, leftThumbClickPath);
 	AddBinding(touchBindings, xrThumbClickAction, rightThumbClickPath);
 	AddBinding(touchBindings, xrThumbstickAction, leftThumbstickPath);
@@ -2299,6 +2336,10 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	AddBinding(indexBindings, xrSelectAction, rightTriggerValuePath);
 	AddBinding(indexBindings, xrGripAction, leftSqueezeValuePath);
 	AddBinding(indexBindings, xrGripAction, rightSqueezeValuePath);
+	AddBinding(indexBindings, xrTriggerValueAction, leftTriggerValuePath);
+	AddBinding(indexBindings, xrTriggerValueAction, rightTriggerValuePath);
+	AddBinding(indexBindings, xrGripValueAction, leftSqueezeValuePath);
+	AddBinding(indexBindings, xrGripValueAction, rightSqueezeValuePath);
 	AddBinding(indexBindings, xrThumbClickAction, leftThumbClickPath);
 	AddBinding(indexBindings, xrThumbClickAction, rightThumbClickPath);
 	AddBinding(indexBindings, xrThumbstickAction, leftThumbstickPath);
@@ -2320,6 +2361,11 @@ bool VKOpenXRDeviceMode::InitializeOpenXR() const
 	AddBinding(wmrBindings, xrSelectAction, rightTriggerValuePath);
 	AddBinding(wmrBindings, xrGripAction, leftSqueezeClickPath);
 	AddBinding(wmrBindings, xrGripAction, rightSqueezeClickPath);
+	AddBinding(wmrBindings, xrTriggerValueAction, leftTriggerValuePath);
+	AddBinding(wmrBindings, xrTriggerValueAction, rightTriggerValuePath);
+	// WMR's squeeze is a click, like the Vive's -- 0 or 1, no travel.
+	AddBinding(wmrBindings, xrGripValueAction, leftSqueezeClickPath);
+	AddBinding(wmrBindings, xrGripValueAction, rightSqueezeClickPath);
 	AddBinding(wmrBindings, xrThumbClickAction, leftThumbClickPath);
 	AddBinding(wmrBindings, xrThumbClickAction, rightThumbClickPath);
 	AddBinding(wmrBindings, xrThumbstickAction, leftThumbstickPath);
@@ -3282,6 +3328,8 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		const XrPath handPath = (hand == 0) ? xrLeftHandPath : xrRightHandPath;
 		input.select = GetActionBoolean(xrSession, xrSelectAction, handPath);
 		input.grip = GetActionBoolean(xrSession, xrGripAction, handPath);
+		input.triggerValue = GetActionFloat(xrSession, xrTriggerValueAction, handPath);
+		input.gripValue = GetActionFloat(xrSession, xrGripValueAction, handPath);
 		input.thumbClick = GetActionBoolean(xrSession, xrThumbClickAction, handPath);
 		input.menu = GetActionBoolean(xrSession, xrMenuAction, handPath);
 		input.a = GetActionBoolean(xrSession, xrAAction, handPath);
@@ -3932,6 +3980,25 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			consolePawn->GripSubjectOff  = xrGripSubject[offHand];
 			consolePawn->FingerTouchMain = xrFingerTouch[mainHand];
 			consolePawn->FingerTouchOff  = xrFingerTouch[offHand];
+
+			// HOW FAR, not merely whether. The booleans above answer "is it
+			// pressed"; these answer "how far in is it", which is what a
+			// trigger with a real release point, a partial pull that never
+			// fires, or a grip that tightens on a part all need. See the
+			// action declarations in the header for why both exist.
+			consolePawn->TriggerValueMain = handInput[mainHand].triggerValue;
+			consolePawn->TriggerValueOff  = handInput[offHand].triggerValue;
+			consolePawn->GripValueMain    = handInput[mainHand].gripValue;
+			consolePawn->GripValueOff     = handInput[offHand].gripValue;
+
+			// WHERE THE THUMB IS, not just that it is touching. FingerTouch
+			// above is a bitfield -- thumb down or not -- which cannot express
+			// a thumb sliding along a selector or a stick pushed part way.
+			// The thumbstick axes were already being read every frame and
+			// discarded here; publishing them is the whole change.
+			consolePawn->ThumbPosMain = DVector2(handInput[mainHand].thumbstick.x, handInput[mainHand].thumbstick.y);
+			consolePawn->ThumbPosOff  = DVector2(handInput[offHand].thumbstick.x, handInput[offHand].thumbstick.y);
+
 			consolePawn->VRTurnYaw = snapTurn;
 		}
 

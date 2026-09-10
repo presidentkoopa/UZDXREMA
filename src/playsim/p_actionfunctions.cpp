@@ -5323,6 +5323,140 @@ DEFINE_ACTION_FUNCTION_NATIVE(AActor, FindBoneIndex, FindBoneIndexNative)
 
 //================================================
 //
+// SURFACES, BY NAME -- what FindBoneIndex already does for bones.
+//
+// THE MESH ALREADY KNOWS WHAT ITS PARTS ARE CALLED. An MD3 stores a name per
+// surface and the loader keeps it (model_md3.h, GetSurfaceName), but nothing
+// script-side could ask -- so every system driving a surface addressed it by
+// a bare INDEX, discovered by hand in Blender and then copied into a script
+// as a magic number.
+//
+// That is fine for one part on one weapon and stops being fine immediately
+// after. An index is a fact about the EXPORT, not about the gun: re-export a
+// mesh with the surfaces in a different order and every number written
+// against it is silently wrong -- not broken-looking, just moving the wrong
+// part, which is the worst way for it to fail. Names survive a re-export.
+// They are also what a person actually knows ("the slide"), and what the
+// tooling that surveys these meshes already reports.
+//
+// Deliberately NOT gated on decoupled animations the way the bone entry
+// points are. That requirement is real for bones and meaningless for
+// surfaces: an ordinary MD3 weapon prop has surfaces and no skeleton at all,
+// and it is exactly the case this exists for.
+//
+// -1 for "no such surface", and for an actor with no model, and for a model
+// index that is not there -- all three are the same answer to the caller
+// ("you cannot address that"), and none of them is worth aborting a script
+// over. A caller that wants to know WHICH of those it hit can ask
+// GetModelSurfaceCount.
+//
+//================================================
+
+static FModel * ResolveModelForSurface(AActor * self, int model_index)
+{
+	if (self == nullptr || model_index < 0) return nullptr;
+
+	// The actor's own runtime model set wins when it has one -- that is what
+	// A_ChangeModel wrote, and it is what is actually being drawn.
+	if (self->modelData
+		&& self->modelData->models.SSize() > model_index
+		&& self->modelData->models[model_index].modelID >= 0
+		&& self->modelData->models[model_index].modelID < Models.SSize())
+	{
+		return Models[self->modelData->models[model_index].modelID];
+	}
+
+	// Otherwise the class's MODELDEF stack. Note this does NOT call
+	// EnsureModelData: a read-only question must not have the side effect of
+	// giving the actor model data it did not have.
+	auto smf_class = (self->modelData && self->modelData->modelDef) ? self->modelData->modelDef : self->GetClass();
+	if (BaseSpriteModelFrames.CheckKey(smf_class)
+		&& BaseSpriteModelFrames[smf_class].modelIDs.SSize() > model_index)
+	{
+		int id = BaseSpriteModelFrames[smf_class].modelIDs[model_index];
+		if (id >= 0 && id < Models.SSize()) return Models[id];
+	}
+
+	return nullptr;
+}
+
+static int FindModelSurfaceIndexNative(AActor * self, int model_index, int surfName_i)
+{
+	FModel * mdl = ResolveModelForSurface(self, model_index);
+	if (!mdl) return -1;
+
+	// FName comparison is case-insensitive by construction (FindName
+	// lowercases before hashing), so a script asking for 'slide' finds a
+	// surface the exporter wrote as "Slide". Worth stating because the
+	// alternative -- a case-sensitive miss -- would look exactly like a
+	// missing surface.
+	FName want { ENamedName(surfName_i) };
+	if (want == NAME_None) return -1;
+
+	const int count = mdl->GetSurfaceCount();
+	for (int i = 0; i < count; i++)
+	{
+		if (mdl->GetSurfaceName(i) == want) return i;
+	}
+	return -1;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(AActor, FindModelSurfaceIndex, FindModelSurfaceIndexNative)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_INT(model_index);
+	PARAM_NAME(surface_name);
+	ACTION_RETURN_INT(FindModelSurfaceIndexNative(self, model_index, surface_name.GetIndex()));
+}
+
+static int GetModelSurfaceCountNative(AActor * self, int model_index)
+{
+	FModel * mdl = ResolveModelForSurface(self, model_index);
+	return mdl ? mdl->GetSurfaceCount() : 0;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(AActor, GetModelSurfaceCount, GetModelSurfaceCountNative)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_INT(model_index);
+	ACTION_RETURN_INT(GetModelSurfaceCountNative(self, model_index));
+}
+
+static int GetModelSurfaceNameNative(AActor * self, int model_index, int surface)
+{
+	FModel * mdl = ResolveModelForSurface(self, model_index);
+	if (!mdl) return NAME_None;
+	return mdl->GetSurfaceName(surface).GetIndex();
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(AActor, GetModelSurfaceName, GetModelSurfaceNameNative)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_INT(model_index);
+	PARAM_INT(surface);
+	ACTION_RETURN_INT(GetModelSurfaceNameNative(self, model_index, surface));
+}
+
+// HOW MANY POSES THIS MESH HAS, so a part map can be checked against the
+// mesh instead of against a memory of it. Pairs with the clamp in
+// models.cpp: a script can now find out that frame 29 is out of range
+// BEFORE driving a surface to it, rather than reading about it in a warning
+// afterwards. -1 when the format does not know its own count.
+static int GetModelFrameCountNative(AActor * self, int model_index)
+{
+	FModel * mdl = ResolveModelForSurface(self, model_index);
+	return mdl ? mdl->NumFrames() : -1;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(AActor, GetModelFrameCount, GetModelFrameCountNative)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_INT(model_index);
+	ACTION_RETURN_INT(GetModelFrameCountNative(self, model_index));
+}
+
+//================================================
+//
 // SetBoneRotation
 //
 //================================================
@@ -7057,6 +7191,187 @@ DEFINE_ACTION_FUNCTION(AActor, SetModelSurfacePos)
 	ACTION_RETURN_BOOL(true);
 }
 
+// RS FORK -- A LIVE TRANSFORM ON TOP OF THE FRAME.
+//
+// SetModelSurfacePos above selects a POSE -- a complete baked snapshot of
+// every vertex, and nothing else. That is the whole of what an MD3 frame is,
+// and it is why a part driven purely by frame selection can only ever be
+// where the author baked it. A live hand position and a baked frame position
+// can never exactly agree, so every handoff between hand-driven and
+// frame-driven motion has a seam in it, and no amount of blending between
+// adjacent frames removes that -- blending two authored snapshots is still
+// not computing a position.
+//
+// Every part this is used on is RIGID: a slide, a magazine, a hammer, a
+// cylinder, a trigger. None of them deform as they move. So the gap was
+// never "MD3 needs arbitrary vertex control" -- it is that a rigid surface
+// needs a position independent of its shape, which is exactly what one bone
+// would give it if MD3 had bones. This is that, without bones, and without
+// touching a single existing asset.
+//
+// Applied in the MODEL's own local space (see the compose order in
+// FHWModelRenderer::SetSurfaceTransform): an offset moves the part along the
+// model's axes, so it stays correct however the weapon is held. A world-space
+// offset would be wrong the instant the gun was canted.
+//
+// Additive with SetModelSurfacePos on the same slot, not exclusive with it:
+// the frame still chooses the pose, this moves it. Pass a zero offset and an
+// identity rotation to clear.
+//
+// Requires modelData, i.e. A_ChangeModel must have run on this actor first --
+// same precondition as its neighbours.
+DEFINE_ACTION_FUNCTION(AActor, SetModelSurfaceOffset)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_INT(slot);
+	PARAM_INT(modelindex);
+	PARAM_INT(surface);
+	PARAM_FLOAT(ofsx);
+	PARAM_FLOAT(ofsy);
+	PARAM_FLOAT(ofsz);
+	PARAM_FLOAT(rotx);
+	PARAM_FLOAT(roty);
+	PARAM_FLOAT(rotz);
+	PARAM_FLOAT(rotw);
+
+	if (self->modelData == nullptr || slot < 0 || slot >= DActorModelData::RS_SURF_SLOTS)
+	{
+		ACTION_RETURN_BOOL(false);
+	}
+
+	self->modelData->SurfOvModel[slot]   = modelindex;
+	self->modelData->SurfOvSurface[slot] = surface;
+	self->modelData->SurfOvHasXf[slot]   = true;
+	self->modelData->SurfOvOfs[slot]     = FVector3((float)ofsx, (float)ofsy, (float)ofsz);
+	self->modelData->SurfOvRot[slot]     = FVector4((float)rotx, (float)roty, (float)rotz, (float)rotw);
+	ACTION_RETURN_BOOL(true);
+}
+
+// Stop transforming this slot's surface, leaving whatever frame it is on
+// alone. Separate from writing a zero offset so "no transform" costs the
+// renderer nothing rather than an identity matrix multiply per draw.
+DEFINE_ACTION_FUNCTION(AActor, ClearModelSurfaceOffset)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_INT(slot);
+
+	if (self->modelData == nullptr || slot < 0 || slot >= DActorModelData::RS_SURF_SLOTS)
+	{
+		ACTION_RETURN_BOOL(false);
+	}
+
+	self->modelData->SurfOvHasXf[slot]   = false;
+	self->modelData->SurfOvOfs[slot]     = FVector3(0.f, 0.f, 0.f);
+	self->modelData->SurfOvRot[slot]     = FVector4(0.f, 0.f, 0.f, 1.f);
+	// History too, or the next Set on this slot would interpolate from wherever
+	// the part was when it was released -- sliding in from a stale position
+	// instead of appearing where it was put.
+	self->modelData->SurfOvOfsPrev[slot] = FVector3(0.f, 0.f, 0.f);
+	self->modelData->SurfOvRotPrev[slot] = FVector4(0.f, 0.f, 0.f, 1.f);
+	ACTION_RETURN_BOOL(true);
+}
+
+// RS FORK -- E2: DRIVE A SURFACE FROM THE LIVE HAND, AT DRAW RATE.
+//
+// Everything else here writes a position at 35 Hz. This hands the surface over
+// to the renderer, which places it from the controller pose on the frame it is
+// drawing -- so the part and the hand come from one pose at one instant and
+// cannot drift apart. A tic-driven part is SMOOTH; only a drawn-driven one is
+// GLUED, and at a fast reload snatch the difference is centimetres.
+//
+// ARMS, DOES NOT ANCHOR. This call does not record where the hand is. The
+// renderer captures that itself on the first frame it draws, from the same live
+// pose it will difference against. Anchoring here would bake in one tic of
+// stale hand position at the instant of grab -- on a short stroke that is most
+// of the travel, so the part would jump most of the way out the moment you
+// touched it, and ONLY when you grabbed quickly. Fine in slow testing, wrong in
+// play.
+//
+// axis and distance are in the MESH's own units, the same ones its vertices are
+// in. No unit constant is involved anywhere in this path; see the note at the
+// drive branch in models.cpp.
+//
+// startValue lets a drive resume from where the part already is rather than
+// snapping to an end -- take hold of a half-open bolt and it stays half open.
+DEFINE_ACTION_FUNCTION(AActor, SetModelSurfaceDrive)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_INT(slot);
+	PARAM_INT(modelindex);
+	PARAM_INT(surface);
+	PARAM_INT(hand);
+	PARAM_FLOAT(axisx);
+	PARAM_FLOAT(axisy);
+	PARAM_FLOAT(axisz);
+	PARAM_FLOAT(distance);
+	PARAM_FLOAT(startValue);
+
+	if (self->modelData == nullptr || slot < 0 || slot >= DActorModelData::RS_SURF_SLOTS)
+	{
+		ACTION_RETURN_BOOL(false);
+	}
+
+	// A zero-length axis has no direction to travel along and would divide the
+	// projection by nothing. Refused rather than normalised to something
+	// arbitrary -- a caller that passed (0,0,0) has a bug, and silently picking
+	// an axis for them hides it.
+	FVector3 axis((float)axisx, (float)axisy, (float)axisz);
+	const float len = axis.Length();
+	if (len < 0.0001f || distance == 0.0)
+	{
+		ACTION_RETURN_BOOL(false);
+	}
+	axis /= len;
+
+	auto md = self->modelData;
+	md->SurfOvModel[slot]      = modelindex;
+	md->SurfOvSurface[slot]    = surface;
+	md->SurfOvDriveOn[slot]    = true;
+	md->SurfOvDriveHand[slot]  = (hand == 1) ? 1 : 0;
+	md->SurfOvDriveAxis[slot]  = axis;
+	md->SurfOvDriveDist[slot]  = (float)distance;
+	md->SurfOvDriveBase[slot]  = (float)clamp(startValue, 0.0, 1.0);
+	md->SurfOvDriveArmed[slot] = false;   // the renderer captures the anchor
+	md->SurfOvDriveValue[slot] = (float)clamp(startValue, 0.0, 1.0);
+	ACTION_RETURN_BOOL(true);
+}
+
+// Hand the surface back to script. Without this there is no way to tell "the
+// drive is working" from "the drive is stuck on" -- the part tracks your hand
+// either way, and only letting go distinguishes them.
+DEFINE_ACTION_FUNCTION(AActor, ClearModelSurfaceDrive)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_INT(slot);
+
+	if (self->modelData == nullptr || slot < 0 || slot >= DActorModelData::RS_SURF_SLOTS)
+	{
+		ACTION_RETURN_BOOL(false);
+	}
+	self->modelData->SurfOvDriveOn[slot]    = false;
+	self->modelData->SurfOvDriveArmed[slot] = false;
+	ACTION_RETURN_BOOL(true);
+}
+
+// WHAT WAS ACTUALLY DRAWN, 0..1, published back by the renderer.
+//
+// The point of reading this rather than script's own estimate: script computes
+// at 35 Hz and the renderer draws at 90+, so they are different numbers on any
+// fast motion. Gameplay decisions made against a value that differs from the
+// one on screen is the whole class of bug this system exists to remove -- the
+// seat that fires while the magazine is visibly still out. Ask what was drawn.
+DEFINE_ACTION_FUNCTION(AActor, GetModelSurfaceDrawnValue)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_INT(slot);
+
+	if (self->modelData == nullptr || slot < 0 || slot >= DActorModelData::RS_SURF_SLOTS)
+	{
+		ACTION_RETURN_FLOAT(0.0);
+	}
+	ACTION_RETURN_FLOAT(self->modelData->SurfOvDriveValue[slot]);
+}
+
 DEFINE_ACTION_FUNCTION(AActor, SetModelSurfaceHidden)
 {
 	PARAM_SELF_PROLOGUE(AActor);
@@ -7090,6 +7405,18 @@ DEFINE_ACTION_FUNCTION(AActor, ClearModelSurfaces)
 			self->modelData->SurfOvHidden[i]  = false;
 			self->modelData->SurfOvPos[i]     = -1.f;
 			self->modelData->SurfOvPosPrev[i] = -1.f;
+
+			// AND THE LIVE TRANSFORM. This is the only teardown call there is,
+			// and it did not clear the offset -- so "clear the surfaces" left a
+			// stale translation welded to a part, with every other field reset
+			// and no writer left to blame for it. A part that had been dragged
+			// somewhere stayed dragged, forever, through the one call whose
+			// entire job is to undo that.
+			self->modelData->SurfOvHasXf[i]   = false;
+			self->modelData->SurfOvOfs[i]     = FVector3(0.f, 0.f, 0.f);
+			self->modelData->SurfOvRot[i]     = FVector4(0.f, 0.f, 0.f, 1.f);
+			self->modelData->SurfOvOfsPrev[i] = FVector3(0.f, 0.f, 0.f);
+			self->modelData->SurfOvRotPrev[i] = FVector4(0.f, 0.f, 0.f, 1.f);
 		}
 	}
 	return 0;

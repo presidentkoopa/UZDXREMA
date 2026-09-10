@@ -37,6 +37,13 @@ class FHWModelRenderer : public FModelRenderer
 	int boneIndexBase = -1;
 	HWDrawInfo *di;
 	FRenderState &state;
+
+	// RS fork -- the model's OWN object-to-world, kept so a per-surface
+	// transform can be composed in front of it and then undone. Without
+	// remembering it, restoring after one transformed surface would mean
+	// re-deriving a matrix the renderer was simply handed.
+	VSMatrix baseModelMatrix;
+	bool     baseModelMatrixValid = false;
 public:
 	FHWModelRenderer(HWDrawInfo *d, FRenderState &st, int mli) : modellightindex(mli), di(d), state(st)
 	{}
@@ -52,5 +59,7 @@ public:
 	void DrawArrays(int start, int count) override;
 	void DrawElements(int numIndices, size_t offset) override;
 	void SetupFrame(FModel *model, unsigned int frame1, unsigned int frame2, unsigned int size, int boneStartIndex) override;
+	void SetSurfaceTransform(const VSMatrix* localTransform) override;
+	bool GetModelToWorldMatrix(VSMatrix* out) const override;
 
 };

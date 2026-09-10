@@ -5108,6 +5108,23 @@ static void SetBeam(FLevelLocals *self, int index,
 	self->BeamIntensity[index] = intensity;
 }
 
+// RS FORK -- anchor a beam's origin to a hand, resolved at draw rate.
+// See FLevelLocals::BeamAnchor. 0 clears it back to the stored world point.
+static void SetBeamAnchor(FLevelLocals *self, int index, int mode)
+{
+	if (index < 0 || index >= FLevelLocals::MAX_BEAMS) return;
+	self->BeamAnchor[index] = (mode < 0 || mode > 2) ? 0 : mode;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetBeamAnchor, SetBeamAnchor)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(index);
+	PARAM_INT(mode);
+	SetBeamAnchor(self, index, mode);
+	return 0;
+}
+
 DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetBeam, SetBeam)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);

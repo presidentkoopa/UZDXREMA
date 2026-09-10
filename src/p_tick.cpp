@@ -464,6 +464,23 @@ void P_Ticker (void)
 		{
 			ac->ClearInterpolation();
 			ac->ClearFOVInterpolation();
+
+			// RS FORK -- SNAPSHOT LAST TIC'S SURFACE POSITIONS AND TRANSFORMS.
+			//
+			// HERE, not in AActor::Tick, and the difference is the whole
+			// feature. Tick runs under RunThinkers, which is downstream of
+			// localEventManager->WorldTick() -- and WorldTick is where every
+			// EventHandler-driven prop in this project writes its surface
+			// positions. Shifting there copied Prev from a Pos that had already
+			// been overwritten for this tic, so Prev == Pos on every frame and
+			// the renderer interpolated each value against itself. The parts
+			// stepped at tic rate and the display-rate smoothing never ran once.
+			//
+			// This is the same instant AActor::Prev is taken and beams are
+			// snapshotted a few lines below, for exactly the same reason: it is
+			// the one point in the tic where these arrays still hold what was
+			// drawn for the tic that just ended, before any writer has run.
+			if (ac->modelData) ac->modelData->ShiftSurfacePositions();
 		}
 
 		P_ThinkParticles(Level);	// [RH] make the particles think
@@ -507,6 +524,15 @@ void P_Ticker (void)
 			for (int b = wasLive; b < Level->PrevBeamCount; b++)
 			{
 				Level->PrevBeamIntensity[b] = 0.0;
+
+				// RS FORK -- and a slot that has gone dark forgets its anchor.
+				//
+				// Slots are reused. Without this, a mod that anchored slot 3 to
+				// a hand and later released it would hand the next user of slot
+				// 3 an origin stuck to a controller they never asked about --
+				// and that beam would look correct right up until the player
+				// moved their arm.
+				Level->BeamAnchor[b] = 0;
 			}
 			Level->PrevBeamCount = wasLive;
 		}

@@ -2259,6 +2259,12 @@ DEFINE_FIELD(AActor, GripClaimMain)
 DEFINE_FIELD(AActor, GripClaimOff)
 DEFINE_FIELD(AActor, GripHeldMain)      // RS fork -- raw squeeze, see actor.h
 DEFINE_FIELD(AActor, GripHeldOff)       // RS fork
+DEFINE_FIELD(AActor, TriggerValueMain)  // RS fork -- analog travel, see actor.h
+DEFINE_FIELD(AActor, TriggerValueOff)   // RS fork
+DEFINE_FIELD(AActor, GripValueMain)     // RS fork
+DEFINE_FIELD(AActor, GripValueOff)      // RS fork
+DEFINE_FIELD(AActor, ThumbPosMain)      // RS fork -- thumbstick axes, see actor.h
+DEFINE_FIELD(AActor, ThumbPosOff)       // RS fork
 DEFINE_FIELD(AActor, GripSubjectMain)
 DEFINE_FIELD(AActor, GripSubjectOff)
 DEFINE_FIELD(AActor, TwoHandedHold)

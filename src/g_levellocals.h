@@ -1254,7 +1254,27 @@ public:
 	//
 	// Slot 0 is what a caller that never heard of slots gets, so every existing
 	// call site keeps working unchanged.
-	static const int MAX_VOL_BEAMS = 4;
+	// 32, AND IT MUST MATCH PPVolumetricBeam::MAX_BEAMS EXACTLY.
+	//
+	// hw_drawinfo.cpp iterates to THIS constant and hands each slot to
+	// PPVolumetricBeam::AddBeam, which guards with `if (count < MAX_BEAMS)`.
+	// If the two disagree, every slot above the LOWER value is dropped on the
+	// floor -- no error, no log line, no warning. The cone simply never renders
+	// and there is nothing anywhere to say why. Change one, change the other.
+	//
+	// Raised from 4 because a dual-wielding VR loadout already fills it at rest:
+	// flashlight, wheel laser, and a muzzle flash per hand is four, with no
+	// headroom for anything added later.
+	//
+	// The ceiling is an ARRAY BOUND, not a per-frame cost. PPVolumetricBeam::
+	// Render early-returns on count <= 0 and loops to `count` -- the number of
+	// beams actually published this frame -- so unused slots cost nothing to
+	// draw. Thirteen arrays of 32 on FLevelLocals is under 4KB per level.
+	//
+	// NOT FOR LASER SIGHTS. A laser is a LINE and belongs in the separate
+	// 128-slot system (MAX_BEAMS / BeamStart / BeamEnd below). These are CONES:
+	// flashlights and muzzle flashes, things that light the air in a volume.
+	static const int MAX_VOL_BEAMS = 32;
 
 	bool     VolBeamActive[MAX_VOL_BEAMS] = {};
 	DVector3 VolBeamPos[MAX_VOL_BEAMS] = {};
@@ -1540,6 +1560,29 @@ public:
 
 	static const int MAX_BEAMS = 128;
 	int      BeamCount = 0;
+	// RS FORK -- WHERE A BEAM'S ORIGIN COMES FROM, per slot.
+	//
+	//   0  the world point in BeamStart, as always
+	//   1  the MAIN hand, resolved at DRAW rate
+	//   2  the OFF hand
+	//
+	// A laser sight starts at the weapon, and a weapon in VR moves at head
+	// tracking rate -- 90Hz and up. Script runs at 35. So a beam whose origin
+	// was written from script sampled AttackPos once per tic and held it, and no
+	// amount of interpolating between two such samples recovers the motion
+	// between them: the beam steps against a gun that glides. Reported as "the
+	// laser is jittery when I move around", and it gets worse with speed
+	// because the disagreement grows with it.
+	//
+	// Anchored instead, the draw path reads the hand's CURRENT position -- the
+	// same value hw_vrmodes.cpp refreshed this frame -- so the beam leaves the
+	// muzzle and stays there. The far END is still the interpolated world point,
+	// correctly, because a hit location genuinely only changes once a tic.
+	//
+	// This is the beam equivalent of AActor::FollowHandMode and exists for the
+	// identical reason. Zero by default: every existing caller is untouched.
+	int      BeamAnchor[MAX_BEAMS] = {};
+
 	DVector3 BeamStart[MAX_BEAMS] = {};
 	DVector3 BeamEnd[MAX_BEAMS] = {};
 	double   BeamThick[MAX_BEAMS] = {};   // the hot core, world units

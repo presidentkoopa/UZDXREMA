@@ -42,4 +42,32 @@ public:
 	virtual void DrawArrays(int start, int count) = 0;
 	virtual void DrawElements(int numIndices, size_t offset) = 0;
 	virtual void SetupFrame(FModel* model, unsigned int frame1, unsigned int frame2, unsigned int size, int boneStartIndex) {};
+
+	// RS FORK -- A MODEL-SPACE TRANSFORM FOR ONE SURFACE, mid-model.
+	//
+	// The object-to-world matrix is handed over once per MODEL, at
+	// BeginDrawModel, which is right for a model that moves as one piece and
+	// has nothing to say about a model whose parts move independently of each
+	// other. This lets one surface be drawn with an extra transform in front
+	// of that matrix and the next surface be drawn without it.
+	//
+	// Passing nullptr restores the model's own matrix. A renderer that does
+	// not implement this simply draws every surface at the model's transform,
+	// which is exactly the behaviour it had before this existed.
+	virtual void SetSurfaceTransform(const VSMatrix* localTransform) {};
+
+	// RS FORK -- the model's own object-to-world, for the draw-rate hand drive.
+	//
+	// A driven surface has to turn a live controller position into a position
+	// along its own travel axis, and that means getting a world point into
+	// MODEL space, which needs this matrix. The renderer was handed it at
+	// BeginDrawModel and is the only thing that still has it at draw time --
+	// the fill loop that needs it is several calls below the function that
+	// computed it, and threading it down would touch every model format's
+	// signature for the benefit of one.
+	//
+	// Returns false when there is nothing sensible to give (a renderer that
+	// does not implement it, or a model not currently being drawn), and the
+	// caller then leaves the surface where script last put it.
+	virtual bool GetModelToWorldMatrix(VSMatrix* out) const { return false; }
 };

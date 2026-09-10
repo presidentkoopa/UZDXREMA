@@ -2200,12 +2200,26 @@ static inline void RenderModelFrame(FModelRenderer *renderer, int i, const FSpri
 	const int   *ovModel = nullptr, *ovSurface = nullptr, *ovFrame = nullptr, *ovNext = nullptr;
 	const float *ovLerp = nullptr, *ovPos = nullptr, *ovPosPrev = nullptr;
 	const bool  *ovHidden = nullptr;
+	// RS fork -- the live-transform half of the same table. See
+	// FModelSurfaceOverride in model.h.
+	const bool     *ovHasXf  = nullptr;
+	const FVector3 *ovOfs    = nullptr;
+	const FVector4 *ovRot    = nullptr;
+	const FVector3 *ovOfsPrev = nullptr;
+	const FVector4 *ovRotPrev = nullptr;
+	// E2 -- the draw-rate hand drive. Mutable, unlike everything else here: the
+	// renderer captures the anchor and publishes the drawn value back, so
+	// script reads the number that was actually drawn rather than a second
+	// estimate of it.
+	DActorModelData *driveData = nullptr;
 	if (psp && psp->AnySurfaceOverride())
 	{
 		ovModel = psp->SurfOvModel; ovSurface = psp->SurfOvSurface;
 		ovFrame = psp->SurfOvFrame; ovNext    = psp->SurfOvNext;
 		ovLerp  = psp->SurfOvLerp;  ovHidden  = psp->SurfOvHidden;
 		ovPos   = psp->SurfOvPos;   ovPosPrev = psp->SurfOvPosPrev;
+		ovHasXf = psp->SurfOvHasXf; ovOfs     = psp->SurfOvOfs;   ovRot = psp->SurfOvRot;
+		ovOfsPrev = psp->SurfOvOfsPrev; ovRotPrev = psp->SurfOvRotPrev;
 	}
 	else if (!psp && modelData && modelData->AnySurfaceOverride())
 	{
@@ -2213,6 +2227,9 @@ static inline void RenderModelFrame(FModelRenderer *renderer, int i, const FSpri
 		ovFrame = modelData->SurfOvFrame; ovNext    = modelData->SurfOvNext;
 		ovLerp  = modelData->SurfOvLerp;  ovHidden  = modelData->SurfOvHidden;
 		ovPos   = modelData->SurfOvPos;   ovPosPrev = modelData->SurfOvPosPrev;
+		ovHasXf = modelData->SurfOvHasXf; ovOfs     = modelData->SurfOvOfs;   ovRot = modelData->SurfOvRot;
+		ovOfsPrev = modelData->SurfOvOfsPrev; ovRotPrev = modelData->SurfOvRotPrev;
+		driveData = modelData;
 	}
 	if (ovModel)
 {
@@ -2226,6 +2243,172 @@ static inline void RenderModelFrame(FModelRenderer *renderer, int i, const FSpri
 			o.frameNext = ovNext[s];
 			o.lerp      = ovLerp[s];
 			o.hidden    = ovHidden[s];
+
+			// The live transform, if this slot has one. An all-zero
+			// quaternion means "never written" and is read as identity, so a
+			// caller that only ever translates never has to supply one.
+			// ---- E2: DRAW-RATE HAND DRIVE -------------------------------
+			//
+			// A driven slot ignores whatever script last wrote and computes its
+			// own position from the LIVE controller pose, on the frame being
+			// drawn. That is the whole point: the part and the hand come from
+			// one pose at one instant, so they cannot separate. A tic-driven
+			// part is smooth and still a tic behind, which is exactly the
+			// difference this exists to remove and exactly what a slow test
+			// cannot show you.
+			bool driven = false;
+			if (driveData && driveData->SurfOvDriveOn[s])
+			{
+				VSMatrix modelToWorld;
+				auto vrmode = VRMode::GetVRModeCached(true);
+				if (vrmode && vrmode->IsVR() && renderer->GetModelToWorldMatrix(&modelToWorld))
+				{
+					VSMatrix handMat;
+					const int dhand = (driveData->SurfOvDriveHand[s] == 1) ? VR_OFFHAND : VR_MAINHAND;
+
+					// GetHandTransform, NOT GetWeaponTransform. The latter
+					// applies a conditional X mirror (hw_vrmodes.cpp, gated on
+					// the held weapon's auto-reverse flag), and a formula that
+					// projects a hand onto a signed axis reads that mirror as a
+					// sign flip -- on one hand only, for some weapons. Silent at
+					// rest and wrong at an angle.
+					if (vrmode->GetHandTransform(dhand, &handMat))
+					{
+						// NO UNIT CONSTANT HERE, DELIBERATELY, AND NONE IS
+						// NEEDED. Whatever scale this model's path applied is
+						// inside modelToWorld, so inverting it undoes that
+						// scale along with everything else. The hand lands in
+						// the SAME space the mesh's own vertices are in, which
+						// is the space `axis` and `distance` are measured in.
+						//
+						// This is on purpose. Elsewhere in this file a bare
+						// 0.01 is multiplied in by hand on some paths and not
+						// others, and forgetting it (or applying it twice) is
+						// the "everything is 100x" bug this project keeps
+						// hitting. A conversion that is derived rather than
+						// remembered cannot be forgotten.
+						const float *hm = handMat.get();
+						FVector3 handWorld(hm[12], hm[13], hm[14]);
+
+						VSMatrix worldToModel;
+						modelToWorld.inverseMatrix(worldToModel);
+						const float *wm = worldToModel.get();
+						FVector3 handModel(
+							wm[0]*handWorld.X + wm[4]*handWorld.Y + wm[8] *handWorld.Z + wm[12],
+							wm[1]*handWorld.X + wm[5]*handWorld.Y + wm[9] *handWorld.Z + wm[13],
+							wm[2]*handWorld.X + wm[6]*handWorld.Y + wm[10]*handWorld.Z + wm[14]);
+
+						const FVector3 axis = driveData->SurfOvDriveAxis[s];
+						const float proj = handModel.X*axis.X + handModel.Y*axis.Y + handModel.Z*axis.Z;
+
+						// ARM, DON'T ANCHOR. The anchor is captured HERE, on the
+						// first drawn frame, from the same live quantity it will
+						// be differenced against. Captured at script rate it
+						// would be one tic stale at the instant of grab -- on a
+						// short stroke that is most of the travel, so the part
+						// would leap most of the way out the moment you touched
+						// it, and only when you grabbed fast.
+						if (!driveData->SurfOvDriveArmed[s])
+						{
+							driveData->SurfOvDriveAnchor[s] = proj;
+							driveData->SurfOvDriveArmed[s] = true;
+						}
+
+						const float dist = (driveData->SurfOvDriveDist[s] != 0.f)
+							? driveData->SurfOvDriveDist[s] : 1.f;
+						float v = driveData->SurfOvDriveBase[s]
+							+ (proj - driveData->SurfOvDriveAnchor[s]) / dist;
+
+						// RE-ANCHOR AT THE CLAMP. Without this, travel past an
+						// end is remembered and has to be un-travelled before
+						// the part moves again -- you overshoot a 7cm stroke by
+						// 30cm on a real pull, then wonder why the magazine
+						// ignores the first third of your push back.
+						if (v < 0.f)
+						{
+							driveData->SurfOvDriveAnchor[s] = proj;
+							driveData->SurfOvDriveBase[s] = 0.f;
+							v = 0.f;
+						}
+						else if (v > 1.f)
+						{
+							driveData->SurfOvDriveAnchor[s] = proj;
+							driveData->SurfOvDriveBase[s] = 1.f;
+							v = 1.f;
+						}
+
+						driveData->SurfOvDriveValue[s] = v;
+
+						o.hasTransform = true;
+						o.offset = axis * (v * dist);
+						o.rotation = FVector4(0.f, 0.f, 0.f, 1.f);
+						driven = true;
+
+						if (vr_surf_debug)
+						{
+							static int lastV[16 * 64];
+							static bool vInit = false;
+							if (!vInit) { for (int k = 0; k < 16*64; k++) lastV[k] = -0x7fffffff; vInit = true; }
+							int vslot = (i * 64 + o.surface) & (16*64 - 1);
+							int vkey = (int)(v * 200.f);
+							if (vkey != lastV[vslot])
+							{
+								lastV[vslot] = vkey;
+								Printf("[DRIVE] model %d surf %d hand %d  v=%.3f  proj=%.3f anchor=%.3f dist=%.3f  handModel=(%.2f %.2f %.2f)\n",
+									i, o.surface, dhand, v, proj, driveData->SurfOvDriveAnchor[s],
+									dist, handModel.X, handModel.Y, handModel.Z);
+							}
+						}
+					}
+				}
+			}
+
+			o.hasTransform = driven || (ovHasXf && ovHasXf[s]);
+			if (o.hasTransform && !driven)
+			{
+				// INTERPOLATED TO THE DRAWN INSTANT, exactly as the frame
+				// position below is. The transform path shipped without this
+				// and the frame path had it, so a part driven by both moved in
+				// two different time bases at once -- the pose gliding, the
+				// placement stepping at 35 Hz. Worse than either alone, because
+				// the two halves of one part's motion visibly disagreed.
+				float f = (float)ticFrac;
+				if (f < 0.f) f = 0.f;
+				if (f > 1.f) f = 1.f;
+
+				const FVector3 curOfs = ovOfs[s];
+				const FVector3 prvOfs = ovOfsPrev ? ovOfsPrev[s] : curOfs;
+				o.offset = prvOfs + (curOfs - prvOfs) * f;
+
+				const FVector4 qc = ovRot[s];
+				const FVector4 cur = (qc.X == 0.f && qc.Y == 0.f && qc.Z == 0.f && qc.W == 0.f)
+					? FVector4(0.f, 0.f, 0.f, 1.f) : qc;
+				const FVector4 qp = ovRotPrev ? ovRotPrev[s] : cur;
+				FVector4 prv = (qp.X == 0.f && qp.Y == 0.f && qp.Z == 0.f && qp.W == 0.f)
+					? FVector4(0.f, 0.f, 0.f, 1.f) : qp;
+
+				// NLERP, SHORTEST ARC. Cheap, and correct for the small
+				// per-tic deltas a hand-driven part actually produces -- slerp
+				// buys accuracy only across wide arcs that cannot happen in one
+				// 35th of a second. The dot-sign flip is not optional: without
+				// it a quaternion and its negation, which are the same
+				// rotation, interpolate the long way round and the part spins
+				// most of a full turn inside one tic.
+				float dot = prv.X * cur.X + prv.Y * cur.Y + prv.Z * cur.Z + prv.W * cur.W;
+				if (dot < 0.f) prv = FVector4(-prv.X, -prv.Y, -prv.Z, -prv.W);
+
+				FVector4 blend(
+					prv.X + (cur.X - prv.X) * f,
+					prv.Y + (cur.Y - prv.Y) * f,
+					prv.Z + (cur.Z - prv.Z) * f,
+					prv.W + (cur.W - prv.W) * f);
+
+				const float len = (float)g_sqrt(blend.X * blend.X + blend.Y * blend.Y
+					+ blend.Z * blend.Z + blend.W * blend.W);
+				o.rotation = (len > 0.0001f)
+					? FVector4(blend.X / len, blend.Y / len, blend.Z / len, blend.W / len)
+					: FVector4(0.f, 0.f, 0.f, 1.f);
+			}
 
 			// RS FORK -- DISPLAY-RATE PART MOTION (p_pspr.h, SurfOvPos).
 			//
@@ -2293,9 +2476,59 @@ static inline void RenderModelFrame(FModelRenderer *renderer, int i, const FSpri
 				float p = prev + (ovPos[s] - prev) * f;
 				if (p < 0.f) p = 0.f;
 
+				// RS FORK -- CLAMP TO THE MESH, AND SAY SO.
+				//
+				// A frame past the end of the mesh used to be accepted in
+				// silence: o.frameNext ran off the end of the frame list and
+				// what got drawn was whatever the surface renderer made of an
+				// out-of-range index. Nothing said a number was wrong, so an
+				// off-by-one in a part map looked like a part that "just
+				// doesn't move right" -- and the parts most likely to carry a
+				// bad number are exactly the deliberately-unusual ones (a
+				// jam-stuck frame, a lock-back hold, a precondition-gated
+				// pose) that nobody has a correct reference for yet.
+				//
+				// NumFrames() is -1 for formats that do not know their own
+				// count, and the clamp is skipped for those rather than
+				// guessed at.
+				const int frameCount = mdl ? mdl->NumFrames() : -1;
+				if (frameCount > 0)
+				{
+					const float maxPos = (float)(frameCount - 1);
+					if (p > maxPos)
+					{
+						if (vr_surf_debug)
+						{
+							// Throttled per (model, surface) for the same
+							// reason the trace above is: a part parked on a
+							// bad frame is wrong on every drawn frame, and an
+							// unthrottled complaint about it buries the log
+							// it is trying to be visible in.
+							static int lastBad[16 * 64];
+							static bool badInit = false;
+							if (!badInit) { for (int k = 0; k < 16 * 64; k++) lastBad[k] = -0x7fffffff; badInit = true; }
+
+							int bslot = (i * 64 + o.surface) & (16 * 64 - 1);
+							int bkey = (int)(p * 16.f);
+							if (bkey != lastBad[bslot])
+							{
+								lastBad[bslot] = bkey;
+								Printf(TEXTCOLOR_YELLOW "[SURF] model %d surface %d driven to frame %.3f, but this mesh only has %d frames (0..%d) -- clamped\n",
+									i, o.surface, p, frameCount, frameCount - 1);
+							}
+						}
+						p = maxPos;
+					}
+				}
+
 				int lo = (int)p;
 				o.frame     = lo;
-				o.frameNext = lo + 1;
+
+				// frameNext must stay inside the mesh too. At the very last
+				// frame there is nothing to blend toward, so it blends with
+				// itself -- which is what "hold exactly here" means, and is
+				// the same answer the pinned-pose path gives.
+				o.frameNext = (frameCount > 0 && lo + 1 > frameCount - 1) ? lo : lo + 1;
 				o.lerp      = p - (float)lo;
 			}
 		}

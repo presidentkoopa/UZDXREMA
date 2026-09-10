@@ -59,6 +59,11 @@ void FHWModelRenderer::BeginDrawModel(FRenderStyle style, int smf_flags, const V
 
 	state.mModelMatrix = objectToWorldMatrix;
 	state.EnableModelMatrix(true);
+
+	// RS fork -- kept so SetSurfaceTransform can compose in front of it and
+	// then put it back for the next surface.
+	baseModelMatrix = objectToWorldMatrix;
+	baseModelMatrixValid = true;
 }
 
 void FHWModelRenderer::EndDrawModel(FRenderStyle style, int smf_flags)
@@ -91,6 +96,10 @@ void FHWModelRenderer::BeginDrawHUDModel(FRenderStyle style, const VSMatrix &obj
 
 	state.mModelMatrix = objectToWorldMatrix;
 	state.EnableModelMatrix(true);
+
+	// RS fork -- see the world-model path above.
+	baseModelMatrix = objectToWorldMatrix;
+	baseModelMatrixValid = true;
 }
 
 void FHWModelRenderer::EndDrawHUDModel(FRenderStyle style, int smf_flags)
@@ -148,4 +157,45 @@ void FHWModelRenderer::SetupFrame(FModel *model, unsigned int frame1, unsigned i
 		state.SetVertexBuffer(mdbuff->vertexBuffer(), frame1, frame2);
 		if (mdbuff->indexBuffer()) state.SetIndexBuffer(mdbuff->indexBuffer());
 	}
+}
+
+// RS FORK -- ONE SURFACE, MOVED, WITHOUT MOVING THE MODEL.
+//
+// Composed in FRONT of the model's own object-to-world, so the transform is
+// in the MODEL's local space: a translation of (0, 0, -4) moves the part four
+// units down the model's own axes, wherever and however the model itself is
+// oriented in the world. Applying it the other way round would move the part
+// along world axes and every offset would be wrong the moment the weapon was
+// canted -- the same trap the grab points in this project's scripts already
+// document at length.
+//
+// nullptr restores the model's matrix for the surfaces that follow. Cheap
+// enough to call per surface; the multiply only happens for surfaces that
+// actually asked for a transform.
+void FHWModelRenderer::SetSurfaceTransform(const VSMatrix* localTransform)
+{
+	if (!baseModelMatrixValid) return;
+
+	if (localTransform)
+	{
+		VSMatrix m = baseModelMatrix;
+		m.multMatrix(*localTransform);
+		state.mModelMatrix = m;
+	}
+	else
+	{
+		state.mModelMatrix = baseModelMatrix;
+	}
+	state.EnableModelMatrix(true);
+}
+
+// RS FORK -- hand the model's own object-to-world back out, for the draw-rate
+// hand drive. This is the matrix BeginDrawModel was given; the fill loop needs
+// it to put a live controller position into model space, and by then it is the
+// only place it still exists.
+bool FHWModelRenderer::GetModelToWorldMatrix(VSMatrix* out) const
+{
+	if (!out || !baseModelMatrixValid) return false;
+	*out = baseModelMatrix;
+	return true;
 }

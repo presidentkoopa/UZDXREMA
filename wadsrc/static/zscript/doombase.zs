@@ -1103,10 +1103,23 @@ struct LevelLocals native
 	// faded to nothing by outer. falloff shapes the fade along the length --
 	// 1 linear, higher concentrates the light near the lens. Publish it each
 	// tic while the light is on; clear it when off, which costs nothing.
-	// FOUR SLOTS. Slot 0 is what a caller that never heard of slots gets, so
-	// every call site written before slots existed keeps working. A torch, a
-	// wheel laser, a weapon effect and one spare -- before this they all shared
-	// one set of fields, so opening the weapon wheel put your flashlight out.
+	// THIRTY-TWO SLOTS. Slot 0 is what a caller that never heard of slots gets,
+	// so every call site written before slots existed keeps working. Before
+	// slots they all shared one set of fields, so opening the weapon wheel put
+	// your flashlight out.
+	//
+	// It was FOUR, and four was already full at rest for a dual-wielding VR
+	// loadout: a flashlight, the wheel laser and a muzzle flash per hand, with
+	// no headroom for anything added afterwards.
+	//
+	// Unused slots cost nothing to draw -- the post-process loops over the beams
+	// actually published this frame, not over the ceiling -- so the limit is an
+	// array bound rather than a budget.
+	//
+	// CONES, NOT LINES. These light the AIR in a volume: flashlights, muzzle
+	// flashes. A laser SIGHT is a line and belongs in the separate 128-slot beam
+	// system (SetBeam / SetBeamAnchor above), which is cheaper and can be
+	// anchored to a hand.
 	native void SetVolumetricBeam(Vector3 pos, Vector3 dir, color col, double inner, double outer, double length, double density, double falloff, double dust = 0, double dustScale = 0.04, double dustDrift = 0, int slot = 0);
 	// One slot, or every slot with -1. Defaults to 0 rather than to all of them:
 	// a caller is turning off the beam it turned on, not everyone else's.
@@ -1372,6 +1385,11 @@ struct LevelLocals native
 	native clearscope void ClearSurfaceStamps();
 
 	native clearscope void SetBeam(int index, Vector3 start, Vector3 end, double thick, double soft, color col, double intensity);
+	// WHERE THIS BEAM STARTS FROM: 0 the point given to SetBeam, 1 the main
+	// hand, 2 the off hand. Anchored, the origin is resolved every FRAME rather
+	// than every tic -- which is what a laser sight on a tracked controller
+	// needs, because the hand moves at 90Hz+ and script runs at 35.
+	native clearscope void SetBeamAnchor(int index, int mode);
 	native clearscope void SetBeamCount(int count, double glow, double fogScatter);
 	// airGlow 0 = the beam only lights what it touches. Above 0 it is visible
 	// in the air as an object, depth-correct, and it feeds bloom by itself.

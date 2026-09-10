@@ -191,6 +191,32 @@ struct FModelSurfaceOverride
 	int   frameNext = -1;     // <0 means "same as frame", i.e. no blend
 	float lerp      = -1.f;   // <0 keeps the caller's interpolation
 	bool  hidden    = false;  // skip this surface entirely
+
+	// RS FORK -- A LIVE TRANSFORM ON TOP OF THE FRAME.
+	//
+	// The fields above select a POSE: a complete, baked snapshot of every
+	// vertex. That is all an MD3 frame is, and it is the root of an entire
+	// class of bug rather than one bug -- a part driven by frame selection
+	// can only ever be where the author baked it, so a live hand position and
+	// a baked frame position can never exactly agree, and every handoff
+	// between hand-driven and frame-driven motion has a seam in it. Blending
+	// between adjacent frames narrows the seam; it cannot remove it, because
+	// it is still interpolating two authored snapshots rather than computing
+	// a position.
+	//
+	// Every part this is used for -- a slide, a magazine, a hammer, a
+	// cylinder, a trigger -- is RIGID. Its shape never changes as it moves,
+	// only its position. So the missing capability was never "arbitrary
+	// vertex control"; it is "a rigid surface needs a live transform on top
+	// of its current frame", which is what a single-bone rig would give it
+	// if MD3 had bones.
+	//
+	// hasTransform is separate from the values so an identity offset and "no
+	// offset" stay distinguishable -- the renderer skips the matrix work
+	// entirely for surfaces that never asked, which is nearly all of them.
+	bool     hasTransform = false;
+	FVector3 offset       = { 0.f, 0.f, 0.f };   // model-space translation
+	FVector4 rotation     = { 0.f, 0.f, 0.f, 1.f }; // quaternion, xyzw, identity = no rotation
 };
 
 // Passed as one pointer so adding this to the RenderFrame virtual costs every
@@ -200,8 +226,26 @@ struct FModelSurfaceOverrideList
 	const FModelSurfaceOverride* items = nullptr;
 	int count = 0;
 
-	// Linear, over a handful of entries. A map would cost more to build every
-	// frame than this costs to walk.
+	// ONE OVERRIDE PER SURFACE WINS, AND IT IS THE LOWEST SLOT INDEX.
+	//
+	// This is the composition rule for the whole per-surface system, stated
+	// here because this function IS the rule and everything else only obeys it.
+	//
+	// Find returns the FIRST entry matching a surface, and the caller fills
+	// this list by walking the slot table in ascending order -- so if two slots
+	// are pointed at the same (model, surface), the lower-numbered slot is
+	// drawn and the higher one is silently ignored. It is NOT "last writer
+	// wins", and it is NOT nondeterministic; both beliefs have come up, and
+	// both would send someone hunting a race that does not exist.
+	//
+	// THERE IS NO ADDITIVE COMPOSITION. Two writers cannot both contribute to
+	// one surface's pose -- there is no base-plus-delta channel anywhere in
+	// this path. Anything wanting "recoil on top of what the hand is doing", or
+	// a revolver cylinder that both index-steps and swings out, has to compose
+	// the values ITSELF and write the single combined result through one slot.
+	// If a design ever genuinely needs two independent simultaneous writers,
+	// that is a real engine change to this struct and this function -- not
+	// something to approximate with a second slot.
 	const FModelSurfaceOverride* Find(int surface) const
 	{
 		if (!items) return nullptr;

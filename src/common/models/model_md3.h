@@ -109,6 +109,16 @@ public:
 	{
 		return (surface >= 0 && (unsigned)surface < Surfaces.Size()) ? Surfaces[surface].Name : NAME_None;
 	}
+
+	// RS fork -- how many poses this mesh actually has.
+	//
+	// FModel's default is -1 ("don't know"), which is honest for formats with
+	// no fixed frame list but leaves the per-surface frame driver
+	// (SetModelSurfacePos, models.cpp) with nothing to bounds-check against:
+	// an out-of-range frame was silently accepted and rendered as whatever the
+	// clamp downstream happened to do. Reporting the real count is what lets
+	// that path clamp and say so.
+	int NumFrames() override { return (int)Frames.Size(); }
 	void LoadGeometry();
 	void LoadGeometry(FileSys::FileData* lumpData) override;
 	void BuildVertexBuffer(FModelRenderer *renderer);

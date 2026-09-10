@@ -261,10 +261,35 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 					Level->BeamIntensity[i] > 0.0;
 				const double f = lerpable ? ticFrac : 1.0;
 
-				const DVector3 a = Level->PrevBeamStart[i] +
+				DVector3 a = Level->PrevBeamStart[i] +
 					(Level->BeamStart[i] - Level->PrevBeamStart[i]) * f;
 				const DVector3 b = Level->PrevBeamEnd[i] +
 					(Level->BeamEnd[i] - Level->PrevBeamEnd[i]) * f;
+
+				// RS FORK -- AN ANCHORED BEAM STARTS AT THE HAND, NOW.
+				//
+				// Not at an interpolation between two 35Hz samples of where the
+				// hand was. AttackPos and OffhandPos are rewritten every frame
+				// by hw_vrmodes.cpp from the live controller transform, and this
+				// loop runs in that same frame -- so reading them here is the
+				// hand's actual current position rather than a stale pair.
+				//
+				// That is the whole fix for a laser sight that stutters while
+				// you move: interpolating between two bad samples cannot
+				// recover the motion between them, so the origin has to be
+				// resolved at draw rate instead of smoothed after the fact.
+				//
+				// ONLY THE START. The far end is a hit location in the world,
+				// which genuinely only changes once a tic and is correctly
+				// interpolated above -- anchoring it too would drag the far end
+				// around with your wrist.
+				if (Level->BeamAnchor[i] != 0)
+				{
+					const player_t *bp = Level->GetConsolePlayer();
+					if (bp && bp->mo)
+						a = (Level->BeamAnchor[i] == 2) ? bp->mo->OffhandPos
+						                                : bp->mo->AttackPos;
+				}
 
 				VPUniforms.mBeamA[i] = {
 					(float)a.X, (float)a.Z,

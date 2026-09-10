@@ -466,10 +466,42 @@ void FMD3Model::RenderFrame(FModelRenderer *renderer, FGameTexture * skin, int f
 		}
 
 		renderer->SetMaterial(surfaceSkin, false, translation);
+
+		// RS FORK -- A LIVE TRANSFORM ON TOP OF THE FRAME.
+		//
+		// The frame above says which baked POSE this surface wears; this says
+		// where that pose is. Every part driven by this system is rigid, so a
+		// position is all that was ever missing -- see FModelSurfaceOverride
+		// in model.h for why frame selection alone cannot put a part exactly
+		// where a hand is, and why that is a class of bug rather than one.
+		//
+		// Only surfaces that asked pay for it, and the transform is undone
+		// immediately after so it cannot leak onto the next surface -- the
+		// same discipline the interpolation bookkeeping above follows, and
+		// for the same reason.
+		const bool transformed = (ov && ov->hasTransform);
+		if (transformed)
+		{
+			VSMatrix local;
+			local.loadIdentity();
+			local.translate(ov->offset.X, ov->offset.Y, ov->offset.Z);
+
+			// Identity quaternion is the common case (a part that slides and
+			// does not turn), and skipping the rotate keeps it exact rather
+			// than passing it through a conversion that need not happen.
+			if (ov->rotation.X != 0.f || ov->rotation.Y != 0.f || ov->rotation.Z != 0.f || ov->rotation.W != 1.f)
+			{
+				local.multQuaternion(ov->rotation);
+			}
+			renderer->SetSurfaceTransform(&local);
+		}
+
 		// sFrame / sFrameNext, not frameno / frameno2 -- this is the whole of
 		// per-surface addressing. Everything else above is bookkeeping.
 		renderer->SetupFrame(this, surf->vindex + sFrame * surf->numVertices, surf->vindex + sFrameNext * surf->numVertices, surf->numVertices, -1);
 		renderer->DrawElements(surf->numTriangles * 3, surf->iindex * sizeof(unsigned int));
+
+		if (transformed) renderer->SetSurfaceTransform(nullptr);
 	}
 	renderer->SetInterpolation(0.f);
 }

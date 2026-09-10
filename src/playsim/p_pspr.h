@@ -428,11 +428,29 @@ public:
 	float SurfOvPosPrev[RS_SURF_SLOTS] =
 		{ -1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f };
 
+	// A live transform on top of the frame -- the psprite half of the same
+	// table DActorModelData carries. Same feature, two homes, one reader.
+	// See FModelSurfaceOverride in model.h.
+	bool     SurfOvHasXf[RS_SURF_SLOTS] = {};
+	FVector3 SurfOvOfs  [RS_SURF_SLOTS] = {};
+	FVector4 SurfOvRot  [RS_SURF_SLOTS] = {};
+
+	// Last tic's transform, so the offset path gets the same display-rate
+	// smoothing the frame path has. See DActorModelData for why the two moving
+	// at different rates is worse than neither moving smoothly.
+	FVector3 SurfOvOfsPrev[RS_SURF_SLOTS] = {};
+	FVector4 SurfOvRotPrev[RS_SURF_SLOTS] = {};
+
 	// Once per tic, before script runs. Cheap enough to do unconditionally:
 	// sixteen float copies against the cost of tracking whether it is needed.
 	void ShiftSurfacePositions()
 	{
-		for (int i = 0; i < RS_SURF_SLOTS; i++) SurfOvPosPrev[i] = SurfOvPos[i];
+		for (int i = 0; i < RS_SURF_SLOTS; i++)
+		{
+			SurfOvPosPrev[i] = SurfOvPos[i];
+			SurfOvOfsPrev[i] = SurfOvOfs[i];
+			SurfOvRotPrev[i] = SurfOvRot[i];
+		}
 	}
 
 	// RS FORK -- SCRIPT-SUPPRESSED LAYER.

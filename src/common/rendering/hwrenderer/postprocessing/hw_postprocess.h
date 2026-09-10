@@ -504,7 +504,13 @@ public:
 	}
 
 private:
-	static const int MAX_BEAMS = 4;
+	// 32, AND IT MUST MATCH FLevelLocals::MAX_VOL_BEAMS EXACTLY.
+	//
+	// AddBeam above drops silently when this is the smaller of the two -- the
+	// caller in hw_drawinfo.cpp iterates to the level's constant and has no way
+	// to learn that anything was refused. A mismatch is a beam that never
+	// renders with nothing anywhere explaining it.
+	static const int MAX_BEAMS = 32;
 	VolumetricBeamUniforms uniforms[MAX_BEAMS] = {};
 	int count = 0;
 

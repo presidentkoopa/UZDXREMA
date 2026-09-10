@@ -798,6 +798,62 @@ public:
 	float SurfOvPosPrev[RS_SURF_SLOTS] =
 		{ -1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f,-1.f };
 
+	// A LIVE TRANSFORM ON TOP OF THE FRAME, per slot. See
+	// FModelSurfaceOverride in model.h for what this is for -- in short, a
+	// frame is a baked pose and a rigid part also needs to be able to be
+	// somewhere the author did not bake.
+	//
+	// Rotation is a quaternion, xyzw. All-zero means never written and is
+	// read as identity, so a caller that only ever translates never has to
+	// think about it.
+	bool     SurfOvHasXf[RS_SURF_SLOTS] = {};
+	FVector3 SurfOvOfs  [RS_SURF_SLOTS] = {};
+	FVector4 SurfOvRot  [RS_SURF_SLOTS] = {};
+
+	// LAST TIC'S TRANSFORM, for the same reason SurfOvPosPrev exists.
+	//
+	// The frame path got display-rate smoothing and the transform path did
+	// not, so a part driven by SetModelSurfaceOffset stepped at 35 Hz while
+	// the frame underneath it glided -- which is worse than either alone,
+	// because the two halves of one part's motion disagreed.
+	FVector3 SurfOvOfsPrev[RS_SURF_SLOTS] = {};
+	FVector4 SurfOvRotPrev[RS_SURF_SLOTS] = {};
+
+	// ---- E2: DRAW-RATE HAND DRIVE -----------------------------------------
+	//
+	// THE ONE THING TIC-RATE MOTION CANNOT DO.
+	//
+	// Everything above is written by script at 35 Hz and interpolated to the
+	// drawn instant. That is smooth, and smooth is not the same as GLUED: the
+	// value being interpolated toward is still a tic old, so a part a hand is
+	// dragging trails the hand by up to one tic no matter how prettily it gets
+	// there. At a fast reload snatch that is centimetres.
+	//
+	// A DRIVEN slot skips script entirely. The renderer reads the live
+	// controller pose on the frame it is drawing, projects it onto the part's
+	// own travel axis, and places the part -- so the part and the hand are
+	// resolved from the same pose at the same instant and cannot separate.
+	//
+	// ARMED, NOT ANCHORED. SetModelSurfaceDrive turns a slot on and says which
+	// hand, which axis and how far; it does NOT record where the hand was.
+	// The renderer captures the anchor itself, on the first frame it draws --
+	// from the same live quantity it will difference against. Capturing at
+	// script rate instead would bake in one tic of stale hand position at the
+	// instant of grab, which on a short stroke is most of the travel: the part
+	// would leap most of the way out the moment you touched it, and only when
+	// you grabbed FAST. Invisible in slow testing, wrong in play.
+	//
+	// driveValue is published BACK by the renderer so script reads the same
+	// number that was drawn, rather than a second estimate of it.
+	bool     SurfOvDriveOn   [RS_SURF_SLOTS] = {};
+	int      SurfOvDriveHand [RS_SURF_SLOTS] = {};   // 0 main, 1 off
+	FVector3 SurfOvDriveAxis [RS_SURF_SLOTS] = {};   // unit, model space
+	float    SurfOvDriveDist [RS_SURF_SLOTS] = {};   // model units for full travel
+	float    SurfOvDriveBase [RS_SURF_SLOTS] = {};   // value the drive resumed FROM
+	float    SurfOvDriveAnchor[RS_SURF_SLOTS] = {};  // captured by the renderer
+	bool     SurfOvDriveArmed[RS_SURF_SLOTS] = {};   // false until the anchor is captured
+	float    SurfOvDriveValue[RS_SURF_SLOTS] = {};   // published back: what was DRAWN, 0..1
+
 	bool AnySurfaceOverride() const
 	{
 		for (int i = 0; i < RS_SURF_SLOTS; i++)
@@ -805,13 +861,33 @@ public:
 		return false;
 	}
 
-	// Once per tic, before script runs, so the renderer has both ends to blend
+	// Once per tic, BEFORE script runs, so the renderer has both ends to blend
 	// between. Without it a slide your own hand is pulling steps at 35 Hz
 	// instead of gliding -- the exact problem SurfOvPos exists to solve, and it
 	// does not solve it unless somebody keeps last tic's value.
+	//
+	// "BEFORE SCRIPT RUNS" IS LOAD-BEARING AND WAS WRONG FOR THE WHOLE LIFE OF
+	// THIS FEATURE. This used to be called from AActor::Tick, which runs under
+	// RunThinkers -- and RunThinkers runs AFTER localEventManager->WorldTick(),
+	// which is where every EventHandler-driven prop in this project writes its
+	// surface positions. So the shift happened after the new value had already
+	// landed: Prev was copied from a Pos that was already this tic's, the two
+	// were identical every frame, and the renderer dutifully interpolated
+	// between a value and itself. Every world prop stepped at tic rate and the
+	// smoothing this function exists for never ran once.
+	//
+	// It is now called from P_Ticker's ClearInterpolation sweep, at the same
+	// instant AActor::Prev is taken and beams are snapshotted -- the one point
+	// in the tic where the arrays still hold exactly what was drawn for the tic
+	// that just ended, and before any writer has run.
 	void ShiftSurfacePositions()
 	{
-		for (int i = 0; i < RS_SURF_SLOTS; i++) SurfOvPosPrev[i] = SurfOvPos[i];
+		for (int i = 0; i < RS_SURF_SLOTS; i++)
+		{
+			SurfOvPosPrev[i] = SurfOvPos[i];
+			SurfOvOfsPrev[i] = SurfOvOfs[i];
+			SurfOvRotPrev[i] = SurfOvRot[i];
+		}
 	}
 
 	DActorModelData() = default;
@@ -2139,6 +2215,36 @@ public:
 	// this says where a finger RESTS, which is what a hand pose needs.
 	int FingerTouchMain;
 	int FingerTouchOff;
+
+	// HOW FAR THE TRIGGER AND THE SQUEEZE ARE PULLED, 0..1.
+	//
+	// GripHeld* above is the same physical control reduced to a bool by the
+	// runtime's own threshold, and that reduction throws away everything a
+	// part driven by a finger needs: a trigger with a real break point and
+	// reset, a pull that stops short of firing, a grip that tightens on a
+	// slide rather than merely closing on it.
+	//
+	// Both are published because they are different questions, and the
+	// boolean is NOT redundant -- it carries the runtime's own idea of where
+	// "pressed" is, which is the right threshold for anything that just wants
+	// a button and should not be re-derived per mod from the analog value.
+	//
+	// 0 or 1 with no travel in between on hardware whose squeeze is a click
+	// (Vive wand, WMR). That is the honest answer for those controllers, not
+	// a missing feature.
+	double TriggerValueMain;
+	double TriggerValueOff;
+	double GripValueMain;
+	double GripValueOff;
+
+	// Thumbstick position per hand, each axis -1..1, centred at (0,0).
+	//
+	// FingerTouch* above can say a thumb is resting somewhere; it cannot say
+	// WHERE along a range, which is what a thumb sliding a fire selector or
+	// stepping a sight dial actually needs. These axes were already read from
+	// the runtime every frame and discarded before script could see them.
+	DVector2 ThumbPosMain;
+	DVector2 ThumbPosOff;
 
 	// Accumulated CONTROLLER-driven yaw (snap turn and stick turn), in degrees.
 	// HmdYaw is physical head yaw PLUS this, and separating them matters: a

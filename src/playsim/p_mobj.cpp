@@ -1971,6 +1971,20 @@ void DActorModelData::Serialize(FSerializer& arc)
 	   .Array("SurfOvHidden",  SurfOvHidden,  RS_SURF_SLOTS)
 	   .Array("SurfOvPos",     SurfOvPos,     RS_SURF_SLOTS)
 	   .Array("SurfOvPosPrev", SurfOvPosPrev, RS_SURF_SLOTS);
+
+	// AND THE LIVE TRANSFORM, which was missing here entirely.
+	//
+	// Without it a save taken mid-reload restored the FRAME of a half-pulled
+	// magazine but not its OFFSET, so the part came back at the right pose in
+	// the wrong place -- and with no writer left holding it, nothing would ever
+	// correct it. The frame half of this feature was saved from the day it
+	// existed; the transform half was added later and this was not extended
+	// with it.
+	arc.Array("SurfOvHasXf",   SurfOvHasXf,   RS_SURF_SLOTS)
+	   .Array("SurfOvOfs",     SurfOvOfs,     RS_SURF_SLOTS)
+	   .Array("SurfOvRot",     SurfOvRot,     RS_SURF_SLOTS)
+	   .Array("SurfOvOfsPrev", SurfOvOfsPrev, RS_SURF_SLOTS)
+	   .Array("SurfOvRotPrev", SurfOvRotPrev, RS_SURF_SLOTS);
 }
 
 void DActorModelData::OnDestroy()
@@ -4580,7 +4594,14 @@ void AActor::Tick ()
 	//
 	// Guarded on the model data existing at all, which is the common case for
 	// almost every actor in a map.
-	if (modelData) modelData->ShiftSurfacePositions();
+	//
+	// MOVED OUT OF HERE -- see DActorModelData::ShiftSurfacePositions in
+	// actor.h. This ran under RunThinkers, which is AFTER WorldTick, so it
+	// copied Prev from a Pos that script had already overwritten this tic. Prev
+	// and Pos were therefore always equal and the renderer interpolated a value
+	// against itself: every EventHandler-driven world prop in the project
+	// stepped at 35 Hz and the smoothing never ran once. It now happens in
+	// P_Ticker's ClearInterpolation sweep, before any writer.
 
 	// [RH] Data for Heretic/Hexen scrolling sectors
 	static const int8_t HexenCompatSpeeds[] = {-25, 0, -10, -5, 0, 5, 10, 0, 25 };

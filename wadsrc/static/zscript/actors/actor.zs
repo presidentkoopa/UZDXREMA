@@ -559,6 +559,30 @@ class Actor : Thinker native
 	native readonly bool GripHeldMain;
 	native readonly bool GripHeldOff;
 
+	// HOW FAR the trigger and the squeeze are pulled, 0..1, per hand.
+	//
+	// GripHeld* above is this same control after the runtime applied its own
+	// threshold and threw the rest away. Read the bool when you want a button
+	// -- it carries the runtime's idea of "pressed", which should not be
+	// re-derived per mod -- and read these when you want the travel: a trigger
+	// with a real break and reset, a pull that stops short of the shot, a grip
+	// that tightens on a part instead of merely closing on it.
+	//
+	// 0 or 1 with nothing in between on controllers whose squeeze is a click
+	// rather than an axis (Vive wand, WMR). That is what that hardware has.
+	native readonly double TriggerValueMain;
+	native readonly double TriggerValueOff;
+	native readonly double GripValueMain;
+	native readonly double GripValueOff;
+
+	// Thumbstick position per hand, each axis -1..1, centred at (0,0).
+	//
+	// FingerTouch* says a thumb is resting somewhere; this says WHERE along a
+	// range, which is what a thumb sliding a fire selector or stepping a sight
+	// dial needs and a touch bit cannot express.
+	native readonly Vector2 ThumbPosMain;
+	native readonly Vector2 ThumbPosOff;
+
 	// What each hand is closed ON, as opposed to what its grip MEANS above.
 	// EGripSubject, declared in constants.zs so every mod can name the values
 	// rather than writing bare integers.
@@ -1600,6 +1624,22 @@ class Actor : Thinker native
 	// exists, i.e. call A_ChangeModel first.
 	native bool RegisterModelStateFrame(State st, int frameNum, int frameNext);
 
+	// ---- ONE WRITER PER SURFACE. READ THIS BEFORE USING THE CALLS BELOW ----
+	//
+	// A surface can be driven by exactly ONE slot. If two slots name the same
+	// (modelindex, surface), the LOWEST SLOT NUMBER is drawn and the other is
+	// ignored -- silently, every frame, deterministically. It is not "last
+	// writer wins" and it is not a race; do not go looking for one.
+	//
+	// THE VALUES DO NOT ADD UP. There is no base-plus-delta channel. If two
+	// things want to move one part at once -- a recoil kick on top of a slide
+	// your hand is already dragging, or a cylinder that both steps round and
+	// swings out -- you must add them together yourself and write the single
+	// combined result through ONE slot. Reaching for a second slot to layer a
+	// second motion looks like it should work and quietly does nothing.
+	//
+	// Slots are per actor and there are 16 of them.
+	//
 	// Drive one SURFACE of this actor's model. The psprite equivalent is a set
 	// of fields; DActorModelData is not exposed to script, so a world model
 	// goes through these.
@@ -1611,8 +1651,90 @@ class Actor : Thinker native
 	// Needs A_ChangeModel to have run on this actor first.
 	native bool SetModelSurfacePos(int slot, int modelindex, int surface, double pos);
 	native bool SetModelSurfaceHidden(int slot, int modelindex, int surface, bool hidden);
+
+	// A LIVE TRANSFORM ON TOP OF THE FRAME.
+	//
+	// SetModelSurfacePos picks a POSE -- a baked snapshot, and nothing else --
+	// so a part driven by frames alone can only be where the author baked it.
+	// That is why a hand-driven part and a frame-driven part can never quite
+	// agree, and why every handoff between the two has a seam. Blending
+	// adjacent frames narrows the seam; it cannot remove it.
+	//
+	// Every part this is used on is rigid: it never changes shape as it moves,
+	// only position. So this gives a surface a position independent of its
+	// shape -- what one bone would do for it, if MD3 had bones.
+	//
+	// The offset is in the MODEL's own axes, so it stays right however the
+	// weapon is held. ADDITIVE with the frame, not instead of it: the frame
+	// still chooses the pose, this moves it. rot is a quaternion (identity =
+	// (0,0,0,1) = no rotation). ClearModelSurfaceOffset stops transforming a
+	// slot and costs the renderer nothing thereafter.
+	native bool SetModelSurfaceOffset(int slot, int modelindex, int surface, Vector3 ofs, Quat rot);
+	native bool ClearModelSurfaceOffset(int slot);
+
+	// ---- DRIVE A PART FROM YOUR HAND, AT DISPLAY RATE --------------------
+	//
+	// Everything above is written by script, 35 times a second, and smoothed to
+	// the drawn frame. Smooth is not the same as GLUED: the value being smoothed
+	// toward is still a tic old, so a part you are dragging trails your hand no
+	// matter how nicely it gets there. On a fast reload snatch that is
+	// centimetres of lag, and it is exactly what a slow test cannot show you.
+	//
+	// A DRIVEN part skips script entirely. The renderer reads your controller on
+	// the frame it is drawing and places the part from it, so the part and your
+	// hand come from the same pose at the same instant and cannot separate.
+	//
+	// hand: 0 main, 1 off. axis and distance are in the MESH's own units -- the
+	// same ones its vertices use. There is no scale constant anywhere in this
+	// path; the conversion is derived from the model's own matrix, so there is
+	// nothing to remember and nothing to get wrong.
+	//
+	// startValue resumes from where the part already is, so taking hold of a
+	// half-open bolt does not snap it shut or fling it open.
+	//
+	// Call ClearModelSurfaceDrive when the hand lets go -- without it the part
+	// keeps following, and "working" and "stuck on" look identical.
+	native bool SetModelSurfaceDrive(int slot, int modelindex, int surface, int hand, Vector3 axis, double distance, double startValue);
+	native bool ClearModelSurfaceDrive(int slot);
+
+	// WHAT WAS DRAWN, 0..1. Read this rather than trusting script's own estimate:
+	// script runs at 35Hz and the renderer draws at 90+, so on fast motion they
+	// are different numbers, and deciding gameplay on the one that ISN'T on
+	// screen is how you get a magazine that seats while visibly still out.
+	native double GetModelSurfaceDrawnValue(int slot);
+
+	// Translate only, which is what a slide, a magazine and a pump all want.
+	// Spelled out so the common case does not have to name an identity
+	// quaternion it does not care about.
+	bool SetModelSurfaceShift(int slot, int modelindex, int surface, Vector3 ofs)
+	{
+		return SetModelSurfaceOffset(slot, modelindex, surface, ofs, Quat(0, 0, 0, 1));
+	}
 	native void ClearModelSurfaces();
 	native void ClearModelStateFrames();
+
+	// ---- ASK THE MESH WHAT ITS PARTS ARE CALLED --------------------------
+	//
+	// The surface drivers above take an INDEX, which is a fact about how the
+	// mesh happened to be exported rather than about the weapon. Re-export
+	// with the surfaces in another order and every hardcoded index is quietly
+	// pointing at the wrong part. These let a part map be written against
+	// NAMES, which survive that -- and which are what a person actually knows
+	// about a gun ("the slide") in the first place.
+	//
+	// Case-insensitive: 'slide' finds a surface exported as "Slide".
+	// -1 / 0 / None when there is no such surface, no such model index, or no
+	// model at all. Works on plain MD3 props -- unlike the bone entry points,
+	// these do not require decoupled animations, because a surface is not a
+	// bone and a weapon prop usually has no skeleton whatsoever.
+	native int  FindModelSurfaceIndex(int modelindex, Name surface);
+	native int  GetModelSurfaceCount(int modelindex);
+	native Name GetModelSurfaceName(int modelindex, int surface);
+
+	// How many poses the mesh has, so a frame number can be checked against
+	// the model instead of against a memory of it. -1 if the format does not
+	// know its own count.
+	native int  GetModelFrameCount(int modelindex);
 
 	// Full state-label enumeration, sorted by state address (= source
 	// declaration order). FindState can only probe names known in advance;
