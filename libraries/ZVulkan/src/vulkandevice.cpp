@@ -6,6 +6,8 @@
 #include <cstring>
 #include <set>
 #include <string>
+#include <cstdio>
+#include <vector>
 
 static int CreateOrModifyQueueInfo(std::vector<VkDeviceQueueCreateInfo>& infos, uint32_t family, float* priorities)
 {
@@ -159,6 +161,12 @@ void VulkanDevice::CreateDevice(int numUploadSlots)
 		*next = &EnabledFeatures.DescriptorIndexing;
 		next = &EnabledFeatures.DescriptorIndexing.pNext;
 	}
+	// RS FORK -- see VulkanDevice::DescribeDeviceLoss.
+	if (SupportsExtension(VK_EXT_DEVICE_FAULT_EXTENSION_NAME))
+	{
+		*next = &EnabledFeatures.Fault;
+		next = &EnabledFeatures.Fault.pNext;
+	}
 
 	VkResult result = vkCreateDevice(PhysicalDevice.Device, &deviceCreateInfo, nullptr, &device);
 	CheckVulkanError(result, "Could not create vulkan device");
@@ -209,4 +217,131 @@ void VulkanDevice::SetObjectName(const char* name, uint64_t handle, VkObjectType
 	info.objectType = type;
 	info.pObjectName = name;
 	vkSetDebugUtilsObjectNameEXT(device, &info);
+}
+
+// RS FORK -- see the declaration. Written to run on a DEAD device: every call
+// here is a query the spec allows after VK_ERROR_DEVICE_LOST, nothing is
+// created through the device, and a failure is reported as text rather than
+// thrown, because the caller is already on its way to an exception.
+static const char* FaultAddressTypeName(VkDeviceFaultAddressTypeEXT type)
+{
+	switch (type)
+	{
+	case VK_DEVICE_FAULT_ADDRESS_TYPE_NONE_EXT: return "no address";
+	case VK_DEVICE_FAULT_ADDRESS_TYPE_READ_INVALID_EXT: return "invalid READ";
+	case VK_DEVICE_FAULT_ADDRESS_TYPE_WRITE_INVALID_EXT: return "invalid WRITE";
+	case VK_DEVICE_FAULT_ADDRESS_TYPE_EXECUTE_INVALID_EXT: return "invalid EXECUTE";
+	case VK_DEVICE_FAULT_ADDRESS_TYPE_INSTRUCTION_POINTER_UNKNOWN_EXT: return "instruction pointer (unknown)";
+	case VK_DEVICE_FAULT_ADDRESS_TYPE_INSTRUCTION_POINTER_INVALID_EXT: return "instruction pointer (invalid)";
+	case VK_DEVICE_FAULT_ADDRESS_TYPE_INSTRUCTION_POINTER_FAULT_EXT: return "instruction pointer (faulting)";
+	default: return "unrecognised address type";
+	}
+}
+
+std::string VulkanDevice::DescribeDeviceLoss() const
+{
+	std::string out;
+	char line[1024];
+
+	// WHERE THE GPU GOT TO. Each queue reports the last checkpoint that reached
+	// the TOP of the pipe (started) and the last that reached the BOTTOM
+	// (finished). Whatever killed it came after the last "finished" and no
+	// later than the last "started".
+	if (SupportsExtension(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME) && vkGetQueueCheckpointDataNV)
+	{
+		const VkQueue queues[2] = { GraphicsQueue, PresentQueue };
+		const char* names[2] = { "graphics", "present" };
+		for (int q = 0; q < 2; q++)
+		{
+			if (queues[q] == VK_NULL_HANDLE || (q == 1 && queues[1] == queues[0]))
+				continue;
+
+			uint32_t count = 0;
+			vkGetQueueCheckpointDataNV(queues[q], &count, nullptr);
+			if (count == 0)
+			{
+				snprintf(line, sizeof(line), "  %s queue: no checkpoint reached\n", names[q]);
+				out += line;
+				continue;
+			}
+
+			std::vector<VkCheckpointDataNV> data(count);
+			for (auto& d : data)
+			{
+				d.sType = VK_STRUCTURE_TYPE_CHECKPOINT_DATA_NV;
+				d.pNext = nullptr;
+			}
+			vkGetQueueCheckpointDataNV(queues[q], &count, data.data());
+			for (uint32_t i = 0; i < count; i++)
+			{
+				const char* stage =
+					(data[i].stage & VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT) ? "last STARTED " :
+					(data[i].stage & VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT) ? "last FINISHED" : "last reached ";
+				// The marker is whatever was passed to vkCmdSetCheckpointNV.
+				// This library's convention: a NUL-terminated string that
+				// outlives the device.
+				const char* marker = data[i].pCheckpointMarker ? (const char*)data[i].pCheckpointMarker : "(none)";
+				snprintf(line, sizeof(line), "  %s queue, %s: %s\n", names[q], stage, marker);
+				out += line;
+			}
+		}
+	}
+	else
+	{
+		out += "  GPU checkpoints were off, so there is no record of which pass was running.\n";
+	}
+
+	// WHAT THE DRIVER SAYS.
+	if (SupportsExtension(VK_EXT_DEVICE_FAULT_EXTENSION_NAME) && EnabledFeatures.Fault.deviceFault && vkGetDeviceFaultInfoEXT)
+	{
+		VkDeviceFaultCountsEXT counts = { VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT };
+		VkResult result = vkGetDeviceFaultInfoEXT(device, &counts, nullptr);
+		if (result == VK_SUCCESS || result == VK_INCOMPLETE)
+		{
+			std::vector<VkDeviceFaultAddressInfoEXT> addresses(counts.addressInfoCount);
+			std::vector<VkDeviceFaultVendorInfoEXT> vendor(counts.vendorInfoCount);
+			VkDeviceFaultInfoEXT info = { VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT };
+			info.pAddressInfos = addresses.empty() ? nullptr : addresses.data();
+			info.pVendorInfos = vendor.empty() ? nullptr : vendor.data();
+			info.pVendorBinaryData = nullptr;
+			counts.vendorBinarySize = 0;   // the binary blob is for vendor tools, not a log
+			result = vkGetDeviceFaultInfoEXT(device, &counts, &info);
+			if (result == VK_SUCCESS || result == VK_INCOMPLETE)
+			{
+				snprintf(line, sizeof(line), "  driver: %s\n", info.description[0] ? info.description : "(no description)");
+				out += line;
+				for (uint32_t i = 0; i < counts.addressInfoCount && i < addresses.size(); i++)
+				{
+					snprintf(line, sizeof(line), "  fault: %s at 0x%016llx (+/- 0x%llx)\n",
+						FaultAddressTypeName(addresses[i].addressType),
+						(unsigned long long)addresses[i].reportedAddress,
+						(unsigned long long)addresses[i].addressPrecision);
+					out += line;
+				}
+				for (uint32_t i = 0; i < counts.vendorInfoCount && i < vendor.size(); i++)
+				{
+					snprintf(line, sizeof(line), "  vendor: %s (code 0x%llx, data 0x%llx)\n",
+						vendor[i].description,
+						(unsigned long long)vendor[i].vendorFaultCode,
+						(unsigned long long)vendor[i].vendorFaultData);
+					out += line;
+				}
+				if (counts.addressInfoCount == 0 && counts.vendorInfoCount == 0)
+					out += "  (no fault addresses reported -- more likely a hang or timeout than a bad memory access)\n";
+			}
+			else
+			{
+				out += "  driver fault report failed: " + VkResultToString(result) + "\n";
+			}
+		}
+		else
+		{
+			out += "  driver fault report unavailable: " + VkResultToString(result) + "\n";
+		}
+	}
+	else
+	{
+		out += "  VK_EXT_device_fault is not available here, so the driver was not asked.\n";
+	}
+	return out;
 }

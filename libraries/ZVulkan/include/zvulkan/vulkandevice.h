@@ -58,6 +58,13 @@ public:
 
 	bool SupportsExtension(const char* ext) const;
 
+	// RS FORK -- everything the driver and the command stream can still say
+	// after VK_ERROR_DEVICE_LOST: the driver's own fault report, and the last
+	// checkpoint each queue started and finished. Meant to be called on a lost
+	// device, which is the only time it has anything to say. See
+	// VulkanDeviceLost in vulkaninstance.h.
+	std::string DescribeDeviceLoss() const;
+
 	void SetObjectName(const char* name, uint64_t handle, VkObjectType type);
 
 private:

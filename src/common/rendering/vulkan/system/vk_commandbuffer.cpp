@@ -38,6 +38,56 @@ extern bool gpuStatActive;
 extern bool keepGpuStatActive;
 extern FString gpuStatOutput;
 
+#include "c_cvars.h"
+
+// RS FORK -- GPU CHECKPOINTS (vk_gpu_checkpoints, defined in vk_renderdevice.cpp).
+//
+// Every PushGroup/PopGroup -- the names the renderer already gives its passes
+// for "stat gpu" -- also drops a marker into the command stream. After a device
+// loss the driver reports the last marker each queue STARTED and the last it
+// FINISHED (VulkanDevice::DescribeDeviceLoss), which brackets the work that
+// killed it.
+EXTERN_CVAR(Bool, vk_gpu_checkpoints)
+
+// A marker is read back AFTER the device is lost, possibly frames after it was
+// recorded, so it has to be a pointer that is still valid then. Labels are
+// interned for the life of the program. Pass names are a small fixed set; the
+// cap only means a caller that ever built names dynamically would cost a wrong
+// label, never unbounded memory.
+static const char* InternCheckpointLabel(const char* prefix, const FString& name)
+{
+	static std::set<std::string> labels;
+	std::string s = std::string(prefix) + name.GetChars();
+	auto found = labels.find(s);
+	if (found != labels.end())
+		return found->c_str();
+	if (labels.size() >= 1024)
+		return "(checkpoint label table full)";
+	return labels.insert(std::move(s)).first->c_str();
+}
+
+static const char* LastGroup = "(no render pass opened yet)";
+
+const char* VkCommandBufferManager::LastGroupLabel()
+{
+	return LastGroup;
+}
+
+void VkCommandBufferManager::GpuCheckpoint(const char* label)
+{
+	// Decided once, on first use, from what the device was actually created
+	// with -- the cvar alone only asks.
+	if (mCheckpoints < 0)
+	{
+		mCheckpoints = (vk_gpu_checkpoints
+			&& fb->device->SupportsExtension(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME)
+			&& vkCmdSetCheckpointNV != nullptr) ? 1 : 0;
+	}
+	if (mCheckpoints == 0)
+		return;
+	vkCmdSetCheckpointNV(GetDrawCommands()->buffer, label);
+}
+
 VkCommandBufferManager::VkCommandBufferManager(VulkanRenderDevice* fb, VkQueue* queue, int queueFamily, bool uploadOnly)
 	: fb(fb), fbQueue(queue), mIsUploadOnly(uploadOnly)
 {
@@ -114,7 +164,9 @@ void VkCommandBufferManager::FlushCommands(VulkanCommandBuffer** commands, size_
 
 	if (mNextSubmit >= maxConcurrentSubmitCount)
 	{
-		vkWaitForFences(fb->device->device, 1, &mSubmitFence[currentIndex]->fence, VK_TRUE, std::numeric_limits<uint64_t>::max());
+		// RS FORK -- checked. A loss here used to be ignored and reported one
+		// submit later, further from whatever caused it.
+		CheckVulkanError(vkWaitForFences(fb->device->device, 1, &mSubmitFence[currentIndex]->fence, VK_TRUE, std::numeric_limits<uint64_t>::max()), "vkWaitForFences failed");
 		vkResetFences(fb->device->device, 1, &mSubmitFence[currentIndex]->fence);
 	}
 
@@ -196,7 +248,8 @@ void VkCommandBufferManager::WaitForCommands(bool finish, bool uploadOnly, bool 
 
 	if (numWaitFences > 0)
 	{
-		vkWaitForFences(fb->device->device, numWaitFences, mSubmitWaitFences, VK_TRUE, std::numeric_limits<uint64_t>::max());
+		// RS FORK -- checked, as above.
+		CheckVulkanError(vkWaitForFences(fb->device->device, numWaitFences, mSubmitWaitFences, VK_TRUE, std::numeric_limits<uint64_t>::max()), "vkWaitForFences failed");
 		vkResetFences(fb->device->device, numWaitFences, mSubmitWaitFences);
 	}
 
@@ -220,6 +273,13 @@ void VkCommandBufferManager::DeleteFrameObjects(bool uploadOnly)
 
 void VkCommandBufferManager::PushGroup(const FString& name)
 {
+	// RS FORK -- the checkpoint is recorded whether or not "stat gpu" is on: a
+	// device loss does not wait for anybody to be profiling.
+	const char* started = InternCheckpointLabel("started ", name);
+	LastGroup = started;
+	mCheckpointStack.push_back(InternCheckpointLabel("finished ", name));
+	GpuCheckpoint(started);
+
 	if (!gpuStatActive)
 		return;
 
@@ -237,6 +297,13 @@ void VkCommandBufferManager::PushGroup(const FString& name)
 
 void VkCommandBufferManager::PopGroup()
 {
+	// RS FORK -- see PushGroup.
+	if (!mCheckpointStack.empty())
+	{
+		GpuCheckpoint(mCheckpointStack.back());
+		mCheckpointStack.pop_back();
+	}
+
 	if (!gpuStatActive || mGroupStack.empty())
 		return;
 

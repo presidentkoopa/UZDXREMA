@@ -2073,6 +2073,19 @@ public:
 	// OffhandRoll needs no equivalent: nothing zeroes it outside multiplayer.
 	DAngle   MainHandRoll;
 
+	// REAL controller velocity, from OpenXR's own sensor fusion via
+	// XrSpaceVelocity -- not inferred by differencing two AttackPos samples
+	// 28ms apart in ZScript, which amplifies tracking jitter and throws away
+	// everything the render thread saw between tics. Renderer-owned like
+	// AttackPos itself: written every frame by the VR backend, never
+	// serialised, zeroed (not left stale) on any frame the runtime does not
+	// report a valid velocity. Linear is map-units/second in the same frame
+	// AttackPos lives in; angular is radians/second about the hand's own
+	// local axes -- what a swung weapon's tip is doing that the hand's
+	// linear velocity alone cannot express.
+	DVector3 AttackVel;
+	DVector3 AttackAngularVel;
+
 	// RS FORK -- DIRECT MODEL FRAME ADDRESSING FOR WORLD ACTORS.
 	//
 	// The same three fields DPSprite has carried since the psprite hands were
@@ -2103,6 +2116,10 @@ public:
 	DAngle   OffhandPitch;
 	DAngle   OffhandAngle;
 	DAngle   OffhandRoll;
+
+	// Same as AttackVel/AttackAngularVel above, off hand.
+	DVector3 OffhandVel;
+	DVector3 OffhandAngularVel;
 
 	// Real headset position/orientation in map units, world space. Unlike
 	// AttackPos/OffhandPos this is not a per-hand aim ray -- it is where the

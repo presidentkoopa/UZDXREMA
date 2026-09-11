@@ -88,6 +88,21 @@ EXTERN_CVAR(Int, vk_max_transfer_threads)
 
 CVAR(Bool, vk_raytrace, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 
+// RS FORK -- GPU STABILITY DIAGNOSTICS. Both are read when the device is
+// created, so a change takes effect on the next restart. The driver's own fault
+// report has no switch: it costs nothing until the GPU is lost, so it is always
+// asked for.
+//
+//   vk_gpu_checkpoints       mark every render pass in the command stream, so a
+//                            device loss names the pass the GPU was in. On by
+//                            default: it only ever reports, and it costs one
+//                            marker per pass.
+//   vk_robust_buffer_access  out-of-range buffer reads return zero instead of
+//                            faulting the GPU. CHANGES BEHAVIOUR -- a test for
+//                            "is this an out-of-bounds read", never a fix.
+CVAR(Bool, vk_gpu_checkpoints, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+CVAR(Bool, vk_robust_buffer_access, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
+
 // Physical device info
 static std::vector<VulkanCompatibleDevice> SupportedDevices;
 int vkversion;
@@ -224,6 +239,10 @@ VulkanRenderDevice::VulkanRenderDevice(void *hMonitor, bool fullscreen, std::sha
 {
 	VulkanDeviceBuilder builder;
 	builder.OptionalRayQuery();
+	// RS FORK -- see the diagnostics cvars above.
+	builder.OptionalDeviceFaultReport();
+	if (vk_gpu_checkpoints) builder.OptionalGpuCheckpoints();
+	if (vk_robust_buffer_access) builder.OptionalRobustBufferAccess();
 	builder.Surface(surface);
 	builder.SelectDevice(vk_device);
 	if (vr_mode == VR_OPENXR_MOBILE)
@@ -243,6 +262,32 @@ VulkanRenderDevice::VulkanRenderDevice(void *hMonitor, bool fullscreen, std::sha
 	}
 	SupportedDevices = builder.FindDevices(surface->Instance);
 	device = builder.Create(surface->Instance, gl_texture_thread ? vk_max_transfer_threads : 0, 0);
+
+	// RS FORK -- SAY WHAT IS WATCHING, AND WHAT TO DO WHEN THE GPU DIES.
+	//
+	// The banner exists because a report that is off looks exactly like a
+	// report that found nothing, and the one time it matters is the one time
+	// nobody can go back and check.
+	Printf("Vulkan diagnostics: driver fault report %s, GPU checkpoints %s, robust buffer access %s\n",
+		(device->SupportsExtension(VK_EXT_DEVICE_FAULT_EXTENSION_NAME) && device->EnabledFeatures.Fault.deviceFault) ? "ON" : "unavailable",
+		device->SupportsExtension(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME) ? "ON" : (vk_gpu_checkpoints ? "unavailable" : "off"),
+		device->EnabledFeatures.Features.robustBufferAccess ? "ON" : "off");
+
+	// Printf, not a dialog: the log is flushed line by line (c_console.cpp), so
+	// this survives the process being killed -- which is often how a device
+	// loss ends, with the OpenXR runtime taking the game down before the
+	// exception ever reaches a message box. That is how a week of GPU resets
+	// went by with nothing in any log.
+	std::weak_ptr<VulkanDevice> weakDevice = device;
+	VulkanSetDeviceLostHandler([weakDevice](const char* where)
+	{
+		Printf(TEXTCOLOR_RED "\n==================== GPU DEVICE LOST ====================\n");
+		Printf("Noticed at: %s\n", where);
+		Printf("Last render pass the CPU opened: %s\n", VkCommandBufferManager::LastGroupLabel());
+		if (auto dev = weakDevice.lock())
+			Printf("%s", dev->DescribeDeviceLoss().c_str());
+		Printf(TEXTCOLOR_RED "==================== end of GPU report ====================\n");
+	});
 
 	if (gl_texture_thread)
 	{
@@ -297,6 +342,9 @@ VulkanRenderDevice::VulkanRenderDevice(void *hMonitor, bool fullscreen, std::sha
 
 VulkanRenderDevice::~VulkanRenderDevice()
 {
+	// RS FORK -- cleared first: a restart builds a new device and registers its
+	// own handler, and this one must not answer for it.
+	VulkanSetDeviceLostHandler(nullptr);
 	StopBackgroundCache();
 	vkDeviceWaitIdle(device->device); // make sure the GPU is no longer using any objects before RAII tears them down
 	PPResource::ResetAll();
@@ -1234,14 +1282,32 @@ void VulkanRenderDevice::AmbientOccludeScene(float m5)
 
 void VulkanRenderDevice::SetSceneRenderTarget(bool useSSAO)
 {
+	// RS FORK -- THE SCENE TARGET IS REGISTERED AT THE SCENE IMAGES' OWN SIZE.
+	//
+	// VkRenderBuffers creates SceneColor/DepthStencil/Fog/Normal at the SCENE
+	// size (CreateScene(sceneWidth, sceneHeight)), but both calls below passed
+	// GetWidth/GetHeight -- the PIPELINE size, max(window, scene). Whenever the
+	// window-derived pipeline was bigger than the scene, the target was
+	// recorded bigger than its images, and BeginRenderPass built the
+	// framebuffer and render area from that number: a framebuffer larger than
+	// its attachments, which Vulkan forbids, and a full-target clear
+	// (Set3DViewport opens with SetScissor(0, 0, -1, -1)) that ran off the
+	// bottom of the image. The GPU reported exactly that -- "3D HEIGHT CT
+	// Violation" -- and reset, 28 times on 2026-09-10 while a collapsed desktop
+	// window had shrunk everything window-sized.
+	//
+	// Every READER of these images already uses the real size (the MSAA
+	// resolve and blit read SceneColor.Image->width/height; postprocess uses
+	// GetSceneWidth/Height), so only this registration was wrong. On
+	// gameplay-eye frames the two sizes are equal and nothing changes.
 	const auto vrmode = VRMode::GetVRModeCached(true);
 	if (vrmode != nullptr && vrmode->IsVR() && vrmode->ShouldUseMultiviewThisFrame() && GetBuffers()->GetSceneLayers() > 1)
 	{
 		mRenderState->SetRenderTarget(
 			&GetBuffers()->SceneColor,
 			GetBuffers()->SceneDepthStencil.GetFramebufferView(),
-			GetBuffers()->GetWidth(),
-			GetBuffers()->GetHeight(),
+			GetBuffers()->GetSceneWidth(),
+			GetBuffers()->GetSceneHeight(),
 			VK_FORMAT_R16G16B16A16_SFLOAT,
 			GetBuffers()->GetSceneSamples(),
 			std::max(1, vrmode->GetMultiviewLayerCount()),
@@ -1251,7 +1317,7 @@ void VulkanRenderDevice::SetSceneRenderTarget(bool useSSAO)
 	}
 
 	const int layerIndex = GetBuffers()->GetSceneLayers() > 1 ? GetCurrentEyeLayer() : 0;
-	mRenderState->SetRenderTarget(&GetBuffers()->SceneColor, GetBuffers()->SceneDepthStencil.GetLayerView(layerIndex), GetBuffers()->GetWidth(), GetBuffers()->GetHeight(), VK_FORMAT_R16G16B16A16_SFLOAT, GetBuffers()->GetSceneSamples(), 1, 0, layerIndex);
+	mRenderState->SetRenderTarget(&GetBuffers()->SceneColor, GetBuffers()->SceneDepthStencil.GetLayerView(layerIndex), GetBuffers()->GetSceneWidth(), GetBuffers()->GetSceneHeight(), VK_FORMAT_R16G16B16A16_SFLOAT, GetBuffers()->GetSceneSamples(), 1, 0, layerIndex);
 }
 
 bool VulkanRenderDevice::RaytracingEnabled()

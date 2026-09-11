@@ -277,6 +277,7 @@ void VulkanSwapChain::QueuePresent(int imageIndex, VulkanSemaphore* semaphore)
 	}
 	else if (result == VK_ERROR_DEVICE_LOST)
 	{
+		VulkanDeviceLost("vkQueuePresentKHR");   // RS FORK -- report first; see vulkaninstance.h
 		VulkanError("vkQueuePresentKHR failed: device lost");
 	}
 	else

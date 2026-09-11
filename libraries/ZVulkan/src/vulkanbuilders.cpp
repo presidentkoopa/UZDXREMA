@@ -1824,6 +1824,37 @@ VulkanDeviceBuilder& VulkanDeviceBuilder::OptionalDescriptorIndexing()
 	return *this;
 }
 
+// RS FORK -- STABILITY DIAGNOSTICS.
+//
+// The driver's own account of a device loss. Costs nothing until the device
+// is lost -- the extension only makes vkGetDeviceFaultInfoEXT answer -- so a
+// caller should simply always ask for it.
+VulkanDeviceBuilder& VulkanDeviceBuilder::OptionalDeviceFaultReport()
+{
+	OptionalExtension(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
+	return *this;
+}
+
+// Markers in the command stream, so a device loss can say which pass the GPU
+// had started and which it had finished. Recording them is the caller's job
+// (vkCmdSetCheckpointNV); this only enables the extension. NVIDIA-only, and
+// silently not enabled anywhere it does not exist.
+VulkanDeviceBuilder& VulkanDeviceBuilder::OptionalGpuCheckpoints()
+{
+	OptionalExtension(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME);
+	return *this;
+}
+
+// Out-of-range buffer reads return zero and out-of-range writes are dropped,
+// instead of faulting the GPU. CHANGES BEHAVIOUR and can cost performance: it
+// is for proving "this is an out-of-bounds access" -- if the crashes stop with
+// it on, that is the answer -- not for leaving on to hide one.
+VulkanDeviceBuilder& VulkanDeviceBuilder::OptionalRobustBufferAccess()
+{
+	wantRobustBufferAccess = true;
+	return *this;
+}
+
 VulkanDeviceBuilder& VulkanDeviceBuilder::Surface(std::shared_ptr<VulkanSurface> surface)
 {
 	if (surface)
@@ -1904,6 +1935,14 @@ std::vector<VulkanCompatibleDevice> VulkanDeviceBuilder::FindDevices(const std::
 		enabledFeatures.DescriptorIndexing.descriptorBindingSampledImageUpdateAfterBind = deviceFeatures.DescriptorIndexing.descriptorBindingSampledImageUpdateAfterBind;
 		enabledFeatures.DescriptorIndexing.descriptorBindingVariableDescriptorCount = deviceFeatures.DescriptorIndexing.descriptorBindingVariableDescriptorCount;
 		enabledFeatures.DescriptorIndexing.shaderSampledImageArrayNonUniformIndexing = deviceFeatures.DescriptorIndexing.shaderSampledImageArrayNonUniformIndexing;
+
+		// RS FORK -- the fault report needs its FEATURE on as well as its
+		// extension: the extension alone makes the call exist and then report
+		// nothing. Robust access only if asked for -- see OptionalRobustBufferAccess.
+		if (dev.EnabledDeviceExtensions.count(VK_EXT_DEVICE_FAULT_EXTENSION_NAME))
+			enabledFeatures.Fault.deviceFault = deviceFeatures.Fault.deviceFault;
+		if (wantRobustBufferAccess)
+			enabledFeatures.Features.robustBufferAccess = deviceFeatures.Features.robustBufferAccess;
 
 		// Figure out which queue can present
 		if (surface)

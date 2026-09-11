@@ -48,6 +48,11 @@ public:
 
 	void PushGroup(const FString& name);
 	void PopGroup();
+
+	// RS FORK -- the label of the last pass the CPU opened, for the device-lost
+	// report. Every PushGroup/PopGroup also records a GPU checkpoint; see
+	// vk_commandbuffer.cpp.
+	static const char* LastGroupLabel();
 	void UpdateGpuStats();
 	VulkanRenderDevice* GetRenderDevice() { return fb; }
 
@@ -111,6 +116,9 @@ private:
 	enum { MaxTimestampQueries = 100 };
 	std::unique_ptr<VulkanQueryPool> mTimestampQueryPool;
 	int mNextTimestampQuery = 0;
+	void GpuCheckpoint(const char* label);
+	int mCheckpoints = -1;   // -1 undecided; then 0 or 1 from what the device was created with
+	std::vector<const char*> mCheckpointStack;
 	std::vector<size_t> mGroupStack;
 	std::vector<TimestampQuery> timeElapsedQueries;
 };

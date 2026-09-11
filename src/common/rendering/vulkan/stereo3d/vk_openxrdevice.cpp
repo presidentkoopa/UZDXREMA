@@ -54,6 +54,23 @@ extern float weaponoffset[3];
 extern float weaponangles[3];
 extern float offhandoffset[3];
 extern float offhandangles[3];
+
+// REAL controller velocity, from OpenXR itself -- not differenced from two
+// stale AttackPos samples 28ms apart in ZScript. XrSpaceVelocity is chained
+// onto the same xrLocateSpace call that already gets pose (see
+// updateHandPose below), so this costs one more struct in the query, not a
+// second query. File-local: both the writer (updateHandPose) and the one
+// reader (the AttackVel/OffhandVel assignment near AttackPos) live in this
+// file, so there is no reason to put these through the same
+// extern-global-defined-elsewhere pattern weaponoffset/weaponangles use.
+// linear is metres/second in the same post-yaw-rotation frame offset[] ends
+// up in; angular is radians/second about the hand's own local axes.
+static float weaponLinearVel[3]  = { 0, 0, 0 };
+static float weaponAngularVel[3] = { 0, 0, 0 };
+static float offhandLinearVel[3]  = { 0, 0, 0 };
+static float offhandAngularVel[3] = { 0, 0, 0 };
+static bool  weaponVelValid  = false;
+static bool  offhandVelValid = false;
 extern float doomYaw;
 extern float previousPitch;
 extern float playerYaw;
@@ -3486,8 +3503,12 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			lastAnalogTurnTime = 0;
 		}
 
-	auto updateHandPose = [&](int hand, float* offset, float* angles)
+	auto updateHandPose = [&](int hand, float* offset, float* angles, float* linVelOut, float* angVelOut, bool* velValidOut)
 	{
+		*velValidOut = false;
+		linVelOut[0] = linVelOut[1] = linVelOut[2] = 0.0f;
+		angVelOut[0] = angVelOut[1] = angVelOut[2] = 0.0f;
+
 		// EVERY REFUSAL SAYS WHY. All three of grab's refusal paths in the reverted
 		// physics module were a bare return, which is how "why is there no gun in
 		// my off hand" became unanswerable from a log. Rate limited so a permanent
@@ -3509,7 +3530,12 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		if (xrHandSpaces[hand] == XR_NULL_HANDLE)
 			return refuse("action space is XR_NULL_HANDLE -- the pose action never bound");
 
-		XrSpaceLocation location{ XR_TYPE_SPACE_LOCATION };
+		// Chained via .next: one call, both pose AND velocity, sensor-fused by
+		// the runtime -- not two backward-difference samples 28ms apart. Every
+		// OpenXR runtime that reports controller pose at all is required to
+		// support velocity on the same locate call; this is not an extension.
+		XrSpaceVelocity velocity{ XR_TYPE_SPACE_VELOCITY };
+		XrSpaceLocation location{ XR_TYPE_SPACE_LOCATION, &velocity };
 		if (XR_FAILED(xrLocateSpace(xrHandSpaces[hand], xrSpace, xrFrameState.predictedDisplayTime, &location)))
 			return refuse("xrLocateSpace failed -- runtime could not place this hand");
 
@@ -3564,6 +3590,36 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		offset[0] = rotated.Y;
 		offset[2] = rotated.X;
 
+		// SAME TRANSFORM AS POSITION, MINUS THE TRANSLATION. Velocity is a
+		// free vector, not a point -- it has no origin to subtract (hence no
+		// "- hmdPosition" here, unlike offset[] above), but it still lives in
+		// the runtime's tracking-space axes and still needs the identical
+		// yaw rotation to land in the same local frame offset[] just landed
+		// in. Angular velocity is rotated the same way for the same reason:
+		// it is expressed about tracking-space axes, and the axis a
+		// component points along has to agree with which local axis it ends
+		// up labeled as.
+		const bool linVelValid = (velocity.velocityFlags & XR_SPACE_VELOCITY_LINEAR_VALID_BIT) != 0;
+		const bool angVelValid = (velocity.velocityFlags & XR_SPACE_VELOCITY_ANGULAR_VALID_BIT) != 0;
+		*velValidOut = linVelValid;   // angular riding along is a bonus; linear is what a throw needs at minimum
+
+		if (linVelValid)
+		{
+			float lv[3] = { velocity.linearVelocity.x, velocity.linearVelocity.y, velocity.linearVelocity.z };
+			DVector2 lvRotated = DVector2(lv[0], lv[2]).Rotated(-yawRotation);
+			linVelOut[0] = (float)lvRotated.Y;
+			linVelOut[1] = lv[1];
+			linVelOut[2] = (float)lvRotated.X;
+		}
+		if (angVelValid)
+		{
+			float av[3] = { velocity.angularVelocity.x, velocity.angularVelocity.y, velocity.angularVelocity.z };
+			DVector2 avRotated = DVector2(av[0], av[2]).Rotated(-yawRotation);
+			angVelOut[0] = (float)avRotated.Y;
+			angVelOut[1] = av[1];
+			angVelOut[2] = (float)avRotated.X;
+		}
+
 		// Apply vr_weaponRotate as a pure pitch-domain adjustment
 		const XrVector3f euler = OpenVREulerAnglesFromQuaternion(location.pose.orientation);
 		angles[YAW] = (float)(euler.x * (180.0 / M_PI));
@@ -3575,8 +3631,8 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 		return true;
 	};
 
-	const bool mainHandValid = updateHandPose(mainHand, weaponoffset, weaponangles);
-	const bool offHandValid = updateHandPose(offHand, offhandoffset, offhandangles);
+	const bool mainHandValid = updateHandPose(mainHand, weaponoffset, weaponangles, weaponLinearVel, weaponAngularVel, &weaponVelValid);
+	const bool offHandValid = updateHandPose(offHand, offhandoffset, offhandangles, offhandLinearVel, offhandAngularVel, &offhandVelValid);
 
 	// ======================================================================
 	// A0 HARNESS -- measure before changing anything.
@@ -4607,6 +4663,26 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 					player->mo->AttackRoll = DAngle::fromDeg(weaponangles[ROLL]);
 					// Same value, kept somewhere the playsim will not zero it.
 					player->mo->MainHandRoll = player->mo->AttackRoll;
+
+					// REAL velocity, not two AttackPos samples differenced in
+					// ZScript at 35Hz. Zeroed rather than left stale when the
+					// runtime didn't report it this frame -- a stale nonzero
+					// velocity is worse than an honest zero for anything that
+					// gates a throw on "did this cross a speed threshold".
+					if (weaponVelValid)
+					{
+						player->mo->AttackVel.X = weaponLinearVel[0] * vr_vunits_per_meter;
+						player->mo->AttackVel.Y = weaponLinearVel[2] * vr_vunits_per_meter;
+						player->mo->AttackVel.Z = weaponLinearVel[1] * vr_vunits_per_meter;
+						player->mo->AttackAngularVel.X = weaponAngularVel[0];
+						player->mo->AttackAngularVel.Y = weaponAngularVel[2];
+						player->mo->AttackAngularVel.Z = weaponAngularVel[1];
+					}
+					else
+					{
+						player->mo->AttackVel = DVector3(0, 0, 0);
+						player->mo->AttackAngularVel = DVector3(0, 0, 0);
+					}
 				}
 			}
 
@@ -4621,6 +4697,21 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 					: -offhandangles[PITCH]);
 				player->mo->OffhandAngle = DAngle::fromDeg(-90 + GetViewpointYaw() + (offhandangles[YAW] - hmdorientation[YAW]));
 				player->mo->OffhandRoll = DAngle::fromDeg(offhandangles[ROLL]);
+
+				if (offhandVelValid)
+				{
+					player->mo->OffhandVel.X = offhandLinearVel[0] * vr_vunits_per_meter;
+					player->mo->OffhandVel.Y = offhandLinearVel[2] * vr_vunits_per_meter;
+					player->mo->OffhandVel.Z = offhandLinearVel[1] * vr_vunits_per_meter;
+					player->mo->OffhandAngularVel.X = offhandAngularVel[0];
+					player->mo->OffhandAngularVel.Y = offhandAngularVel[2];
+					player->mo->OffhandAngularVel.Z = offhandAngularVel[1];
+				}
+				else
+				{
+					player->mo->OffhandVel = DVector3(0, 0, 0);
+					player->mo->OffhandAngularVel = DVector3(0, 0, 0);
+				}
 			}
 
 			if (vr_teleport && player->mo->health > 0)
@@ -5117,6 +5208,8 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 	VkResult submitResult = vkQueueSubmit(xrVkDevice->GraphicsQueue, 1, &submitInfo, xrVkSubmitFence->fence);
 	if (submitResult != VK_SUCCESS)
 	{
+		// RS FORK -- a loss noticed here used to vanish into "return false".
+		if (submitResult == VK_ERROR_DEVICE_LOST) VulkanDeviceLost("OpenXR swapchain copy: vkQueueSubmit");
 		return false;
 	}
 	VkResult waitResult = VK_SUCCESS;
@@ -5126,6 +5219,7 @@ bool VKOpenXRDeviceMode::AcquireXRSwapchain() const
 	}
 	if (waitResult != VK_SUCCESS)
 	{
+		if (waitResult == VK_ERROR_DEVICE_LOST) VulkanDeviceLost("OpenXR swapchain copy: vkWaitForFences");
 		return false;
 	}
 	XrSwapchainImageReleaseInfo releaseInfo{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };

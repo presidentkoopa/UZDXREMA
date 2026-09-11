@@ -52,6 +52,10 @@ public:
 	VulkanDeviceBuilder& OptionalExtension(const std::string& extensionName);
 	VulkanDeviceBuilder& OptionalRayQuery();
 	VulkanDeviceBuilder& OptionalDescriptorIndexing();
+	// RS FORK -- stability diagnostics; see the definitions for what each costs.
+	VulkanDeviceBuilder& OptionalDeviceFaultReport();
+	VulkanDeviceBuilder& OptionalGpuCheckpoints();
+	VulkanDeviceBuilder& OptionalRobustBufferAccess();
 	VulkanDeviceBuilder& Surface(std::shared_ptr<VulkanSurface> surface);
 	VulkanDeviceBuilder& SelectDevice(int index);
 	VulkanDeviceBuilder& PreferredPhysicalDevice(VkPhysicalDevice device);
@@ -65,6 +69,7 @@ private:
 	std::shared_ptr<VulkanSurface> surface;
 	int deviceIndex = 0;
 	VkPhysicalDevice preferredPhysicalDevice = VK_NULL_HANDLE;
+	bool wantRobustBufferAccess = false;
 };
 
 class VulkanSwapChainBuilder

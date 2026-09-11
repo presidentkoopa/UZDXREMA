@@ -256,6 +256,13 @@ std::vector<VulkanPhysicalDevice> VulkanInstance::GetPhysicalDevices(VkInstance 
 				*next = &dev.Features.DescriptorIndexing;
 				next = &dev.Features.DescriptorIndexing.pNext;
 			}
+			// RS FORK -- queried so the device can be created with it; see
+			// VulkanDevice::DescribeDeviceLoss.
+			if (checkForExtension(VK_EXT_DEVICE_FAULT_EXTENSION_NAME))
+			{
+				*next = &dev.Features.Fault;
+				next = &dev.Features.Fault.pNext;
+			}
 
 			if (apiVersion != VK_API_VERSION_1_0 && vkGetPhysicalDeviceFeatures2 != nullptr)
 				vkGetPhysicalDeviceFeatures2(dev.Device, &deviceFeatures2);
@@ -267,6 +274,7 @@ std::vector<VulkanPhysicalDevice> VulkanInstance::GetPhysicalDevices(VkInstance 
 			dev.Features.AccelerationStructure.pNext = nullptr;
 			dev.Features.RayQuery.pNext = nullptr;
 			dev.Features.DescriptorIndexing.pNext = nullptr;
+			dev.Features.Fault.pNext = nullptr;
 		}
 		else
 		{
@@ -434,4 +442,40 @@ std::string VkResultToString(VkResult result)
 	default: break;
 	}
 	return "vkResult " + std::to_string((int)result);
+}
+
+// RS FORK -- see VulkanDeviceLost in vulkaninstance.h.
+static std::mutex DeviceLostMutex;
+static std::function<void(const char*)> DeviceLostHandler;
+static bool DeviceLostReported = false;
+
+void VulkanSetDeviceLostHandler(std::function<void(const char* where)> handler)
+{
+	std::lock_guard<std::mutex> lock(DeviceLostMutex);
+	DeviceLostHandler = std::move(handler);
+	DeviceLostReported = false;
+}
+
+void VulkanDeviceLost(const char* where)
+{
+	// Copied out under the lock and run outside it: the handler logs, and a
+	// second thread noticing the same loss must return at once rather than
+	// wait on a report it has nothing to add to.
+	std::function<void(const char*)> handler;
+	{
+		std::lock_guard<std::mutex> lock(DeviceLostMutex);
+		if (DeviceLostReported) return;
+		DeviceLostReported = true;
+		handler = DeviceLostHandler;
+	}
+	if (!handler) return;
+	try
+	{
+		handler(where ? where : "(unknown)");
+	}
+	catch (...)
+	{
+		// The caller is about to throw the real error. A failure inside the
+		// report must not replace it.
+	}
 }

@@ -481,6 +481,18 @@ class Actor : Thinker native
 	// OffhandRoll is already true and needs no counterpart.
 	native readonly double MainHandRoll;
 
+	// REAL controller velocity, from OpenXR's own sensor fusion -- not
+	// inferred by differencing two AttackPos samples 28ms apart in script,
+	// which amplifies tracking jitter and throws away everything the render
+	// thread saw between tics. Renderer-owned like AttackPos itself: written
+	// every frame, never serialised, reads (0,0,0) on any frame the runtime
+	// didn't report a valid velocity rather than holding a stale value.
+	// Linear is map-units/second in the same frame AttackPos lives in;
+	// angular is radians/second about the hand's own local axes -- what the
+	// tip of a swung weapon is doing that linear velocity alone can't say.
+	native readonly vector3 AttackVel;
+	native readonly vector3 AttackAngularVel;
+
 	// RS fork -- address a model frame directly, bypassing the sprite letter
 	// table. The hand rig's poses live at 0-10 and 1289-1297 and no sprite
 	// letter can name frame 1293, so this is the only way to reach them on a
@@ -494,6 +506,10 @@ class Actor : Thinker native
 	native double OffhandPitch;
 	native readonly double OffhandRoll;
 	native double OffhandAngle;
+
+	// Same as AttackVel/AttackAngularVel above, off hand.
+	native readonly vector3 OffhandVel;
+	native readonly vector3 OffhandAngularVel;
 	native readonly bool OverrideAttackPosDir;
 
 	// Real headset position/orientation in map units, world space -- where the
