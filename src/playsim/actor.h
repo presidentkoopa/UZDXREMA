@@ -2145,9 +2145,10 @@ public:
 	// AttackPos itself: written every frame by the VR backend, never
 	// serialised, zeroed (not left stale) on any frame the runtime does not
 	// report a valid velocity. Linear is map-units/second in the same frame
-	// AttackPos lives in; angular is radians/second about the hand's own
-	// local axes -- what a swung weapon's tip is doing that the hand's
-	// linear velocity alone cannot express.
+	// AttackPos lives in; angular is radians/second about the MAP axes (X, Y,
+	// Z up) -- NOT the hand's own. Spin about the barrel is its projection
+	// onto the hand's forward axis. What a swung weapon's tip is doing that
+	// the hand's linear velocity alone cannot express.
 	DVector3 AttackVel;
 	DVector3 AttackAngularVel;
 

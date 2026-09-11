@@ -64,7 +64,9 @@ extern float offhandangles[3];
 // file, so there is no reason to put these through the same
 // extern-global-defined-elsewhere pattern weaponoffset/weaponangles use.
 // linear is metres/second in the same post-yaw-rotation frame offset[] ends
-// up in; angular is radians/second about the hand's own local axes.
+// up in; angular is radians/second about the same (base-space, post-yaw)
+// axes -- OpenXR reports XrSpaceVelocity.angularVelocity in the base space,
+// and updateHandPose rotates it exactly like linear. NOT hand-local.
 static float weaponLinearVel[3]  = { 0, 0, 0 };
 static float weaponAngularVel[3] = { 0, 0, 0 };
 static float offhandLinearVel[3]  = { 0, 0, 0 };
@@ -4669,13 +4671,25 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 					// runtime didn't report it this frame -- a stale nonzero
 					// velocity is worse than an honest zero for anything that
 					// gates a throw on "did this cross a speed threshold".
+					//
+					// SIGNS AND SCALE AS ATTACKPOS GETS THEM. GetHandTransform puts
+					// the hand at eye - vu*offset[0] (map X) and eye - vu*offset[2]
+					// (map Y, the -vu scale on GL z), with height vu*offset[1] /
+					// pixelstretch. The velocity went through offset[]'s own
+					// rotation and swap, so it takes the same signs: both
+					// horizontal axes NEGATED, height divided by pixelstretch.
+					// Published without them, every throw and let-go flew mirrored
+					// horizontally and ~1.2x too fast vertically. Angular takes
+					// the same horizontal flip -- the XR-to-map mapping is a proper
+					// rotation, so the pseudo-vector maps like the linear one.
 					if (weaponVelValid)
 					{
-						player->mo->AttackVel.X = weaponLinearVel[0] * vr_vunits_per_meter;
-						player->mo->AttackVel.Y = weaponLinearVel[2] * vr_vunits_per_meter;
-						player->mo->AttackVel.Z = weaponLinearVel[1] * vr_vunits_per_meter;
-						player->mo->AttackAngularVel.X = weaponAngularVel[0];
-						player->mo->AttackAngularVel.Y = weaponAngularVel[2];
+						const double velStretch = r_viewpoint.ViewLevel ? r_viewpoint.ViewLevel->pixelstretch : 1.2;
+						player->mo->AttackVel.X = -weaponLinearVel[0] * vr_vunits_per_meter;
+						player->mo->AttackVel.Y = -weaponLinearVel[2] * vr_vunits_per_meter;
+						player->mo->AttackVel.Z = weaponLinearVel[1] * vr_vunits_per_meter / velStretch;
+						player->mo->AttackAngularVel.X = -weaponAngularVel[0];
+						player->mo->AttackAngularVel.Y = -weaponAngularVel[2];
 						player->mo->AttackAngularVel.Z = weaponAngularVel[1];
 					}
 					else
@@ -4700,11 +4714,13 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 
 				if (offhandVelValid)
 				{
-					player->mo->OffhandVel.X = offhandLinearVel[0] * vr_vunits_per_meter;
-					player->mo->OffhandVel.Y = offhandLinearVel[2] * vr_vunits_per_meter;
-					player->mo->OffhandVel.Z = offhandLinearVel[1] * vr_vunits_per_meter;
-					player->mo->OffhandAngularVel.X = offhandAngularVel[0];
-					player->mo->OffhandAngularVel.Y = offhandAngularVel[2];
+					// Same signs and scale as AttackVel above -- see there.
+					const double velStretch = r_viewpoint.ViewLevel ? r_viewpoint.ViewLevel->pixelstretch : 1.2;
+					player->mo->OffhandVel.X = -offhandLinearVel[0] * vr_vunits_per_meter;
+					player->mo->OffhandVel.Y = -offhandLinearVel[2] * vr_vunits_per_meter;
+					player->mo->OffhandVel.Z = offhandLinearVel[1] * vr_vunits_per_meter / velStretch;
+					player->mo->OffhandAngularVel.X = -offhandAngularVel[0];
+					player->mo->OffhandAngularVel.Y = -offhandAngularVel[2];
 					player->mo->OffhandAngularVel.Z = offhandAngularVel[1];
 				}
 				else

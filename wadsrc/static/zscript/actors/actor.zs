@@ -513,8 +513,10 @@ class Actor : Thinker native
 	// every frame, never serialised, reads (0,0,0) on any frame the runtime
 	// didn't report a valid velocity rather than holding a stale value.
 	// Linear is map-units/second in the same frame AttackPos lives in;
-	// angular is radians/second about the hand's own local axes -- what the
-	// tip of a swung weapon is doing that linear velocity alone can't say.
+	// angular is radians/second about the MAP axes (X, Y, Z up), NOT the
+	// hand's own -- spin about the barrel is its projection onto the hand's
+	// forward axis. What the tip of a swung weapon is doing that linear
+	// velocity alone can't say.
 	native readonly vector3 AttackVel;
 	native readonly vector3 AttackAngularVel;
 

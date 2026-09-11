@@ -2241,7 +2241,7 @@ DEFINE_FIELD(AActor, OffhandPos)
 // filled from XrSpaceVelocity in vk_openxrdevice.cpp. actor.zs declares all
 // four native; without these the engine refuses to start on an unregistered
 // native field. Map units/second (scaled by vr_vunits_per_meter on write);
-// angular in radians/second about the hand's own axes.
+// angular in radians/second about the map axes (not the hand's own).
 DEFINE_FIELD(AActor, AttackVel)
 DEFINE_FIELD(AActor, AttackAngularVel)
 DEFINE_FIELD(AActor, OffhandVel)
