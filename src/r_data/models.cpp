@@ -466,13 +466,26 @@ static void ModelWorldTransform(AActor *self, double mx, double my, double mz,
 			v[1]*a + v[5]*b + v[9]*c  + v[13],
 			v[2]*a + v[6]*b + v[10]*c + v[14]);
 	};
-	posOut = xf(mx, my, mz);
+	// BACK TO MAP ORDER. The matrix is the renderer's, so what comes out of it
+	// is in the renderer's GL order -- (x, HEIGHT, y) -- while a map position
+	// is (x, y, z). Swapped here, exactly as AActor::GetBonePosition swaps its
+	// own result (p_mobj.cpp).
+	//
+	// This shipped without the swap. Every answer sat |y - z| away from the
+	// model it described -- hundreds of units on a real map -- and every
+	// caller had a distance guard that quietly threw the answer away and fell
+	// back to something else. So it read as "roughly works" everywhere and was
+	// right nowhere: grab points, a magazine well and reach markers all landed
+	// out in the map, and the palm and holster positions built on it were never
+	// once used.
+	auto toMap = [](const DVector3 &g) { return DVector3(g.X, g.Z, g.Y); };
+	posOut = toMap(xf(mx, my, mz));
 
 	// Axes as differences from the transformed origin, so translation cancels
 	// and any scale baked into the matrix normalises away.
 	const DVector3 org = xf(0, 0, 0);
-	DVector3 fx = xf(1, 0, 0) - org;
-	DVector3 fy = xf(0, 1, 0) - org;
+	DVector3 fx = toMap(xf(1, 0, 0) - org);
+	DVector3 fy = toMap(xf(0, 1, 0) - org);
 	if (fx.Length() > 1e-9) fwdOut = fx / fx.Length();
 	if (fy.Length() > 1e-9) upOut  = fy / fy.Length();
 }

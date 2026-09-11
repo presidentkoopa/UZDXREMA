@@ -2033,6 +2033,12 @@ class Actor : Thinker native
 	// seating a gun into a hand is then subtracting one from the other, and the
 	// firing line is the returned forward axis rather than a guess rebuilt out
 	// of Euler angles.
+	//
+	// IN: the renderer's model space, y up -- the MD3 loader stores every vertex
+	// as (x, z, y), and surface offsets are in this space too. OUT: map order,
+	// (x, y, z) with z up, like every other position script handles and like
+	// GetBonePosition. It answered in the renderer's (x, z, y) until 2026-09-11;
+	// see ModelWorldTransform in models.cpp.
 	native Vector3, Vector3, Vector3 ModelPointToWorld(double mx, double my, double mz);
 
 	// RS fork -- does this actor's model carry this bone? -1 if not.
