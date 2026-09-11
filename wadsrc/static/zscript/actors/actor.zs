@@ -439,6 +439,11 @@ class Actor : Thinker native
 	native double OutlineGlow;
 	native double OutlinePulse;
 	native int OutlineMode;
+	// Draw this actor only while the named cvar is above zero. The RENDERER
+	// reads it every frame, so it answers even while a menu has the playsim
+	// frozen: a tuning page lights what it is editing by setting one cvar from
+	// its UI code. 'None' (the default) always draws. See actor.h.
+	native name VisibleCVar;
 
 	// [BB] A SWEEP FRONT JUST REACHED THIS ACTOR.
 	//
@@ -1712,6 +1717,15 @@ class Actor : Thinker native
 	// keeps following, and "working" and "stuck on" look identical.
 	native bool SetModelSurfaceDrive(int slot, int modelindex, int surface, int hand, Vector3 axis, double distance, double startValue);
 	native bool ClearModelSurfaceDrive(int slot);
+
+	// AND TURN AS IT GOES. Call after SetModelSurfaceDrive on the same slot
+	// (which resets it to a pure slide). At drive value v the part turns
+	// v * degrees about `axis` through `pivot`, then slides -- a magazine that
+	// rocks into its well, a bolt that lifts as it draws. Same space and sense
+	// as Quat.AxisAngle given to SetModelSurfaceOffset, so a part posed at rest
+	// and the same part in the hand agree at every value. degrees 0 turns it
+	// off. Refused on a slot that is not being driven.
+	native bool SetModelSurfaceDriveRotation(int slot, Vector3 axis, double degrees, Vector3 pivot);
 
 	// WHAT WAS DRAWN, 0..1. Read this rather than trusting script's own estimate:
 	// script runs at 35Hz and the renderer draws at 90+, so on fast motion they

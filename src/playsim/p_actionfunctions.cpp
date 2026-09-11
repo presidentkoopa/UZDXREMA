@@ -7333,6 +7333,59 @@ DEFINE_ACTION_FUNCTION(AActor, SetModelSurfaceDrive)
 	md->SurfOvDriveBase[slot]  = (float)clamp(startValue, 0.0, 1.0);
 	md->SurfOvDriveArmed[slot] = false;   // the renderer captures the anchor
 	md->SurfOvDriveValue[slot] = (float)clamp(startValue, 0.0, 1.0);
+	md->SurfOvDriveTurnDeg[slot] = 0.f;   // a pure slide until told otherwise
+	ACTION_RETURN_BOOL(true);
+}
+
+// AND TURN AS IT GOES. Call after SetModelSurfaceDrive on the same slot, which
+// resets it. At drive value v the renderer turns the part v * degrees about
+// `axis` through `pivot`, then slides it -- so a magazine that rocks into its
+// well stays one glued motion instead of sliding straight and snapping to its
+// angle on release.
+//
+// Same space and same sense as the static path: the rotation is exactly the
+// one Quat.AxisAngle(axis, v * degrees) hands SetModelSurfaceOffset, so a part
+// posed by script at rest and by the drive in the hand agree at every value.
+//
+// Only a slot that is already driven. Turning a part nobody is holding is
+// SetModelSurfaceOffset's job; accepting it here would leave a turn armed in a
+// slot for whatever drive picks it up next.
+DEFINE_ACTION_FUNCTION(AActor, SetModelSurfaceDriveRotation)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_INT(slot);
+	PARAM_FLOAT(axisx);
+	PARAM_FLOAT(axisy);
+	PARAM_FLOAT(axisz);
+	PARAM_FLOAT(degrees);
+	PARAM_FLOAT(pivotx);
+	PARAM_FLOAT(pivoty);
+	PARAM_FLOAT(pivotz);
+
+	if (self->modelData == nullptr || slot < 0 || slot >= DActorModelData::RS_SURF_SLOTS
+		|| !self->modelData->SurfOvDriveOn[slot])
+	{
+		ACTION_RETURN_BOOL(false);
+	}
+
+	auto md = self->modelData;
+	if (degrees == 0.0)
+	{
+		md->SurfOvDriveTurnDeg[slot] = 0.f;
+		ACTION_RETURN_BOOL(true);
+	}
+
+	// Refused, not normalised to something arbitrary -- the same rule as the
+	// drive's own axis. A caller turning about (0,0,0) has a bug.
+	FVector3 axis((float)axisx, (float)axisy, (float)axisz);
+	const float len = axis.Length();
+	if (len < 0.0001f)
+	{
+		ACTION_RETURN_BOOL(false);
+	}
+	md->SurfOvDriveTurnAxis[slot]  = axis / len;
+	md->SurfOvDriveTurnDeg[slot]   = (float)degrees;
+	md->SurfOvDriveTurnPivot[slot] = FVector3((float)pivotx, (float)pivoty, (float)pivotz);
 	ACTION_RETURN_BOOL(true);
 }
 
@@ -7350,6 +7403,7 @@ DEFINE_ACTION_FUNCTION(AActor, ClearModelSurfaceDrive)
 	}
 	self->modelData->SurfOvDriveOn[slot]    = false;
 	self->modelData->SurfOvDriveArmed[slot] = false;
+	self->modelData->SurfOvDriveTurnDeg[slot] = 0.f;
 	ACTION_RETURN_BOOL(true);
 }
 

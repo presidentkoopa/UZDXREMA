@@ -2342,6 +2342,35 @@ static inline void RenderModelFrame(FModelRenderer *renderer, int i, const FSpri
 						o.hasTransform = true;
 						o.offset = axis * (v * dist);
 						o.rotation = FVector4(0.f, 0.f, 0.f, 1.f);
+
+						// AND THE TURN, if this slot has one
+						// (SetModelSurfaceDriveRotation). Turn about the pivot,
+						// then slide: v' = R(v - P) + P + slide. The surface
+						// transform is translate-then-rotate about the mesh
+						// origin, so the pivot folds into the offset as P - RP.
+						// RP comes from the very matrix multQuaternion builds
+						// from this quaternion, so the pivot holds still
+						// whatever handedness that conversion has.
+						const float turn = driveData->SurfOvDriveTurnDeg[s] * v;
+						if (turn != 0.f)
+						{
+							const FVector3 ta = driveData->SurfOvDriveTurnAxis[s];
+							const FVector3 P  = driveData->SurfOvDriveTurnPivot[s];
+							const double half = turn * (M_PI / 360.0);   // AxisAngle's half angle
+							const float sh = (float)sin(half);
+							const FVector4 q(ta.X * sh, ta.Y * sh, ta.Z * sh, (float)cos(half));
+
+							VSMatrix turnMat;
+							turnMat.loadIdentity();
+							turnMat.multQuaternion(q);
+							const float *tm = turnMat.get();
+							const FVector3 RP(
+								tm[0]*P.X + tm[4]*P.Y + tm[8] *P.Z,
+								tm[1]*P.X + tm[5]*P.Y + tm[9] *P.Z,
+								tm[2]*P.X + tm[6]*P.Y + tm[10]*P.Z);
+							o.offset += P - RP;
+							o.rotation = q;
+						}
 						driven = true;
 
 						if (vr_surf_debug)

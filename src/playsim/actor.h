@@ -854,6 +854,21 @@ public:
 	bool     SurfOvDriveArmed[RS_SURF_SLOTS] = {};   // false until the anchor is captured
 	float    SurfOvDriveValue[RS_SURF_SLOTS] = {};   // published back: what was DRAWN, 0..1
 
+	// A DRIVEN PART MAY ALSO TURN AS IT TRAVELS. At drive value v the renderer
+	// turns the part v * TurnDeg about TurnAxis through TurnPivot, then slides
+	// it along the drive axis -- one motion, still glued to the hand. A
+	// magazine that rocks into its well, a bolt handle that lifts as it draws
+	// back, a lever that swings while it slides. Without this such a part
+	// slides straight in the hand and snaps to its angle the moment script
+	// takes it back on release.
+	//
+	// INERT UNTIL SET: SetModelSurfaceDrive resets TurnDeg to 0, a pure slide,
+	// so a slot reused for a plain drive never inherits a stale turn. Set by
+	// SetModelSurfaceDriveRotation; all three are in the mesh's own space.
+	FVector3 SurfOvDriveTurnAxis [RS_SURF_SLOTS] = {};  // unit, model space
+	float    SurfOvDriveTurnDeg  [RS_SURF_SLOTS] = {};  // degrees at value 1; 0 = no turn
+	FVector3 SurfOvDriveTurnPivot[RS_SURF_SLOTS] = {};  // model space
+
 	bool AnySurfaceOverride() const
 	{
 		for (int i = 0; i < RS_SURF_SLOTS; i++)
@@ -1527,6 +1542,20 @@ public:
 	double			OutlineGlow;		// how far the halo reaches off the line
 	double			OutlinePulse;		// A-to-B crossfade speed; 0 holds on A
 	int				OutlineMode;		// 0 off, 1 edge, 2 wire, 3 ghost
+
+	// RS FORK -- DRAWN ONLY WHILE A SETTING SAYS SO.
+	//
+	// Names a cvar; the renderer draws this actor only while that cvar is above
+	// zero, reading it every frame it draws. That is the whole point: while a
+	// menu is open the playsim is frozen and script cannot switch anything on
+	// or off, but the renderer is still drawing -- so a tuning page can light
+	// up the very thing it is editing (a holster, a hand, a stored gun) by
+	// setting one cvar from its UI code. Pair it with PlacementPrefix for a
+	// thing that must also MOVE live.
+	//
+	// INERT UNTIL SET: NAME_None, the default, draws as always and costs one
+	// compare. Read in HWSprite::Process.
+	FName			VisibleCVar;
 
 // interaction info
 	FBlockNode		*BlockNode;			// links in blocks (if needed)

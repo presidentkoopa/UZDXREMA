@@ -19,6 +19,7 @@
 #include "p_effect.h"
 #include "g_level.h"
 #include "doomstat.h"
+#include "c_cvars.h"
 #include "r_defs.h"
 #include "r_sky.h"
 #include "r_utility.h"
@@ -1018,6 +1019,16 @@ void HWSprite::Process(HWDrawInfo *di, AActor* thing, sector_t * sector, area_t 
 
 	const auto &vp = di->Viewpoint;
 	AActor *camera = vp.camera;
+
+	// RS FORK -- AActor::VisibleCVar: drawn only while the named cvar is above
+	// zero. Read here, every frame, so it answers behind a paused menu.
+	// GetCVar(consoleplayer, ...) and not FindCVar: a user cvar's value does not
+	// live in the raw object FindCVar returns (see GetPlacementCVar, models.cpp).
+	if (thing->VisibleCVar != NAME_None)
+	{
+		FBaseCVar *gate = GetCVar(consoleplayer, thing->VisibleCVar.GetChars());
+		if (gate == nullptr || gate->GetGenericRep(CVAR_Float).Float <= 0.f) return;
+	}
 
 	const double alpha = thing->InterpolatedAlpha(vp.TicFrac);
 	if (thing->renderflags & RF_INVISIBLE || !thing->RenderStyle.IsVisible(alpha))
