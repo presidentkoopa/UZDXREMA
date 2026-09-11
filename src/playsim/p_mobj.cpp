@@ -174,6 +174,10 @@ IMPLEMENT_POINTERS_START(AActor)
 	IMPLEMENT_POINTER(alternative)
 	IMPLEMENT_POINTER(ViewPos)
 	IMPLEMENT_POINTER(modelData)
+	// RS fork -- a child drawn inside this actor's model frame. Registered so a
+	// destroyed parent is nulled out here rather than left dangling for the
+	// renderer to read (ModelFollowFrame, models.cpp).
+	IMPLEMENT_POINTER(FollowActor)
 IMPLEMENT_POINTERS_END
 
 IMPLEMENT_CLASS(DBehavior, false, true)
@@ -424,6 +428,9 @@ void AActor::Serialize(FSerializer &arc)
 			A("FollowHandMode", FollowHandMode)
 			A("FollowHandOfs", FollowHandOfs)
 			A("PlacementPrefix", PlacementPrefix)
+			("FollowActor", FollowActor)
+			A("FollowActorSlot", FollowActorSlot)
+			A("FollowActorOfs", FollowActorOfs)
 			A("OutlineColorA", OutlineColorA)
 			A("OutlineColorB", OutlineColorB)
 			A("OutlineStrength", OutlineStrength)

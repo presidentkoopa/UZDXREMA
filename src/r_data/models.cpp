@@ -529,7 +529,242 @@ static bool GetPlacementCVar(const char *name, float &out)
 	return true;
 }
 
-VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(AActor * actor, float x, float y, float z, double ticFrac)
+// ---- SURFACE SLOT POSES: the one place a part's live transform is worked out
+//
+// What a surface slot does to its part this frame, in its model's own space.
+// Read by the part's own draw (the per-surface loop in RenderFrameModel) and by
+// anything riding that part (ModelFollowFrame). One set of functions, so the
+// two cannot drift.
+//
+// PURE. These read the slot table and never write it. Arming a drive's anchor
+// on the first drawn frame, re-anchoring at the clamp, publishing the drawn
+// value and the debug trace all belong to the OWNER's draw and stay there -- so
+// what a follower computes cannot depend on which of the two is drawn first.
+
+// Where a hand is along a part's travel axis, in the model's own space.
+//
+// NO UNIT CONSTANT, DELIBERATELY. Whatever scale the model's path applied is
+// inside modelToWorld, so inverting it undoes that scale along with everything
+// else: the hand lands in the space the mesh's own vertices are in, which is
+// the space the drive's axis and distance are measured in.
+static float SurfaceHandProjection(const VSMatrix &handMat, VSMatrix modelToWorld, const FVector3 &axis, FVector3 &handModel)
+{
+	const float *hm = handMat.get();
+	FVector3 handWorld(hm[12], hm[13], hm[14]);
+
+	VSMatrix worldToModel;
+	modelToWorld.inverseMatrix(worldToModel);
+	const float *wm = worldToModel.get();
+	handModel = FVector3(
+		wm[0]*handWorld.X + wm[4]*handWorld.Y + wm[8] *handWorld.Z + wm[12],
+		wm[1]*handWorld.X + wm[5]*handWorld.Y + wm[9] *handWorld.Z + wm[13],
+		wm[2]*handWorld.X + wm[6]*handWorld.Y + wm[10]*handWorld.Z + wm[14]);
+
+	return handModel.X*axis.X + handModel.Y*axis.Y + handModel.Z*axis.Z;
+}
+
+// A driven part at travel v (0..1): slid along its axis, and turned about its
+// pivot if SetModelSurfaceDriveRotation gave it a turn. Turn about the pivot,
+// then slide: v' = R(v - P) + P + slide. The surface transform is translate-
+// then-rotate about the mesh origin, so the pivot folds into the offset as
+// P - RP. RP comes from the very matrix multQuaternion builds from this
+// quaternion, so the pivot holds still whatever handedness that conversion has.
+static void SurfaceDrivePose(const DActorModelData *md, int s, float v, FVector3 &offset, FVector4 &rotation)
+{
+	const FVector3 axis = md->SurfOvDriveAxis[s];
+	const float dist = (md->SurfOvDriveDist[s] != 0.f) ? md->SurfOvDriveDist[s] : 1.f;
+
+	offset = axis * (v * dist);
+	rotation = FVector4(0.f, 0.f, 0.f, 1.f);
+
+	const float turn = md->SurfOvDriveTurnDeg[s] * v;
+	if (turn != 0.f)
+	{
+		const FVector3 ta = md->SurfOvDriveTurnAxis[s];
+		const FVector3 P  = md->SurfOvDriveTurnPivot[s];
+		const double half = turn * (M_PI / 360.0);   // AxisAngle's half angle
+		const float sh = (float)sin(half);
+		const FVector4 q(ta.X * sh, ta.Y * sh, ta.Z * sh, (float)cos(half));
+
+		VSMatrix turnMat;
+		turnMat.loadIdentity();
+		turnMat.multQuaternion(q);
+		const float *tm = turnMat.get();
+		const FVector3 RP(
+			tm[0]*P.X + tm[4]*P.Y + tm[8] *P.Z,
+			tm[1]*P.X + tm[5]*P.Y + tm[9] *P.Z,
+			tm[2]*P.X + tm[6]*P.Y + tm[10]*P.Z);
+		offset += P - RP;
+		rotation = q;
+	}
+}
+
+// A script-set part transform, INTERPOLATED TO THE DRAWN INSTANT exactly as the
+// frame position is. The transform path shipped without this while the frame
+// path had it, so a part driven by both moved in two time bases at once -- the
+// pose gliding, the placement stepping at 35 Hz.
+//
+// NLERP, SHORTEST ARC. Cheap, and correct for the small per-tic deltas a hand-
+// driven part actually produces -- slerp buys accuracy only across wide arcs
+// that cannot happen in one 35th of a second. The dot-sign flip is not
+// optional: without it a quaternion and its negation, which are the same
+// rotation, interpolate the long way round and the part spins most of a full
+// turn inside one tic.
+static void SurfaceSetPose(const FVector3 *ovOfs, const FVector4 *ovRot, const FVector3 *ovOfsPrev, const FVector4 *ovRotPrev,
+	int s, double ticFrac, FVector3 &offset, FVector4 &rotation)
+{
+	float f = (float)ticFrac;
+	if (f < 0.f) f = 0.f;
+	if (f > 1.f) f = 1.f;
+
+	const FVector3 curOfs = ovOfs[s];
+	const FVector3 prvOfs = ovOfsPrev ? ovOfsPrev[s] : curOfs;
+	offset = prvOfs + (curOfs - prvOfs) * f;
+
+	const FVector4 qc = ovRot[s];
+	const FVector4 cur = (qc.X == 0.f && qc.Y == 0.f && qc.Z == 0.f && qc.W == 0.f)
+		? FVector4(0.f, 0.f, 0.f, 1.f) : qc;
+	const FVector4 qp = ovRotPrev ? ovRotPrev[s] : cur;
+	FVector4 prv = (qp.X == 0.f && qp.Y == 0.f && qp.Z == 0.f && qp.W == 0.f)
+		? FVector4(0.f, 0.f, 0.f, 1.f) : qp;
+
+	float dot = prv.X * cur.X + prv.Y * cur.Y + prv.Z * cur.Z + prv.W * cur.W;
+	if (dot < 0.f) prv = FVector4(-prv.X, -prv.Y, -prv.Z, -prv.W);
+
+	FVector4 blend(
+		prv.X + (cur.X - prv.X) * f,
+		prv.Y + (cur.Y - prv.Y) * f,
+		prv.Z + (cur.Z - prv.Z) * f,
+		prv.W + (cur.W - prv.W) * f);
+
+	const float len = (float)g_sqrt(blend.X * blend.X + blend.Y * blend.Y
+		+ blend.Z * blend.Z + blend.W * blend.W);
+	rotation = (len > 0.0001f)
+		? FVector4(blend.X / len, blend.Y / len, blend.Z / len, blend.W / len)
+		: FVector4(0.f, 0.f, 0.f, 1.f);
+}
+
+// The travel a FOLLOWER sees: the owner's formula without the owner's writes.
+// Clamped the same way, so it is the number the owner draws this frame even
+// though only the owner re-anchors. Before the owner has drawn the part once
+// there is no anchor yet, and the value the drive resumed from is the honest
+// answer.
+static float SurfaceDriveValueForFollower(const DActorModelData *md, int s, float proj)
+{
+	float v = md->SurfOvDriveBase[s];
+	if (md->SurfOvDriveArmed[s])
+	{
+		const float dist = (md->SurfOvDriveDist[s] != 0.f) ? md->SurfOvDriveDist[s] : 1.f;
+		v = md->SurfOvDriveBase[s] + (proj - md->SurfOvDriveAnchor[s]) / dist;
+	}
+	if (v < 0.f) v = 0.f;
+	else if (v > 1.f) v = 1.f;
+	return v;
+}
+
+// The pose a follower rides for slot s this frame -- the owner's branches, in
+// the owner's order: a live drive when there is a hand pose, else a set
+// transform. False when the slot moves nothing (empty, or a frame-only part),
+// and the follower rides the whole model instead.
+static bool SurfaceSlotPoseForFollower(const DActorModelData *md, int s, const VSMatrix &modelToWorld, double ticFrac,
+	FVector3 &offset, FVector4 &rotation)
+{
+	if (md == nullptr || s < 0 || s >= DActorModelData::RS_SURF_SLOTS) return false;
+	if (md->SurfOvModel[s] < 0 || md->SurfOvSurface[s] < 0) return false;
+
+	if (md->SurfOvDriveOn[s])
+	{
+		auto vrmode = VRMode::GetVRModeCached(true);
+		VSMatrix handMat;
+		const int dhand = (md->SurfOvDriveHand[s] == 1) ? VR_OFFHAND : VR_MAINHAND;
+		if (vrmode && vrmode->IsVR() && vrmode->GetHandTransform(dhand, &handMat))
+		{
+			FVector3 handModel;
+			const float proj = SurfaceHandProjection(handMat, modelToWorld, md->SurfOvDriveAxis[s], handModel);
+			SurfaceDrivePose(md, s, SurfaceDriveValueForFollower(md, s, proj), offset, rotation);
+			return true;
+		}
+	}
+
+	if (!md->SurfOvHasXf[s]) return false;
+	SurfaceSetPose(md->SurfOvOfs, md->SurfOvRot, md->SurfOvOfsPrev, md->SurfOvRotPrev, s, ticFrac, offset, rotation);
+	return true;
+}
+
+// AActor::FollowActor -- the frame a child model rides.
+//
+// Built by the PARENT'S OWN ObjectToWorldMatrix, never reconstructed here: that
+// function hands back, beside its full matrix, the parent's drawn origin with
+// the parent's own and placement rotation and its path units, and no scale or
+// MODELDEF base orientation. Rebuilding that basis by hand is what cost this
+// tree two attempts at the holster centring.
+//
+// Then, if FollowActorSlot names one, carried by that slot's live motion: the
+// part's own transform conjugated into the world (into model space, the part's
+// motion, back out), so at rest it is the identity and a child seated against
+// slot -1 sits exactly the same against a slot. Then the child's seat.
+//
+// False when there is nothing to follow this frame -- no parent, no model, or a
+// follow loop -- and the child draws as though the field were unset.
+static thread_local int followDepth = 0;
+
+static bool ModelFollowFrame(AActor *child, double ticFrac, VSMatrix &out)
+{
+	AActor *parent = child->FollowActor.Get();
+	if (parent == nullptr || parent == child) return false;
+
+	// A chain is fine -- a hand on a magazine in a gun in a holster. A loop is
+	// not, and this is what ends one.
+	if (followDepth >= 4) return false;
+
+	FSpriteModelFrame *psmf = FindModelFrame(parent, parent->sprite, parent->frame, false);
+	if (psmf == nullptr) return false;
+
+	// The position the sprite pass hands RenderModel for this actor
+	// (hw_sprites.cpp), less portal displacement. A parent riding the body or a
+	// controller never reads it.
+	DVector3 ppos = parent->InterpolatedPosition(ticFrac)
+		+ DVector3(parent->WorldOffset.X, parent->WorldOffset.Y, parent->WorldOffset.Z);
+	const uint32_t spritetype = (parent->renderflags & RF_SPRITETYPEMASK);
+	if (spritetype == RF_FACESPRITE) ppos.Z -= parent->Floorclip;
+
+	VSMatrix frame;
+	followDepth++;
+	VSMatrix parentMat = psmf->ObjectToWorldMatrix(parent, (float)ppos.X, (float)ppos.Y, (float)ppos.Z, ticFrac, &frame);
+	followDepth--;
+
+	FVector3 partOfs;
+	FVector4 partRot;
+	if (child->FollowActorSlot >= 0
+		&& SurfaceSlotPoseForFollower(parent->modelData.ForceGet(), child->FollowActorSlot, parentMat, ticFrac, partOfs, partRot))
+	{
+		// Built exactly as models_md3.cpp builds a surface's transform.
+		VSMatrix local;
+		local.loadIdentity();
+		local.translate(partOfs.X, partOfs.Y, partOfs.Z);
+		if (partRot.X != 0.f || partRot.Y != 0.f || partRot.Z != 0.f || partRot.W != 1.f)
+			local.multQuaternion(partRot);
+
+		VSMatrix toModel;
+		parentMat.inverseMatrix(toModel);
+
+		VSMatrix carried = parentMat;
+		carried.multMatrix(local);
+		carried.multMatrix(toModel);
+		carried.multMatrix(frame);
+		frame = carried;
+	}
+
+	// The child's seat, Doom-local into the renderer's axes the same way the
+	// world translate below writes a position: (x, z, y).
+	const DVector3 &seat = child->FollowActorOfs;
+	frame.translate((float)seat.X, (float)seat.Z, (float)seat.Y);
+
+	out = frame;
+	return true;
+}
+
+VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(AActor * actor, float x, float y, float z, double ticFrac, VSMatrix *followFrameOut)
 {
 	int smf_flags = getFlags(actor->modelData);
 
@@ -665,10 +900,16 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(AActor * actor, float x, float y
 	// a height for everything else.
 	const float bodyPivotZ = actor->VoxelOverride ? float(actor->Height * 0.5) : 0.f;
 
-	return ObjectToWorldMatrix(actor->Level, DVector3(x, y, z), DRotator(DAngle::fromDeg(pitch), DAngle::fromDeg(angle), DAngle::fromDeg(roll)), actor->InterpolatedScale(ticFrac), smf_flags, tic, bodyPivotZ, actor->FollowBodyMode, actor->FollowBodyOfs, actor->FollowBodyYaw, actor->FollowHandMode, actor->FollowHandOfs, actor->PlacementPrefix);
+	// AActor::FollowActor -- inside another model's drawn frame. One pointer
+	// test for every actor that never sets it. See ModelFollowFrame.
+	VSMatrix followFrame;
+	const bool following = ModelFollowFrame(actor, ticFrac, followFrame);
+
+	return ObjectToWorldMatrix(actor->Level, DVector3(x, y, z), DRotator(DAngle::fromDeg(pitch), DAngle::fromDeg(angle), DAngle::fromDeg(roll)), actor->InterpolatedScale(ticFrac), smf_flags, tic, bodyPivotZ, actor->FollowBodyMode, actor->FollowBodyOfs, actor->FollowBodyYaw, actor->FollowHandMode, actor->FollowHandOfs, actor->PlacementPrefix,
+		following ? &followFrame : nullptr, followFrameOut);
 }
 
-VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic, float bodyPivotZ, int followBodyMode, DVector3 followBodyOfs, double followBodyYaw, int followHandMode, DVector3 followHandOfs, FName placementPrefix)
+VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic, float bodyPivotZ, int followBodyMode, DVector3 followBodyOfs, double followBodyYaw, int followHandMode, DVector3 followHandOfs, FName placementPrefix, const VSMatrix *followFrameIn, VSMatrix *followFrameOut)
 {
 	double rotateOffset = 0;
 
@@ -719,7 +960,20 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 	// what drew every holstered weapon barrel-forward instead of barrel-down.
 	bool followedBody = false;
 	bool followedHand = false;
-	if (followBodyMode > 0)
+
+	// AActor::FollowActor, handed down as a finished frame (ModelFollowFrame):
+	// another model's drawn frame with this actor's seat already in it. Loaded
+	// whole, like the body and hand frames below, and it outranks both -- the
+	// parent already rides whichever of those it rides. This actor's own
+	// rotation then applies RELATIVE to it, and the world translate is skipped.
+	bool followedActor = false;
+	if (followFrameIn != nullptr)
+	{
+		objectToWorldMatrix = *followFrameIn;
+		followedActor = true;
+	}
+
+	if (!followedActor && followBodyMode > 0)
 	{
 		auto vrmode = VRMode::GetVRModeCached(true);
 		float bodyYaw = 0.f;
@@ -762,7 +1016,7 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 		: ((flags & MDL_FOLLOWOFFHAND) ? VR_OFFHAND : -1);
 	if (followHandMode == 1)      followHand = VR_MAINHAND;
 	else if (followHandMode == 2) followHand = VR_OFFHAND;
-	if (!followedBody && followHand >= 0)
+	if (!followedActor && !followedBody && followHand >= 0)
 	{
 		auto vrmode = VRMode::GetVRModeCached(true);
 		if (vrmode != nullptr && vrmode->IsVR() &&
@@ -820,6 +1074,11 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 		// rotate() of zero degrees is a no-op -- so MDL_ROTATING and the rotation
 		// -centre paths keep behaving exactly as they always have.
 		rotation.Yaw = rotation.Pitch = rotation.Roll = DAngle::fromDeg(0.);
+	}
+	else if (followedActor)
+	{
+		// In the parent's frame already, seat included. Nothing to translate,
+		// and this actor's Angles are relative to that frame.
 	}
 	else
 	{
@@ -1039,6 +1298,21 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 		}
 	}
 
+	// THE FRAME A FOLLOWER RIDES (AActor::FollowActor), if one asked: this
+	// model's frame and own rotation so far, plus its placement rotation --
+	// written in the same order and sense as step 5 below. Taken BEFORE the
+	// scale and without the MODELDEF base orientation, on purpose: see
+	// ModelFollowFrame. Its origin is filled in at the very end, once the whole
+	// matrix says where this model is actually drawn.
+	VSMatrix followOut;
+	if (followFrameOut != nullptr)
+	{
+		followOut = objectToWorldMatrix;
+		followOut.rotate(-wPlaceRot[0], 0, 1, 0);
+		followOut.rotate(wPlaceRot[1],  0, 0, 1);
+		followOut.rotate(-wPlaceRot[2], 1, 0, 0);
+	}
+
 	// 3) Scaling model.
 	objectToWorldMatrix.scale(scaleFactorX * wPlaceScale * wPlaceAxis[0],
 		scaleFactorZ * wPlaceScale * wPlaceAxis[2],
@@ -1129,6 +1403,20 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 	{
 		stretch = (modelIDs[0] >= 0 ? Models[modelIDs[0]]->getAspectFactor(Level->info->pixelstretch) : 1.f) / Level->info->pixelstretch;
 		objectToWorldMatrix.scale(1, stretch, 1);
+	}
+
+	if (followFrameOut != nullptr)
+	{
+		// At the model's DRAWN origin: where the whole matrix puts (0,0,0) --
+		// the same point ModelPointToWorld(0,0,0) answers.
+		FLOATTYPE m[16];
+		followOut.copy(m);
+		const FLOATTYPE *full = objectToWorldMatrix.get();
+		m[12] = full[12];
+		m[13] = full[13];
+		m[14] = full[14];
+		followOut.loadMatrix(m);
+		*followFrameOut = followOut;
 	}
 
 	return objectToWorldMatrix;
@@ -2300,19 +2588,10 @@ static inline void RenderModelFrame(FModelRenderer *renderer, int i, const FSpri
 						// the "everything is 100x" bug this project keeps
 						// hitting. A conversion that is derived rather than
 						// remembered cannot be forgotten.
-						const float *hm = handMat.get();
-						FVector3 handWorld(hm[12], hm[13], hm[14]);
-
-						VSMatrix worldToModel;
-						modelToWorld.inverseMatrix(worldToModel);
-						const float *wm = worldToModel.get();
-						FVector3 handModel(
-							wm[0]*handWorld.X + wm[4]*handWorld.Y + wm[8] *handWorld.Z + wm[12],
-							wm[1]*handWorld.X + wm[5]*handWorld.Y + wm[9] *handWorld.Z + wm[13],
-							wm[2]*handWorld.X + wm[6]*handWorld.Y + wm[10]*handWorld.Z + wm[14]);
-
-						const FVector3 axis = driveData->SurfOvDriveAxis[s];
-						const float proj = handModel.X*axis.X + handModel.Y*axis.Y + handModel.Z*axis.Z;
+						// SurfaceHandProjection: the same function a model riding
+						// this part uses (ModelFollowFrame), so the two agree.
+						FVector3 handModel;
+						const float proj = SurfaceHandProjection(handMat, modelToWorld, driveData->SurfOvDriveAxis[s], handModel);
 
 						// ARM, DON'T ANCHOR. The anchor is captured HERE, on the
 						// first drawn frame, from the same live quantity it will
@@ -2352,38 +2631,10 @@ static inline void RenderModelFrame(FModelRenderer *renderer, int i, const FSpri
 
 						driveData->SurfOvDriveValue[s] = v;
 
+						// The slide and the turn (SetModelSurfaceDriveRotation),
+						// from the shared pure function -- see SurfaceDrivePose.
 						o.hasTransform = true;
-						o.offset = axis * (v * dist);
-						o.rotation = FVector4(0.f, 0.f, 0.f, 1.f);
-
-						// AND THE TURN, if this slot has one
-						// (SetModelSurfaceDriveRotation). Turn about the pivot,
-						// then slide: v' = R(v - P) + P + slide. The surface
-						// transform is translate-then-rotate about the mesh
-						// origin, so the pivot folds into the offset as P - RP.
-						// RP comes from the very matrix multQuaternion builds
-						// from this quaternion, so the pivot holds still
-						// whatever handedness that conversion has.
-						const float turn = driveData->SurfOvDriveTurnDeg[s] * v;
-						if (turn != 0.f)
-						{
-							const FVector3 ta = driveData->SurfOvDriveTurnAxis[s];
-							const FVector3 P  = driveData->SurfOvDriveTurnPivot[s];
-							const double half = turn * (M_PI / 360.0);   // AxisAngle's half angle
-							const float sh = (float)sin(half);
-							const FVector4 q(ta.X * sh, ta.Y * sh, ta.Z * sh, (float)cos(half));
-
-							VSMatrix turnMat;
-							turnMat.loadIdentity();
-							turnMat.multQuaternion(q);
-							const float *tm = turnMat.get();
-							const FVector3 RP(
-								tm[0]*P.X + tm[4]*P.Y + tm[8] *P.Z,
-								tm[1]*P.X + tm[5]*P.Y + tm[9] *P.Z,
-								tm[2]*P.X + tm[6]*P.Y + tm[10]*P.Z);
-							o.offset += P - RP;
-							o.rotation = q;
-						}
+						SurfaceDrivePose(driveData, s, v, o.offset, o.rotation);
 						driven = true;
 
 						if (vr_surf_debug)
@@ -2406,51 +2657,10 @@ static inline void RenderModelFrame(FModelRenderer *renderer, int i, const FSpri
 			}
 
 			o.hasTransform = driven || (ovHasXf && ovHasXf[s]);
+			// A script-set transform, interpolated to the drawn instant by the
+			// shared pure function -- see SurfaceSetPose.
 			if (o.hasTransform && !driven)
-			{
-				// INTERPOLATED TO THE DRAWN INSTANT, exactly as the frame
-				// position below is. The transform path shipped without this
-				// and the frame path had it, so a part driven by both moved in
-				// two different time bases at once -- the pose gliding, the
-				// placement stepping at 35 Hz. Worse than either alone, because
-				// the two halves of one part's motion visibly disagreed.
-				float f = (float)ticFrac;
-				if (f < 0.f) f = 0.f;
-				if (f > 1.f) f = 1.f;
-
-				const FVector3 curOfs = ovOfs[s];
-				const FVector3 prvOfs = ovOfsPrev ? ovOfsPrev[s] : curOfs;
-				o.offset = prvOfs + (curOfs - prvOfs) * f;
-
-				const FVector4 qc = ovRot[s];
-				const FVector4 cur = (qc.X == 0.f && qc.Y == 0.f && qc.Z == 0.f && qc.W == 0.f)
-					? FVector4(0.f, 0.f, 0.f, 1.f) : qc;
-				const FVector4 qp = ovRotPrev ? ovRotPrev[s] : cur;
-				FVector4 prv = (qp.X == 0.f && qp.Y == 0.f && qp.Z == 0.f && qp.W == 0.f)
-					? FVector4(0.f, 0.f, 0.f, 1.f) : qp;
-
-				// NLERP, SHORTEST ARC. Cheap, and correct for the small
-				// per-tic deltas a hand-driven part actually produces -- slerp
-				// buys accuracy only across wide arcs that cannot happen in one
-				// 35th of a second. The dot-sign flip is not optional: without
-				// it a quaternion and its negation, which are the same
-				// rotation, interpolate the long way round and the part spins
-				// most of a full turn inside one tic.
-				float dot = prv.X * cur.X + prv.Y * cur.Y + prv.Z * cur.Z + prv.W * cur.W;
-				if (dot < 0.f) prv = FVector4(-prv.X, -prv.Y, -prv.Z, -prv.W);
-
-				FVector4 blend(
-					prv.X + (cur.X - prv.X) * f,
-					prv.Y + (cur.Y - prv.Y) * f,
-					prv.Z + (cur.Z - prv.Z) * f,
-					prv.W + (cur.W - prv.W) * f);
-
-				const float len = (float)g_sqrt(blend.X * blend.X + blend.Y * blend.Y
-					+ blend.Z * blend.Z + blend.W * blend.W);
-				o.rotation = (len > 0.0001f)
-					? FVector4(blend.X / len, blend.Y / len, blend.Z / len, blend.W / len)
-					: FVector4(0.f, 0.f, 0.f, 1.f);
-			}
+				SurfaceSetPose(ovOfs, ovRot, ovOfsPrev, ovRotPrev, s, ticFrac, o.offset, o.rotation);
 
 			// RS FORK -- DISPLAY-RATE PART MOTION (p_pspr.h, SurfOvPos).
 			//

@@ -133,7 +133,9 @@ public:
 	friend void InitModels();
 	friend void ParseModelDefLump(int Lump);
 
-	VSMatrix ObjectToWorldMatrix(AActor * actor, float x, float y, float z, double ticFrac);
+	// followFrameOut, when given, receives the frame a model following THIS one
+	// rides (AActor::FollowActor) -- see ModelFollowFrame in models.cpp.
+	VSMatrix ObjectToWorldMatrix(AActor * actor, float x, float y, float z, double ticFrac, VSMatrix *followFrameOut = nullptr);
 	// bodyPivotZ: height above the actor's origin to turn about, in map units.
 	// Zero keeps the historical behaviour of turning about the origin itself --
 	// which for anything standing on a floor is the point between its feet, so a
@@ -144,7 +146,7 @@ public:
 	// Defaulted off: every caller written before this existed is unaffected.
 	// followHandMode/followHandOfs are the hand-frame twins of the two above and
 	// arrive the same way, for the same reason -- see AActor::FollowHandMode.
-	VSMatrix ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic, float bodyPivotZ = 0.f, int followBodyMode = 0, DVector3 followBodyOfs = DVector3(0, 0, 0), double followBodyYaw = 0.0, int followHandMode = 0, DVector3 followHandOfs = DVector3(0, 0, 0), FName placementPrefix = NAME_None);
+	VSMatrix ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic, float bodyPivotZ = 0.f, int followBodyMode = 0, DVector3 followBodyOfs = DVector3(0, 0, 0), double followBodyYaw = 0.0, int followHandMode = 0, DVector3 followHandOfs = DVector3(0, 0, 0), FName placementPrefix = NAME_None, const VSMatrix *followFrameIn = nullptr, VSMatrix *followFrameOut = nullptr);
 };
 
 

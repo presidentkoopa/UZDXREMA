@@ -1519,6 +1519,42 @@ public:
 	// on one transform" means, and it reads as the slider being dead.
 	FName			PlacementPrefix = NAME_None;
 
+	// RS FORK -- DRAWN INSIDE ANOTHER ACTOR'S MODEL, AT DRAW RATE.
+	//
+	// FollowBodyMode puts a model in the player's body frame, FollowHandMode in
+	// a controller's. This puts it in ANOTHER MODEL'S frame, as that model is
+	// drawn this frame: its seat, its own body or hand follow, and its live
+	// placement sliders included. A stored gun rides its holster through
+	// whatever moves the holster -- including a holster page's sliders with the
+	// menu open, which no script-side placement can follow, because script does
+	// not run behind a menu. The same primitive serves a scope on a rifle, or a
+	// hand riding the slide another hand is dragging.
+	//
+	// THE FRAME (models.cpp, ModelFollowFrame) is the parent model's drawn
+	// origin, turned by the parent's own rotation and its placement rotation.
+	// NOT the parent's scale -- a big holster must not stretch the gun in it --
+	// and NOT its MODELDEF base orientation, so swapping the parent's mesh does
+	// not turn the child. It keeps the parent's PATH units: a parent riding a
+	// controller is in the hand frame, so a child of it is too.
+	//
+	// FollowActorOfs is the child's seat in that frame, Doom-local map units
+	// (X forward, Y left, Z up) -- the axes GetModelWorldOffset answers in, so a
+	// centring correction from it goes straight in. The child's own Angles
+	// apply on top, RELATIVE to the frame.
+	//
+	// FollowActorSlot -1 (the default) follows the whole model. 0..15 follows
+	// that surface-override slot of the parent's model data as it is drawn this
+	// frame -- a script-set part transform or a live hand drive -- so a child
+	// rides a moving part. World actors only: a psprite's slots have no actor.
+	//
+	// Outranks FollowBodyMode and FollowHandMode while the parent has a model to
+	// follow; with none this frame it falls through to them. INERT UNTIL SET:
+	// null draws exactly as before. The child's own position still decides
+	// whether it is drawn at all, so keep it near the parent.
+	TObjPtr<AActor*>	FollowActor;		// GC-registered in p_mobj.cpp (IMPLEMENT_POINTER)
+	int				FollowActorSlot = -1;
+	DVector3		FollowActorOfs;
+
 	// RS FORK -- TRACE THIS ACTOR IN NEON, FROM ITS OWN SPRITE.
 	//
 	// The drawing is func_spriteoutline.fp: a Sobel edge detect over the

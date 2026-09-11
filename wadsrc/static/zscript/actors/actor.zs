@@ -425,6 +425,26 @@ class Actor : Thinker native
 	// ANIMATION, owned by script and never touched by a slider. The renderer
 	// adds them. One writer each.
 	native name PlacementPrefix;
+
+	// RS FORK -- DRAWN INSIDE ANOTHER ACTOR'S MODEL, AT DRAW RATE.
+	//
+	// The model rides FollowActor's model as it is drawn this frame -- its seat,
+	// its own follow mode and its live placement sliders included -- so it moves
+	// with the parent even while a menu has the game paused. Not the parent's
+	// scale, and not its MODELDEF base orientation.
+	//
+	// FollowActorOfs is the seat in that frame: X forward, Y left, Z up, map
+	// units -- the axes GetModelWorldOffset answers in. This actor's own angles
+	// apply on top, RELATIVE to the frame.
+	//
+	// FollowActorSlot -1 (the default) follows the whole model; 0..15 follows
+	// that surface slot of the parent as it is drawn (a set part transform or a
+	// live hand drive). Null is off. Keep the actor near the parent: its own
+	// position still decides whether it is drawn at all. See actor.h.
+	native Actor FollowActor;
+	native int FollowActorSlot;
+	native Vector3 FollowActorOfs;
+
 	// Trace this actor in neon, from its own sprite. See func_spriteoutline.fp
 	// and the note in actor.h. OutlineMode 0 is off and is the default; 1 keeps
 	// the body and adds a glowing edge, 2 erases the body and leaves the wire
