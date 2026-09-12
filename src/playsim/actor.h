@@ -1612,6 +1612,20 @@ public:
 	// compare. Read in HWSprite::Process.
 	FName			VisibleCVar;
 
+	// RS FORK -- DRAWN AT THE FADE A SETTING SAYS, not the one script last set.
+	//
+	// Names a cvar; while it exists the renderer draws this actor at that alpha,
+	// every frame it draws. Same reason as VisibleCVar above: behind a menu the
+	// playsim is frozen, so an Alpha script assigns each tic stops changing at
+	// the exact moment someone is dragging the fade slider for it. A marker, a
+	// gauge or any drawn aid can hand its fade over and have the slider answer
+	// at once.
+	//
+	// INERT UNTIL SET: NAME_None keeps the actor's own Alpha. A cvar that does
+	// not exist is ignored rather than read as zero, so a typo cannot make a
+	// thing vanish. Read in HWSprite::Process.
+	FName			AlphaCVar;
+
 // interaction info
 	FBlockNode		*BlockNode;			// links in blocks (if needed)
 	struct sector_t	*Sector;

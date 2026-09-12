@@ -472,6 +472,11 @@ class Actor : Thinker native
 	// its UI code. 'None' (the default) always draws. See actor.h.
 	native name VisibleCVar;
 
+	// Drawn at the fade this cvar says, read by the RENDERER every frame, so a
+	// fade slider answers while a menu has the playsim frozen. 'None' (the
+	// default) keeps this actor's own Alpha. See actor.h.
+	native name AlphaCVar;
+
 	// [BB] A SWEEP FRONT JUST REACHED THIS ACTOR.
 	//
 	// Called once, at the moment a travelling band's front crosses it -- not

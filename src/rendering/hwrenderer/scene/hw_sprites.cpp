@@ -1030,7 +1030,15 @@ void HWSprite::Process(HWDrawInfo *di, AActor* thing, sector_t * sector, area_t 
 		if (gate == nullptr || gate->GetGenericRep(CVAR_Float).Float <= 0.f) return;
 	}
 
-	const double alpha = thing->InterpolatedAlpha(vp.TicFrac);
+	// RS FORK -- AActor::AlphaCVar: the fade a setting says, read here every
+	// frame so a slider answers behind a paused menu. Ignored when the cvar does
+	// not exist, so a typo cannot make a thing invisible.
+	double alpha = thing->InterpolatedAlpha(vp.TicFrac);
+	if (thing->AlphaCVar != NAME_None)
+	{
+		FBaseCVar *fade = GetCVar(consoleplayer, thing->AlphaCVar.GetChars());
+		if (fade != nullptr) alpha = fade->GetGenericRep(CVAR_Float).Float;
+	}
 	if (thing->renderflags & RF_INVISIBLE || !thing->RenderStyle.IsVisible(alpha))
 	{
 		if (!(thing->flags & MF_STEALTH) || !di->isStealthVision() || thing == camera)
