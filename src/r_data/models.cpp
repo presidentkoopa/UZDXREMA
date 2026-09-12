@@ -742,7 +742,7 @@ static bool SurfaceSlotPoseForFollower(const DActorModelData *md, int s, const V
 		auto vrmode = VRMode::GetVRModeCached(true);
 		VSMatrix handMat;
 		const int dhand = (md->SurfOvDriveHand[s] == 1) ? VR_OFFHAND : VR_MAINHAND;
-		if (vrmode && vrmode->IsVR() && vrmode->GetHandTransform(dhand, &handMat))
+		if (vrmode && vrmode->IsVR() && vrmode->GetHandTransform(VR_ControllerForHand(dhand), &handMat))
 		{
 			FVector3 handModel;
 			const float proj = SurfaceHandProjection(handMat, modelToWorld, md->SurfOvDriveAxis[s], handModel);
@@ -2675,7 +2675,7 @@ static inline void RenderModelFrame(FModelRenderer *renderer, int i, const FSpri
 					// projects a hand onto a signed axis reads that mirror as a
 					// sign flip -- on one hand only, for some weapons. Silent at
 					// rest and wrong at an angle.
-					if (vrmode->GetHandTransform(dhand, &handMat))
+					if (vrmode->GetHandTransform(VR_ControllerForHand(dhand), &handMat))
 					{
 						// NO UNIT CONSTANT HERE, DELIBERATELY, AND NONE IS
 						// NEEDED. Whatever scale this model's path applied is

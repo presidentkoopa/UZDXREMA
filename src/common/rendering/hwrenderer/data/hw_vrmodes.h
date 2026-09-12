@@ -59,6 +59,18 @@ enum
 	VR_OFFHAND = 1
 };
 
+// RS FORK -- MAIN/OFF HAND IS NOT A CONTROLLER NUMBER.
+//
+// VR_MAINHAND/VR_OFFHAND say which hand a thing belongs to. VRMode::
+// GetHandTransform takes the physical CONTROLLER instead, and for a right-handed
+// player the main hand is controller 1. Passing VR_MAINHAND (0) straight in
+// returns the OFF hand's pose. That silently broke the draw-rate hand drive:
+// a slide followed the hand holding its own gun, which never moves relative to
+// that gun, so the slide and the magazine never moved at all. GetWeaponTransform
+// always did this conversion inline; it lives here now so every caller uses the
+// same rule.
+int VR_ControllerForHand(int hand);
+
 struct HWDrawInfo;
 struct HWViewpointUniforms;
 

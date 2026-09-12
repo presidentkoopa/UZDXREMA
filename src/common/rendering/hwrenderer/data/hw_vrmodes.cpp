@@ -1480,6 +1480,12 @@ void VRMode::SetUp() const
 // and right variants.
 //
 //---------------------------------------------------------------------------
+int VR_ControllerForHand(int hand)
+{
+	const bool rightHanded = vr_control_scheme < 10;
+	return (hand == VR_OFFHAND) ? 1 - rightHanded : rightHanded;
+}
+
 bool VRMode::GetWeaponTransform(VSMatrix* out, int hand_weapon, bool allowAutoReverse) const
 {
 	player_t* player = &players[consoleplayer];
@@ -1489,8 +1495,7 @@ bool VRMode::GetWeaponTransform(VSMatrix* out, int hand_weapon, bool allowAutoRe
 		AActor *weap = (hand_weapon == VR_OFFHAND) ? player->OffhandWeapon : player->ReadyWeapon;
 		autoReverse = weap == nullptr || !(weap->IntVar(NAME_WeaponFlags) & WIF_NO_AUTO_REVERSE);
 	}
-	bool rightHanded = vr_control_scheme < 10;
-	int hand = (hand_weapon == VR_OFFHAND) ? 1 - rightHanded : rightHanded;
+	int hand = VR_ControllerForHand(hand_weapon);
 	if (GetHandTransform(hand, out))
 	{
 		if (!hand && autoReverse)
