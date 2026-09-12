@@ -2315,6 +2315,8 @@ DEFINE_FIELD(AActor, OutlinePulse)
 DEFINE_FIELD(AActor, OutlineMode)
 DEFINE_FIELD(AActor, VisibleCVar)       // RS fork
 DEFINE_FIELD(AActor, AlphaCVar)         // RS fork
+DEFINE_FIELD(AActor, ScaleCVar)         // RS fork
+DEFINE_FIELD(AActor, ScaleCVarUnit)     // RS fork
 DEFINE_FIELD(AActor, UnmorphTime)
 DEFINE_FIELD(AActor, MorphFlags)
 DEFINE_FIELD(AActor, PremorphProperties)

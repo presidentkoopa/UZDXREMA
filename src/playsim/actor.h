@@ -1626,6 +1626,23 @@ public:
 	// thing vanish. Read in HWSprite::Process.
 	FName			AlphaCVar;
 
+	// RS FORK -- DRAWN AT THE SIZE A SETTING SAYS.
+	//
+	// The third of the same family (VisibleCVar, AlphaCVar): while the named cvar
+	// is above zero the renderer draws this model at that size, every frame it
+	// draws, so a size slider answers with the playsim frozen behind a menu.
+	// At zero -- or with no such cvar -- the actor's own Scale is used, so a
+	// slider set to "off" hands the size straight back to whatever set it.
+	//
+	// ScaleCVarUnit is what ONE of that cvar means, as a scale. A slider in map
+	// units of radius drives a mesh whose own radius is not one and which may sit
+	// in a frame whose units are not map units; the caller knows both and states
+	// the conversion once, rather than every reader of the cvar guessing it.
+	//
+	// INERT UNTIL SET. Read in FSpriteModelFrame::ObjectToWorldMatrix.
+	FName			ScaleCVar;
+	double			ScaleCVarUnit = 1.0;
+
 // interaction info
 	FBlockNode		*BlockNode;			// links in blocks (if needed)
 	struct sector_t	*Sector;

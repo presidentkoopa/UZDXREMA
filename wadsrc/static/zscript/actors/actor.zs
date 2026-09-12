@@ -477,6 +477,14 @@ class Actor : Thinker native
 	// default) keeps this actor's own Alpha. See actor.h.
 	native name AlphaCVar;
 
+	// Drawn at the size this cvar says, while it is above zero -- read by the
+	// RENDERER every frame, so a size slider answers behind a paused menu. At
+	// zero, or with no such cvar, this actor's own Scale is used. ScaleCVarUnit
+	// is what one of that cvar means as a scale, so a slider in map units can
+	// drive a mesh of any radius in a frame of any units. See actor.h.
+	native name ScaleCVar;
+	native double ScaleCVarUnit;
+
 	// [BB] A SWEEP FRONT JUST REACHED THIS ACTOR.
 	//
 	// Called once, at the moment a travelling band's front crosses it -- not

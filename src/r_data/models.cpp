@@ -921,7 +921,19 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(AActor * actor, float x, float y
 	VSMatrix followFrame;
 	const bool following = ModelFollowFrame(actor, ticFrac, followFrame);
 
-	return ObjectToWorldMatrix(actor->Level, DVector3(x, y, z), DRotator(DAngle::fromDeg(pitch), DAngle::fromDeg(angle), DAngle::fromDeg(roll)), actor->InterpolatedScale(ticFrac), smf_flags, tic, bodyPivotZ, actor->FollowBodyMode, actor->FollowBodyOfs, actor->FollowBodyYaw, actor->FollowHandMode, actor->FollowHandOfs, actor->PlacementPrefix,
+	// AActor::ScaleCVar -- the size a setting says, read here so it answers with
+	// the playsim frozen. Zero, or a cvar that does not exist, leaves the actor's
+	// own scale alone: a slider at "off" hands the size back to its owner rather
+	// than shrinking the model to nothing.
+	DVector2 drawScale = actor->InterpolatedScale(ticFrac);
+	if (actor->ScaleCVar != NAME_None)
+	{
+		float sv = 0.f;
+		if (GetPlacementCVar(actor->ScaleCVar.GetChars(), sv) && sv > 0.f)
+			drawScale = DVector2(sv * actor->ScaleCVarUnit, sv * actor->ScaleCVarUnit);
+	}
+
+	return ObjectToWorldMatrix(actor->Level, DVector3(x, y, z), DRotator(DAngle::fromDeg(pitch), DAngle::fromDeg(angle), DAngle::fromDeg(roll)), drawScale, smf_flags, tic, bodyPivotZ, actor->FollowBodyMode, actor->FollowBodyOfs, actor->FollowBodyYaw, actor->FollowHandMode, actor->FollowHandOfs, actor->PlacementPrefix,
 		following ? &followFrame : nullptr, followFrameOut);
 }
 
