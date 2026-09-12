@@ -1643,6 +1643,39 @@ public:
 	FName			ScaleCVar;
 	double			ScaleCVarUnit = 1.0;
 
+	// RS FORK -- A DRAWN THING THAT BREATHES, IN WALL-CLOCK TIME.
+	//
+	// PulseHz above zero fades this actor in and out that many times a second,
+	// between full alpha and PulseDepth of it (0.4 = down to 40%). The renderer
+	// does it from the WALL CLOCK, not the playsim clock, for the same reason the
+	// cvar channels above exist: behind a menu the playsim is frozen, and a thing
+	// that breathes to say "this is the one you are editing" has to keep
+	// breathing exactly then. It is also why this is not script fading Alpha.
+	//
+	// A FADE, NOT A FLASH: the curve is a sine, never a step, and never reaches
+	// zero. A hard flash is a photosensitivity problem; a breath is not.
+	//
+	// INERT UNTIL SET: PulseHz 0, the default, draws exactly as before. Read in
+	// HWSprite::Process beside AlphaCVar.
+	double			PulseHz = 0.0;
+	double			PulseDepth = 0.5;
+
+	// RS FORK -- A MODEL WITH THREE DIFFERENT SIZES.
+	//
+	// Actor::Scale has two numbers, width and height, because a sprite has two.
+	// A MODEL has three, and a volume drawn to show a REACH needs all three: a
+	// grab that is long along a barrel and narrow across it is an oval, and a
+	// sphere drawn for it is a lie about what will be caught.
+	//
+	// Multiplies the model's own scale, per axis, in the model's own space
+	// (x, y, z as the mesh is authored). A placement set's _scale_x/_y/_z does
+	// the same thing from cvars and both apply; this is the per-ACTOR one, for
+	// when every instance needs a different shape and no slider is involved.
+	//
+	// INERT UNTIL SET: zero or less on an axis means "leave that axis", so the
+	// default (0,0,0) draws exactly as before.
+	DVector3		ScaleAxes;
+
 // interaction info
 	FBlockNode		*BlockNode;			// links in blocks (if needed)
 	struct sector_t	*Sector;

@@ -31,6 +31,7 @@
 #include "actorinlines.h"
 #include "r_data/r_vanillatrans.h"
 #include "matrix.h"
+#include "i_time.h"
 #include "models.h"
 #include "vectors.h"
 #include "texturemanager.h"
@@ -1038,6 +1039,18 @@ void HWSprite::Process(HWDrawInfo *di, AActor* thing, sector_t * sector, area_t 
 	{
 		FBaseCVar *fade = GetCVar(consoleplayer, thing->AlphaCVar.GetChars());
 		if (fade != nullptr) alpha = fade->GetGenericRep(CVAR_Float).Float;
+	}
+
+	// RS FORK -- AActor::PulseHz: breathing, on the WALL clock. A menu freezes
+	// the playsim, and a mark that says "this is the one you are editing" has to
+	// keep moving exactly then, so the phase comes from I_msTime and not from any
+	// game tic. A sine between full alpha and PulseDepth of it -- a fade, never a
+	// step, because a hard flash is a photosensitivity problem.
+	if (thing->PulseHz > 0.0)
+	{
+		const double depth = clamp(thing->PulseDepth, 0.0, 1.0);
+		const double phase = (double)I_msTime() * 0.001 * thing->PulseHz * 2.0 * M_PI;
+		alpha *= depth + (1.0 - depth) * (0.5 + 0.5 * sin(phase));
 	}
 	if (thing->renderflags & RF_INVISIBLE || !thing->RenderStyle.IsVisible(alpha))
 	{

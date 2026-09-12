@@ -934,10 +934,10 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(AActor * actor, float x, float y
 	}
 
 	return ObjectToWorldMatrix(actor->Level, DVector3(x, y, z), DRotator(DAngle::fromDeg(pitch), DAngle::fromDeg(angle), DAngle::fromDeg(roll)), drawScale, smf_flags, tic, bodyPivotZ, actor->FollowBodyMode, actor->FollowBodyOfs, actor->FollowBodyYaw, actor->FollowHandMode, actor->FollowHandOfs, actor->PlacementPrefix,
-		following ? &followFrame : nullptr, followFrameOut);
+		following ? &followFrame : nullptr, followFrameOut, actor->ScaleAxes);
 }
 
-VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic, float bodyPivotZ, int followBodyMode, DVector3 followBodyOfs, double followBodyYaw, int followHandMode, DVector3 followHandOfs, FName placementPrefix, const VSMatrix *followFrameIn, VSMatrix *followFrameOut)
+VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 translation, DRotator rotation, DVector2 scaling, unsigned int flags, double tic, float bodyPivotZ, int followBodyMode, DVector3 followBodyOfs, double followBodyYaw, int followHandMode, DVector3 followHandOfs, FName placementPrefix, const VSMatrix *followFrameIn, VSMatrix *followFrameOut, DVector3 scaleAxes)
 {
 	double rotateOffset = 0;
 
@@ -1342,9 +1342,15 @@ VSMatrix FSpriteModelFrame::ObjectToWorldMatrix(FLevelLocals *Level, DVector3 tr
 	}
 
 	// 3) Scaling model.
-	objectToWorldMatrix.scale(scaleFactorX * wPlaceScale * wPlaceAxis[0],
-		scaleFactorZ * wPlaceScale * wPlaceAxis[2],
-		scaleFactorY * wPlaceScale * wPlaceAxis[1]);
+	// AActor::ScaleAxes rides with the placement set's own per-axis scale: same
+	// axes, same meaning, one from a slider and one from the actor. Zero or less
+	// on an axis means "leave it", so an unset actor multiplies by one.
+	const float axX = scaleAxes.X > 0.0 ? (float)scaleAxes.X : 1.f;
+	const float axY = scaleAxes.Y > 0.0 ? (float)scaleAxes.Y : 1.f;
+	const float axZ = scaleAxes.Z > 0.0 ? (float)scaleAxes.Z : 1.f;
+	objectToWorldMatrix.scale(scaleFactorX * wPlaceScale * wPlaceAxis[0] * axX,
+		scaleFactorZ * wPlaceScale * wPlaceAxis[2] * axZ,
+		scaleFactorY * wPlaceScale * wPlaceAxis[1] * axY);
 
 	// 4) Aplying model offsets (model offsets do not depend on model scalings).
 	//

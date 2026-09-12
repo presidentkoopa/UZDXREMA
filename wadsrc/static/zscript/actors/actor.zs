@@ -485,6 +485,20 @@ class Actor : Thinker native
 	native name ScaleCVar;
 	native double ScaleCVarUnit;
 
+	// Breathes: above zero, this actor fades in and out PulseHz times a second,
+	// down to PulseDepth of its alpha and back. Driven by the RENDERER from the
+	// wall clock, so it keeps breathing while a menu has the playsim frozen --
+	// which is when a "this is the one you are editing" mark has to be visible.
+	// A sine, never a step. Zero (the default) is off. See actor.h.
+	native double PulseHz;
+	native double PulseDepth;
+
+	// Three sizes for a model, because Scale has only two and a mesh has three.
+	// Multiplies the model's own scale per axis, in the mesh's own space; zero or
+	// less on an axis leaves that axis alone, so (0,0,0) -- the default -- draws
+	// as before. What turns a drawn reach sphere into the oval it really is.
+	native vector3 ScaleAxes;
+
 	// [BB] A SWEEP FRONT JUST REACHED THIS ACTOR.
 	//
 	// Called once, at the moment a travelling band's front crosses it -- not
