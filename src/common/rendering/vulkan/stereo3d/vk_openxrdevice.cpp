@@ -4621,14 +4621,18 @@ void VKOpenXRDeviceMode::UpdateControllerState() const
 			{
 				player->mo->HmdPos  = r_viewpoint.CenterEyePos;
 				player->mo->HmdYaw   = r_viewpoint.Angles.Yaw;
-				// PITCH AND ROLL FROM THE HEADSET, NOT THE GAMEPLAY VIEW. The head's
-				// tilt reaches the renderer through HWAngles (SetUp, above) and never
-				// touches Angles, so reading Angles gave the body a head that could
-				// not look down -- RS_VRBody's torso never faded, and anything else
-				// reading these fields saw a level head. Same sign as Angles: positive
-				// pitch is down.
-				player->mo->HmdPitch = DAngle::fromDeg(r_viewpoint.HWAngles.Pitch.Degrees());
-				player->mo->HmdRoll  = DAngle::fromDeg(r_viewpoint.HWAngles.Roll.Degrees());
+				// PITCH AND ROLL FROM THE HEADSET, NOT THE GAMEPLAY VIEW.
+				//
+				// r_viewpoint.Angles never carries the head's tilt, so these fields
+				// reported a level head and RS_VRBody's torso never faded when you
+				// looked down. Reading r_viewpoint.HWAngles instead does not fix it:
+				// updateHmdPose writes the head's tilt there, but R_SetupFrame
+				// (r_utility.cpp) rebuilds HWAngles from Angles every frame, so by the
+				// time this runs it is the gameplay pitch again. hmdorientation is the
+				// head's own, kept by updateHmdPose, in the sign HWAngles uses:
+				// positive pitch is down.
+				player->mo->HmdPitch = DAngle::fromDeg(hmdorientation[0]);
+				player->mo->HmdRoll  = DAngle::fromDeg(hmdorientation[2]);
 			}
 
 			if (!multiplayer)
