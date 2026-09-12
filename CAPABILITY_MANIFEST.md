@@ -1,5 +1,19 @@
 # What UZDXREMA adds to UZDoom 5.0.0
 
+> ## STALE — DO NOT DESIGN AGAINST THIS
+>
+> Written before the 2026-09-06 reseat, and its capability list still contains
+> the rigid-body physics module **deleted** in `268dcdaf4c` — `PhysBody`,
+> `bPhysicsBody`, `PhysicsGrab`, `p_physics.cpp/.h` are all gone. Entries
+> elsewhere in it may also predate the reseat; the file has not been re-checked
+> against source since.
+>
+> Kept for its account of how each capability is *reached* in play, which
+> nothing else records. Verify anything you intend to use.
+>
+> **For what the engine has today:** `E:\DOOMWork\EngineDocs5.0.x\` — start with
+> `WEAPON_SYSTEMS_INVENTORY.md`.
+
 UZDXREMA (shipped as **DoomXR**) is a virtual-reality fork of UZDoom. Upstream UZDoom
 contains no VR code at all -- its stereo modes are flat-screen tricks, its `VRMode` is a
 struct of eye-shift factors, and it has never had a headset, a tracked hand or a

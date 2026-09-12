@@ -1,5 +1,19 @@
 # UZDXREMA — Engine Delta
 
+> ## STALE — DO NOT DESIGN AGAINST THIS
+>
+> Written before the 2026-09-06 reseat. The rigid-body physics module it
+> documents at length **was deleted** in `268dcdaf4c`: `PhysBody`,
+> `bPhysicsBody`, `PhysicsGrab` and `p_physics.cpp/.h` do not exist in this
+> tree. Sections 2, 9, 10 and 11 are built on it.
+>
+> Kept deliberately, as the record of what was tried and why — it is the only
+> account of the physics work. It is not a description of the engine.
+>
+> **For what the engine has today:** `E:\DOOMWork\EngineDocs5.0.x\` — start with
+> `WEAPON_SYSTEMS_INVENTORY.md`, and `TRAPS.md` for the failure modes that print
+> nothing.
+
 **From the UZDoom 5.0 merge to now.** A code-sourced account of every change in this window,
 followed by an assessment of what it takes to reach the interaction targets.
 

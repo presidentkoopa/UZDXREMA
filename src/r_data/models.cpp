@@ -757,7 +757,23 @@ static bool ModelFollowFrame(AActor *child, double ticFrac, VSMatrix &out)
 
 	// The child's seat, Doom-local into the renderer's axes the same way the
 	// world translate below writes a position: (x, z, y).
-	const DVector3 &seat = child->FollowActorOfs;
+	DVector3 seat = child->FollowActorOfs;
+
+	// AActor::FollowActorOfsCVar -- the tunable half of that seat, read HERE so
+	// it answers with the playsim frozen behind a menu. Added in the frame's own
+	// units and NOT divided by the child's scale: the seat belongs to the parent
+	// frame, so resizing the child must not move it, and one cvar set can seat
+	// many children of different sizes.
+	if (child->FollowActorOfsCVar != NAME_None)
+	{
+		const char *pre = child->FollowActorOfsCVar.GetChars();
+		char nm[160];
+		float v;
+		snprintf(nm, sizeof(nm), "%s_ofs_x", pre); if (GetPlacementCVar(nm, v)) seat.X += v;
+		snprintf(nm, sizeof(nm), "%s_ofs_y", pre); if (GetPlacementCVar(nm, v)) seat.Y += v;
+		snprintf(nm, sizeof(nm), "%s_ofs_z", pre); if (GetPlacementCVar(nm, v)) seat.Z += v;
+	}
+
 	frame.translate((float)seat.X, (float)seat.Z, (float)seat.Y);
 
 	out = frame;

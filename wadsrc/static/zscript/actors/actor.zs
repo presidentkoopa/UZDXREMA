@@ -445,6 +445,13 @@ class Actor : Thinker native
 	native int FollowActorSlot;
 	native Vector3 FollowActorOfs;
 
+	// A SEAT YOU CAN TUNE WITH THE MENU OPEN. Names a placement set; the
+	// RENDERER adds <prefix>_ofs_x/_ofs_y/_ofs_z to FollowActorOfs every frame,
+	// in the follow frame's axes and units, so a slider moves this while the
+	// playsim is frozen. Not divided by this actor's scale, so one set of cvars
+	// serves children of different sizes. 'None' adds nothing. See actor.h.
+	native name FollowActorOfsCVar;
+
 	// Trace this actor in neon, from its own sprite. See func_spriteoutline.fp
 	// and the note in actor.h. OutlineMode 0 is off and is the default; 1 keeps
 	// the body and adds a glowing edge, 2 erases the body and leaves the wire

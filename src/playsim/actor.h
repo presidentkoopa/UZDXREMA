@@ -1555,6 +1555,25 @@ public:
 	int				FollowActorSlot = -1;
 	DVector3		FollowActorOfs;
 
+	// A SEAT A HUMAN CAN TUNE WHILE THE MENU IS OPEN.
+	//
+	// Names a placement set: the RENDERER adds <prefix>_ofs_x/_ofs_y/_ofs_z to
+	// FollowActorOfs every frame it draws, in the follow frame's own axes and
+	// units, so a slider moves the child WHILE THE PLAYSIM IS FROZEN -- which is
+	// exactly when a person is looking at the slider. Script cannot do this: it
+	// does not run behind a menu, so anything it seats stands still until the
+	// menu closes.
+	//
+	// NOT DIVIDED BY THE CHILD'S SCALE, unlike a placement set on the child's own
+	// model (step 4 in ObjectToWorldMatrix). The seat lives in the parent's
+	// frame, so it must not change when the child is resized -- one cvar set can
+	// then serve many children of different sizes, which is the whole point for
+	// markers and gauges.
+	//
+	// The same suffixes a MODELDEF PlacementCVars set uses, so one name reads the
+	// same wherever it appears. INERT UNTIL SET: NAME_None adds nothing.
+	FName			FollowActorOfsCVar;
+
 	// RS FORK -- TRACE THIS ACTOR IN NEON, FROM ITS OWN SPRITE.
 	//
 	// The drawing is func_spriteoutline.fp: a Sobel edge detect over the
