@@ -34,6 +34,9 @@
 #include "info.h"
 #include "playsim/p_hitscantracer.h"
 #include "utf8.h"
+#include "c_cvars.h"
+
+EXTERN_CVAR(Bool, r_visualstate_log)	// RS fork: defined in vmthunks.cpp
 
 EventManager staticEventManager;
 
@@ -1964,6 +1967,23 @@ void DStaticEventHandler::WorldThingDamaged(AActor* actor, AActor* inflictor, AA
 		e.DamageType = mod;
 		e.DamageFlags = flags;
 		e.DamageAngle = angle;
+		// RS fork: the sector and line damage events fill these, thing damage
+		// never did -- so a handler asking "was this an explosion, and where"
+		// read garbage. P_RadiusAttack passes DMG_EXPLOSION; the position is
+		// where the damage came from (the inflictor), falling back to the
+		// source and then to the victim itself.
+		e.DamageIsRadius = (flags & DMG_EXPLOSION) != 0;
+		{
+			AActor *from = inflictor ? inflictor : (source ? source : actor);
+			if (from) e.DamagePosition = from->Pos();
+		}
+		// Diagnostic (r_visualstate_log): explosions only, so a test shows the
+		// flag and position a fog/sweep handler will read.
+		if (r_visualstate_log && e.DamageIsRadius)
+			Printf("WorldThingDamaged: radius damage %d to %s at (%.0f, %.0f, %.0f) from %s\n",
+				damage, actor ? actor->GetClass()->TypeName.GetChars() : "null",
+				e.DamagePosition.X, e.DamagePosition.Y, e.DamagePosition.Z,
+				inflictor ? "inflictor" : (source ? "source" : "victim"));
 		VMValue params[2] = { (DStaticEventHandler*)this, &e };
 		VMCall(func, params, 2, nullptr, 0);
 	}

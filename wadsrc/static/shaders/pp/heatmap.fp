@@ -2,7 +2,14 @@
 layout(location=0) in vec2 TexCoord;
 layout(location=0) out vec4 FragColor;
 
+// MULTISAMPLE is defined for the HeatMS variant (hw_postprocess.h), picked when
+// gl_multisample > 1: the scene depth is then a multisampled texture, and a
+// plain sampler2D reads it as 0. Same split as volumetricbeam.fp/lineardepth.fp.
+#if defined(MULTISAMPLE)
+layout(binding=0) uniform sampler2DMS DepthTexture;
+#else
 layout(binding=0) uniform sampler2D DepthTexture;
+#endif
 
 // TWO SINGLE-CHANNEL TEXTURES RATHER THAN ONE WITH TWO CHANNELS, because the
 // CPU side already holds two plain float arrays and R32f takes them verbatim.
@@ -39,7 +46,18 @@ void main()
 {
 	if (HeatScale <= 0.0) { FragColor = vec4(0.0); return; }
 
-	float rawDepth = texture(DepthTexture, TexCoord).x;
+	// Depth is read INSIDE THE SCENE VIEWPORT: this pass draws over
+	// mSceneViewport, so TexCoord spans the 3D view only, while the depth
+	// texture covers the whole screen buffer. With a status bar or a reduced
+	// screen size raw TexCoord read the wrong texels. Same fix as the beam pass.
+	vec2 depthUV = SceneOffset + TexCoord * SceneScale;
+#if defined(MULTISAMPLE)
+	ivec2 depthSize = textureSize(DepthTexture);
+	ivec2 depthTexel = clamp(ivec2(depthUV * vec2(depthSize)), ivec2(0), depthSize - ivec2(1));
+	float rawDepth = texelFetch(DepthTexture, depthTexel, 0).x;
+#else
+	float rawDepth = texture(DepthTexture, depthUV).x;
+#endif
 
 	// Sky and void sit at the far plane and have no floor to mark. Rejecting
 	// them explicitly rather than letting the reconstruction run is not just an
@@ -50,7 +68,10 @@ void main()
 	float linearZ = 1.0 / (clamp(rawDepth, 0.0, 1.0) * LinearizeDepthA + LinearizeDepthB);
 
 	vec2 ndc = TexCoord * 2.0 - 1.0;
-	vec3 rayDir = vec3(ndc * TanHalfFov, -1.0);
+	// ProjOffset = projection (m[8], m[9]), the off-centre terms of a headset
+	// eye's asymmetric frustum; zero on a flat screen. Without it each eye put
+	// the marks in a sideways-shifted place. See volumetricbeam.fp for the maths.
+	vec3 rayDir = vec3((ndc + ProjOffset) * TanHalfFov, -1.0);
 
 	// rayDir.z is -1 here, so scaling by linearZ puts the point at the right
 	// distance ALONG THE VIEW AXIS -- which is what the depth buffer measures.

@@ -1238,19 +1238,18 @@ public:
 	//       4 sphere from origin
 	// [BB] VOLUMETRIC BEAMS -- lit air rather than lit surfaces.
 	//
-	// FOUR OF THEM, and it used to be one. A singleton meant every caller was
-	// really the same caller: the weapon wheel's laser, RS_Lance and anything
-	// else all wrote the same fields, so whoever set it last won and whoever
-	// finished first called Clear and took everyone else's light out with it.
-	// A flashlight was impossible to add for exactly that reason -- open the
-	// wheel and your torch would go dark.
+	// THIRTY-TWO SLOTS (MAX_VOL_BEAMS below), and it used to be one. A
+	// singleton meant every caller was really the same caller: the weapon
+	// wheel's laser, RS_Lance and anything else all wrote the same fields, so
+	// whoever set it last won and whoever finished first called Clear and took
+	// everyone else's light out with it. A flashlight was impossible to add for
+	// exactly that reason -- open the wheel and your torch would go dark.
 	//
-	// Four because these are not free: each is a raymarch. They cost nothing
-	// when off-screen -- the pass bounds every one with an analytic ray/cone
-	// intersection and returns black in a few dot products -- but four beams
-	// lighting the same corridor is four marches over the same pixels. Four is
-	// a torch, a wheel laser, a weapon effect and one spare, which is the set
-	// that actually comes up.
+	// (It was four for a while; see the note on the constant for why it grew.)
+	// Each LIVE beam is a raymarch. They cost nothing when off-screen -- the
+	// pass bounds every one with an analytic ray/cone intersection and returns
+	// black in a few dot products -- but N beams lighting the same corridor is
+	// N marches over the same pixels.
 	//
 	// Slot 0 is what a caller that never heard of slots gets, so every existing
 	// call site keeps working unchanged.
@@ -1289,12 +1288,37 @@ public:
 	double   VolBeamDustScale[MAX_VOL_BEAMS] = {};
 	double   VolBeamDustDrift[MAX_VOL_BEAMS] = {};
 
-	// The first live beam, or -1. The fog reads a single torch cone (it has one
-	// set of mFogBeam uniforms), so it takes the lowest live slot rather than
-	// silently taking whichever happened to be written last.
+	// RS FORK -- WHERE A VOLUMETRIC BEAM IS HELD, per slot.
+	//
+	//   0  the pos/dir script gave SetVolumetricBeam, as always
+	//   1  the MAIN hand: AttackPos, aimed along AttackAngle/AttackPitch
+	//   2  the OFF hand: OffhandPos, OffhandAngle/OffhandPitch
+	//   3  the HEAD: HmdPos/HmdYaw/HmdPitch, or the view when no headset
+	//      pose has been written (HmdPos zero)
+	//
+	// The cone version of BeamAnchor (below) and for the same reason: script
+	// publishes at 35Hz, a tracked hand moves at 90Hz+, so a hand torch posed
+	// from WorldTick holds each pose for 2-3 frames and then jumps. Anchored,
+	// hw_drawinfo.cpp (ResolveVolBeamPose) reads the pose the VR backend wrote
+	// THIS frame. Unlike a line beam's anchor it moves the DIRECTION too -- a
+	// cone has no world-fixed far end to keep.
+	//
+	// VolBeamAnchorOffset is (forward, right, up) in map units in the pose's
+	// yaw/pitch frame. Zero by default; SetVolumetricBeam resets both when it
+	// claims a slot that was not live, and ClearVolumetricBeam resets the mode.
+	int      VolBeamAnchor[MAX_VOL_BEAMS] = {};
+	DVector3 VolBeamAnchorOffset[MAX_VOL_BEAMS] = {};
+
+	// The first live beam that actually emits light, or -1. The fog reads a
+	// single torch cone (it has one set of mFogBeam uniforms), so it takes the
+	// lowest live slot rather than silently taking whichever happened to be
+	// written last. A beam at density 0 (Brightness 0, or a flicker dip) is
+	// skipped: the air pass already draws nothing for it, and the fog glow
+	// must not keep a full-strength torch the beam itself no longer has.
 	int FirstVolBeam() const
 	{
-		for (int i = 0; i < MAX_VOL_BEAMS; i++) if (VolBeamActive[i]) return i;
+		for (int i = 0; i < MAX_VOL_BEAMS; i++)
+			if (VolBeamActive[i] && VolBeamDensity[i] > 0.0) return i;
 		return -1;
 	}
 
@@ -1398,7 +1422,7 @@ public:
 	//
 	// Eight, because that is enough for a weapon beam plus a tripwire grid,
 	// and the per-fragment cost is eight cheap segment tests.
-// [BB] SHAPES. Sixteen, not eight -- eight was the beam budget, chosen for a
+// [BB] SHAPES. More than eight (16 when written, MAX_SHAPES = 128 now) -- eight was the beam budget, chosen for a
 	// system where every slot costs a segment solve per fragment. A shape is a
 	// couple of ALU behind an early reject, so the old cap was being copied
 	// rather than reasoned about.
@@ -1487,12 +1511,14 @@ public:
 	//
 	// A stamp is an EVENT with a life, where a beam is a SLOT a script owns --
 	// so unlike the beams these are not addressed by index from script. Spawn
-	// takes the oldest slot when all sixteen are busy, which is the right thing
+	// takes the oldest slot when all are busy, which is the right thing
 	// to lose in a firefight: the stamp that has been fading longest.
 	//
-	// 16 to match the shader and both GLSL viewpoint blocks. See the note on
-	// MAX_SURFACE_STAMPS in func_surfacestamps.fp.
-	static const int MAX_SURFACE_STAMPS = 16;
+	// 64 (raised from 16, which ran out in a firefight) to match the shader and
+	// both GLSL viewpoint blocks and HWViewpointUniforms::mStamp*. FIVE places
+	// say this number. See the note on MAX_SURFACE_STAMPS in
+	// func_surfacestamps.fp; a mismatch is silent corruption, not an error.
+	static const int MAX_SURFACE_STAMPS = 64;
 
 	DVector3 StampPos[MAX_SURFACE_STAMPS] = {};
 	DVector3 StampAxis[MAX_SURFACE_STAMPS] = {};   // world space; shader projects it
@@ -1556,6 +1582,171 @@ public:
 			StampLife[i] = 0;
 			StampRadius[i] = 0.0;
 		}
+	}
+
+	// [GPUPARTICLES] STATELESS GPU PARTICLES -- the renderer-agnostic half.
+	//
+	// Every other procedural effect here is a field; this is matter. A record
+	// is a particle's STARTING conditions, and the vertex shader works out where
+	// it is now from level time, so nothing is stepped per tic and nothing is
+	// re-uploaded per frame. This ring and the two members below are what a
+	// renderer rebuild keeps; GpuParticleBuffer (hw_gpuparticlebuffer.h), the
+	// shaders and the draw call are what it replaces.
+	//
+	// See "Engine docs/GPU_PARTICLES_PLAN.md".
+	//
+	// Record, SHADER space (y up), five vec4s, 80 bytes, std430 with no padding.
+	// Must match GpuParticleBuffer::RECORD_BYTES and the GpuParticle struct in
+	// vk_shader.cpp's prolog.
+	struct GpuParticleRecord
+	{
+		float a[4];   // xyz spawn position,               w birth, level seconds
+		float b[4];   // xyz initial velocity, units/s,    w life, seconds (0 = free slot)
+		float c[4];   // rgb colour 0..1,                  w intensity
+		float d[4];   // x size start, y size end (diameter), z gravity u/s^2, w drag 1/s
+		float e[4];   // x orient mode, y stretch (s), z floor height, w restitution (both phase 2)
+	};
+
+	TArray<GpuParticleRecord> GpuParticles;   // empty until the first spawn this process
+	// Every record ever written this level; the write cursor is Written % size.
+	uint64_t GpuParticleWritten = 0;
+	// Per-level serial from a global counter, NOT this object's address: a new
+	// level can be allocated where the last one was, and the renderer uses the
+	// serial to know it must re-upload the whole ring.
+	uint64_t GpuParticleSerial = 0;
+
+	static uint64_t GpuParticleNewSerial()
+	{
+		static uint64_t counter = 0;
+		return ++counter;
+	}
+
+	// Local integer hash. ALL spawn jitter comes from this -- never random(),
+	// never FRandom, never any playsim RNG stream -- so a spawn is netplay-safe
+	// by construction, even when the caller is gated on the local player.
+	static uint32_t GpuParticleHash(uint32_t x)
+	{
+		x ^= x >> 16; x *= 0x7feb352dU;
+		x ^= x >> 15; x *= 0x846ca68bU;
+		x ^= x >> 16;
+		return x;
+	}
+
+	static double GpuParticleRand(uint32_t seed, uint32_t index, uint32_t stream)
+	{
+		return GpuParticleHash(seed ^ GpuParticleHash(index * 8U + stream + 0x68bc21ebU)) / 4294967296.0;
+	}
+
+	// Sized on first use from the same latched capacity the GPU ring uses, so
+	// the two can never disagree within a run. Kept allocated across levels.
+	void EnsureGpuParticleRing()
+	{
+		if (GpuParticles.Size() > 0) return;
+		extern int GpuParticleRingCapacity();   // hw_cvars.cpp, r_gpuparticles_ringsize
+		GpuParticles.Resize((unsigned)GpuParticleRingCapacity());
+		for (auto &r : GpuParticles) r = GpuParticleRecord();
+		if (GpuParticleSerial == 0) GpuParticleSerial = GpuParticleNewSerial();
+	}
+
+	// Write `count` records at the cursor. NEVER REFUSES: the oldest records are
+	// overwritten, for FogDisturb's reason -- a refusal makes the hundredth
+	// spark in a firefight silently do nothing, at the one moment the effect
+	// exists for.
+	//
+	// Game space in, shader space out, for position AND velocity. spread is the
+	// cone's half-angle in degrees around dir. speed in map units per second,
+	// life in seconds, gravity in map units/s^2, drag in 1/s. seed 0 derives one
+	// from the cursor.
+	//
+	// Inline and on the level, like SpawnSurfaceStamp, so native gameplay code
+	// can publish these as well as script.
+	void SpawnGpuParticles(const DVector3 &pos, const DVector3 &dir, int count,
+		double spread, double speed, double speedJitter,
+		PalEntry color, double intensity, double life, double lifeJitter,
+		double sizeStart, double sizeEnd, double gravity, double drag,
+		int orient, double stretch, int seed)
+	{
+		if (count <= 0 || life <= 0.0) return;
+
+		EnsureGpuParticleRing();
+		const unsigned size = GpuParticles.Size();
+		if (size == 0) return;
+		if ((unsigned)count > size) count = (int)size;
+
+		const uint32_t s = seed != 0 ? (uint32_t)seed
+			: GpuParticleHash((uint32_t)GpuParticleWritten ^ (uint32_t)(GpuParticleWritten >> 32) ^ 0x9e3779b9U);
+
+		// Cone axis and a basis around it, in game space.
+		const double kPi = 3.14159265358979323846;
+		double ax = dir.X, ay = dir.Y, az = dir.Z;
+		const double al = sqrt(ax * ax + ay * ay + az * az);
+		if (al < 1e-9) { ax = 0.0; ay = 0.0; az = 1.0; }
+		else { ax /= al; ay /= al; az /= al; }
+
+		const double sx = (az < 0.9 && az > -0.9) ? 0.0 : 1.0;
+		const double sz = (az < 0.9 && az > -0.9) ? 1.0 : 0.0;
+		double t1x = -sz * ay, t1y = sz * ax - sx * az, t1z = sx * ay;   // seed x axis
+		const double tl = sqrt(t1x * t1x + t1y * t1y + t1z * t1z);
+		t1x /= tl; t1y /= tl; t1z /= tl;
+		const double t2x = ay * t1z - az * t1y, t2y = az * t1x - ax * t1z, t2z = ax * t1y - ay * t1x;
+
+		const double spreadDeg = spread < 0.0 ? 0.0 : (spread > 180.0 ? 180.0 : spread);
+		const double cosMax = cos(spreadDeg * kPi / 180.0);
+
+		// Birth on the tic clock, the same basis as FogDisturb. Sub-tic
+		// smoothness comes from uLevelTime including TicFrac.
+		const float birth = (float)(maptime / (double)TICRATE);
+		const float mode = (float)(orient < 0 ? 0 : (orient > 2 ? 2 : orient));
+
+		for (int i = 0; i < count; i++)
+		{
+			const double u1 = GpuParticleRand(s, (uint32_t)i, 0);
+			const double u2 = GpuParticleRand(s, (uint32_t)i, 1);
+			const double u3 = GpuParticleRand(s, (uint32_t)i, 2);
+			const double u4 = GpuParticleRand(s, (uint32_t)i, 3);
+
+			// Uniform over the spherical cap.
+			const double cosT = 1.0 - u1 * (1.0 - cosMax);
+			const double sin2 = 1.0 - cosT * cosT;
+			const double sinT = sin2 > 0.0 ? sqrt(sin2) : 0.0;
+			const double phi = u2 * 2.0 * kPi;
+			const double cp = cos(phi) * sinT, sp = sin(phi) * sinT;
+			const double vx = ax * cosT + t1x * cp + t2x * sp;
+			const double vy = ay * cosT + t1y * cp + t2y * sp;
+			const double vz = az * cosT + t1z * cp + t2z * sp;
+
+			const double spd = speed * (1.0 + speedJitter * (2.0 * u3 - 1.0));
+			double lf = life * (1.0 + lifeJitter * (2.0 * u4 - 1.0));
+			if (lf < 1e-3) lf = 1e-3;
+
+			GpuParticleRecord &r = GpuParticles[(unsigned)(GpuParticleWritten % size)];
+			// Game (x, y, z) -> shader (x, z, y): y is up in shader space.
+			r.a[0] = (float)pos.X;      r.a[1] = (float)pos.Z;      r.a[2] = (float)pos.Y;      r.a[3] = birth;
+			r.b[0] = (float)(vx * spd); r.b[1] = (float)(vz * spd); r.b[2] = (float)(vy * spd); r.b[3] = (float)lf;
+			r.c[0] = color.r / 255.f;   r.c[1] = color.g / 255.f;   r.c[2] = color.b / 255.f;   r.c[3] = (float)intensity;
+			r.d[0] = (float)sizeStart;  r.d[1] = (float)sizeEnd;    r.d[2] = (float)gravity;    r.d[3] = (float)drag;
+			r.e[0] = mode;              r.e[1] = (float)stretch;    r.e[2] = 0.f;               r.e[3] = 0.f;
+			GpuParticleWritten++;
+		}
+	}
+
+	// Zero every life and push the cursor on by a whole ring, which the
+	// renderer's sync rule reads as "upload everything" on the next scene.
+	void ClearGpuParticles()
+	{
+		const unsigned size = GpuParticles.Size();
+		if (size == 0) return;
+		for (auto &r : GpuParticles) r.b[3] = 0.f;
+		GpuParticleWritten += size;
+	}
+
+	// Map change and savegame load (ClearLevelData). A new serial, so the
+	// renderer re-uploads the emptied ring before anything draws.
+	void ResetGpuParticles()
+	{
+		for (auto &r : GpuParticles) r = GpuParticleRecord();
+		GpuParticleWritten = 0;
+		GpuParticleSerial = GpuParticleNewSerial();
 	}
 
 	static const int MAX_BEAMS = 128;
@@ -1767,7 +1958,10 @@ public:
 	double   FogDisturbStrength[MAX_FOG_DISTURB] = {};
 	double   FogDisturbSpeed[MAX_FOG_DISTURB] = {};
 	int      FogDisturbMode[MAX_FOG_DISTURB] = {};
-	int      FogDisturbNext = 0;                      // ring cursor
+	// NOT a ring cursor, whatever it was meant to be: FogDisturb takes the
+	// first free slot or the oldest, and never reads this. Only
+	// ClearFogDisturb writes it. Left in place as inert state.
+	int      FogDisturbNext = 0;
 
 	double   FogNoiseScale = 0.004;
 	double   FogNoiseDepth = 0;      // 0 = uniform density, as before
@@ -1792,6 +1986,9 @@ public:
 	// Which reference each fog edge follows, and how gently. 0 is absolute
 	// world Z; positive follows the FLOOR by that fraction, negative follows
 	// the CEILING. The magnitude is what turns a staircase into a slope.
+	// [RS fork] The edge sits at its value PLUS the full floor (ceiling)
+	// height; the magnitude blends the eye's floor toward each fragment's
+	// floor. It used to scale absolute floor Z. See FogSlabAt in main.fp.
 	double   FogFollowTop = 0;
 	double   FogFollowBottom = 0;
 
@@ -1825,6 +2022,13 @@ public:
 	PalEntry FogColor2 = 0xffb38059;
 	double   FogColor2Mix = 0;       // 0 = one colour, as before
 
+	// [RS fork] The colour an IGNITE disturbance burns (SetFogIgniteColor).
+	// Ignite used FogColor2, a colour chosen for the top of the layer and left
+	// black by most presets, so explosions added black light. Unset keeps
+	// that old behaviour. Uploaded packed in mFogWake2.w.
+	PalEntry FogIgniteColor = 0;
+	bool     FogIgniteColorSet = false;
+
 	// [BB] Texture inside the glow -- see GlowTextureAt in main.fp. The wave
 	// varies a glow's EDGE and has nothing to say once coverage saturates;
 	// these happen within the lit area instead. All off at 0.
@@ -1843,6 +2047,11 @@ public:
 	double   GlowReact = 0;      // the walls take the disturbance array too
 	double   GlowPulse = 0;      // depth of the state pulse
 	double   GlowPulseLevel = 0; // and how alarmed the room currently is
+	// [RS fork] HOW FAST THE THROB BEATS, a multiplier on the rate the level
+	// implies (main.fp: rate = 1 + 6*level). The level set depth AND speed, so
+	// a bright alarm was always a fast one and RS_GlowInTheDark's Red Alert
+	// strobed. 1 is the old rate exactly. Uploaded in mGlowTex4.w.
+	double   GlowPulseRate = 1.0;
 
 	// [BB] THE HEATMAP.
 	//
@@ -1891,6 +2100,25 @@ public:
 	double   FogSurfLen = 256;
 	double   FogSurfSpeed = 1.0;
 	double   FogSurfCross = 0.6;
+
+	// [RS fork] A TRANSIENT SLAB THAT OVERRIDES THE STANDING ONE
+	// (SetFogSlabOverride / ClearFogSlabOverride).
+	//
+	// One slab slot and two kinds of caller made them fight: RS_Fog re-pushes
+	// its standing fog every tic and replaced the weapon wheel's mist, and the
+	// wheel's ClearFogSlab wiped RS_Fog's fog when it closed. A caller whose
+	// mist is temporary sets this instead. While it is active the renderer
+	// draws it in place of the FogSlab* values above, which stay untouched, so
+	// clearing it brings the standing fog straight back. Self-contained and in
+	// absolute world Z: its own bottom, no stack, no swell, no follow. Wake and
+	// pickup are still the standing slab's. Density <= 0 clears it.
+	bool     FogSlabOverrideActive = false;
+	double   FogSlabOverrideTop = 0;
+	double   FogSlabOverrideDensity = 0;
+	double   FogSlabOverrideSoft = 24;
+	double   FogSlabOverrideScatter = 0;
+	PalEntry FogSlabOverrideColor = 0xFF3018;
+	double   FogSlabOverrideBottom = -32768;
 
 	// links to global game objects
 	TArray<DBehavior*> ActorBehaviors, ClientSideActorBehaviors;

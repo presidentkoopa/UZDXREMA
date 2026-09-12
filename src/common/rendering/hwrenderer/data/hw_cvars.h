@@ -120,3 +120,13 @@ EXTERN_CVAR(Bool, vr_scene_multithread)
 EXTERN_CVAR(Bool, gl_portals)
 
 EXTERN_CVAR(Bool, gl_strict_gldefs_errors)
+
+// [GPUPARTICLES] see hw_cvars.cpp
+EXTERN_CVAR(Bool, r_gpuparticles)
+EXTERN_CVAR(Float, r_gpuparticles_sizescale)
+EXTERN_CVAR(Float, r_gpuparticles_maxsize)
+EXTERN_CVAR(Float, r_gpuparticles_stretch)
+EXTERN_CVAR(Float, r_gpuparticles_intensity)
+EXTERN_CVAR(Int, r_gpuparticles_ringsize)
+EXTERN_CVAR(Bool, r_gpuparticles_debug)
+int GpuParticleRingCapacity();

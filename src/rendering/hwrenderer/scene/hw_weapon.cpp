@@ -58,6 +58,7 @@ EXTERN_CVAR(Int, gl_fuzztype)
 EXTERN_CVAR(Bool, gl_texture_thread)
 EXTERN_CVAR(Bool, r_drawplayersprites)
 EXTERN_CVAR(Bool, r_deathcamera)
+EXTERN_CVAR(Bool, r_visualstate_log)	// RS fork: defined in vmthunks.cpp
 EXTERN_CVAR(Bool, vr_laser_sight)
 EXTERN_CVAR(Bool, vr_laser_show_melee)
 EXTERN_CVAR(Bool, vr_laser_hide_on_wheel)
@@ -183,7 +184,23 @@ void HWDrawInfo::DrawPSprite(HUDSprite *huds, FRenderState &state)
 	// hands can be either: world actors or psprites, toggled at runtime. The
 	// same hands would darken differently depending on which mode they were in,
 	// with nothing to explain why.
-	state.SetDarknessExempt((float)Level->DarkActorExempt);
+	//
+	// And, like that path, a FULLBRIGHT frame is exempt outright (hw_sprites.cpp
+	// uses fullbright ? 1 : DarkActorExempt). Without it a muzzle flash was
+	// darkened on screen while the same flash as a world sprite was not.
+	state.SetDarknessExempt(huds->bright ? 1.f : (float)Level->DarkActorExempt);
+	// Diagnostic (r_visualstate_log): print when the psprite exemption changes
+	// while darkness is on, so a test shows a muzzle flash reaching 1.00.
+	if (r_visualstate_log && Level->DarkMode > 0)
+	{
+		static float lastExempt = -1.f;
+		const float ex = huds->bright ? 1.f : (float)Level->DarkActorExempt;
+		if (ex != lastExempt)
+		{
+			lastExempt = ex;
+			Printf("psprite darkness exempt %.2f (%s frame)\n", ex, huds->bright ? "fullbright" : "lit");
+		}
+	}
 
 	state.SetDynLight(huds->dynrgb[0], huds->dynrgb[1], huds->dynrgb[2]);
 	state.EnableBrightmap(!(huds->RenderStyle.Flags & STYLEF_ColorIsFixed));
@@ -1955,6 +1972,9 @@ bool HUDSprite::GetWeaponRenderStyle(DPSprite *psp, AActor *playermo, sector_t *
 
 	lightlevel = lighting.lightlevel;
 	cm = lighting.cm;
+	// RS fork: kept so the draw path can exempt a fullbright frame (muzzle
+	// flash) from world darkness, as the world-sprite path already does.
+	this->bright = bright;
 	if (bright) SetBright(lighting.isbelow);
 
 	return true;
@@ -2569,6 +2589,7 @@ void HWDrawInfo::PrepareTargeterSprites(double ticfrac)
 	hudsprite.mframe = nullptr;
 	hudsprite.cm.Clear();
 	hudsprite.lightlevel = 255;
+	hudsprite.bright = true;  // RS fork: targeter is drawn fullbright, so darkness exempts it
 	hudsprite.ObjectColor = 0xffffffff;
 	hudsprite.AddColor = 0;   // RS fork
 	hudsprite.alpha = 1;

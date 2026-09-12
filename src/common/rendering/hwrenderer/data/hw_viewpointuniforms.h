@@ -124,7 +124,9 @@ struct HWViewpointUniforms
 	FVector4 mFogBeamDir = { 0.f, 0.f, 1.f, 1.f };
 	FVector4 mFogBeamCol = { 1.f, 1.f, 1.f, 1.f };
 
-	// [BB] mFogSlabExtra: x wake strength, y glow pickup, zw spare.
+	// [BB] mFogSlabExtra: x wake strength, y glow pickup, z torch-beam falloff
+	// for the fog glow (written with mFogBeam* in hw_drawinfo.cpp; 0 = linear),
+	// w spare.
 	//
 	// POSITION IS LOAD-BEARING. This sits between mFogBeamCol and mSweepFill
 	// because that is where both GLSL copies put it, and a uniform block is
@@ -268,11 +270,14 @@ struct HWViewpointUniforms
 
 	// The wake, stretched along the direction of travel. A disc is a hole you
 	// carry; an ellipse is a corridor you carve.
-	//   x velocity X, y velocity Y (shader space), z stretch, w spare
+	//   x velocity X, y velocity Y (shader space), z stretch,
+	//   w fog IGNITE colour packed 1 + 0xRRGGBB, 0 = unset (SetFogIgniteColor)
 	FVector4 mFogWake2 = { 0.f, 0.f, 0.f, 0.f };
 
 	// A sweep band pushes mist ahead of it and leaves it thin behind.
-	//   x strength, y width, z thin-behind ratio, w spare
+	//   x strength, y width, z thin-behind ratio,
+	//   w live-disturbance HIGH-WATER MARK (hw_drawinfo liveDisturb) -- NOT
+	//     spare: FogSlabAt's gate, the disturbance loops and Ignite read it
 	FVector4 mFogBow = { 0.f, 64.f, 0.6f, 0.f };
 
 	// Second colour, mixed across the layer's own thickness. Cold at the
@@ -285,7 +290,8 @@ struct HWViewpointUniforms
 	//   mGlowTex   x noise amount, y noise scale, z drift, w contrast
 	//   mGlowTex2  x flow amount, y spacing, z speed, w sharpness
 	//   mGlowTex3  x cell amount, y cell scale, z pulse speed, w vein width
-	//   mGlowTex4  x disturbance reach, y state pulse depth, z state level, w -
+	//   mGlowTex4  x disturbance reach, y state pulse depth, z state level,
+	//              w pulse rate multiplier (GlowPulseRate, 1 = level's own rate)
 	FVector4 mGlowTex = { 0.f, 0.02f, 1.f, 1.f };
 	FVector4 mGlowTex2 = { 0.f, 64.f, 0.4f, 2.f };
 	FVector4 mGlowTex3 = { 0.f, 96.f, 1.2f, 0.08f };
@@ -471,13 +477,41 @@ struct HWViewpointUniforms
 	// per wall and per flat because its slots rode the draw; here the shader
 	// reads one global list and the flat and wall renderers are untouched.
 	//
-	// APPENDED LAST, and appended last in both GLSL copies in the same change.
-	// See mFogSurf above for what happens when those two stop being true.
-	FVector4 mStampPos[16];
-	FVector4 mStampCol[16];
-	FVector4 mStampArg[16];
-	FVector4 mStampMod[16];
+	// Appended at the tail in both GLSL copies in the same change. No longer the
+	// LAST members: mLevelTime and mGpuParticleParams follow, and whatever is
+	// added next goes after THEM. See mFogSurf above for what happens when the
+	// three copies stop agreeing.
+	//
+	// [STAMP] 64 slots, raised from 16. Sixteen was running out in a real
+	// firefight (every impact is a stamp, and eviction takes the oldest). The
+	// shader loop breaks at the live count in mStampParams.x, so an empty slot
+	// costs nothing per fragment; the price is 48 x 4 x 16 = 3,072 bytes of
+	// block per eye. MAX_SURFACE_STAMPS in g_levellocals.h and
+	// func_surfacestamps.fp, and both GLSL copies, say 64 in the same change.
+	FVector4 mStampPos[64];
+	FVector4 mStampCol[64];
+	FVector4 mStampArg[64];
+	FVector4 mStampMod[64];
 	FVector4 mStampParams = { 0.f, 0.f, 0.f, 0.f };
+
+	// [GPUPARTICLES] THE CLOCK AND THE PARTICLE KNOBS.
+	//
+	//   mLevelTime          x level seconds at render rate,
+	//                         (maptime + TicFrac) / TICRATE; yzw spare
+	//   mGpuParticleParams  x size scale, y max size (map units),
+	//                       z stretch scale, w intensity scale
+	//
+	// mLevelTime is general and named for what it holds: the `timer` uniform
+	// cannot stand in for it (wall-clock, scaled by the bound material, zero
+	// without one, runs while paused). Stateless GPU particles age by it; stamps,
+	// shapes and disturbances could move their aging onto it too.
+	// mGpuParticleParams carries the r_gpuparticles_* live-tuning cvars.
+	//
+	// APPENDED LAST, and appended last in both GLSL copies (gl_shader.cpp's
+	// ViewpointUBO, vk_shader.cpp's ViewpointData plus its #defines) in the same
+	// change. Anything added after this goes after THESE, in all three places.
+	FVector4 mLevelTime = { 0.f, 0.f, 0.f, 0.f };
+	FVector4 mGpuParticleParams = { 1.f, 8.f, 1.f, 1.f };
 
 	void CalcDependencies()
 	{

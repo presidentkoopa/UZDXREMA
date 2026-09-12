@@ -1215,8 +1215,13 @@ Both were silent, both survived review, and both are the kind that repeat.
 
 `volumetricbeam.fp` bounded its march with a general ray/cone intersection. That
 solve is **degenerate when the apex is at the eye** — which is the normal case,
-not an edge case: `AttackPos` *is* the eye position, and the head and chest
-mounts are within a few units of it. Apex at origin → `co`, `b` and `c` all zero
+not an edge case for a head mount, which sits within a few units of it.
+(This note once said `AttackPos` *is* the eye position. It is not: in VR it is
+the controller, and on a flat screen it is `PosAtZ(shootz)`. `AttackAngle` is
+also stored as world yaw minus 90 with `AttackPitch` negated. A hand or
+AttackPos mount is therefore NOT in the apex-at-eye case, and the general
+solve had its own bug -- it marched the gap between the double cone's two
+nappes instead of the forward nappe. Fixed 2026-09-12, FL-02.) Apex at origin → `co`, `b` and `c` all zero
 → discriminant zero → both roots zero → `tMax <= tMin` → return black. Every
 pixel, every frame, since the pass was written.
 

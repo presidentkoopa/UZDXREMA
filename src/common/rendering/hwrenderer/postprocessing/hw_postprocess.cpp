@@ -29,6 +29,7 @@
 #include "texturemanager.h"
 
 #include "stats.h"
+#include "printf.h"   // vol_beam diagnostics in PPVolumetricBeam::Render
 
 Postprocess hw_postprocess;
 
@@ -86,14 +87,44 @@ void PPVolumetricBeam::Render(PPRenderState *renderstate, int sceneWidth, int sc
 
 	renderstate->PushGroup("volumetricbeam");
 
+	// The depth read must match the depth texture's type: multisampled with
+	// MSAA on, so the MS variant (texelFetch on sampler2DMS). Logged on change
+	// so a test shows which variant ran.
+	const bool multisampled = gl_multisample > 1;
+	static int loggedMultisample = -1;
+	if (loggedMultisample != (int)multisampled)
+	{
+		loggedMultisample = (int)multisampled;
+		Printf("vol_beam: depth read uses the %s shader variant (gl_multisample %d)\n",
+			multisampled ? "MULTISAMPLE" : "single-sample", (int)gl_multisample);
+	}
+
+	// Where the 3D view sits inside the depth texture. Read here rather than at
+	// scene setup because this is the frame the pass viewport is taken from.
+	const FVector2 sceneScale = screen->SceneScale();
+	const FVector2 sceneOffset = screen->SceneOffset();
+	static FVector2 loggedScale(-1.f, -1.f), loggedOffset(-1.f, -1.f);
+	if (sceneScale.X != loggedScale.X || sceneScale.Y != loggedScale.Y ||
+		sceneOffset.X != loggedOffset.X || sceneOffset.Y != loggedOffset.Y)
+	{
+		loggedScale = sceneScale;
+		loggedOffset = sceneOffset;
+		Printf("vol_beam: depth lookup inside scene viewport, scale (%.3f, %.3f) offset (%.3f, %.3f)\n",
+			sceneScale.X, sceneScale.Y, sceneOffset.X, sceneOffset.Y);
+	}
+
 	for (int i = 0; i < count; i++)
 	{
 		if (uniforms[i].Density <= 0.0f || uniforms[i].BeamLength <= 0.0f)
 			continue;
 
+		VolumetricBeamUniforms u = uniforms[i];
+		u.SceneScale = sceneScale;
+		u.SceneOffset = sceneOffset;
+
 		renderstate->Clear();
-		renderstate->Shader = &Beam;
-		renderstate->Uniforms.Set(uniforms[i]);
+		renderstate->Shader = multisampled ? &BeamMS : &Beam;
+		renderstate->Uniforms.Set(u);
 		renderstate->Viewport = screen->mSceneViewport;
 		renderstate->SetInputSceneDepth(0);
 		renderstate->SetOutputCurrent();
@@ -114,9 +145,33 @@ void PPHeatmap::Render(PPRenderState *renderstate, int sceneWidth, int sceneHeig
 
 	renderstate->PushGroup("heatmap");
 
+	// Same depth handling as PPVolumetricBeam::Render: the MS variant when the
+	// scene depth is multisampled, and the scene viewport's place in the depth
+	// texture. One confirmation line whenever either changes.
+	const bool multisampled = gl_multisample > 1;
+	HeatmapUniforms u = uniforms;
+	u.SceneScale = screen->SceneScale();
+	u.SceneOffset = screen->SceneOffset();
+	{
+		static int loggedMultisample = -1;
+		static FVector2 loggedScale(-1.f, -1.f), loggedOffset(-1.f, -1.f);
+		if (loggedMultisample != (int)multisampled ||
+			u.SceneScale.X != loggedScale.X || u.SceneScale.Y != loggedScale.Y ||
+			u.SceneOffset.X != loggedOffset.X || u.SceneOffset.Y != loggedOffset.Y)
+		{
+			loggedMultisample = (int)multisampled;
+			loggedScale = u.SceneScale;
+			loggedOffset = u.SceneOffset;
+			Printf("heatmap: %s depth read, scene scale (%.3f, %.3f) offset (%.3f, %.3f), projection offset (%.4f, %.4f)\n",
+				multisampled ? "MULTISAMPLE" : "single-sample",
+				u.SceneScale.X, u.SceneScale.Y, u.SceneOffset.X, u.SceneOffset.Y,
+				u.ProjOffset.X, u.ProjOffset.Y);
+		}
+	}
+
 	renderstate->Clear();
-	renderstate->Shader = &Heat;
-	renderstate->Uniforms.Set(uniforms);
+	renderstate->Shader = multisampled ? &HeatMS : &Heat;
+	renderstate->Uniforms.Set(u);
 	renderstate->Viewport = screen->mSceneViewport;
 	renderstate->SetInputSceneDepth(0);
 	// LINEAR on the grid, so the cells blend into each other. Nearest would

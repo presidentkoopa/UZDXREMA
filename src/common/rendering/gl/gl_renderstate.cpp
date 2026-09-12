@@ -159,7 +159,8 @@ bool FGLRenderState::ApplyShader()
 	}
 
 	// [BB] Sweep. Unconditional, same reasoning as flat glow below: the
-	// shader gates on uSweepColor.a, so clearing has to actually reach it.
+	// shader gates on uSweepCount (there is no uSweepColor), so clearing has
+	// to actually reach it.
 	activeShader->muSweepOrigin.Set(&mStreamData.uSweepOrigin.X);
 	activeShader->muSweepCount.Set(mStreamData.uSweepCount);
 	activeShader->muSweepTrail.Set(mStreamData.uSweepTrail);

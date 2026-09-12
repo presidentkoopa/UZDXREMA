@@ -85,12 +85,20 @@ void VkDescriptorSetManager::UpdateHWBufferSet()
 
 	const size_t viewpointRange = screen->mViewpoints ? (size_t)screen->mViewpoints->GetBlockSize() * 2 : sizeof(HWViewpointUniforms);
 
+	// [GPUPARTICLES] Binding 5 is in the layout for every pipeline, so it is
+	// always written. The ring is created beside the bone buffer before Init;
+	// if it somehow is not there, the bone buffer stands in -- only the
+	// gpuparticles effect reads binding 5, and its draw is gated off unless the
+	// real ring exists (GpuParticleBuffer::IsDrawable).
+	VkHardwareDataBuffer* gpuParticleSSO = fb->GetBufferManager()->GpuParticleSSO ? fb->GetBufferManager()->GpuParticleSSO : fb->GetBufferManager()->BoneBufferSSO;
+
 	WriteDescriptors()
 		.AddBuffer(HWBufferSet.get(), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, fb->GetBufferManager()->ViewpointUBO->mBuffer.get(), 0, viewpointRange)
 		.AddBuffer(HWBufferSet.get(), 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, fb->GetBufferManager()->MatrixBuffer->UniformBuffer->mBuffer.get(), 0, sizeof(MatricesUBO))
 		.AddBuffer(HWBufferSet.get(), 2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, fb->GetBufferManager()->StreamBuffer->UniformBuffer->mBuffer.get(), 0, sizeof(StreamUBO))
 		.AddBuffer(HWBufferSet.get(), 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fb->GetBufferManager()->LightBufferSSO->mBuffer.get())
 		.AddBuffer(HWBufferSet.get(), 4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fb->GetBufferManager()->BoneBufferSSO->mBuffer.get())
+		.AddBuffer(HWBufferSet.get(), 5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, gpuParticleSSO->mBuffer.get())
 		.Execute(fb->device.get());
 }
 
@@ -264,6 +272,7 @@ void VkDescriptorSetManager::CreateHWBufferSetLayout()
 		.AddBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
 		.AddBinding(3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT)
 		.AddBinding(4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT)
+		.AddBinding(5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT)	// [GPUPARTICLES] GpuParticleSSO
 		.DebugName("VkDescriptorSetManager.HWBufferSetLayout")
 		.Create(fb->device.get());
 }
@@ -283,7 +292,8 @@ void VkDescriptorSetManager::CreateHWBufferPool()
 {
 	HWBufferDescriptorPool = DescriptorPoolBuilder()
 		.AddPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 3 * maxSets)
-		.AddPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2 * maxSets)
+		// [GPUPARTICLES] 3, not 2: lights (binding 3), bones (4), particles (5).
+		.AddPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3 * maxSets)
 		.MaxSets(maxSets)
 		.DebugName("VkDescriptorSetManager.HWBufferDescriptorPool")
 		.Create(fb->device.get());

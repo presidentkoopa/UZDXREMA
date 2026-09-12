@@ -454,6 +454,31 @@ struct VolumetricBeamUniforms
 	//   ViewToWorld 96                                     -> aligned
 	float ViewToWorld[16];   // plain floats: VSMatrix is not visible in this header
 
+	// ---- APPENDED AFTER THE MATRIX, which ends at 160 ----------------------
+	//
+	//   ProjOffset 160  SceneScale 168  SceneOffset 176                 vec2s
+	//   AxisFadeReach 184  BeamPadding0 188                   -> block ends 192
+	//
+	// The static_asserts below the struct hold these offsets; add fields after
+	// BeamPadding0 (or replace it) rather than in the middle.
+
+	// Projection m[8], m[9]: the off-centre terms of an asymmetric (headset)
+	// frustum. The ray rebuild ignored them and each eye's rays were shifted
+	// sideways. Zero on a symmetric projection. See volumetricbeam.fp.
+	FVector2 ProjOffset;
+
+	// Where the scene viewport sits inside the depth texture, so the depth
+	// lookup reads the right texels with a status bar or reduced screen size.
+	// Filled in PPVolumetricBeam::Render from screen->SceneScale()/SceneOffset(),
+	// the same pair the bloom extract and lineardepth.fp use.
+	FVector2 SceneScale;
+	FVector2 SceneOffset;
+
+	// Map units: the axis fade only applies when the beam's axis passes within
+	// this distance of the eye (vol_beam_axisfade_reach). 0 = old behaviour.
+	float AxisFadeReach;
+	float BeamPadding0;
+
 	static std::vector<UniformFieldDesc> Desc()
 	{
 		return
@@ -476,9 +501,31 @@ struct VolumetricBeamUniforms
 			{ "LinearizeDepthB", UniformType::Float, offsetof(VolumetricBeamUniforms, LinearizeDepthB) },
 			{ "AxisFade", UniformType::Float, offsetof(VolumetricBeamUniforms, AxisFade) },
 			{ "ViewToWorld", UniformType::Mat4, offsetof(VolumetricBeamUniforms, ViewToWorld) },
+			{ "ProjOffset", UniformType::Vec2, offsetof(VolumetricBeamUniforms, ProjOffset) },
+			{ "SceneScale", UniformType::Vec2, offsetof(VolumetricBeamUniforms, SceneScale) },
+			{ "SceneOffset", UniformType::Vec2, offsetof(VolumetricBeamUniforms, SceneOffset) },
+			{ "AxisFadeReach", UniformType::Float, offsetof(VolumetricBeamUniforms, AxisFadeReach) },
+			{ "BeamPadding0", UniformType::Float, offsetof(VolumetricBeamUniforms, BeamPadding0) },
 		};
 	}
 };
+
+// std140 guard rails for VolumetricBeamUniforms. UniformBlockDecl::Create emits
+// the fields in declaration order with no explicit offsets, so the C++ layout IS
+// the GLSL layout, and a mismatch is silent -- see the ViewToWorld note above,
+// which cost a day. These make the compiler count instead of a comment.
+static_assert(offsetof(VolumetricBeamUniforms, ViewToWorld) == 96,
+	"VolumetricBeamUniforms::ViewToWorld must start at 96 for std140");
+static_assert(offsetof(VolumetricBeamUniforms, ProjOffset) == 160,
+	"VolumetricBeamUniforms::ProjOffset must start at 160 for std140");
+static_assert(offsetof(VolumetricBeamUniforms, SceneScale) == 168,
+	"VolumetricBeamUniforms::SceneScale must start at 168 for std140");
+static_assert(offsetof(VolumetricBeamUniforms, SceneOffset) == 176,
+	"VolumetricBeamUniforms::SceneOffset must start at 176 for std140");
+static_assert(offsetof(VolumetricBeamUniforms, AxisFadeReach) == 184,
+	"VolumetricBeamUniforms::AxisFadeReach must start at 184 for std140");
+static_assert(sizeof(VolumetricBeamUniforms) == 192,
+	"VolumetricBeamUniforms must be 192 bytes; pad to a 16-byte row");
 
 class PPVolumetricBeam
 {
@@ -515,6 +562,10 @@ private:
 	int count = 0;
 
 	PPShader Beam = { "shaders/pp/volumetricbeam.fp", "", VolumetricBeamUniforms::Desc() };
+	// MSAA variant: with gl_multisample > 1 the scene depth is multisampled and
+	// must be read with texelFetch on a sampler2DMS, as lineardepth.fp does.
+	// Render() picks between the two. Without it the beam did not draw with MSAA.
+	PPShader BeamMS = { "shaders/pp/volumetricbeam.fp", "#define MULTISAMPLE\n", VolumetricBeamUniforms::Desc() };
 };
 
 struct HeatmapUniforms
@@ -534,6 +585,17 @@ struct HeatmapUniforms
 	float pad2;
 	float ViewToWorld[16];
 
+	// ---- APPENDED AFTER THE MATRIX (80..144), same fixes as the beam pass ----
+	//   ProjOffset 144  SceneScale 152  SceneOffset 160  heatPad3 168  heatPad4 172
+	// ProjOffset: projection m[8], m[9], the off-centre terms of a headset eye's
+	// frustum (set in HWDrawInfo::SetupHeatmap). SceneScale/SceneOffset: where
+	// the scene viewport sits in the depth texture (set in PPHeatmap::Render).
+	FVector2 ProjOffset;
+	FVector2 SceneScale;
+	FVector2 SceneOffset;
+	float heatPad3;
+	float heatPad4;
+
 	static std::vector<UniformFieldDesc> Desc()
 	{
 		return
@@ -552,9 +614,27 @@ struct HeatmapUniforms
 			{ "pad1", UniformType::Float, offsetof(HeatmapUniforms, pad1) },
 			{ "pad2", UniformType::Float, offsetof(HeatmapUniforms, pad2) },
 			{ "ViewToWorld", UniformType::Mat4, offsetof(HeatmapUniforms, ViewToWorld) },
+			{ "ProjOffset", UniformType::Vec2, offsetof(HeatmapUniforms, ProjOffset) },
+			{ "SceneScale", UniformType::Vec2, offsetof(HeatmapUniforms, SceneScale) },
+			{ "SceneOffset", UniformType::Vec2, offsetof(HeatmapUniforms, SceneOffset) },
+			{ "heatPad3", UniformType::Float, offsetof(HeatmapUniforms, heatPad3) },
+			{ "heatPad4", UniformType::Float, offsetof(HeatmapUniforms, heatPad4) },
 		};
 	}
 };
+
+// std140 guard rails for HeatmapUniforms: the C++ layout IS the GLSL layout
+// (UniformBlockDecl::Create, declaration order, no explicit offsets).
+static_assert(offsetof(HeatmapUniforms, ViewToWorld) == 80,
+	"HeatmapUniforms::ViewToWorld must start at 80 for std140");
+static_assert(offsetof(HeatmapUniforms, ProjOffset) == 144,
+	"HeatmapUniforms::ProjOffset must start at 144 for std140");
+static_assert(offsetof(HeatmapUniforms, SceneScale) == 152,
+	"HeatmapUniforms::SceneScale must start at 152 for std140");
+static_assert(offsetof(HeatmapUniforms, SceneOffset) == 160,
+	"HeatmapUniforms::SceneOffset must start at 160 for std140");
+static_assert(sizeof(HeatmapUniforms) == 176,
+	"HeatmapUniforms must be 176 bytes; pad to a 16-byte row");
 
 // [BB] Where the fighting happened, painted on the floor.
 //
@@ -592,6 +672,9 @@ private:
 	PPTexture Height;
 
 	PPShader Heat = { "shaders/pp/heatmap.fp", "", HeatmapUniforms::Desc() };
+	// MSAA variant (texelFetch on sampler2DMS), picked in Render() when
+	// gl_multisample > 1 -- a plain sampler2D reads multisampled depth as 0.
+	PPShader HeatMS = { "shaders/pp/heatmap.fp", "#define MULTISAMPLE\n", HeatmapUniforms::Desc() };
 };
 
 

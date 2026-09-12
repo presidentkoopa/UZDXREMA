@@ -65,6 +65,11 @@ struct HUDSprite
 	int lightlevel;
 	PalEntry ObjectColor;
 	PalEntry AddColor;   // RS fork: per-psprite additive glow
+	// RS fork: this frame is fullbright (isBright), recorded where SetBright
+	// runs so the draw path can exempt it from world darkness exactly as
+	// HWSprite does for a fullbright world sprite. lightlevel 255 alone cannot
+	// say it -- a brightly lit sector gives the same number.
+	bool bright = false;
 
 	FRenderStyle RenderStyle;
 	float alpha;

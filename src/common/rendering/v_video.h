@@ -50,6 +50,7 @@ class FGameTexture;
 class FModel;
 class FRenderState;
 class BoneBuffer;
+class GpuParticleBuffer;
 
 enum EHWCaps
 {
@@ -149,6 +150,10 @@ public:
 	HWViewpointBuffer *mViewpoints = nullptr;	// Viewpoint render data.
 	FLightBuffer *mLights = nullptr;			// Dynamic lights
 	BoneBuffer* mBones = nullptr;				// Model bones
+	// [GPUPARTICLES] Stateless particle ring + quad buffer. Vulkan only --
+	// created beside mBones in VulkanRenderDevice::InitializeState and null on
+	// GL/GLES, so every user must null-check. See hw_gpuparticlebuffer.h.
+	GpuParticleBuffer* mGpuParticles = nullptr;
 	IShadowMap mShadowMap;
 
 	int mGameScreenWidth = 0;

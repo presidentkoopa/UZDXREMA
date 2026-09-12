@@ -34,6 +34,7 @@
 #include "c_dispatch.h"
 #include "flatvertices.h"
 #include "hw_bonebuffer.h"
+#include "hw_gpuparticlebuffer.h"	// [GPUPARTICLES]
 #include "hw_clock.h"
 #include "hw_lightbuffer.h"
 #include "hw_skydome.h"
@@ -354,6 +355,9 @@ VulkanRenderDevice::~VulkanRenderDevice()
 	delete mViewpoints;
 	delete mLights;
 	delete mBones;
+	// [GPUPARTICLES] beside the bones, which it is created beside
+	delete mGpuParticles;
+	mGpuParticles = nullptr;
 	mShadowMap.Reset();
 
 	if (mDescriptorSetManager)
@@ -417,6 +421,10 @@ void VulkanRenderDevice::InitializeState()
 	mViewpoints = new HWViewpointBuffer;
 	mLights = new FLightBuffer();
 	mBones = new BoneBuffer();
+	// [GPUPARTICLES] Vulkan only (OpenXR only exists here, and useSSBO() is
+	// unconditionally true). Must exist before mDescriptorSetManager->Init()
+	// below, which writes it to set 1 binding 5.
+	mGpuParticles = new GpuParticleBuffer();
 
 	mShaderManager.reset(new VkShaderManager(this));
 	mDescriptorSetManager->Init();

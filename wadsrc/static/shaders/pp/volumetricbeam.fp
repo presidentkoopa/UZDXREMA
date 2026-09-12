@@ -2,7 +2,16 @@
 layout(location=0) in vec2 TexCoord;
 layout(location=0) out vec4 FragColor;
 
+// MULTISAMPLE is defined for the BeamMS variant (hw_postprocess.h), picked when
+// gl_multisample > 1. With MSAA on, the scene depth is a multisampled texture,
+// and reading that through a plain sampler2D reads as 0 -- which linearises to
+// znear, pins the march to a few units and the beam never draws. Same split
+// lineardepth.fp has always had, for the same reason.
+#if defined(MULTISAMPLE)
+layout(binding=0) uniform sampler2DMS DepthTexture;
+#else
 layout(binding=0) uniform sampler2D DepthTexture;
+#endif
 
 // ============================================================================
 // [BB] Volumetric flashlight beam.
@@ -58,7 +67,18 @@ void main()
 {
 	// View-space ray for this pixel. Origin is the eye, at (0,0,0).
 	vec2 ndc = TexCoord * 2.0 - 1.0;
-	vec3 rayDir = normalize(vec3(ndc * TanHalfFov, -1.0));
+
+	// OFF-CENTRE FRUSTUMS. A headset eye's projection is asymmetric: m[8] and
+	// m[9] are non-zero (vk_openxrdevice.cpp builds them from tanLeft/Right/
+	// Up/Down), and they are opposite in the two eyes. Solving the projection
+	// for a view point at z = -1 gives ndc = m0*x - m8, so x = (ndc + m8) / m0.
+	// Rebuilding with ndc * TanHalfFov alone shifted each eye's rays sideways
+	// in opposite directions -- the cone sat at the wrong stereo depth and did
+	// not line up with the depth buffer it clips against. ProjOffset is
+	// (m[8], m[9]), zero on a symmetric flat-screen projection, so the flat
+	// case is unchanged. Holds for a Y-flipped matrix too: the flip negates
+	// m[5] and m[9] together.
+	vec3 rayDir = normalize(vec3((ndc + ProjOffset) * TanHalfFov, -1.0));
 
 	// Scene depth for this pixel: how far along the ray the world is. The
 	// beam must stop there, or it would shine through walls.
@@ -69,14 +89,29 @@ void main()
 	// capped tMax at under one unit and the integral covered nothing. Convert
 	// it the way lineardepth.fp does, then turn the along-Z distance into a
 	// distance along THIS ray, which is what tMin/tMax are measured in.
-	float rawDepth = texture(DepthTexture, TexCoord).x;
+	//
+	// SAMPLED INSIDE THE SCENE VIEWPORT. This pass draws over mSceneViewport,
+	// so TexCoord runs 0..1 across the 3D view only, while the depth texture
+	// covers the whole screen buffer. With a status bar or a reduced screen
+	// size the two differ, and reading depth at raw TexCoord took it from the
+	// wrong texels: the beam cut off early against walls or shone through them.
+	// Same Offset + TexCoord * Scale that lineardepth.fp and the bloom extract
+	// use; SceneScale/SceneOffset are (1,1)/(0,0) when the view fills the screen.
+	vec2 depthUV = SceneOffset + TexCoord * SceneScale;
+#if defined(MULTISAMPLE)
+	// Sample 0, as the SSAO linear-depth pass does with SampleIndex 0. A
+	// multisampled texture has no filtering; fetch the texel directly.
+	ivec2 depthSize = textureSize(DepthTexture);
+	ivec2 depthTexel = clamp(ivec2(depthUV * vec2(depthSize)), ivec2(0), depthSize - ivec2(1));
+	float rawDepth = texelFetch(DepthTexture, depthTexel, 0).x;
+#else
+	float rawDepth = texture(DepthTexture, depthUV).x;
+#endif
 	float linearZ = 1.0 / (clamp(rawDepth, 0.0, 1.0) * LinearizeDepthA + LinearizeDepthB);
 	float sceneDepth = linearZ / max(-rayDir.z, 1e-4);
 
 	// --- analytic ray/cone intersection --------------------------------
-	// Bounds the march to the segment that can possibly be lit. Solves the
-	// standard infinite-cone quadratic, then clamps to the cone's actual
-	// length and to the scene depth.
+	// Bounds the march to the segment that can possibly be lit.
 	vec3 co = -BeamPos;                  // eye relative to the cone apex
 	float cosT = CosOuter;
 	float cos2 = cosT * cosT;
@@ -84,58 +119,143 @@ void main()
 	float dv = dot(rayDir, BeamDir);
 	float cv = dot(co, BeamDir);
 
+	// f(t) = a t^2 + b t + c is >= 0 where the ray point is inside the
+	// INFINITE DOUBLE cone -- the lit forward nappe AND its mirror image
+	// behind the apex. h(t) = dv t + cv is the point's distance along the beam
+	// axis, positive only on the forward nappe. See the note below.
 	float a = dv * dv - cos2;
 	float b = 2.0 * (dv * cv - dot(rayDir, co) * cos2);
 	float c = cv * cv - dot(co, co) * cos2;
 
+	// THE CONE'S LENGTH IS MEASURED FROM THE APEX, not from the eye, so bound
+	// the march by the sphere of radius BeamLength around the apex rather than
+	// by t <= BeamLength. With the apex at the eye the two are the same; with
+	// the apex on a hand, or behind the camera, only the sphere is right.
+	float rb = dot(rayDir, BeamPos);
+	float sphereDisc = rb * rb - dot(BeamPos, BeamPos) + BeamLength * BeamLength;
+	if (sphereDisc <= 0.0) { FragColor = vec4(0.0); return; }
+	float sphereSq = sqrt(sphereDisc);
+	float reachFar = rb + sphereSq;
+	if (reachFar <= 0.0) { FragColor = vec4(0.0); return; }
+	float reachNear = max(rb - sphereSq, 0.0);
+
+	const float FAR_T = 1.0e30;
 	float tMin = 0.0;
 	float tMax = 0.0;
 
 	// ---------------------------------------------------------------------
-	// THE APEX IS USUALLY AT THE EYE, AND THAT KILLED THE WHOLE PASS.
+	// THE APEX AT THE EYE NEEDS NO QUADRATIC.
 	//
-	// A torch held at head height, or on the head, or read from AttackPos --
-	// which IS the eye position -- puts the cone's apex within a hair of the
-	// view origin. Then co is zero, so b and c are zero, so the discriminant
-	// is zero, so both roots are zero, so tMin == tMax == 0, so the guard
-	// below returned black. For every pixel. On every frame. The beam has
-	// never drawn a single lit fragment in this configuration, which is the
-	// default one.
+	// A torch on the head puts the cone's apex within a hair of the view
+	// origin. Then co is zero, so b and c are zero, both roots are zero, and a
+	// general solve returns an empty segment -- which is how this pass once
+	// drew black for every pixel in that configuration. With the apex at the
+	// eye the ray either lies inside the cone or it does not -- one dot
+	// product -- and if it does, the lit stretch is the whole ray out to
+	// whatever stops it.
 	//
-	// It is also the case that needs no quadratic at all. With the apex at
-	// the eye the ray either lies inside the cone or it does not -- one dot
-	// product -- and if it does, the lit stretch is the whole ray from the
-	// eye to whatever stops it. Solving that as a general ray/cone problem
-	// was asking a degenerate question a robust way instead of asking an
-	// easy question at all.
+	// (This used to say AttackPos IS the eye. It is not. In VR AttackPos is
+	// the CONTROLLER, written per frame in hw_vrmodes.cpp / vk_openxrdevice.cpp;
+	// on a flat screen it is PosAtZ(shootz), the shooting height, not viewz.
+	// So a torch read from AttackPos is usually NOT in this branch -- it is in
+	// the general one below, which is why that one has to be right.)
 	// ---------------------------------------------------------------------
 	if (dot(BeamPos, BeamPos) < 1.0)
 	{
 		if (dv <= cosT) { FragColor = vec4(0.0); return; }
 		tMin = 0.0;
-		tMax = min(BeamLength, sceneDepth);
-	}
-	else if (abs(a) < 1e-6)
-	{
-		// Ray parallel to the cone surface: one root, or none worth having.
-		if (abs(b) < 1e-6) { FragColor = vec4(0.0); return; }
-		float t = -c / b;
-		tMin = max(t, 0.0);
-		tMax = BeamLength;
+		tMax = FAR_T;
 	}
 	else
 	{
-		float disc = b * b - 4.0 * a * c;
-		if (disc < 0.0) { FragColor = vec4(0.0); return; }
-		float sq = sqrt(disc);
-		float t0 = (-b - sq) / (2.0 * a);
-		float t1 = (-b + sq) / (2.0 * a);
-		tMin = min(t0, t1);
-		tMax = max(t0, t1);
+		// -----------------------------------------------------------------
+		// ONLY THE FORWARD NAPPE IS LIT, AND THE LIT PART IS ONE INTERVAL.
+		//
+		// The quadratic solves the DOUBLE cone. The old code took [t0, t1]
+		// between its two roots, which is right only when the ray crosses the
+		// forward nappe twice (a < 0). When the ray looks along the beam
+		// (a > 0), one root is on the mirror nappe BEHIND the apex, and the
+		// stretch between the roots is the gap outside the cone. Measured with
+		// the apex 4 units below the eye, beam forward: the shader delivered
+		// 1.67 of 82.87 units of light; a VR hand torch got about 6%. The far
+		// body of the beam -- the part you look along -- was black.
+		//
+		// The forward nappe (half-angle < 90, clamped in SetVolumetricBeam) is
+		// a CONVEX set, so a ray meets it in exactly one interval, and that
+		// interval is fixed by three facts:
+		//   startsInside  the eye itself is inside the forward nappe
+		//   endsInside    the ray's direction is within the cone angle, so far
+		//                 enough out it is inside for good
+		//   crossings     roots with t > 0 whose point has h(t) > 0; roots on
+		//                 the mirror nappe are discarded
+		// in -> in    [0, far)            in -> out   [0, first crossing]
+		// out -> in   [last crossing, far) out -> out [first, second] or nothing
+		// -----------------------------------------------------------------
+		bool startsInside = (cv > 0.0) && (c >= 0.0);
+		bool endsInside = dv > cosT;
+
+		float cross0 = 0.0;
+		float cross1 = 0.0;
+		int crossings = 0;
+
+		if (abs(a) < 1e-6)
+		{
+			// Ray parallel to the cone surface: f is linear, one root at most.
+			if (abs(b) > 1e-6)
+			{
+				float t = -c / b;
+				if (t > 0.0 && dv * t + cv > 0.0) { cross0 = t; crossings = 1; }
+			}
+		}
+		else
+		{
+			float disc = b * b - 4.0 * a * c;
+			if (disc >= 0.0)
+			{
+				// Numerically stable roots: the textbook (-b +- sq) / 2a loses
+				// the small root to cancellation when b dominates, which is
+				// exactly the grazing case at the edge of the cone.
+				float sq = sqrt(disc);
+				float q = -0.5 * (b + (b >= 0.0 ? sq : -sq));
+				float r0 = q / a;
+				float r1 = (abs(q) > 1e-12) ? c / q : r0;
+				float lo = min(r0, r1);
+				float hi = max(r0, r1);
+				if (lo > 0.0 && dv * lo + cv > 0.0) { cross0 = lo; crossings = 1; }
+				if (hi > 0.0 && dv * hi + cv > 0.0)
+				{
+					if (crossings == 0) cross0 = hi; else cross1 = hi;
+					crossings++;
+				}
+			}
+		}
+
+		if (startsInside && endsInside)
+		{
+			tMin = 0.0;
+			tMax = FAR_T;
+		}
+		else if (startsInside)
+		{
+			tMin = 0.0;
+			tMax = (crossings > 0) ? cross0 : FAR_T;
+		}
+		else if (endsInside)
+		{
+			// Convexity says one crossing; take the last if rounding found two.
+			tMin = (crossings > 1) ? cross1 : ((crossings > 0) ? cross0 : 0.0);
+			tMax = FAR_T;
+		}
+		else
+		{
+			if (crossings < 2) { FragColor = vec4(0.0); return; }
+			tMin = cross0;
+			tMax = cross1;
+		}
 	}
 
-	tMin = max(tMin, 0.0);
-	tMax = min(tMax, min(BeamLength, sceneDepth));
+	tMin = max(tMin, reachNear);
+	tMax = min(tMax, min(reachFar, sceneDepth));
 	if (tMax <= tMin) { FragColor = vec4(0.0); return; }
 
 	// --- march ----------------------------------------------------------
@@ -248,10 +368,17 @@ void main()
 	// crosshair carries no information about the beam, because the beam is
 	// exactly where you are already looking.
 	//
-	// And on a flat screen it is the ONLY way you ever see it. The default
-	// mainhand mount reads AttackPos/AttackAngle, which track the view, so
-	// the cone is permanently aligned with the camera. What you get is not a
-	// beam, it is a permanent bloom-fed halo over the centre of the frame.
+	// And on a flat screen that is most of how you see it. A torch mounted
+	// on the view -- or on AttackPos/AttackAngle, which on a flat screen come
+	// from the view angles at shooting height (hw_vrmodes.cpp) -- keeps its
+	// cone aligned with the camera. What you get is not a beam, it is a
+	// permanent bloom-fed halo over the centre of the frame.
+	//
+	// Note for mounts: in VR AttackPos/AttackAngle are the CONTROLLER, not
+	// the view, and the angles are stored offset -- AttackAngle is world yaw
+	// minus 90 and AttackPitch is negated (g_game.cpp, hw_vrmodes.cpp). Use
+	// yaw = AttackAngle + 90 and Doom pitch = -AttackPitch, or anchor the beam
+	// with SetVolumetricBeamAnchor and let the renderer do it.
 	//
 	// So fade by how well the view axis agrees with the beam axis. In view
 	// space the view direction is exactly (0,0,-1), which makes the whole
@@ -262,10 +389,27 @@ void main()
 	// This is a dial rather than a rule because in VR the hands are tracked
 	// separately and a hand torch pointed forward is a real thing somebody
 	// might want to see.
+	//
+	// ONLY WHEN THE BEAM'S AXIS ACTUALLY PASSES NEAR THE EYE. (FL-09) The fade
+	// used to depend on direction alone, so a VR hand torch pointed where you
+	// look kept 15% of its light even though its apex is on a hand a couple
+	// of feet away and you see the cone from beside, not end-on. The disc only
+	// happens when the axis line runs through (or very near) the eye, so the
+	// fade is scaled by that distance: full within a quarter of AxisFadeReach,
+	// gone by AxisFadeReach (vol_beam_axisfade_reach, map units). A head or
+	// view mount, a few units off, keeps the whole fade; a hand does not.
+	// AxisFadeReach 0 restores the old direction-only fade.
 	if (AxisFade > 0.0)
 	{
 		float align = clamp(-BeamDir.z, 0.0, 1.0);
-		accum *= 1.0 - AxisFade * align * align;
+		float nearAxis = 1.0;
+		if (AxisFadeReach > 0.0)
+		{
+			// Eye (the view-space origin) to the beam's axis line.
+			vec3 axisToEye = BeamPos - BeamDir * dot(BeamPos, BeamDir);
+			nearAxis = 1.0 - smoothstep(AxisFadeReach * 0.25, AxisFadeReach, length(axisToEye));
+		}
+		accum *= 1.0 - AxisFade * align * align * nearAxis;
 	}
 
 	FragColor = vec4(BeamColor * accum, 1.0);

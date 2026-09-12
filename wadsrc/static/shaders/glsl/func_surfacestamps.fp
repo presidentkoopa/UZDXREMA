@@ -130,8 +130,12 @@
 // number, exactly as MAX_BEAMS' 128 does: here, HWViewpointUniforms::mStamp*,
 // and the viewpoint block declared in gl_shader.cpp and vk_shader.cpp. A
 // uniform block is matched by offset, so a mismatch is silent corruption rather
-// than an error.
-#define MAX_SURFACE_STAMPS 16
+// than an error. (Five places counting FLevelLocals::MAX_SURFACE_STAMPS, which
+// sizes what gets written into those arrays.)
+//
+// 64, raised from 16: the loop below breaks at the live count, so the raise
+// costs nothing per fragment when the slots are empty.
+#define MAX_SURFACE_STAMPS 64
 
 // ------------------------------------------------------------- texture ids
 //

@@ -29,6 +29,8 @@
 #include "engineerrors.h"
 #include "version.h"
 #include "cmdlib.h"
+#include "printf.h"
+#include "hw_gpuparticlebuffer.h"	// [GPUPARTICLES] ShaderReady / ShaderFailed
 
 ShaderIncludeResult VkShaderManager::OnInclude(FString headerName, FString includerName, size_t depth)
 {
@@ -119,8 +121,32 @@ bool VkShaderManager::CompileNextShader()
 		// Effect shaders
 
 		VkShaderProgram prog;
-		prog.vert = LoadVertShader(effectshaders[i].ShaderName, effectshaders[i].vp, effectshaders[i].defines);
-		prog.frag = LoadFragShader(effectshaders[i].ShaderName, effectshaders[i].fp1, effectshaders[i].fp2, effectshaders[i].fp3, effectshaders[i].defines, true, compilePass == GBUFFER_PASS);
+		if (i == EFF_GPUPARTICLES)
+		{
+			// [GPUPARTICLES] The one effect whose compile failure must not take
+			// Vulkan startup down with it: it is new, optional, and nothing else
+			// depends on it. A failure is logged, the program is left empty (so
+			// GetEffect returns null for it), and GpuParticleBuffer::ShaderFailed
+			// below keeps the draw -- and therefore the pipeline that would
+			// dereference that null -- from ever being requested.
+			try
+			{
+				prog.vert = LoadVertShader(effectshaders[i].ShaderName, effectshaders[i].vp, effectshaders[i].defines);
+				prog.frag = LoadFragShader(effectshaders[i].ShaderName, effectshaders[i].fp1, effectshaders[i].fp2, effectshaders[i].fp3, effectshaders[i].defines, true, compilePass == GBUFFER_PASS);
+			}
+			catch (const std::exception &err)
+			{
+				Printf(TEXTCOLOR_RED "GpuParticles: effect shader failed to compile (%s pass) -- particles disabled:\n%s\n",
+					compilePass == GBUFFER_PASS ? "gbuffer" : "normal", err.what());
+				prog.vert.reset();
+				prog.frag.reset();
+			}
+		}
+		else
+		{
+			prog.vert = LoadVertShader(effectshaders[i].ShaderName, effectshaders[i].vp, effectshaders[i].defines);
+			prog.frag = LoadFragShader(effectshaders[i].ShaderName, effectshaders[i].fp1, effectshaders[i].fp2, effectshaders[i].fp3, effectshaders[i].defines, true, compilePass == GBUFFER_PASS);
+		}
 		mEffectShaders[compilePass].push_back(std::move(prog));
 
 		compileIndex++;
@@ -131,6 +157,22 @@ bool VkShaderManager::CompileNextShader()
 			if (compilePass == MAX_PASS_TYPES)
 			{
 				compileIndex = -1; // we're done.
+
+				// [GPUPARTICLES] Every pass is compiled now. The draw is allowed
+				// only if the effect exists for all of them, because the pass a
+				// pipeline is built for depends on the render target at draw time.
+				if (fb->mGpuParticles != nullptr)
+				{
+					bool ok = true;
+					for (int pass = 0; pass < MAX_PASS_TYPES; pass++)
+					{
+						if ((int)mEffectShaders[pass].size() <= EFF_GPUPARTICLES || !mEffectShaders[pass][EFF_GPUPARTICLES].vert || !mEffectShaders[pass][EFF_GPUPARTICLES].frag)
+							ok = false;
+					}
+					fb->mGpuParticles->ShaderFailed = !ok;
+					fb->mGpuParticles->ShaderReady = ok;
+					Printf("GpuParticles: effect shader %s for %d passes\n", ok ? "compiled" : "NOT available", (int)MAX_PASS_TYPES);
+				}
 				return true;
 			}
 			compileState = 0;
@@ -304,11 +346,19 @@ static const char *shaderBindings = R"(
 
 		// [STAMP] Surface stamps. Appended last, matching
 		// HWViewpointUniforms::mStamp* by offset.
-		vec4 uSurfaceStampPos[16];
-		vec4 uSurfaceStampCol[16];
-		vec4 uSurfaceStampArg[16];
-		vec4 uSurfaceStampMod[16];
+		// 64 -- must equal MAX_SURFACE_STAMPS (func_surfacestamps.fp).
+		vec4 uSurfaceStampPos[64];
+		vec4 uSurfaceStampCol[64];
+		vec4 uSurfaceStampArg[64];
+		vec4 uSurfaceStampMod[64];
 		vec4 uSurfaceStampParams;
+
+		// [GPUPARTICLES] APPENDED LAST, matching HWViewpointUniforms by
+		// offset. uLevelTime.x is level seconds at render rate (maptime +
+		// TicFrac) / TICRATE -- the clock gpuparticles.vp ages records by.
+		// uGpuParticleParams: x size scale, y max size, z stretch, w intensity.
+		vec4 uLevelTime;
+		vec4 uGpuParticleParams;
 	};
 
 	layout(set = 1, binding = 0, std140) uniform readonly ViewpointUBO {
@@ -391,6 +441,9 @@ static const char *shaderBindings = R"(
 	#define uSurfaceStampArg viewpoints[HW_VIEWPOINT_INDEX].uSurfaceStampArg
 	#define uSurfaceStampMod viewpoints[HW_VIEWPOINT_INDEX].uSurfaceStampMod
 	#define uSurfaceStampParams viewpoints[HW_VIEWPOINT_INDEX].uSurfaceStampParams
+	// [GPUPARTICLES] the fourth list -- every ViewpointData member needs one
+	#define uLevelTime viewpoints[HW_VIEWPOINT_INDEX].uLevelTime
+	#define uGpuParticleParams viewpoints[HW_VIEWPOINT_INDEX].uGpuParticleParams
 
 	layout(set = 1, binding = 1, std140) uniform readonly MatricesUBO {
 		mat4 ModelMatrix;
@@ -487,6 +540,16 @@ static const char *shaderBindings = R"(
 	layout(set = 1, binding = 4, std430) buffer readonly BoneBufferSSO
 	{
 	    mat4 bones[];
+	};
+
+	// [GPUPARTICLES] The stateless particle ring (hw_gpuparticlebuffer.h).
+	// Five vec4s, 80 bytes, std430 with no padding -- must match
+	// FLevelLocals::GpuParticleRecord. Declared for every shader like the
+	// bones; only gpuparticles.vp reads it, so the layout entry is vertex-only.
+	struct GpuParticle { vec4 a; vec4 b; vec4 c; vec4 d; vec4 e; };
+	layout(set = 1, binding = 5, std430) buffer readonly GpuParticleSSO
+	{
+	    GpuParticle gpuParticles[];
 	};
 
 	// textures

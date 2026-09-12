@@ -1120,10 +1120,33 @@ struct LevelLocals native
 	// flashes. A laser SIGHT is a line and belongs in the separate 128-slot beam
 	// system (SetBeam / SetBeamAnchor above), which is cheaper and can be
 	// anchored to a hand.
-	native void SetVolumetricBeam(Vector3 pos, Vector3 dir, color col, double inner, double outer, double length, double density, double falloff, double dust = 0, double dustScale = 0.04, double dustDrift = 0, int slot = 0);
+	//
+	// CLEARSCOPE because this is look-only render state, the same reason the
+	// glow setters in mapdata.zs are: the playsim is frozen while a menu is
+	// open, so a mod that can only publish the beam from play scope cannot show
+	// a slider's change until the menu closes. From UiTick it can.
+	//
+	// A slot outside 0..31 is refused (logged), not moved to slot 0. Angles are
+	// clamped to outer 0.1..89, inner at most outer - 0.1; length >= 1,
+	// falloff >= 0.01 (logged when a clamp starts applying).
+	native clearscope void SetVolumetricBeam(Vector3 pos, Vector3 dir, color col, double inner, double outer, double length, double density, double falloff, double dust = 0, double dustScale = 0.04, double dustDrift = 0, int slot = 0);
 	// One slot, or every slot with -1. Defaults to 0 rather than to all of them:
 	// a caller is turning off the beam it turned on, not everyone else's.
-	native void ClearVolumetricBeam(int slot = 0);
+	// Clearing also releases the slot's anchor.
+	native clearscope void ClearVolumetricBeam(int slot = 0);
+	// WHERE THE CONE IS HELD, resolved every FRAME by the renderer rather than
+	// every tic by script -- a hand moves at 90Hz+, script runs at 35, and a
+	// torch posed from WorldTick judders behind the controller.
+	//   mode 0  none: the pos/dir given to SetVolumetricBeam (default)
+	//        1  main hand (AttackPos / AttackAngle / AttackPitch)
+	//        2  off hand  (OffhandPos / OffhandAngle / OffhandPitch)
+	//        3  head      (HmdPos / HmdYaw / HmdPitch; the view when no headset)
+	// Anchored, BOTH origin and direction come from the pose: the cone points
+	// along it, starting at offset = (forward, right, up) map units in that
+	// pose's yaw/pitch frame (no roll). Poses are the console player's.
+	// Call it AFTER SetVolumetricBeam each time you claim the slot: a slot that
+	// was not live forgets its anchor when SetVolumetricBeam takes it.
+	native clearscope void SetVolumetricBeamAnchor(int slot, int mode, Vector3 offset = (0, 0, 0));
 
 	// [BB] Sweep -- up to eight thin bands of light travelling through the
 	// world, each tested per pixel against world position on every surface,
@@ -1188,6 +1211,11 @@ struct LevelLocals native
 	// The wake is one lagging point that thins the mist where you just walked.
 	native clearscope void SetFogSlab(double topZ, double density, double softness, double scatter, color col);
 	native void SetFogWake(Vector3 pos, double radius, double strength);
+	// [RS fork] The wake split by scope: its SHAPE is look-only, so a menu's
+	// UiTick can push it while the game is paused; its POSITION reads the
+	// playsim and stays play scope. SetFogWake still sets all three at once.
+	native clearscope void SetFogWakeShape(double radius, double strength, double stretch);
+	native void SetFogWakePos(Vector3 pos);
 	native clearscope void SetFogPickup(double amount);
 	// A tornado -- the same fog shaped into a funnel you can stand inside.
 	// Density 0 = off.
@@ -1198,7 +1226,7 @@ struct LevelLocals native
 	// [BB] DISTURBANCES -- one primitive, five effects. A wake, a ripple, an
 	// ignition, fog draining from a point and a monster shouldering mist
 	// aside are the same function: a point, a radius, an age, a strength and
-	// a sign. Eight slots, oldest recycled, strength decaying over its life.
+	// a sign. 32 slots, oldest recycled, strength decaying over its life.
 	//
 	//   mode 0 DISC    fixed radius, thins the mist. Wakes and displacers.
 	//   mode 1 RIPPLE  a ring travelling out at r = age * speed
@@ -1215,6 +1243,10 @@ struct LevelLocals native
 	// gentleness -- 0.3 turns a staircase into a slope rather than steps.
 	native clearscope void SetFogFollow(double top, double bottom);
 	native clearscope void SetFogGradient(color col, double mix);
+	// [RS fork] The colour an IGNITE disturbance (mode 2) burns. Unset, or
+	// after ClearFogIgniteColor, it follows the gradient colour as before.
+	native clearscope void SetFogIgniteColor(color col);
+	native clearscope void ClearFogIgniteColor();
 
 	// [BB] SHAPES -- signed distance fields drawn onto surfaces. 128 slots,
 	// oldest EXPIRING one recycled. AddShape returns its slot so the other
@@ -1307,7 +1339,9 @@ struct LevelLocals native
 	native clearscope void SetGlowTexture(double noise, double scale, double drift, double contrast);
 	native clearscope void SetGlowFlow(double amount, double spacing, double speed, double sharp);
 	native clearscope void SetGlowCells(double amount, double scale, double speed, double width);
-	native clearscope void SetGlowReact(double react, double pulse, double level);
+	// rate multiplies the beat rate the level implies; 1 = the old rate, so
+	// bright-and-slow is expressible. [RS fork]
+	native clearscope void SetGlowReact(double react, double pulse, double level, double rate = 1.0);
 
 	// [BB] WHAT SURVIVES A COLOUR DRAIN. Desaturation was all or nothing, so a
 	// monochrome world made blood exactly as grey as the wall behind it.
@@ -1340,6 +1374,12 @@ struct LevelLocals native
 	// The mist's surface, animated. Amplitude 0 = a flat top.
 	native clearscope void SetFogSurface(double amp, double wavelength, double speed, double crossSwell);
 	native clearscope void ClearFogSlab();
+	// [RS fork] A TRANSIENT slab that wins over the standing one while set, and
+	// leaves it untouched: for mist that comes and goes (a menu, a cutscene)
+	// next to a fog mod that re-pushes SetFogSlab every tic. Absolute world Z,
+	// its own bottom, no follow/stack/swell. Density <= 0 clears it.
+	native clearscope void SetFogSlabOverride(double topZ, double density, double softness, double scatter, color col, double bottomZ = -32768);
+	native clearscope void ClearFogSlabOverride();
 
 	// [BB] The pattern drawn INSIDE a sweep band. Spacing 0 in an axis means
 	// no lines in that axis, so grid / slats / a single tripwire are one mode.
@@ -1383,6 +1423,31 @@ struct LevelLocals native
 	// same reason the glow setters on Sector are.
 	native clearscope void SpawnSurfaceStamp(int shape, Vector3 pos, double radius, color col, int life, Vector3 axis, int tex = 0, double texStr = 0.0);
 	native clearscope void ClearSurfaceStamps();
+
+	// [GPUPARTICLES] Stateless GPU-drawn particles: sparks, embers, ejecta.
+	// Fire and forget, and it NEVER refuses -- the oldest records are
+	// overwritten when the ring is full, because a refusal would make the
+	// hundredth spark in a firefight silently do nothing. Additive and emissive.
+	// Vulkan only: on GL the records are written and never drawn. Jitter comes
+	// from a hash of (seed, i), never from playsim RNG, so this is netplay-safe.
+	//
+	//   pos, dir       where, and the cone's axis (game space; dir need not be unit)
+	//   count          how many; clamped to the ring size
+	//   spread         cone HALF-angle in degrees around dir; 180 = every direction
+	//   speed          map units per SECOND; speedJitter 0..1 -> speed * (1 +/- j)
+	//   col, intensity emissive colour, brightness (additive; above 1 is allowed)
+	//   life           seconds; lifeJitter 0..1 -> life * (1 +/- j)
+	//   sizeStart/End  diameter in map units across its life (r_gpuparticles_maxsize caps it)
+	//   gravity        map units per second^2, downward (Doom's own is about 1225)
+	//   drag           1/s exponential slow-down; 0 = none
+	//   orient         0 camera-facing, 1 stretched along velocity, 2 flat, facing its initial direction
+	//   stretch        orient 1: seconds of travel drawn as the streak (try 0.02 - 0.05)
+	//   seed           0 derives one from the ring cursor
+	//
+	// clearscope, like the stamps, so a menu can preview a burst while paused
+	// (paused particles hold still -- they age by level time).
+	native clearscope void SpawnGpuParticles(Vector3 pos, Vector3 dir, int count, double spread, double speed, double speedJitter, color col, double intensity, double life, double lifeJitter, double sizeStart, double sizeEnd, double gravity, double drag, int orient = 0, double stretch = 0, int seed = 0);
+	native clearscope void ClearGpuParticles();
 
 	native clearscope void SetBeam(int index, Vector3 start, Vector3 end, double thick, double soft, color col, double intensity);
 	// WHERE THIS BEAM STARTS FROM: 0 the point given to SetBeam, 1 the main

@@ -405,11 +405,18 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 
 			// [STAMP] Surface stamps. Appended last, matching
 			// HWViewpointUniforms::mStamp* by offset.
-			vec4 uSurfaceStampPos[16];
-			vec4 uSurfaceStampCol[16];
-			vec4 uSurfaceStampArg[16];
-			vec4 uSurfaceStampMod[16];
+			// 64 -- must equal MAX_SURFACE_STAMPS (func_surfacestamps.fp).
+			vec4 uSurfaceStampPos[64];
+			vec4 uSurfaceStampCol[64];
+			vec4 uSurfaceStampArg[64];
+			vec4 uSurfaceStampMod[64];
 			vec4 uSurfaceStampParams;
+
+			// [GPUPARTICLES] APPENDED LAST, matching HWViewpointUniforms by
+			// offset. GL never draws particles, but the block must still
+			// agree with the C++ struct it is uploaded from.
+			vec4 uLevelTime;
+			vec4 uGpuParticleParams;
 		};
 
 		uniform int uTextureMode;
@@ -1171,8 +1178,17 @@ bool FShaderCollection::CompileNextShader()
 	}
 	else if (mCompileState == 3)
 	{
-		FShader *eff = new FShader(effectshaders[i].ShaderName);
-		if (!eff->Load(effectshaders[i].ShaderName, effectshaders[i].vp, effectshaders[i].fp1,
+		// [GPUPARTICLES] Never loaded on GL. gpuparticles reads GpuParticleSSO,
+		// a storage block only the Vulkan prolog declares, so it would fail
+		// here -- and a failed GL effect is deleted silently, BindEffect then
+		// returns null, and FGLRenderState::ApplyShader would take that null as
+		// its active shader. Skipping keeps mEffectShaders[i] null and that path
+		// unreachable; nothing on GL ever selects EFF_GPUPARTICLES.
+		FShader *eff = (i == EFF_GPUPARTICLES) ? nullptr : new FShader(effectshaders[i].ShaderName);
+		if (eff == nullptr)
+		{
+		}
+		else if (!eff->Load(effectshaders[i].ShaderName, effectshaders[i].vp, effectshaders[i].fp1,
 						effectshaders[i].fp2, effectshaders[i].fp3, effectshaders[i].defines))
 		{
 			delete eff;

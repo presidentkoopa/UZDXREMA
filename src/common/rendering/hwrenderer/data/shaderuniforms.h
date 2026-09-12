@@ -28,7 +28,10 @@ enum
 	LIGHTNODES_BINDINGPOINT = 4,
 	LIGHTLINES_BINDINGPOINT = 5,
 	LIGHTLIST_BINDINGPOINT = 6,
-	BONEBUF_BINDINGPOINT = 7
+	BONEBUF_BINDINGPOINT = 7,
+	// [GPUPARTICLES] The particle record ring (hw_gpuparticlebuffer.h). Only
+	// VkBufferManager::CreateDataBuffer keys on it; GL never creates one.
+	GPUPARTICLE_BINDINGPOINT = 8
 };
 
 enum class UniformType

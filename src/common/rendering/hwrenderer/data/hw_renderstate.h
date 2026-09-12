@@ -44,6 +44,9 @@ enum ERenderEffect
 	EFF_BURN,
 	EFF_STENCIL,
 	EFF_DITHERTRANS,
+	// [GPUPARTICLES] Stateless additive particles (gpuparticles.vp/.fp). Vulkan
+	// only: the GL and GLES effect loaders skip this index.
+	EFF_GPUPARTICLES,
 	MAX_EFFECTS
 };
 

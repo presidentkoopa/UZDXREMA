@@ -328,6 +328,14 @@ const FEffectShader effectshaders[] =
 	{ "burn", "shaders/glsl/main.vp", "shaders/glsl/burn.fp", nullptr, nullptr, "#define SIMPLE\n#define NO_ALPHATEST\n" },
 	{ "stencil", "shaders/glsl/main.vp", "shaders/glsl/stencil.fp", nullptr, nullptr, "#define SIMPLE\n#define NO_ALPHATEST\n" },
 	{ "dithertrans", "shaders/glsl/main.vp", "shaders/glsl/main.fp", "shaders/glsl/func_normal.fp", "shaders/glsl/material_normal.fp", "#define NO_ALPHATEST\n#define DITHERTRANS\n" },
+	// [GPUPARTICLES] Index EFF_GPUPARTICLES. Carries its own vertex shader,
+	// which is what lets particles draw through the main pipeline with no new
+	// pipeline type or render pass. Vulkan only -- it reads GpuParticleSSO,
+	// which only the Vulkan prolog declares; GL and GLES skip this entry.
+	// SIMPLE and NO_ALPHATEST copy burn/stencil. Checked: SIMPLE is only read
+	// by main.vp (drops attributes 3-8, the glow/gradient/split varyings and
+	// bone skinning), so with gpuparticles.vp it switches nothing off.
+	{ "gpuparticles", "shaders/glsl/gpuparticles.vp", "shaders/glsl/gpuparticles.fp", nullptr, nullptr, "#define SIMPLE\n#define NO_ALPHATEST\n" },
 };
 
 int DFrameBuffer::GetShaderCount()

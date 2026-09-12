@@ -413,7 +413,9 @@ struct FWorldEvent
 	sector_t* DamageSector = nullptr;
 	int DamageLineSide = -1;
 	DVector3 DamagePosition;
-	bool DamageIsRadius; // radius damage yes/no
+	// RS fork: defaulted. It was the one field here with no initializer, and
+	// WorldThingDamaged never set it, so ZScript read an indeterminate bool.
+	bool DamageIsRadius = false; // radius damage yes/no
 	int NewDamage = 0; // sector/line damaged. allows modifying damage
 	FState* CrushedState = nullptr; // custom crush state set in thingground
 	DVector3 AttackPos; //hitscan point of origin

@@ -34,6 +34,7 @@
 #include "flatvertices.h"
 #include "hw_lightbuffer.h"
 #include "hw_bonebuffer.h"
+#include "hw_gpuparticlebuffer.h"	// [GPUPARTICLES]
 #include "hw_vrmodes.h"
 #include "hw_vrwheel.h"
 #include "hw_clipper.h"
@@ -48,6 +49,7 @@ void DrawHitscanTracers(FRenderState& state);
 
 EXTERN_CVAR(Float, r_visibility)
 EXTERN_CVAR(Int, gl_max_portals);
+EXTERN_CVAR(Bool, r_visualstate_log)	// RS fork: defined in vmthunks.cpp
 CVAR(Bool, gl_bandedswlight, false, CVAR_ARCHIVE)
 CVAR(Bool, gl_sort_textures, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
 CVAR(Bool, gl_no_skyclear, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG)
@@ -75,6 +77,21 @@ CVAR(Int, vol_beam_quality, 24, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 // somebody might want to see. 0 restores the unfaded behaviour.
 CVAR(Float, vol_beam_axisfade, 0.85f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 
+// [BB] How close to the eye the beam's AXIS must pass for the fade above to
+// apply, in map units. Full fade within a quarter of this, none beyond it.
+//
+// The fade used to depend on direction alone, so a VR hand torch pointed where
+// you look -- apex on a hand a couple of feet from the eye, cone seen from the
+// side -- kept 15% of its light. A head or view mount (a few units off) still
+// gets the whole fade. 0 restores the direction-only fade for every beam.
+CVAR(Float, vol_beam_axisfade_reach, 12.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
+// [BB] Volumetric beam diagnostics that can change often (the fog's torch slot
+// under flicker, the per-slot axis fade band). Off by default; the rare-event
+// lines (pose source, projection offset, MSAA variant, scene viewport) always
+// print, once per change.
+CVAR(Bool, vol_beam_debug, false, 0);
+
 // [BB] Smooth segment beams between tics instead of stepping at 35Hz.
 //
 // Beams are written from script, so they only change 35 times a second while
@@ -90,6 +107,119 @@ sector_t * hw_FakeFlat(sector_t * sec, sector_t * dest, area_t in_area, bool bac
 std::pair<PalEntry, PalEntry>& R_GetSkyCapColor(FGameTexture* tex);
 
 extern int portalsPerEye;
+
+//==========================================================================
+//
+// RS FORK -- where a volumetric beam actually is THIS FRAME.
+//
+// Anchor 0 is the world pos/dir script published. Anchors 1-3 read a tracked
+// pose instead (FLevelLocals::VolBeamAnchor): the main hand, the off hand or
+// the head, as the VR backend wrote it for this frame -- the same fields
+// SetBeamAnchor reads for line beams, for the same reason (a 35Hz pose steps
+// against a 90Hz hand). Used by both consumers of the cone, the air pass
+// (SetupVolumetricBeam) and the fog glow (mFogBeam* in StartScene), so the two
+// can never disagree about where the torch is.
+//
+// Angle conventions, which are NOT the obvious ones: AttackAngle/OffhandAngle
+// are stored as world yaw MINUS 90 and AttackPitch/OffhandPitch are negated
+// (g_game.cpp, hw_vrmodes.cpp). HmdYaw is plain world yaw and HmdPitch is
+// already Doom-signed, positive down (vk_openxrdevice.cpp). Doom pitch
+// positive is down, so forward.Z = -sin(pitch).
+//
+// Returns an EVolBeamPoseSource so the caller can log where the pose came from.
+//
+//==========================================================================
+
+enum EVolBeamPoseSource
+{
+	VBPOSE_WORLD,       // not anchored: script's pos/dir
+	VBPOSE_MAINHAND,
+	VBPOSE_OFFHAND,
+	VBPOSE_HMD,
+	VBPOSE_VIEW,        // head anchor, no headset pose written: r_viewpoint
+	VBPOSE_NOPLAYER,    // anchored, but no console player: script's pos/dir
+	VBPOSE_COUNT
+};
+
+static int ResolveVolBeamPose(const FLevelLocals *Level, int slot, DVector3 &pos, DVector3 &dir)
+{
+	pos = Level->VolBeamPos[slot];
+	dir = Level->VolBeamDir[slot];
+
+	const int anchor = Level->VolBeamAnchor[slot];
+	if (anchor <= 0 || anchor > 3) return VBPOSE_WORLD;
+
+	const player_t *pl = Level->GetConsolePlayer();
+	if (pl == nullptr || pl->mo == nullptr) return VBPOSE_NOPLAYER;
+	const AActor *mo = pl->mo;
+
+	DVector3 origin;
+	DAngle yaw, pitch;
+	int source;
+	if (anchor == 1)
+	{
+		origin = mo->AttackPos;
+		yaw = mo->AttackAngle + DAngle::fromDeg(90.);
+		pitch = -mo->AttackPitch;
+		source = VBPOSE_MAINHAND;
+	}
+	else if (anchor == 2)
+	{
+		origin = mo->OffhandPos;
+		yaw = mo->OffhandAngle + DAngle::fromDeg(90.);
+		pitch = -mo->OffhandPitch;
+		source = VBPOSE_OFFHAND;
+	}
+	else if (mo->HmdPos.LengthSquared() > 0.0)
+	{
+		origin = mo->HmdPos;
+		yaw = mo->HmdYaw;
+		pitch = mo->HmdPitch;
+		source = VBPOSE_HMD;
+	}
+	else
+	{
+		// No headset pose (flat screen, or a backend that does not write
+		// HmdPos): the centre eye of the main view is the head.
+		origin = r_viewpoint.CenterEyePos;
+		yaw = r_viewpoint.Angles.Yaw;
+		pitch = r_viewpoint.Angles.Pitch;
+		source = VBPOSE_VIEW;
+	}
+
+	const double cp = pitch.Cos(), sp = pitch.Sin();
+	const double cy = yaw.Cos(), sy = yaw.Sin();
+	const DVector3 forward(cp * cy, cp * sy, -sp);
+	const DVector3 right(sy, -cy, 0.);
+	const DVector3 up(sp * cy, sp * sy, cp);
+
+	const DVector3 &ofs = Level->VolBeamAnchorOffset[slot];
+	pos = origin + forward * ofs.X + right * ofs.Y + up * ofs.Z;
+	dir = forward;
+	return source;
+}
+
+// Log a slot's pose source when it changes -- rare (an anchor set or dropped),
+// so always on. Says in one line whether an anchored torch is really reading
+// the per-frame pose or silently falling back to the script's world point.
+static void LogVolBeamPoseSource(int slot, int source)
+{
+	static int lastSource[FLevelLocals::MAX_VOL_BEAMS] = {};   // 0 = VBPOSE_WORLD
+	if (slot < 0 || slot >= FLevelLocals::MAX_VOL_BEAMS || lastSource[slot] == source) return;
+	lastSource[slot] = source;
+
+	static const char *const names[VBPOSE_COUNT] =
+	{
+		"script world point (not anchored)",
+		"main hand, per frame (AttackPos)",
+		"off hand, per frame (OffhandPos)",
+		"headset, per frame (HmdPos)",
+		"view centre eye (no headset pose written)",
+		"anchored but no console player -- using the script world point",
+	};
+	Printf("vol_beam: slot %d pose source: %s\n", slot,
+		(source >= 0 && source < VBPOSE_COUNT) ? names[source] : "?");
+}
 
 //==========================================================================
 //
@@ -349,6 +479,20 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 			VPUniforms.mStampParams = { (float)ns, 0.f, 0.f, 0.f };
 		}
 
+		// [GPUPARTICLES] The clock particles age by: level seconds at render
+		// rate. Not `timer` -- on Vulkan that is wall-clock time scaled by the
+		// bound material's shader speed, zero with no material, and it runs
+		// while paused. This is the same time basis as FogDisturb's `now` and
+		// as particle birth (maptime / TICRATE), so pausing freezes particles
+		// the way it freezes actors. mLevelTime is general; nothing about it is
+		// particle-specific, and stamps or disturbances could age by it too.
+		VPUniforms.mLevelTime = {
+			(float)((Level->maptime + Viewpoint.TicFrac) / (double)TICRATE), 0.f, 0.f, 0.f };
+		// Live-tuning cvars, renderer-read every frame so they respond in a menu.
+		VPUniforms.mGpuParticleParams = {
+			(float)r_gpuparticles_sizescale, (float)r_gpuparticles_maxsize,
+			(float)r_gpuparticles_stretch,   (float)r_gpuparticles_intensity };
+
 		// [BB] Sweep fill -- the pattern inside a band. Frame-global style;
 		// only the mode is per band, packed into the draw mode.
 		VPUniforms.mSweepFill = {
@@ -391,30 +535,91 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 		// willing to draw a funnel in clear air, and the uniform carrying its
 		// density was never written unless floor fog happened to be on. A
 		// feature can be switched off by code that does not mention it.
-		if (Level->FogSlabActive && Level->FogSlabDensity > 0.0)
+		//
+		// [RS fork] WHICH SLAB. There is one set of slab uniforms, and two kinds
+		// of caller: a STANDING fog (RS_Fog, pushed every tic) and a TRANSIENT
+		// one (the weapon wheel's mist while it is open). Sharing SetFogSlab
+		// made them fight -- the standing push replaced the transient mist, and
+		// the transient ClearFogSlab wiped the standing fog. A transient caller
+		// now sets the OVERRIDE, which wins while it is set and leaves the
+		// standing slab untouched underneath. The override is a self-contained
+		// absolute slab: its own top, density, soft edge, scatter, colour and
+		// bottom, with no stack, no surface swell and no follow (see mFogFollow
+		// below). Wake and pickup stay the standing slab's.
+		const bool slabOvr = Level->FogSlabOverrideActive;
+		const double slabTop = slabOvr ? Level->FogSlabOverrideTop : Level->FogSlabTop;
+		const double slabDensity = slabOvr ? Level->FogSlabOverrideDensity : Level->FogSlabDensity;
+		const double slabSoft = slabOvr ? Level->FogSlabOverrideSoft : Level->FogSlabSoft;
+		const double slabScatter = slabOvr ? Level->FogSlabOverrideScatter : Level->FogSlabScatter;
+		const PalEntry slabColor = slabOvr ? Level->FogSlabOverrideColor : Level->FogSlabColor;
+		const bool slabOn = slabOvr || (Level->FogSlabActive && Level->FogSlabDensity > 0.0);
+		if (slabOn)
 		{
 			VPUniforms.mFogSlab = {
-				(float)Level->FogSlabTop, (float)Level->FogSlabDensity,
-				(float)Level->FogSlabSoft, (float)Level->FogSlabScatter };
+				(float)slabTop, (float)slabDensity,
+				(float)slabSoft, (float)slabScatter };
 			VPUniforms.mFogSlabColor = {
-				Level->FogSlabColor.r / 255.f, Level->FogSlabColor.g / 255.f,
-				Level->FogSlabColor.b / 255.f, (float)Level->FogSlabWakeStrength };
+				slabColor.r / 255.f, slabColor.g / 255.f,
+				slabColor.b / 255.f, (float)Level->FogSlabWakeStrength };
 			VPUniforms.mFogSlabWake = {
 				(float)Level->FogSlabWakePos.X, (float)Level->FogSlabWakePos.Z,
 				(float)Level->FogSlabWakePos.Y, (float)Level->FogSlabWakeRadius };
 			VPUniforms.mFogSlabExtra = {
 				(float)Level->FogSlabWakeStrength, (float)Level->FogSlabPickup,
 				0.0f, 0.0f };
-			VPUniforms.mFogSlab2 = { (float)Level->FogSlabBottom,
-				(float)Level->FogSlabPeriod, (float)Level->FogSlabRoll, 0.f };
-			VPUniforms.mFogSurf = {
-				(float)Level->FogSurfAmp, (float)Level->FogSurfLen,
-				(float)Level->FogSurfSpeed, (float)Level->FogSurfCross };
+			if (slabOvr)
+			{
+				// The override's own bottom; no repeating stack and a flat top,
+				// so a standing preset's look does not reshape a transient mist.
+				VPUniforms.mFogSlab2 = { (float)Level->FogSlabOverrideBottom, 0.f, 0.f, 0.f };
+				VPUniforms.mFogSurf = { 0.f, 256.f, 1.f, 0.f };
+			}
+			else
+			{
+				VPUniforms.mFogSlab2 = { (float)Level->FogSlabBottom,
+					(float)Level->FogSlabPeriod, (float)Level->FogSlabRoll, 0.f };
+				VPUniforms.mFogSurf = {
+					(float)Level->FogSurfAmp, (float)Level->FogSurfLen,
+					(float)Level->FogSurfSpeed, (float)Level->FogSurfCross };
+			}
 		}
 		else
 		{
-			VPUniforms.mFogSlab = { 0.f, 0.f, 24.f, 0.f };
+			VPUniforms.mFogSlab = { (float)Level->FogSlabTop, 0.f, 24.f, 0.f };
 			VPUniforms.mFogSurf = { 0.f, 256.f, 1.f, 0.f };
+
+			// [RS fork] THE SLAB IS OFF, BUT ITS TOP, COLOUR, BOTTOM AND PICKUP
+			// STILL HAVE TO BE CURRENT. Tendrils and ignite draw without the
+			// slab (see above) and read these: with density 0 the wisps rose
+			// from world Z 0 in whatever colour the last preset left (or the
+			// header's orange-red). Only the components this block owns are
+			// written on mFogSlabExtra/mFogSlab2, so a spare another feature
+			// packs there is left alone.
+			VPUniforms.mFogSlabColor = {
+				Level->FogSlabColor.r / 255.f, Level->FogSlabColor.g / 255.f,
+				Level->FogSlabColor.b / 255.f, (float)Level->FogSlabWakeStrength };
+			VPUniforms.mFogSlabExtra.X = (float)Level->FogSlabWakeStrength;
+			VPUniforms.mFogSlabExtra.Y = (float)Level->FogSlabPickup;
+			VPUniforms.mFogSlab2.X = (float)Level->FogSlabBottom;
+			VPUniforms.mFogSlab2.Y = (float)Level->FogSlabPeriod;
+			VPUniforms.mFogSlab2.Z = (float)Level->FogSlabRoll;
+		}
+
+		// [RS fork] Diagnostic: say when the slab gate flips, and what the
+		// ungated upload carries, so one test shows the colour/top are current.
+		if (r_visualstate_log)
+		{
+			// 0 no slab drawn, 1 the standing slab, 2 the override.
+			static int lastSlabGate = -1;
+			const int gate = slabOvr ? 2 : (slabOn ? 1 : 0);
+			if (gate != lastSlabGate)
+			{
+				lastSlabGate = gate;
+				Printf("fog slab drawn: %s -- top %.1f density %.2f colour %02x%02x%02x (standing slab %s; colour/top/bottom/pickup uploaded either way)\n",
+					gate == 2 ? "OVERRIDE" : (gate == 1 ? "standing" : "none"),
+					slabTop, slabDensity, slabColor.r, slabColor.g, slabColor.b,
+					(Level->FogSlabActive && Level->FogSlabDensity > 0.0) ? "set" : "off");
+			}
 		}
 
 		VPUniforms.mTornado = { (float)Level->TornadoPos.X,
@@ -499,7 +704,11 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 			(float)Level->FogTendrilTaper };
 
 		VPUniforms.mFogWake2 = { (float)Level->FogWakeVel.X,
-			(float)Level->FogWakeVel.Y, (float)Level->FogWakeStretch, 0.f };
+			(float)Level->FogWakeVel.Y, (float)Level->FogWakeStretch,
+			// [RS fork] w: the fog IGNITE colour, packed 1 + 0xRRGGBB (exact in
+			// a float, < 2^24), 0 = unset so the shader falls back to
+			// uFogColor2. Was an unread 0. See SetFogIgniteColor.
+			Level->FogIgniteColorSet ? (float)(1 + (int)(Level->FogIgniteColor.d & 0xffffff)) : 0.f };
 
 		VPUniforms.mFogBow = { (float)Level->FogBowStrength,
 			(float)Level->FogBowWidth, (float)Level->FogBowThin,
@@ -519,8 +728,13 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 				eyeFloor = vsec->floorplane.ZatPoint(Viewpoint.Pos);
 				eyeCeil = vsec->ceilingplane.ZatPoint(Viewpoint.Pos);
 			}
-			VPUniforms.mFogFollow = { (float)Level->FogFollowTop,
-				(float)Level->FogFollowBottom, (float)eyeFloor, (float)eyeCeil };
+			// [RS fork] The fog slab OVERRIDE is absolute world Z, so it follows
+			// nothing: a transient mist placed at a world height (the wheel's,
+			// at its anchor) must not have a standing preset's follow-the-floor
+			// added on top of it. Standing follow values are untouched.
+			const bool followOff = Level->FogSlabOverrideActive;
+			VPUniforms.mFogFollow = { followOff ? 0.f : (float)Level->FogFollowTop,
+				followOff ? 0.f : (float)Level->FogFollowBottom, (float)eyeFloor, (float)eyeCeil };
 		}
 
 		// [BB] Shapes. Size, growth and the seam all resolve HERE rather than
@@ -700,7 +914,10 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 			(float)Level->GlowCellScale, (float)Level->GlowCellSpeed,
 			(float)Level->GlowCellWidth };
 		VPUniforms.mGlowTex4 = { (float)Level->GlowReact,
-			(float)Level->GlowPulse, (float)Level->GlowPulseLevel, 0.f };
+			(float)Level->GlowPulse, (float)Level->GlowPulseLevel,
+			// [RS fork] w: pulse rate multiplier, 1 = the level's own rate.
+			// Was an unread 0 -- the shader never looked at uGlowTex4.w.
+			(float)Level->GlowPulseRate };
 
 		VPUniforms.mFogColor2 = { Level->FogColor2.r / 255.f,
 			Level->FogColor2.g / 255.f, Level->FogColor2.b / 255.f,
@@ -714,24 +931,59 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 		// uniforms -- so with several beams live it takes the lowest live slot
 		// rather than whichever was written most recently. Deterministic, and
 		// slot 0 is the one a flashlight would naturally hold.
+		// FirstVolBeam skips beams at density 0, so a torch at Brightness 0 (or
+		// in a flicker dip) turns the fog glow off along with the air beam.
 		const int fb = Level->FirstVolBeam();
+		if (vol_beam_debug)
+		{
+			static int loggedFogSlot = -2;
+			if (fb != loggedFogSlot)
+			{
+				loggedFogSlot = fb;
+				if (fb >= 0)
+					Printf("vol_beam: fog glow follows slot %d (density %.2f, falloff %.2f)\n",
+						fb, Level->VolBeamDensity[fb], Level->VolBeamFalloff[fb]);
+				else
+					Printf("vol_beam: fog glow off (no live beam with density > 0)\n");
+			}
+		}
 		if (fb >= 0)
 		{
+			// Same pose the air pass uses, anchored or not (ResolveVolBeamPose).
+			DVector3 fbPos, fbDir;
+			ResolveVolBeamPose(Level, fb, fbPos, fbDir);
+
+			// THE GLOW FOLLOWS THE BEAM'S BRIGHTNESS AND FALLOFF. (FL-11)
+			//
+			// It used to carry position, angles and colour only, so dragging
+			// Brightness to 0 hid the air beam while the fog kept a
+			// full-strength torch, flicker never reached the mist, and the mist
+			// used a linear fade instead of the beam's curve.
+			//
+			// NO NEW VIEWPOINT MEMBERS: density (already after flicker -- the
+			// caller multiplies it in) is premultiplied into the colour, which
+			// the shader only ever uses as a multiplier; falloff goes in
+			// mFogSlabExtra.z, which was unread (main.fp reads only .y there).
+			// Density 1.0 reproduces the old glow strength.
+			const float fbBright = (float)std::max(Level->VolBeamDensity[fb], 0.0);
 			VPUniforms.mFogBeamPos = {
-				(float)Level->VolBeamPos[fb].X, (float)Level->VolBeamPos[fb].Z,
-				(float)Level->VolBeamPos[fb].Y, (float)Level->VolBeamLength[fb] };
+				(float)fbPos.X, (float)fbPos.Z,
+				(float)fbPos.Y, (float)Level->VolBeamLength[fb] };
 			VPUniforms.mFogBeamDir = {
-				(float)Level->VolBeamDir[fb].X, (float)Level->VolBeamDir[fb].Z,
-				(float)Level->VolBeamDir[fb].Y,
+				(float)fbDir.X, (float)fbDir.Z,
+				(float)fbDir.Y,
 				(float)cos(Level->VolBeamInner[fb] * M_PI / 180.0) };
 			VPUniforms.mFogBeamCol = {
-				Level->VolBeamColor[fb].r / 255.f, Level->VolBeamColor[fb].g / 255.f,
-				Level->VolBeamColor[fb].b / 255.f,
+				Level->VolBeamColor[fb].r / 255.f * fbBright,
+				Level->VolBeamColor[fb].g / 255.f * fbBright,
+				Level->VolBeamColor[fb].b / 255.f * fbBright,
 				(float)cos(Level->VolBeamOuter[fb] * M_PI / 180.0) };
+			VPUniforms.mFogSlabExtra.Z = (float)Level->VolBeamFalloff[fb];
 		}
 		else
 		{
 			VPUniforms.mFogBeamPos = { 0.f, 0.f, 0.f, 0.f };
+			VPUniforms.mFogSlabExtra.Z = 0.f;
 		}
 	}
 	mClipper->SetViewpoint(Viewpoint);
@@ -1008,9 +1260,16 @@ void HWDrawInfo::SetupVolumetricBeam()
 	if (!Level->VolBeamActive[bi]) continue;
 
 	VolumetricBeamUniforms u = {};
-	u.BeamPos = worldToView(Level->VolBeamPos[bi], false);
 
-	FVector3 dir = worldToView(Level->VolBeamDir[bi], true);
+	// The script's world point, or the tracked pose THIS frame when the slot is
+	// anchored (SetVolumetricBeamAnchor). Logged when the source changes.
+	DVector3 beamPos, beamDir;
+	const int poseSource = ResolveVolBeamPose(Level, bi, beamPos, beamDir);
+	LogVolBeamPoseSource(bi, poseSource);
+
+	u.BeamPos = worldToView(beamPos, false);
+
+	FVector3 dir = worldToView(beamDir, true);
 	float dl = dir.Length();
 	u.BeamDir = (dl > 0.0001f) ? dir / dl : FVector3(0, 0, -1);
 
@@ -1033,6 +1292,21 @@ void HWDrawInfo::SetupVolumetricBeam()
 	float py = (proj[5] != 0.0f) ? 1.0f / proj[5] : 1.0f;
 	u.TanHalfFov = FVector2(px, py);
 
+	// And the off-centre terms. A headset eye's frustum is asymmetric --
+	// m[8]/m[9] are non-zero and opposite per eye -- and without them each
+	// eye's rays were shifted sideways, putting the cone at the wrong stereo
+	// depth. Zero on a symmetric projection. (FL-06; see volumetricbeam.fp.)
+	u.ProjOffset = FVector2(proj[8], proj[9]);
+	{
+		static bool loggedAsymmetric = false;
+		if (!loggedAsymmetric && (fabs(proj[8]) > 1e-4f || fabs(proj[9]) > 1e-4f))
+		{
+			loggedAsymmetric = true;
+			Printf("vol_beam: asymmetric projection seen (offset %.4f, %.4f); beam rays include it\n",
+				proj[8], proj[9]);
+		}
+	}
+
 	u.StepCount = clamp((int)vol_beam_quality, 8, 64);
 
 	// Dust is sampled in world space, so the shader needs a way back out of
@@ -1042,6 +1316,27 @@ void HWDrawInfo::SetupVolumetricBeam()
 	u.DustDrift = (float)Level->VolBeamDustDrift[bi];
 	u.DustTime = (float)(screen->FrameTime * 0.001);
 	u.AxisFade = (float)clamp<double>(vol_beam_axisfade, 0.0, 1.0);
+	u.AxisFadeReach = (float)std::max<double>(vol_beam_axisfade_reach, 0.0);
+
+	// With vol_beam_debug: which band of the axis fade this slot is in, from
+	// the same distance the shader measures (eye to the beam's axis line, view
+	// space). On band change only. "none" for a hand torch is the FL-09 fix.
+	if (vol_beam_debug && u.AxisFade > 0.0f)
+	{
+		const float along = u.BeamPos.X * u.BeamDir.X + u.BeamPos.Y * u.BeamDir.Y + u.BeamPos.Z * u.BeamDir.Z;
+		const float axisDist = (u.BeamPos - u.BeamDir * along).Length();
+		int band = 2;   // full fade
+		if (u.AxisFadeReach > 0.0f)
+			band = (axisDist >= u.AxisFadeReach) ? 0 : (axisDist > u.AxisFadeReach * 0.25f ? 1 : 2);
+		static int loggedBand[FLevelLocals::MAX_VOL_BEAMS] = {};   // 0 = none
+		if (loggedBand[bi] != band)
+		{
+			loggedBand[bi] = band;
+			static const char *const bandNames[] = { "none", "partial", "full" };
+			Printf("vol_beam: slot %d axis fade %s (axis passes %.1f units from the eye, reach %.1f)\n",
+				bi, bandNames[band], axisDist, u.AxisFadeReach);
+		}
+	}
 
 	// The two constants that turn a raw depth sample back into a view-space
 	// distance, identical to the pair PPAmbientOcclusion feeds lineardepth.fp.
@@ -1146,6 +1441,10 @@ void HWDrawInfo::SetupHeatmap()
 	u.TanHalfFov = FVector2(
 		(proj[0] != 0.0f) ? 1.0f / proj[0] : 1.0f,
 		(proj[5] != 0.0f) ? 1.0f / proj[5] : 1.0f);
+	// And the off-centre terms of an asymmetric (headset) frustum, which the
+	// rebuild ignored -- the marks landed sideways-shifted per eye. Zero on a
+	// symmetric projection. Same fix as SetupVolumetricBeam (FL-06).
+	u.ProjOffset = FVector2(proj[8], proj[9]);
 
 	u.LinearizeDepthA = 1.0f / screen->GetZFar() - 1.0f / screen->GetZNear();
 	u.LinearizeDepthB = max(1.0f / screen->GetZNear(), 1.e-8f);
@@ -1643,6 +1942,35 @@ void HWDrawInfo::RenderTranslucent(FRenderState &state)
 
 	drawlists[GLDL_TRANSLUCENT].DrawSorted(this, state);
 	state.EnableBrightmap(false);
+
+	// [GPUPARTICLES] Stateless additive particles, one draw for the whole ring.
+	// Here because depth writing is already off and depth testing on. Additive
+	// blending is order-independent, so nothing is sorted. Dead slots collapse
+	// to a point in the vertex shader and cost six vertex invocations each.
+	//
+	// Three conditions, per the plan, plus the kill switch and a shader that
+	// actually compiled (a pipeline for a missing effect dereferences null):
+	//   - Vulkan (mGpuParticles is null elsewhere; IsVulkan says it plainly)
+	//   - main view only: portals and mirrors render through their own draw
+	//     infos with mCurrentPortal set, and phase one skips them
+	//   - this level's ring has been written at least once -- an empty room
+	//     costs nothing at all
+	if (r_gpuparticles && screen->IsVulkan() && mCurrentPortal == nullptr && Level != nullptr &&
+		Level->GpuParticleWritten > 0 && screen->mGpuParticles != nullptr && screen->mGpuParticles->IsDrawable())
+	{
+		auto particles = screen->mGpuParticles;
+		state.SetEffect(EFF_GPUPARTICLES);
+		state.SetRenderStyle(STYLE_Add);
+		state.SetVertexBuffer(particles->GetVertexBuffer(), 0, 0);
+		state.Draw(DT_Triangles, 0, particles->GetVertexCount());
+		particles->CountDraw();
+
+		// Restore what the rest of the translucent pass and the portal code
+		// expect, the way RenderPortal restores the vertex buffer.
+		state.SetEffect(EFF_NONE);
+		state.SetRenderStyle(STYLE_Translucent);
+		state.SetVertexBuffer(screen->mVertexData);
+	}
 
 
 	state.AlphaFunc(Alpha_GEqual, 0.5f);
@@ -2156,6 +2484,19 @@ void HWDrawInfo::ProcessScene(bool toscreen)
 		mapsection = Level->PointInRenderSubsector(Viewpoint.OffPos)->mapsection;
 	CurrentMapSections.Set(mapsection);
 	screen->mBones->Map();
+
+	// [GPUPARTICLES] Bring the GPU ring up to date with this level's CPU ring
+	// before anything draws. One rule covers normal frames, level changes,
+	// savegame loads and bursts bigger than the ring -- see
+	// GpuParticleBuffer::Sync. Unlike the bones this is NOT cleared per frame:
+	// records persist until they expire or are overwritten. Null on GL/GLES.
+	if (screen->mGpuParticles != nullptr && Level != nullptr)
+	{
+		screen->mGpuParticles->Sync(Level->GpuParticles.Data(), Level->GpuParticles.Size(),
+			Level->GpuParticleSerial, Level->GpuParticleWritten);
+		screen->mGpuParticles->DebugReport(Level->GpuParticleWritten);
+	}
+
 	DrawScene(toscreen ? DM_MAINVIEW : DM_OFFSCREEN);
 	screen->mBones->Unmap();
 }

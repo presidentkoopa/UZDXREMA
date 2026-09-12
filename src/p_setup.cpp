@@ -305,6 +305,12 @@ void FLevelLocals::ClearLevelData(bool fullgc)
 	TravellingThinkers.Clear();
 	interpolator.ClearInterpolations();	// [RH] Nothing to interpolate on a fresh level.
 
+	// [GPUPARTICLES] No particle survives a map change or a savegame load.
+	// maptime restarts, so a stale record would come back to life with a
+	// valid-looking age; the fresh serial makes the renderer re-upload the
+	// whole (now empty) ring. See FLevelLocals::ResetGpuParticles.
+	ResetGpuParticles();
+
 	// [BB] Beams do not survive a map change. Nothing else resets them, so
 	// without this the first tic of the new map still holds the old map's
 	// endpoints and would interpolate a beam from wherever it was standing in
@@ -315,6 +321,88 @@ void FLevelLocals::ClearLevelData(bool fullgc)
 	for (int b = 0; b < MAX_BEAMS; b++)
 	{
 		PrevBeamIntensity[b] = 0.0;
+	}
+
+	// [RS fork] NOR DOES THE REST OF THE LEVEL'S VISUAL STATE.
+	//
+	// FLevelLocals is one static object, so everything a mod pushed -- a sweep,
+	// a torch cone, darkness, a fog slab, a tornado -- was still set when the
+	// next map started, drawn at the OLD map's coordinates until some mod pushed
+	// again, and a mod that only sets these on events never does. Disturbance
+	// and shape births are in map seconds and maptime restarts at 0, so an old
+	// ripple sat hidden until the new map's clock reached its birth and then
+	// fired at its old position.
+	//
+	// Only the switches that make something DRAW are reset, to their declared
+	// defaults (all default-off), mirroring ClearSweep / ClearFogSlab /
+	// ClearDarkness. Look settings (colours, spacings, curves) are left alone:
+	// they draw nothing by themselves, and a mod may set them once.
+	{
+		FString live;
+		if (SweepMode != 0 || SweepCount != 0) live += " sweep";
+		for (int i = 0; i < MAX_VOL_BEAMS; i++) if (VolBeamActive[i]) { live += " volbeam"; break; }
+		if (GlowWaveLength != 0) live += " glowwave";
+		if (DarkMode != 0) live += " darkness";
+		if (FogSlabActive) live += " fogslab";
+		if (FogSlabOverrideActive) live += " fogslaboverride";
+		if (TornadoDensity != 0) live += " tornado";
+		if (FogBowStrength != 0) live += " fogbow";
+		if (SweepRoomSoft != 0) live += " sweeproom";
+		for (int i = 0; i < MAX_FOG_DISTURB; i++) if (FogDisturbLife[i] > 0) { live += " disturbances"; break; }
+		for (int i = 0; i < MAX_SHAPES; i++) if (ShapeSize[i] > 0 || ShapeKind[i] != 0) { live += " shapes"; break; }
+
+		SweepMode = 0;
+		SweepCount = 0;
+		SweepTrail = 0;
+		for (int i = 0; i < MAX_SWEEP_BANDS; i++)
+		{
+			SweepRadius[i] = 0;
+			SweepThickness[i] = 0;
+			SweepSoftness[i] = 0;
+			SweepColor[i] = 0;
+			SweepIntensity[i] = 0;
+			SweepBandOrigin[i] = DVector3(0, 0, 0);
+			SweepBandMode[i] = 0;
+			SweepBandDraw[i] = 0;
+			SweepBandFill[i] = 0;
+		}
+		SweepFillAir = 0;
+		SweepRoomSoft = 0;
+		SweepRoomMin = SweepRoomMax = DVector3(0, 0, 0);
+
+		// Anchors too: a slot anchored to a hand on the old map must not come
+		// back anchored when a new caller claims it (the beam lane's
+		// VolBeamAnchor / VolBeamAnchorOffset, same reset ClearVolumetricBeam does).
+		for (int i = 0; i < MAX_VOL_BEAMS; i++)
+		{
+			VolBeamActive[i] = false;
+			VolBeamAnchor[i] = 0;
+			VolBeamAnchorOffset[i] = DVector3(0, 0, 0);
+		}
+
+		GlowWaveLength = 0;
+
+		DarkMode = 0;
+		DarkDistDepth = 0;
+		DarkHeightDepth = 0;
+
+		FogSlabActive = false;
+		FogSlabDensity = 0;
+		FogSlabWakeStrength = 0;
+		FogSlabOverrideActive = false;   // a transient mist never outlives its map
+		FogSlabOverrideDensity = 0;
+		TornadoDensity = 0;
+		FogBowStrength = 0;
+
+		for (int i = 0; i < MAX_FOG_DISTURB; i++) FogDisturbLife[i] = 0;
+		for (int i = 0; i < MAX_SHAPES; i++) { ShapeSize[i] = 0; ShapeKind[i] = 0; }
+
+		// Stamps own their own clear, and their array size is not ours to know.
+		ClearSurfaceStamps();
+
+		// One line per map change, and only when something was actually live.
+		if (live.IsNotEmpty())
+			Printf("Level visual state reset for the new map:%s\n", live.GetChars());
 	}
 
 	Thinkers.DestroyAllThinkers(fullgc);

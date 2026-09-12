@@ -216,3 +216,41 @@ CVARD(Bool, gl_no_ssbo, false, 0, "Disable SSBO support")
 CVARD(Bool, vr_scene_multithread, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "Allow VR BSP scene-build jobs on a worker thread")
 
 CVAR(Bool, gl_strict_gldefs_errors, false, CVAR_GLOBALCONFIG | CVAR_ARCHIVE)
+
+// [GPUPARTICLES] Stateless GPU-drawn particles -- hw_gpuparticlebuffer.h,
+// gpuparticles.vp, and "Engine docs/GPU_PARTICLES_PLAN.md".
+//
+// Every visual knob is a cvar so it can be tuned in the headset. The four
+// tuning values reach the shader through HWViewpointUniforms::mGpuParticleParams,
+// filled by the renderer every frame, so they respond while a menu is open.
+//
+// THE COST IS ADDITIVE OVERDRAW from large particles close to the eye, not the
+// particle count -- which is why drawn size is capped in world units.
+CVARD(Bool, r_gpuparticles, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "master switch for drawing GPU particles (Vulkan only)")
+CVARD(Float, r_gpuparticles_sizescale, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "multiplies every GPU particle's size")
+CVARD(Float, r_gpuparticles_maxsize, 8.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "world-unit cap on a GPU particle's drawn size")
+CVARD(Float, r_gpuparticles_stretch, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "multiplies GPU particle velocity stretch")
+CVARD(Float, r_gpuparticles_intensity, 1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "multiplies GPU particle brightness")
+CUSTOM_CVARD(Int, r_gpuparticles_ringsize, 65536, CVAR_ARCHIVE | CVAR_GLOBALCONFIG | CVAR_NOINITCALL, "GPU particle ring capacity; takes effect on restart")
+{
+	Printf("You must restart " GAMENAME " for this change to take effect.\n");
+}
+// Diagnostics: a line every two seconds with written / uploaded / drawn counts.
+// Off by default so nothing prints per frame unless asked.
+CVARD(Bool, r_gpuparticles_debug, false, 0, "print GPU particle spawn, upload and draw counts every two seconds")
+
+// The ring size, latched the first time anything asks. The CPU ring on
+// FLevelLocals and the GPU ring both size from this, so they can never
+// disagree within one run -- which is what "takes effect on restart" means.
+int GpuParticleRingCapacity()
+{
+	static int latched = 0;
+	if (latched == 0)
+	{
+		int v = r_gpuparticles_ringsize;
+		if (v < 1024) v = 1024;
+		if (v > (1 << 20)) v = 1 << 20;
+		latched = v;
+	}
+	return latched;
+}

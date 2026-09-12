@@ -3597,9 +3597,71 @@ static void SetVolumetricBeam(FLevelLocals *self, double px, double py, double p
 	double inner, double outer, double length, double density, double falloff,
 	double dust, double dustScale, double dustDrift, int slot)
 {
-	// Slot 0 for anything that never heard of slots, which is every caller
-	// that existed before there were any.
-	if (slot < 0 || slot >= FLevelLocals::MAX_VOL_BEAMS) slot = 0;
+	// Slot 0 is the DEFAULT for anything that never heard of slots (see the
+	// declaration's `slot = 0`). An OUT-OF-RANGE slot is refused, not redirected.
+	//
+	// It used to be remapped to 0, which quietly took over slot 0 -- the
+	// flashlight, the exact clash slots exist to prevent -- and the caller's
+	// own ClearVolumetricBeam(badSlot) was then a no-op, so its cone could
+	// never be turned off except by killing the torch too. Logged once per
+	// distinct bad value, so a caller doing this every tic does not flood.
+	if (slot < 0 || slot >= FLevelLocals::MAX_VOL_BEAMS)
+	{
+		static bool loggedBadSlot = false;
+		static int lastBadSlot = 0;
+		if (!loggedBadSlot || slot != lastBadSlot)
+		{
+			loggedBadSlot = true;
+			lastBadSlot = slot;
+			Printf("SetVolumetricBeam: slot %d is outside 0..%d; the beam is ignored\n",
+				slot, FLevelLocals::MAX_VOL_BEAMS - 1);
+		}
+		return;
+	}
+
+	// VALIDATE THE CONE. GLSL smoothstep(e0, e1, x) is undefined when e0 >= e1,
+	// and both the air pass (smoothstep(cosOuter, cosInner, ...)) and the fog
+	// glow feed it the two angles directly: equal angles divide by zero (NaN on
+	// some drivers), inner above outer reverses the ramp. Length 0 divides by
+	// zero in the axial fade. The outer angle is also capped below 90: the beam
+	// shader relies on the forward cone being convex (volumetricbeam.fp). The
+	// !(x >= min) form also catches NaN. A clamp is logged when the set of
+	// clamped inputs for a slot changes, not every tic.
+	int clampMask = 0;
+	if (!(outer >= 0.1)) { outer = 0.1; clampMask |= 1; }
+	if (outer > 89.0) { outer = 89.0; clampMask |= 2; }
+	if (!(inner <= outer - 0.1)) { inner = outer - 0.1; clampMask |= 4; }
+	if (inner < 0.0) { inner = 0.0; clampMask |= 4; }
+	if (!(length >= 1.0)) { length = 1.0; clampMask |= 8; }
+	if (!(falloff >= 0.01)) { falloff = 0.01; clampMask |= 16; }
+	{
+		static int lastClampMask[FLevelLocals::MAX_VOL_BEAMS] = {};
+		if (clampMask != lastClampMask[slot])
+		{
+			lastClampMask[slot] = clampMask;
+			if (clampMask != 0)
+			{
+				Printf("SetVolumetricBeam slot %d: clamped%s%s%s%s%s -> inner %.2f outer %.2f length %.1f falloff %.2f\n",
+					slot,
+					(clampMask & 1) ? " outer<0.1" : "",
+					(clampMask & 2) ? " outer>89" : "",
+					(clampMask & 4) ? " inner-not-below-outer" : "",
+					(clampMask & 8) ? " length<1" : "",
+					(clampMask & 16) ? " falloff<0.01" : "",
+					inner, outer, length, falloff);
+			}
+		}
+	}
+
+	// A slot being CLAIMED (it was not live) forgets any anchor it had.
+	// Slots are reused: without this, a caller taking over a slot another
+	// mod had anchored to a hand would get a cone stuck to a controller it
+	// never asked about. An anchor is therefore set AFTER SetVolumetricBeam.
+	if (!self->VolBeamActive[slot])
+	{
+		self->VolBeamAnchor[slot] = 0;
+		self->VolBeamAnchorOffset[slot] = DVector3(0, 0, 0);
+	}
 
 	self->VolBeamActive[slot] = true;
 	self->VolBeamDust[slot] = dust;
@@ -3661,13 +3723,21 @@ DEFINE_ACTION_FUNCTION_NATIVE0(FLevelLocals, SetVolumetricBeam, SetVolumetricBea
 // slots exist to fix.
 static void ClearVolumetricBeam(FLevelLocals *self, int slot)
 {
+	// Clearing releases the slot, anchor included (see SetVolumetricBeam).
 	if (slot < 0)
 	{
 		for (int i = 0; i < FLevelLocals::MAX_VOL_BEAMS; i++)
+		{
 			self->VolBeamActive[i] = false;
+			self->VolBeamAnchor[i] = 0;
+		}
 		return;
 	}
-	if (slot < FLevelLocals::MAX_VOL_BEAMS) self->VolBeamActive[slot] = false;
+	if (slot < FLevelLocals::MAX_VOL_BEAMS)
+	{
+		self->VolBeamActive[slot] = false;
+		self->VolBeamAnchor[slot] = 0;
+	}
 }
 
 DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearVolumetricBeam, ClearVolumetricBeam)
@@ -3676,6 +3746,87 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearVolumetricBeam, ClearVolumetric
 	PARAM_INT(slot);
 	ClearVolumetricBeam(self, slot);
 	return 0;
+}
+
+// RS FORK -- anchor a volumetric beam to a tracked pose, resolved at DRAW rate.
+// See FLevelLocals::VolBeamAnchor. The cone equivalent of SetBeamAnchor, and it
+// moves the DIRECTION as well as the origin: a cone has no far end in the world
+// to hold still, and a torch that swings at 35Hz behind a 90Hz hand judders.
+//
+// mode 0 none (the script's pos/dir), 1 main hand, 2 off hand, 3 head.
+// offset is (forward, right, up) in map units in that pose's yaw/pitch frame.
+// Out-of-range modes read as 0. Call AFTER SetVolumetricBeam: claiming a slot
+// that was not live resets its anchor.
+static void SetVolumetricBeamAnchor(FLevelLocals *self, int slot, int mode, double ox, double oy, double oz)
+{
+	if (slot < 0 || slot >= FLevelLocals::MAX_VOL_BEAMS)
+	{
+		static bool loggedBadSlot = false;
+		static int lastBadSlot = 0;
+		if (!loggedBadSlot || slot != lastBadSlot)
+		{
+			loggedBadSlot = true;
+			lastBadSlot = slot;
+			Printf("SetVolumetricBeamAnchor: slot %d is outside 0..%d; ignored\n",
+				slot, FLevelLocals::MAX_VOL_BEAMS - 1);
+		}
+		return;
+	}
+	if (mode < 0 || mode > 3) mode = 0;
+
+	// An anchor on a slot that is not live will be wiped when SetVolumetricBeam
+	// claims it -- almost certainly a call-order mistake. Say so once per slot
+	// until the slot is anchored while live.
+	static bool warnedNotLive[FLevelLocals::MAX_VOL_BEAMS] = {};
+	if (!self->VolBeamActive[slot] && mode != 0)
+	{
+		if (!warnedNotLive[slot])
+		{
+			warnedNotLive[slot] = true;
+			Printf("SetVolumetricBeamAnchor: slot %d is not live; SetVolumetricBeam resets the anchor when it claims the slot -- call the anchor after it\n", slot);
+		}
+	}
+	else
+	{
+		warnedNotLive[slot] = false;
+	}
+
+	self->VolBeamAnchor[slot] = mode;
+	self->VolBeamAnchorOffset[slot] = DVector3(ox, oy, oz);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetVolumetricBeamAnchor, SetVolumetricBeamAnchor)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(slot);
+	PARAM_INT(mode);
+	PARAM_FLOAT(ox);
+	PARAM_FLOAT(oy);
+	PARAM_FLOAT(oz);
+	SetVolumetricBeamAnchor(self, slot, mode, ox, oy, oz);
+	return 0;
+}
+
+// [RS fork] DIAGNOSTICS FOR THE LEVEL VISUAL STATE -- the sweep, glow, fog and
+// darkness setters and the render gates that read them. Off by default and not
+// archived. When on, each setter prints when a value CHANGES (never per tic)
+// and the renderer prints when a gate flips, so one test run shows whether a
+// push reached the engine. Read in hw_drawinfo.cpp, hw_weapon.cpp and events.cpp.
+CVAR(Bool, r_visualstate_log, false, 0)
+
+// [RS fork] Sweep and glow-wave shape ids are 0..9 (see SweepShapeDist in
+// main.fp). Anything else is treated as 0, OFF. Unchecked, a bad id drew four
+// different things: a sphere for the band light, a ring for the fog bow, wave
+// and fill, and nothing in the air lattice. Reported once per distinct bad id
+// -- not gated, since a bad id is a caller bug worth seeing.
+static void ReportBadShapeId(const char *setter, int id)
+{
+	static const char *lastSetter = nullptr;
+	static int lastId = 0;   // 0 is valid, so it is never reported
+	if (setter == lastSetter && id == lastId) return;
+	lastSetter = setter;
+	lastId = id;
+	Printf("%s: shape %d is outside 0..9, treated as 0 (off)\n", setter, id);
 }
 
 // [BB] Sweep -- up to eight thin bands of light travelling through the world,
@@ -3693,6 +3844,8 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearVolumetricBeam, ClearVolumetric
 // sweep, stagger them for a train chasing itself.
 static void SetSweepOrigin(FLevelLocals *self, int mode, double x, double y, double z, int count)
 {
+	// [RS fork] Shape ids 0..9; anything else is off. See ReportBadShapeId.
+	if (mode < 0 || mode > 9) { ReportBadShapeId("SetSweepOrigin", mode); mode = 0; }
 	self->SweepMode = mode;
 	self->SweepOrigin = DVector3(x, y, z);
 	self->SweepCount = clamp(count, 0, FLevelLocals::MAX_SWEEP_BANDS);
@@ -3770,6 +3923,9 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetSweepCount, SetSweepCount)
 static void SetSweepBandAt(FLevelLocals *self, int index, double x, double y, double z, int mode)
 {
 	if (index < 0 || index >= FLevelLocals::MAX_SWEEP_BANDS) return;
+	// [RS fork] Shape ids 0..9; anything else is 0, which hands the band back
+	// to the shared origin rather than inventing a shape. See ReportBadShapeId.
+	if (mode < 0 || mode > 9) { ReportBadShapeId("SetSweepBandAt", mode); mode = 0; }
 	self->SweepBandOrigin[index] = DVector3(x, y, z);
 	self->SweepBandMode[index] = mode;
 }
@@ -3819,6 +3975,9 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetSweepTrail, SetSweepTrail)
 static void SetGlowWave(FLevelLocals *self, double wavelength, double speed,
 	double sharpness, int shape)
 {
+	// [RS fork] Shape ids 0..9 (0 still means the ring, as before). Anything
+	// else switches the wave off -- wavelength 0 is its off switch.
+	if (shape < 0 || shape > 9) { ReportBadShapeId("SetGlowWave", shape); wavelength = 0; shape = 1; }
 	self->GlowWaveLength = wavelength;
 	self->GlowWaveSpeed = speed;
 	self->GlowWaveSharp = sharpness;
@@ -4057,8 +4216,46 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogWake, SetFogWake)
 	return 0;
 }
 
-// How much of the surface behind it the mist takes on. This is what makes the
-// slab read as a substance rather than a coloured filter over the scene.
+// [RS fork] THE WAKE'S SHAPE WITHOUT ITS POSITION.
+//
+// SetFogWake is play scope because the position comes from the playsim, and
+// radius and strength rode along with it -- so the wake's look sliders only
+// moved while the game ran and did nothing with a menu open. These three are
+// look settings, so they get a clearscope setter a UiTick can push.
+// SetFogWakePos is the position half, so a caller that splits them does not
+// write radius and strength from two scopes. SetFogWake is unchanged.
+static void SetFogWakeShape(FLevelLocals *self, double radius, double strength,
+	double stretch)
+{
+	if (r_visualstate_log && (radius != self->FogSlabWakeRadius
+		|| strength != self->FogSlabWakeStrength || stretch != self->FogWakeStretch))
+		Printf("SetFogWakeShape: radius %.1f strength %.2f stretch %.2f\n", radius, strength, stretch);
+	self->FogSlabWakeRadius = radius;
+	self->FogSlabWakeStrength = strength;
+	self->FogWakeStretch = stretch;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogWakeShape, SetFogWakeShape)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(radius); PARAM_FLOAT(strength); PARAM_FLOAT(stretch);
+	SetFogWakeShape(self, radius, strength, stretch);
+	return 0;
+}
+
+static void SetFogWakePos(FLevelLocals *self, double x, double y, double z)
+{
+	self->FogSlabWakePos = DVector3(x, y, z);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogWakePos, SetFogWakePos)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(x); PARAM_FLOAT(y); PARAM_FLOAT(z);
+	SetFogWakePos(self, x, y, z);
+	return 0;
+}
+
 // The slab's surface, animated. A flat top reads as a sheet once you can
 // see it clearly; two waves at an angle to each other interfere, and
 // interference is what looks like a surface rolling rather than a pattern
@@ -4197,19 +4394,29 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetGlowCells, SetGlowCells)
 // React is the disturbance array reaching the walls; pulse and level are the
 // room's own alarm. Kept together because both are "the glow responding to
 // something" rather than "the glow having a texture".
+//
+// [RS fork] `rate` is back (it was in 07b540ba1b and went out only because
+// 79c31bffc8 reset the whole tree to the 5.0.0-dxr release). It multiplies the
+// beat rate the level implies, so depth and speed are separable -- without it a
+// bright alarm is always a fast one. Defaulted to 1.0 in ZScript, which is the
+// old rate exactly, so three-argument callers are untouched.
 static void SetGlowReact(FLevelLocals *self, double react, double pulse,
-	double level)
+	double level, double rate)
 {
 	self->GlowReact = react;
 	self->GlowPulse = pulse;
 	self->GlowPulseLevel = level;
+	if (r_visualstate_log && rate != self->GlowPulseRate)
+		Printf("SetGlowReact: pulse rate x%.2f (level %.2f beats at %.2f Hz)\n", rate, level,
+			(1.0 + 6.0 * clamp(level, 0.0, 1.0)) * max(rate, 0.0) * 0.35);
+	self->GlowPulseRate = rate;
 }
 
 DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetGlowReact, SetGlowReact)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
-	PARAM_FLOAT(react); PARAM_FLOAT(pulse); PARAM_FLOAT(level);
-	SetGlowReact(self, react, pulse, level);
+	PARAM_FLOAT(react); PARAM_FLOAT(pulse); PARAM_FLOAT(level); PARAM_FLOAT(rate);
+	SetGlowReact(self, react, pulse, level, rate);
 	return 0;
 }
 
@@ -4855,8 +5062,6 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogWakeMotion, SetFogWakeMotion)
 	return 0;
 }
 
-// A sweep band pushing mist ahead of itself. Strength 0 and the sweep passes
-// through the fog without touching it, as it always did.
 // [BB] Which reference each fog edge follows, and how gently.
 //
 // A slab with one world Z is flat across the whole map. What "fog on the
@@ -4871,6 +5076,11 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogWakeMotion, SetFogWakeMotion)
 //
 // Top follows floor is floor fog. Bottom follows ceiling is ceiling fog. Both
 // following the floor is a chest-high band that walks upstairs with you.
+//
+// [RS fork] The edge's value is now a height ABOVE that floor (below that
+// ceiling): the shader adds the full plane height and the magnitude blends the
+// eye's floor toward each fragment's floor. It used to scale absolute floor Z,
+// so ground mist sank under any raised floor. See FogSlabAt in main.fp.
 static void SetFogFollow(FLevelLocals *self, double top, double bottom)
 {
 	self->FogFollowTop = clamp(top, -1.0, 1.0);
@@ -4885,6 +5095,8 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogFollow, SetFogFollow)
 	return 0;
 }
 
+// A sweep band pushing mist ahead of itself. Strength 0 and the sweep passes
+// through the fog without touching it, as it always did.
 static void SetFogBow(FLevelLocals *self, double strength, double width,
 	double thin)
 {
@@ -4914,6 +5126,45 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogGradient, SetFogGradient)
 	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
 	PARAM_COLOR(color); PARAM_FLOAT(mix);
 	SetFogGradient(self, color, mix);
+	return 0;
+}
+
+// [RS fork] THE COLOUR AN IGNITE DISTURBANCE BURNS (FogDisturb mode 2).
+//
+// Ignite was lit with the gradient colour above -- a colour picked for the top
+// of the layer, which most presets leave black, so an explosion added black
+// light and there was no flash. This gives the flash its own colour. Until it
+// is set, or after ClearFogIgniteColor, ignite follows the gradient colour
+// exactly as before. Look-only, so clearscope.
+static void SetFogIgniteColor(FLevelLocals *self, int color)
+{
+	const PalEntry c = (PalEntry)color;
+	if (r_visualstate_log && (!self->FogIgniteColorSet
+		|| (self->FogIgniteColor.d & 0xffffff) != (c.d & 0xffffff)))
+		Printf("SetFogIgniteColor: %02x%02x%02x\n", c.r, c.g, c.b);
+	self->FogIgniteColor = c;
+	self->FogIgniteColorSet = true;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogIgniteColor, SetFogIgniteColor)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_COLOR(color);
+	SetFogIgniteColor(self, color);
+	return 0;
+}
+
+static void ClearFogIgniteColor(FLevelLocals *self)
+{
+	if (r_visualstate_log && self->FogIgniteColorSet)
+		Printf("ClearFogIgniteColor: ignite follows the gradient colour again\n");
+	self->FogIgniteColorSet = false;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearFogIgniteColor, ClearFogIgniteColor)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	ClearFogIgniteColor(self);
 	return 0;
 }
 
@@ -4950,6 +5201,8 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetTornadoMotion, SetTornadoMotion)
 	return 0;
 }
 
+// How much of the surface behind it the mist takes on. This is what makes the
+// slab read as a substance rather than a coloured filter over the scene.
 static void SetFogPickup(FLevelLocals *self, double amount)
 {
 	self->FogSlabPickup = amount;
@@ -5095,6 +5348,63 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearSurfaceStamps, ClearSurfaceStam
 	return 0;
 }
 
+// [GPUPARTICLES] Script's way in to FLevelLocals::SpawnGpuParticles. Policy --
+// jitter, eviction, space conversion -- lives on the level so native code can
+// publish particles too.
+static void SpawnGpuParticles(FLevelLocals *self, double px, double py, double pz,
+	double dx, double dy, double dz, int count, double spread, double speed, double speedJitter,
+	int color, double intensity, double life, double lifeJitter,
+	double sizeStart, double sizeEnd, double gravity, double drag,
+	int orient, double stretch, int seed)
+{
+	const bool firstThisLevel = self->GpuParticleWritten == 0;
+	self->SpawnGpuParticles(DVector3(px, py, pz), DVector3(dx, dy, dz), count,
+		spread, speed, speedJitter, (PalEntry)color, intensity, life, lifeJitter,
+		sizeStart, sizeEnd, gravity, drag, orient, stretch, seed);
+
+	// Diagnostic: one line per level, the first time its ring is written.
+	if (firstThisLevel && self->GpuParticleWritten > 0)
+	{
+		Printf("GpuParticles: first write this level -- serial %llu, ring %u records, burst of %d\n",
+			(unsigned long long)self->GpuParticleSerial, self->GpuParticles.Size(), count);
+	}
+}
+
+// _NATIVE0, NOT _NATIVE. This is 22 VM arguments (self, two Vector3s at three
+// floats each, fifteen more). The plain macro registers a direct-call pointer
+// the JIT builds from the function signature, asmjit caps that at 16, and past
+// the cap the process dies at load with nothing in any log -- see the note on
+// SetVolumetricBeam. The VM calling convention has no such limit.
+DEFINE_ACTION_FUNCTION_NATIVE0(FLevelLocals, SpawnGpuParticles, SpawnGpuParticles)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(px); PARAM_FLOAT(py); PARAM_FLOAT(pz);
+	PARAM_FLOAT(dx); PARAM_FLOAT(dy); PARAM_FLOAT(dz);
+	PARAM_INT(count);
+	PARAM_FLOAT(spread); PARAM_FLOAT(speed); PARAM_FLOAT(speedJitter);
+	PARAM_COLOR(color);
+	PARAM_FLOAT(intensity); PARAM_FLOAT(life); PARAM_FLOAT(lifeJitter);
+	PARAM_FLOAT(sizeStart); PARAM_FLOAT(sizeEnd);
+	PARAM_FLOAT(gravity); PARAM_FLOAT(drag);
+	PARAM_INT(orient); PARAM_FLOAT(stretch); PARAM_INT(seed);
+	SpawnGpuParticles(self, px, py, pz, dx, dy, dz, count, spread, speed, speedJitter,
+		color, intensity, life, lifeJitter, sizeStart, sizeEnd, gravity, drag,
+		orient, stretch, seed);
+	return 0;
+}
+
+static void ClearGpuParticles(FLevelLocals *self)
+{
+	self->ClearGpuParticles();
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearGpuParticles, ClearGpuParticles)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	ClearGpuParticles(self);
+	return 0;
+}
+
 static void SetBeam(FLevelLocals *self, int index,
 	double ax, double ay, double az, double bx, double by, double bz,
 	double thick, double soft, int color, double intensity)
@@ -5199,6 +5509,66 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearFogSlab, ClearFogSlab)
 {
 	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
 	ClearFogSlab(self);
+	return 0;
+}
+
+// [RS fork] A TRANSIENT FOG SLAB THAT WINS OVER THE STANDING ONE.
+//
+// SetFogSlab is one shared slot, so a temporary mist (the weapon wheel's, while
+// it is open) and a standing fog (RS_Fog, re-pushed every tic) replaced each
+// other, and the temporary caller's ClearFogSlab wiped the standing fog. The
+// override is a second slot the renderer prefers while it is set; the standing
+// FogSlab* values are never touched, so ClearFogSlabOverride hands the view
+// straight back to them. Same parameters as SetFogSlab plus its own bottom, all
+// absolute world Z (the override ignores SetFogFollow, SetFogBottom's stack and
+// SetFogSurface). Density <= 0 clears it, as density 0 switches SetFogSlab off.
+//
+// One override, not a stack: two transient callers at once still share it.
+static void ClearFogSlabOverride(FLevelLocals *self)
+{
+	if (r_visualstate_log && self->FogSlabOverrideActive)
+		Printf("ClearFogSlabOverride: the standing fog slab is active again (%s)\n",
+			(self->FogSlabActive && self->FogSlabDensity > 0.0) ? "set" : "off, so no slab");
+	self->FogSlabOverrideActive = false;
+	self->FogSlabOverrideDensity = 0;
+}
+
+static void SetFogSlabOverride(FLevelLocals *self, double topZ, double density,
+	double softness, double scatter, int color, double bottomZ)
+{
+	if (density <= 0.0)
+	{
+		ClearFogSlabOverride(self);
+		return;
+	}
+	if (r_visualstate_log && !self->FogSlabOverrideActive)
+		Printf("SetFogSlabOverride: the OVERRIDE fog slab is active (top %.1f density %.2f bottom %.1f), standing slab %s underneath\n",
+			topZ, density, bottomZ,
+			(self->FogSlabActive && self->FogSlabDensity > 0.0) ? "held" : "off");
+	self->FogSlabOverrideActive = true;
+	self->FogSlabOverrideTop = topZ;
+	self->FogSlabOverrideDensity = density;
+	self->FogSlabOverrideSoft = softness;
+	self->FogSlabOverrideScatter = scatter;
+	self->FogSlabOverrideColor = (PalEntry)color;
+	self->FogSlabOverrideBottom = bottomZ;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetFogSlabOverride, SetFogSlabOverride)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_FLOAT(topZ); PARAM_FLOAT(density);
+	PARAM_FLOAT(softness); PARAM_FLOAT(scatter);
+	PARAM_COLOR(color);
+	PARAM_FLOAT(bottomZ);
+	SetFogSlabOverride(self, topZ, density, softness, scatter, color, bottomZ);
+	return 0;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearFogSlabOverride, ClearFogSlabOverride)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	ClearFogSlabOverride(self);
 	return 0;
 }
 

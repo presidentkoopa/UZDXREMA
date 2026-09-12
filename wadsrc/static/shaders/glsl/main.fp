@@ -773,6 +773,32 @@ void SetMaterialProps(inout Material material, vec2 texCoord)
 #endif
 }
 
+// [RS fork] ONE DISTANCE FUNCTION FOR EVERY SHAPE ID.
+//
+// The band light, the fog bow and the glow wave each had their own copy of
+// this chain, and they drifted: the bow measured shell (4) and the signed
+// crossings (6-9) as rings, and the wave did not know 6-9 at all. Two systems
+// that measure the world differently cannot be lined up, so they now share
+// this one. The setters clamp ids to 0..9, so "anything else" never arrives;
+// 0 is off and callers test it before calling.
+//
+//   1 ring (xz)     2 bar along X (abs)    3 bar along Y (abs)    4 sphere
+//   5 rise (signed Y)   6 +X   7 +Y   8 -X   9 -Y   (6-9 signed)
+//
+// p and o are in shader space: Doom's Z is .y.
+float SweepShapeDist(int shape, vec3 p, vec3 o)
+{
+	if (shape == 1)      return length(p.xz - o.xz);
+	else if (shape == 2) return abs(p.x - o.x);
+	else if (shape == 3) return abs(p.z - o.z);
+	else if (shape == 5) return p.y - o.y;
+	else if (shape == 6) return p.x - o.x;
+	else if (shape == 7) return p.z - o.z;
+	else if (shape == 8) return o.x - p.x;
+	else if (shape == 9) return o.z - p.z;
+	return length(p - o);   // 4, the sphere
+}
+
 float SweepBandAttenAt(int sb)
 {
 	vec4 sband = uSweepBands[sb];
@@ -800,16 +826,9 @@ float SweepBandAttenAt(int sb)
 	// The negative pair exists so a sweep can come from either side without the
 	// caller having to move the origin to the far edge and invert its own reach,
 	// which is arithmetic every caller would otherwise repeat.
-	float sdist;
-	if (smode == 1)      sdist = length(pixelpos.xz - sorg.xz);
-	else if (smode == 2) sdist = abs(pixelpos.x - sorg.x);
-	else if (smode == 3) sdist = abs(pixelpos.z - sorg.z);
-	else if (smode == 5) sdist = pixelpos.y - sorg.y;
-	else if (smode == 6) sdist = pixelpos.x - sorg.x;
-	else if (smode == 7) sdist = pixelpos.z - sorg.z;
-	else if (smode == 8) sdist = sorg.x - pixelpos.x;
-	else if (smode == 9) sdist = sorg.z - pixelpos.z;
-	else                 sdist = length(pixelpos.xyz - sorg.xyz);
+	// [RS fork] The chain that lived here is SweepShapeDist, shared with the
+	// fog bow and the glow wave so the three cannot disagree again.
+	float sdist = SweepShapeDist(smode, pixelpos.xyz, sorg.xyz);
 
 	float ssigned = sdist - sband.x;
 	float thick = max(sband.y, 0.001);
@@ -873,12 +892,10 @@ float GlowWaveRaw(float phase, float seedOff)
 
 	int wshape = int(uGlowWave.w);
 	vec3 wo = uGlowWaveOrigin.xyz;
-	float d;
-	if (wshape == 2)      d = abs(pixelpos.x - wo.x);
-	else if (wshape == 3) d = abs(pixelpos.z - wo.z);
-	else if (wshape == 4) d = length(pixelpos.xyz - wo);
-	else if (wshape == 5) d = pixelpos.y - wo.y;
-	else                  d = length(pixelpos.xz - wo.xz);
+	// [RS fork] The sweep's own distance function, so a wave given 6-9 to
+	// match a crossing band follows that band instead of turning into rings.
+	// Identical to the old chain for 1-5.
+	float d = SweepShapeDist(wshape, pixelpos.xyz, wo);
 
 	float t = d / uGlowWave.x + timer * uGlowWave.y + phase + seedOff;
 	float w = 0.5 + 0.5 * sin(t);
@@ -928,7 +945,8 @@ float GlowWaveSeedOff(float src)
 //   uGlowTex   x noise amount, y noise scale, z drift, w contrast
 //   uGlowTex2  x flow amount, y flow spacing, z flow speed, w flow sharpness
 //   uGlowTex3  x cell amount, y cell scale, z cell speed, w cell edge width
-//   uGlowTex4  x disturbance reach, y state pulse depth, z state level, w -
+//   uGlowTex4  x disturbance reach, y state pulse depth, z state level,
+//              w pulse rate multiplier (1 = the rate the level implies)
 //
 // Sampled in WORLD space, not surface space. A wall and the floor it meets
 // then agree about the pattern crossing the join, which is what makes it read
@@ -1516,8 +1534,8 @@ float GlowTextureAt(float seedOff)
 	// ---- 4. THE WALLS REACT TOO ---------------------------------------
 	//
 	// The disturbance array already exists, already fires on gunfire and on
-	// death, and until now only the fog consumed it. Feeding the same eight
-	// slots into the glow costs nothing to build and makes a shot visibly
+	// death, and until now only the fog consumed it. Feeding the same slots
+	// (32 now, MAX_FOG_DISTURB) into the glow costs nothing to build and makes a shot visibly
 	// travel across the lit surfaces of the room rather than only through
 	// the air in it.
 	//
@@ -1559,7 +1577,11 @@ float GlowTextureAt(float seedOff)
 		// Rate rises with the level, so it is not just brighter when things
 		// are bad -- it is FASTER, which is what reads as urgency.
 		float lvl = clamp(uGlowTex4.z, 0.0, 1.0);
-		float rate = 1.0 + 6.0 * lvl;
+		// [RS fork] uGlowTex4.w (Level->GlowPulseRate, SetGlowReact's `rate`)
+		// scales it. The level alone set the rate, so a strong alarm was
+		// always a fast one and bright-and-slow could not be asked for (Red
+		// Alert strobed). 1 is the original rate exactly; 0 stops the beat.
+		float rate = (1.0 + 6.0 * lvl) * max(uGlowTex4.w, 0.0);
 		float beat = 0.5 + 0.5 * sin(timer * rate * 6.2831853 * 0.35);
 		mul *= 1.0 + uGlowTex4.y * lvl * (beat - 0.5) * 2.0;
 	}
@@ -1612,7 +1634,11 @@ float DarknessAt(float lightLevel)
 	if (base <= 0.0) return 1.0;      // already black; nothing to scale
 
 	float A = uDarkness.y;
-	float L = base + uDarkness.w;     // pre-gain, before the curve
+	// Pre-gain, before the curve. Floored at 0 because the gain can be
+	// negative (the slider reaches -128) and mode 4 feeds L to pow(), which
+	// GLSL leaves undefined for a negative base -- NaN on most drivers, and a
+	// NaN survives the clamp on mul below as black/white/flicker garbage.
+	float L = max(base + uDarkness.w, 0.0);
 
 	float outL;
 	if (dmode == 1)                   // subtract -- a simple fade
@@ -1879,7 +1905,8 @@ vec3 BeamAirGlow(vec3 fragPos)
 // painted on the walls: it wraps corners, and there is nothing between them.
 // Walk into it and you walk through a picture of a laser grid.
 //
-// The beam system draws real lines in the air, and it caps at eight -- which
+// The beam system draws real lines in the air, and it caps at a fixed count
+// (eight when this was written; MAX_BEAMS is 128 now) -- which
 // is a fence, not a screen door, and raising the cap makes it worse because
 // each beam is another segment solve for every fragment.
 //
@@ -2311,16 +2338,27 @@ vec4 FogSlabAt(vec3 fragPos)
 	// and that is not a shortcut -- the planes describe the FRAGMENT's sector.
 	// Using them for the eye would mean that looking at a wall on the floor
 	// above raised the fog around your head to match it.
+	//
+	// [RS fork] THE FULL FLOOR HEIGHT IS ADDED; THE DIAL ONLY BLENDS WHICH
+	// FLOOR. This used to be `floorZ * amount` -- a scale on ABSOLUTE world Z --
+	// so top 56 at 0.35 put the surface under any floor above ~86 units and
+	// hundreds of units deep in a pit, and "constant depth underfoot" was only
+	// true at 1. Now the edge is `value + floor`, where floor is the eye's floor
+	// blended toward this fragment's floor by the amount: at 1 every step is
+	// tracked exactly, at 0.3 a step ten units up raises the fog three -- the
+	// same gentleness, measured from where you stand instead of from world 0.
+	// At the eye the blend is the eye floor itself, so depth underfoot is the
+	// value on any floor. Ceiling-following is the same with the ceiling.
 	float topOffFrag = 0.0, topOffEye = 0.0;
 	if (uFogFollow.x > 0.0)
 	{
-		topOffFrag = FogPlaneAt(uGlowBottomPlane, fragPos) * uFogFollow.x;
-		topOffEye  = uFogFollow.z * uFogFollow.x;
+		topOffEye  = uFogFollow.z;
+		topOffFrag = mix(uFogFollow.z, FogPlaneAt(uGlowBottomPlane, fragPos), uFogFollow.x);
 	}
 	else if (uFogFollow.x < 0.0)
 	{
-		topOffFrag = FogPlaneAt(uGlowTopPlane, fragPos) * -uFogFollow.x;
-		topOffEye  = uFogFollow.w * -uFogFollow.x;
+		topOffEye  = uFogFollow.w;
+		topOffFrag = mix(uFogFollow.w, FogPlaneAt(uGlowTopPlane, fragPos), -uFogFollow.x);
 	}
 	topZ += topOffFrag;
 
@@ -2358,15 +2396,17 @@ vec4 FogSlabAt(vec3 fragPos)
 	// a band that does both, and never the layer walking upstairs intact.
 	float botZ = uFogSlab2.x;
 	float botOffFrag = 0.0, botOffEye = 0.0;
+	// [RS fork] Same rule as the top: full floor (or ceiling) height, with the
+	// amount blending the eye's toward the fragment's. See the top's note.
 	if (uFogFollow.y > 0.0)
 	{
-		botOffFrag = FogPlaneAt(uGlowBottomPlane, fragPos) * uFogFollow.y;
-		botOffEye  = uFogFollow.z * uFogFollow.y;
+		botOffEye  = uFogFollow.z;
+		botOffFrag = mix(uFogFollow.z, FogPlaneAt(uGlowBottomPlane, fragPos), uFogFollow.y);
 	}
 	else if (uFogFollow.y < 0.0)
 	{
-		botOffFrag = FogPlaneAt(uGlowTopPlane, fragPos) * -uFogFollow.y;
-		botOffEye  = uFogFollow.w * -uFogFollow.y;
+		botOffEye  = uFogFollow.w;
+		botOffFrag = mix(uFogFollow.w, FogPlaneAt(uGlowTopPlane, fragPos), -uFogFollow.y);
 	}
 
 	float botEye = botZ + botOffEye, botFrag = botZ + botOffFrag;
@@ -2498,11 +2538,12 @@ vec4 FogSlabAt(vec3 fragPos)
 
 			int bs = int(uSweepBandOrigin[bb].w);
 			vec3 bo = uSweepBandOrigin[bb].xyz;
-			float here;
-			if (bs == 2)      here = abs(fragPos.x - bo.x);
-			else if (bs == 3) here = abs(fragPos.z - bo.z);
-			else if (bs == 5) here = fragPos.y - bo.y;
-			else              here = length(fragPos.xz - bo.xz);
+			// [RS fork] SweepShapeDist, the band light's own measure. This
+			// treated shell (4) and the signed crossings (6-9) as rings, so
+			// the bulge sat nowhere near the visible band. Signed shapes stay
+			// signed, so sd > 0 below still means "not yet reached".
+			if (bs <= 0) continue;
+			float here = SweepShapeDist(bs, fragPos, bo);
 
 			// Signed distance from the band surface: ahead of it is positive.
 			float sd = here - uSweepBands[bb].x;
@@ -2532,6 +2573,19 @@ vec4 FogSlabAt(vec3 fragPos)
 	// over every fragment inside the fog volume, so walking empty slots here
 	// is the most expensive place in the shader to do it.
 	vec3 ignite = vec3(0.0);
+
+	// [RS fork] IGNITE'S OWN COLOUR (SetFogIgniteColor), packed into
+	// uFogWake2.w as 1 + 0xRRGGBB -- exact in a float, every value is below
+	// 2^24 -- with 0 meaning unset. Unset keeps the old behaviour: ignite burns
+	// in the gradient colour, which most presets leave black, which is why a
+	// separate colour exists. Decoded once, outside the per-slot loop.
+	vec3 igniteCol = uFogColor2.rgb;
+	if (uFogWake2.w > 0.5)
+	{
+		float pk = floor(uFogWake2.w + 0.5) - 1.0;
+		igniteCol = vec3(floor(pk / 65536.0), mod(floor(pk / 256.0), 256.0), mod(pk, 256.0)) / 255.0;
+	}
+
 	int ndisturb = int(uFogBow.w);
 	for (int di = 0; di < 32; di++)
 	{
@@ -2567,7 +2621,7 @@ vec4 FogSlabAt(vec3 fragPos)
 			float front = drad + age * spd;
 			float shell = 1.0 - smoothstep(front * 0.35, front, r);
 			if (shell <= 0.0) continue;
-			ignite += uFogColor2.rgb * shell * stren;
+			ignite += igniteCol * shell * stren;
 		}
 		else
 		{
@@ -2598,7 +2652,12 @@ vec4 FogSlabAt(vec3 fragPos)
 		// stepped outside.
 		amount = clamp(amount + FogTendrilAt(fragPos, topFrag) * uFogDensityScale, 0.0, 1.0);
 
-	vec3 col = uFogSlabColor.rgb;
+	// [RS fork] Starts BLACK when there is no slab and no wisps. Then col only
+	// carries added light -- ignite, the torch, beams -- and must not start from
+	// a slab colour that is not being drawn: clear-air ignite used to take the
+	// last preset's colour, or the header's orange-red. Wisps are the slab's
+	// own mist, so they keep its colour (uploaded outside the gate now).
+	vec3 col = (haveSlab || haveTend) ? uFogSlabColor.rgb : vec3(0.0);
 
 	// A SECOND COLOUR ACROSS THE LAYER'S OWN THICKNESS. Cold at the floor,
 	// warm at the top, or the other way about. Measured against the layer
@@ -2621,7 +2680,14 @@ vec4 FogSlabAt(vec3 fragPos)
 		{
 			float cosA = dot(toFrag / len, uFogBeamDir.xyz);
 			float lit = smoothstep(uFogBeamCol.w, uFogBeamDir.w, cosA);
-			lit *= 1.0 - clamp(len / uFogBeamPos.w, 0.0, 1.0);
+			// Along the beam, the SAME curve the air pass uses -- pow(1 - d/L,
+			// falloff) -- so the mist glow dies out where the visible beam does.
+			// Falloff arrives in uFogSlabExtra.z; 0 means nothing published it
+			// and keeps the old linear fade. The beam's brightness (density,
+			// after flicker) is premultiplied into uFogBeamCol.rgb on the CPU,
+			// so a torch at Brightness 0 no longer lights the fog.
+			float beamFall = uFogSlabExtra.z > 0.0 ? uFogSlabExtra.z : 1.0;
+			lit *= pow(1.0 - clamp(len / uFogBeamPos.w, 0.0, 1.0), beamFall);
 			col += uFogBeamCol.rgb * lit * uFogSlab.w;
 		}
 	}
@@ -2738,7 +2804,9 @@ vec4 FogSlabAt(vec3 fragPos)
 			{
 				float cosA = dot(toFrag / len, uFogBeamDir.xyz);
 				float lit = smoothstep(uFogBeamCol.w, uFogBeamDir.w, cosA);
-				lit *= 1.0 - clamp(len / uFogBeamPos.w, 0.0, 1.0);
+				// Same falloff and brightness as the slab's torch glow above.
+				float beamFall = uFogSlabExtra.z > 0.0 ? uFogSlabExtra.z : 1.0;
+				lit *= pow(1.0 - clamp(len / uFogBeamPos.w, 0.0, 1.0), beamFall);
 				tcol += uFogBeamCol.rgb * lit * uTornadoCol.w;
 			}
 		}

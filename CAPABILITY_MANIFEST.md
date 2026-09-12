@@ -1090,7 +1090,7 @@ A postprocess pass that lights the AIR rather than a surface: an analytic ray/co
 
 **Why.** Everything else in the engine lights surfaces, so a torch gives you a bright disc where it lands and nothing in between. There is no geometry to hang a cone on, which is why this has to be a postprocess pass.
 
-**Reached by.** ZScript API only: Level.SetVolumetricBeam(pos, dir, col, inner, outer, length, density, falloff, dust, dustScale, dustDrift) and Level.ClearVolumetricBeam(), declared at wadsrc/static/zscript/doombase.zs:1106-1107. A mod must republish the beam each tic; nothing in wadsrc calls either function. Quality and the axis fade are tuning-only cvars, not gates:...
+**Reached by.** ZScript API only: Level.SetVolumetricBeam(pos, dir, col, inner, outer, length, density, falloff, dust, dustScale, dustDrift, slot), Level.ClearVolumetricBeam(slot) and Level.SetVolumetricBeamAnchor(slot, mode, offset), all clearscope, declared in the LevelLocals struct in wadsrc/static/zscript/doombase.zs (search SetVolumetricBeam; line numbers drift). 32 slots (FLevelLocals::MAX_VOL_BEAMS). A mod must republish the beam each tic; nothing in wadsrc calls either function. Quality and the axis fade are tuning-only cvars, not gates:...
 
 **Files.** `wadsrc/static/shaders/pp/volumetricbeam.fp`, `src/rendering/hwrenderer/scene/hw_drawinfo.cpp`, `src/common/rendering/hwrenderer/postprocessing/hw_postprocess.h`, `src/scripting/vmthunks.cpp`
 
