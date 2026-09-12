@@ -1666,6 +1666,20 @@ public:
 	double			PulseHz = 0.0;
 	double			PulseDepth = 0.5;
 
+	// RS FORK -- A COLOUR THAT TINTS WHAT IS DRAWN, WHATEVER THE RENDER STYLE.
+	//
+	// fillcolor (SetShade) only reaches the renderer for the styles that REPLACE
+	// the texture with a colour -- Stencil, Shaded -- so a textured model asked
+	// to look green either stayed its own colour or became a flat green
+	// silhouette. This multiplies the drawn colour instead: the texture stays,
+	// tinted. A magazine coloured by how full it is was the first caller; any
+	// model or sprite that wants to say something by its colour is the next.
+	// Fullbright (+BRIGHT) plus a tint reads as glowing in that colour.
+	//
+	// INERT UNTIL SET: 0, the default, draws exactly as before -- black is not a
+	// tint. Read in HWSprite::Process where ThingColor is chosen.
+	uint32_t		TintColor = 0;
+
 	// RS FORK -- A MODEL WITH THREE DIFFERENT SIZES.
 	//
 	// Actor::Scale has two numbers, width and height, because a sprite has two.

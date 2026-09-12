@@ -498,6 +498,12 @@ class Actor : Thinker native
 	native double PulseHz;
 	native double PulseDepth;
 
+	// Multiplies the colour this actor is drawn in, whatever its render style --
+	// the texture stays, tinted, unlike SetShade, which only a Stencil or Shaded
+	// style uses. With +BRIGHT it glows in that colour. 0 (the default) is off.
+	// See actor.h.
+	native color TintColor;
+
 	// Three sizes for a model, because Scale has only two and a mesh has three.
 	// Multiplies the model's own scale per axis, in the mesh's own space; zero or
 	// less on an axis leaves that axis alone, so (0,0,0) -- the default -- draws

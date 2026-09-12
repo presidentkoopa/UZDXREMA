@@ -2320,6 +2320,7 @@ DEFINE_FIELD(AActor, ScaleCVar)         // RS fork
 DEFINE_FIELD(AActor, ScaleCVarUnit)     // RS fork
 DEFINE_FIELD(AActor, PulseHz)           // RS fork
 DEFINE_FIELD(AActor, PulseDepth)        // RS fork
+DEFINE_FIELD(AActor, TintColor)         // RS fork
 DEFINE_FIELD(AActor, ScaleAxes)         // RS fork
 DEFINE_FIELD(AActor, UnmorphTime)
 DEFINE_FIELD(AActor, MorphFlags)

@@ -1673,6 +1673,9 @@ void HWSprite::Process(HWDrawInfo *di, AActor* thing, sector_t * sector, area_t 
 	lightlevel = rendersector->CheckSpriteGlow(lightlevel, thingpos);
 
 	ThingColor = (thing->RenderStyle.Flags & STYLEF_ColorIsFixed) ? thing->fillcolor : 0xffffff;
+	// RS FORK -- AActor::TintColor: tint whatever is drawn, texture kept.
+	if (thing->TintColor & 0xffffff)
+		ThingColor = ThingColor.Modulate(PalEntry(thing->TintColor));
 	ThingColor.a = 255;
 	RenderStyle = thing->RenderStyle;
 
