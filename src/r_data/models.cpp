@@ -504,6 +504,71 @@ DEFINE_ACTION_FUNCTION_NATIVE(AActor, ModelPointToWorld, ModelWorldTransform)
 	return numret;
 }
 
+// RS FORK -- WHERE A CHILD OF THIS ACTOR IS DRAWN (AActor::FollowActor).
+//
+// A child seated in this actor's frame is drawn in the frame ObjectToWorldMatrix
+// hands back through followFrameOut -- origin and rotation, WITHOUT this actor's
+// scale. ModelPointToWorld answers through the full matrix, scale included, so
+// the two disagree whenever the model is scaled -- and flatly contradict each
+// other when a MODELDEF Scale is negative, because a mirror flips an axis. A
+// script that works out a child's seat from ModelPointToWorld then puts it on
+// the wrong side of the parent. Found on a gun drawn at Scale -0.82: every grab
+// sphere sat off the gun, correctly spaced, on the far side.
+//
+// So this answers from THE SAME FRAME the renderer seats the child in. Input is
+// a seat as FollowActorOfs takes one (X forward, Y left, Z up, frame units).
+// Returns the world point and the three axis vectors UNNORMALISED -- each is one
+// frame unit along that axis, in map units -- so a caller gets the frame's units
+// along with its directions and never has to guess them.
+static void ModelFollowFrameTransform(AActor *self, double sx, double sy, double sz,
+	DVector3 &posOut, DVector3 &axXOut, DVector3 &axYOut, DVector3 &axZOut)
+{
+	posOut = DVector3(0, 0, 0);
+	axXOut = DVector3(1, 0, 0);
+	axYOut = DVector3(0, 1, 0);
+	axZOut = DVector3(0, 0, 1);
+	if (self == nullptr) return;
+
+	FSpriteModelFrame *smf = FindModelFrame(self, self->sprite, self->frame, false);
+	if (smf == nullptr) return;
+
+	VSMatrix frame;
+	smf->ObjectToWorldMatrix(self, (float)self->X(), (float)self->Y(), (float)self->Z(), I_GetTimeFrac(), &frame);
+
+	const FLOATTYPE *v = frame.get();
+	// A seat goes into the frame as (x, z, y), exactly as ModelFollowFrame
+	// translates one, and comes back out of the renderer's order into the map's.
+	auto xf = [&](double fwd, double left, double up) {
+		const double gx = fwd, gy = up, gz = left;
+		return DVector3(
+			v[0]*gx + v[4]*gy + v[8]*gz  + v[12],
+			v[1]*gx + v[5]*gy + v[9]*gz  + v[13],
+			v[2]*gx + v[6]*gy + v[10]*gz + v[14]);
+	};
+	auto toMap = [](const DVector3 &g) { return DVector3(g.X, g.Z, g.Y); };
+
+	const DVector3 org = xf(0, 0, 0);
+	posOut = toMap(xf(sx, sy, sz));
+	axXOut = toMap(xf(1, 0, 0) - org);
+	axYOut = toMap(xf(0, 1, 0) - org);
+	axZOut = toMap(xf(0, 0, 1) - org);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(AActor, ModelFollowFrameToWorld, ModelFollowFrameTransform)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_FLOAT(sx);
+	PARAM_FLOAT(sy);
+	PARAM_FLOAT(sz);
+	DVector3 pos, ax, ay, az;
+	ModelFollowFrameTransform(self, sx, sy, sz, pos, ax, ay, az);
+	if (numret > 3) ret[3].SetVector(az);
+	if (numret > 2) ret[2].SetVector(ay);
+	if (numret > 1) ret[1].SetVector(ax);
+	if (numret > 0) ret[0].SetVector(pos);
+	return numret;
+}
+
 // PLACEMENT CVARS ARE `user` CVARS, AND FindCVar CANNOT READ THOSE.
 //
 // FindCVar hands back the raw FBaseCVar. For a CVAR_USERINFO cvar that object

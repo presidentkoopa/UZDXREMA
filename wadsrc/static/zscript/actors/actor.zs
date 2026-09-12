@@ -2102,6 +2102,14 @@ class Actor : Thinker native
 	// see ModelWorldTransform in models.cpp.
 	native Vector3, Vector3, Vector3 ModelPointToWorld(double mx, double my, double mz);
 
+	// RS fork -- where a CHILD of this actor is drawn (FollowActor): the seat
+	// (X forward, Y left, Z up, frame units) as a world point, plus the frame's
+	// three axes UNNORMALISED -- one frame unit each, in map units. Answers from
+	// the frame the renderer really seats a child in, which leaves out this
+	// actor's scale; ModelPointToWorld keeps it, so on a scaled or mirrored model
+	// the two disagree. Use this one to work out a child's seat.
+	native Vector3, Vector3, Vector3, Vector3 ModelFollowFrameToWorld(double sx, double sy, double sz);
+
 	// RS fork -- does this actor's model carry this bone? -1 if not.
 	//
 	// The model declares what it is: a mesh with MARKER_grip has a grip, one
