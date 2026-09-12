@@ -452,6 +452,11 @@ class Actor : Thinker native
 	// serves children of different sizes. 'None' adds nothing. See actor.h.
 	native name FollowActorOfsCVar;
 
+	// A second set, summed with the first: one seat moved by two sliders that
+	// cannot share a name -- a correction for a whole family of children and a
+	// nudge for this one. Both live. See actor.h.
+	native name FollowActorOfsCVar2;
+
 	// Trace this actor in neon, from its own sprite. See func_spriteoutline.fp
 	// and the note in actor.h. OutlineMode 0 is off and is the default; 1 keeps
 	// the body and adds a glowing edge, 2 erases the body and leaves the wire

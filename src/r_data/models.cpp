@@ -764,15 +764,18 @@ static bool ModelFollowFrame(AActor *child, double ticFrac, VSMatrix &out)
 	// units and NOT divided by the child's scale: the seat belongs to the parent
 	// frame, so resizing the child must not move it, and one cvar set can seat
 	// many children of different sizes.
-	if (child->FollowActorOfsCVar != NAME_None)
+	auto addSeatCVars = [&seat](FName prefix)
 	{
-		const char *pre = child->FollowActorOfsCVar.GetChars();
+		if (prefix == NAME_None) return;
+		const char *pre = prefix.GetChars();
 		char nm[160];
 		float v;
 		snprintf(nm, sizeof(nm), "%s_ofs_x", pre); if (GetPlacementCVar(nm, v)) seat.X += v;
 		snprintf(nm, sizeof(nm), "%s_ofs_y", pre); if (GetPlacementCVar(nm, v)) seat.Y += v;
 		snprintf(nm, sizeof(nm), "%s_ofs_z", pre); if (GetPlacementCVar(nm, v)) seat.Z += v;
-	}
+	};
+	addSeatCVars(child->FollowActorOfsCVar);
+	addSeatCVars(child->FollowActorOfsCVar2);
 
 	frame.translate((float)seat.X, (float)seat.Z, (float)seat.Y);
 

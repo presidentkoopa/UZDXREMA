@@ -1574,6 +1574,12 @@ public:
 	// same wherever it appears. INERT UNTIL SET: NAME_None adds nothing.
 	FName			FollowActorOfsCVar;
 
+	// A SECOND SET, SUMMED WITH THE FIRST. One seat, two sliders that both move
+	// it and cannot share a name: a correction applied to a whole family of
+	// children (every grab point on one gun) and a nudge for this one alone. Both
+	// have to answer live, so neither can be the one script folds in.
+	FName			FollowActorOfsCVar2;
+
 	// RS FORK -- TRACE THIS ACTOR IN NEON, FROM ITS OWN SPRITE.
 	//
 	// The drawing is func_spriteoutline.fp: a Sobel edge detect over the
