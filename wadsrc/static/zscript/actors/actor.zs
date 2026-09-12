@@ -2110,6 +2110,14 @@ class Actor : Thinker native
 	// the two disagree. Use this one to work out a child's seat.
 	native Vector3, Vector3, Vector3, Vector3 ModelFollowFrameToWorld(double sx, double sy, double sz);
 
+	// RS fork -- is this actor solid, or a billboard? Anything drawn in a frame of
+	// its own (FollowHandMode, FollowBodyMode, FollowActor) must be a MODEL; a
+	// sprite ignores those and is drawn where the actor stands. HasModelFrame: its
+	// ordinary lookup finds a model or voxel. HasVoxelFrame: a voxel exists for its
+	// current frame -- ask before setting VoxelOverride, since a pack is optional.
+	native bool HasModelFrame();
+	native bool HasVoxelFrame();
+
 	// RS fork -- does this actor's model carry this bone? -1 if not.
 	//
 	// The model declares what it is: a mesh with MARKER_grip has a grip, one

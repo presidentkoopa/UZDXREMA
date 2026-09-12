@@ -569,6 +569,38 @@ DEFINE_ACTION_FUNCTION_NATIVE(AActor, ModelFollowFrameToWorld, ModelFollowFrameT
 	return numret;
 }
 
+// RS FORK -- IS THIS ACTOR SOLID, OR A BILLBOARD?
+//
+// Everything that draws an actor in a frame of its own -- a controller's
+// (FollowHandMode), the body's, another model's -- works on MODELS only. A
+// sprite has no frame to be placed in: it is drawn at the actor's position,
+// facing you, whatever those fields say. So a caller that is about to put
+// something in a hand has to know which it is holding, or it builds for a
+// model and gets a billboard -- found as caught barrels "disappearing": the
+// hold scaled a sprite up a hundredfold for a frame it was never drawn in.
+//
+// HasModelFrame: drawn as a model or voxel by the ordinary lookup, without any
+// per-actor voxel override -- its own MODELDEF, or a voxel r_drawvoxels would
+// draw anyway. HasVoxelFrame: a voxel exists for its current sprite frame,
+// whether or not anything is drawing it -- the question to ask BEFORE setting
+// VoxelOverride, since a pack is optional and the override finds nothing
+// without one.
+DEFINE_ACTION_FUNCTION(AActor, HasModelFrame)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	const bool dropped = !!(self->flags & MF_DROPPED);
+	FSpriteModelFrame *smf = FindModelFrame(
+		(self->modelData != nullptr && self->modelData->modelDef != nullptr) ? self->modelData->modelDef : self->GetClass(),
+		(self->flags9 & MF9_DECOUPLEDANIMATIONS), self->sprite, self->frame, dropped);
+	ACTION_RETURN_BOOL(smf != nullptr);
+}
+
+DEFINE_ACTION_FUNCTION(AActor, HasVoxelFrame)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	ACTION_RETURN_BOOL(FindVoxelFrame(self->sprite, self->frame, !!(self->flags & MF_DROPPED)) != nullptr);
+}
+
 // PLACEMENT CVARS ARE `user` CVARS, AND FindCVar CANNOT READ THOSE.
 //
 // FindCVar hands back the raw FBaseCVar. For a CVAR_USERINFO cvar that object
