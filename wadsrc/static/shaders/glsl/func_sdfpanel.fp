@@ -44,9 +44,11 @@ vec4 ProcessTexel()
 	// nothing downstream reads uAddColor.a. uSpecularMaterial was the obvious
 	// alternative and is not usable: it is filled from the TEXTURE's glossiness
 	// and specular level, and only on the GL backend.
-	float packed = floor(uAddColor.a * 255.0 + 0.5);
-	float radius = floor(packed / 16.0) / 15.0;
-	float border = mod(packed, 16.0) / 15.0;
+	// NOT named `packed` -- NVIDIA's OpenGL compiler reserves it (Vulkan does not),
+	// and the failed compile took the whole GL renderer down at startup.
+	float shapeBits = floor(uAddColor.a * 255.0 + 0.5);
+	float radius = floor(shapeBits / 16.0) / 15.0;
+	float border = mod(shapeBits, 16.0) / 15.0;
 
 	// A radius of 1 would round the rectangle into a lozenge and swallow the
 	// whole plate, so the useful range stops short of the half-extent.

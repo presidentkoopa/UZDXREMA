@@ -46,9 +46,11 @@ vec4 ProcessTexel()
 	// corner rounding, low is the border width, each 0..15 across the
 	// half-extent. Kept identical so the same ZScript shape argument means the
 	// same thing whichever of the two a caller picks.
-	float packed = floor(uAddColor.a * 255.0 + 0.5);
-	float radius = floor(packed / 16.0) / 15.0;
-	float border = mod(packed, 16.0) / 15.0;
+	// NOT named `packed` -- NVIDIA's OpenGL compiler reserves it (Vulkan does not),
+	// and the failed compile took the whole GL renderer down at startup.
+	float shapeBits = floor(uAddColor.a * 255.0 + 0.5);
+	float radius = floor(shapeBits / 16.0) / 15.0;
+	float border = mod(shapeBits, 16.0) / 15.0;
 
 	// A hexagon has far less room to round than a rectangle before it stops
 	// being a hexagon -- its corners are 120 degrees, not 90, so the same

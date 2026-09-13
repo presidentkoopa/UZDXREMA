@@ -260,6 +260,16 @@ FString ProcessShaderError(const char * shaderError, TArray<FString> &filenames_
 				}
 
 				int64_t old_len = cur - line_start;
+				// The driver's source-string number is 1-based into the include list, but
+				// core shaders are one glShaderSource string, so NVIDIA reports 0 and the
+				// list may hold a single name or none. An unchecked [lump_num - 1] read
+				// index -1 and turned a shader compile error into a crash with no message.
+				// Out of range, leave the driver's own "0(83) :" prefix as it is.
+				if (lump_num < 1 || lump_num > (int64_t)filenames_for_error.Size())
+				{
+					state = SKIP_TO_NEWLINE;
+					continue;
+				}
 				FString new_err = "File '" + filenames_for_error[lump_num - 1] + "', Line " + line_num_str + ": ";
 
 				int64_t diff = new_err.Len() - old_len;

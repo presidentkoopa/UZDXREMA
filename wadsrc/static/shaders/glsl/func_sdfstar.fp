@@ -54,9 +54,11 @@ vec4 ProcessTexel()
 	//   low   stroke width, and ZERO MEANS FILLED. That is the hierarchy
 	//         switch -- hollow for something you can name and choose, solid
 	//         for the dust around it.
-	float packed  = floor(uAddColor.a * 255.0 + 0.5);
-	float pts     = floor(packed / 16.0);
-	float strokeN = mod(packed, 16.0);
+	// NOT named `packed` -- NVIDIA's OpenGL compiler reserves it (Vulkan does not),
+	// and the failed compile took the whole GL renderer down at startup.
+	float shapeBits  = floor(uAddColor.a * 255.0 + 0.5);
+	float pts     = floor(shapeBits / 16.0);
+	float strokeN = mod(shapeBits, 16.0);
 	if (pts < 3.0) pts = 5.0;
 
 	// THE STAR FIELD.
