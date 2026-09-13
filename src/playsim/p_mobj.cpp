@@ -9140,3 +9140,10 @@ void PrintMiscActorInfo(AActor *query)
 		Printf("State:%s, Tics: %d\n", sn.GetChars(), query->tics);
 	}
 }
+
+// The null-safe default for AActor::AttackDir / OffhandDir -- see actor.h.
+DVector3 P_FlatWeaponDir(AActor*, DAngle yaw, DAngle pitch)
+{
+	double pc = pitch.Cos();
+	return { pc * yaw.Cos(), pc * yaw.Sin(), -pitch.Sin() };
+}

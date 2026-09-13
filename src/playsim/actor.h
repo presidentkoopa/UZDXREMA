@@ -954,6 +954,15 @@ public:
 const double MinVel = EQUAL_EPSILON;
 
 // Map Object definition.
+// Flat aim direction from yaw and pitch. The default for AActor::AttackDir and
+// OffhandDir until a VR mode installs a controller-aware one (VRMode::SetUp).
+// Without it both pointers are null for the tics between a pawn spawning and
+// the first rendered frame, while the playsim has already set
+// OverrideAttackPosDir -- and every caller trusts that flag. That window
+// crashed desktop OpenXR at map start (RIP=0 from JIT ZScript).
+class AActor;
+DVector3 P_FlatWeaponDir(AActor* actor, DAngle yaw, DAngle pitch);
+
 class AActor final : public DThinker
 {
 	DECLARE_CLASS_WITH_META (AActor, DThinker, PClassActor)
@@ -2279,7 +2288,7 @@ public:
 	int   ModelFrameNext = -1;
 	float ModelFrameLerp = -1.f;
 
-	DVector3 (*AttackDir)(AActor* actor, DAngle yaw, DAngle pitch);
+	DVector3 (*AttackDir)(AActor* actor, DAngle yaw, DAngle pitch) = P_FlatWeaponDir;
 
 	DVector3 OffhandPos;
 	DAngle   OffhandPitch;
@@ -2467,7 +2476,7 @@ public:
 	bool LaserHeadshotLinedUpMain;
 	bool LaserHeadshotLinedUpOff;
 
-	DVector3 (*OffhandDir)(AActor* actor, DAngle yaw, DAngle pitch);
+	DVector3 (*OffhandDir)(AActor* actor, DAngle yaw, DAngle pitch) = P_FlatWeaponDir;
 };
 
 class FActorIterator
