@@ -146,7 +146,15 @@ public:
 	enum class FrameRenderMode
 	{
 		GameplayEyes,
-		VirtualScreen
+		VirtualScreen,
+		// vr_menu_keep_world: a menu is open over a level, but the headset keeps
+		// the live stereo world (GameplayEyes' eye path, recommended size, HMD
+		// pose) and the menu goes on the virtual-screen quad WITHOUT the flat
+		// scene copy and the opaque backdrop wall. Exists so renderer-read
+		// sliders (holster/model placement) can be tuned while looking at the
+		// result on your body. ShouldUseScreenLayerForCurrentFrame() is true
+		// here (quad + pointer), ShouldUseRecommendedRenderSizeThisFrame() too.
+		MenuOverWorld
 	};
 
 	friend class VKOpenXRDeviceEyePose;
@@ -180,6 +188,7 @@ public:
 	bool GetRecommendedRenderSize(int& outWidth, int& outHeight) const override;
 	virtual bool ShouldUseRecommendedRenderSizeThisFrame() const override;
 	virtual bool ShouldUseScreenLayerForCurrentFrame() const override;
+	virtual bool IsMenuOverWorldFrame() const override;
 	virtual bool IsInitialized() const override;
 	bool HasActiveInputSession() const;
 	
@@ -228,6 +237,12 @@ protected:
 	mutable bool isSessionRunning = false;
 	mutable bool isSessionReadyToBegin = false;
 	mutable FrameRenderMode mFrameRenderMode = FrameRenderMode::VirtualScreen;
+	// vr_menu_keep_world: head yaw that turned the rendered view (doomYaw) while
+	// a MenuOverWorld frame was up, but was NOT sent to the player actor -- a
+	// menu-paused playsim drops ticcmd turns. Paid into G_AddViewAngle on the
+	// first gameplay frame after the menu closes; zeroed when doomYaw is snapped
+	// back to the actor. Always 0 when the cvar is off.
+	mutable float xrMenuHeldYawDegrees = 0.0f;
 	mutable bool mInVRSceneRender = false;
 	mutable bool mInVirtualScreenRender = false;
 	mutable uint32_t sceneWidth = 0;

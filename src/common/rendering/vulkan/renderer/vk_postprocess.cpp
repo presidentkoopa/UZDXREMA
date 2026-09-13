@@ -450,6 +450,11 @@ void VkPostprocess::BlurScene(float gameinfobluramount)
 	VkPPRenderState renderstate(fb);
 
 	auto vrmode = VRMode::GetVRModeCached(true);
+	// vr_menu_keep_world: the menu is on its own quad and the headset is showing
+	// the live world so you can see what the sliders do. Blurring the eye images
+	// here would defeat that; the menu dim is a 2D quad and stays on the panel.
+	if (vrmode->IsMenuOverWorldFrame())
+		return;
 	int eyeCount = vrmode->mEyeCount;
 	for (int i = 0; i < eyeCount; ++i)
 	{

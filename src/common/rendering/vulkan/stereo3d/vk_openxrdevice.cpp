@@ -190,6 +190,14 @@ EXTERN_CVAR(Bool, vr_holster_use_grip);
 CVAR(Bool, vr_menu_pointer, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR(Color, vr_menu_pointer_color, 0xffffff, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 CVAR(Bool, vr_mouse_in_menu, false, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+// Keep the live stereo world and head tracking in the headset while a menu is
+// open over a level, with the menu on the virtual-screen quad (no flat scene
+// copy, no backdrop wall, no menu blur). For tuning renderer-read sliders --
+// holster/model placement -- while looking at your body. Playsim stays paused;
+// head yaw is held off the actor until the menu closes (xrMenuHeldYawDegrees).
+// Off = the old behaviour: menu collapses the view onto a flat head-follow
+// screen and head yaw stops turning the world. See FrameRenderMode::MenuOverWorld.
+CVAR(Bool, vr_menu_keep_world, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
 
 namespace s3d {
 
@@ -877,6 +885,8 @@ static const char* FrameRenderModeName(VKOpenXRDeviceMode::FrameRenderMode mode)
 		return "GameplayEyes";
 	case VKOpenXRDeviceMode::FrameRenderMode::VirtualScreen:
 		return "VirtualScreen";
+	case VKOpenXRDeviceMode::FrameRenderMode::MenuOverWorld:
+		return "MenuOverWorld";
 	default:
 		return "Unknown";
 	}
@@ -1772,12 +1782,21 @@ bool VKOpenXRDeviceMode::GetRecommendedRenderSize(int& outWidth, int& outHeight)
 
 bool VKOpenXRDeviceMode::ShouldUseRecommendedRenderSizeThisFrame() const
 {
-	return mFrameRenderMode == FrameRenderMode::GameplayEyes;
+	// vr_menu_keep_world: MenuOverWorld renders the same stereo eye images as
+	// gameplay, so it needs the same recommended per-eye size and viewport.
+	return mFrameRenderMode == FrameRenderMode::GameplayEyes || mFrameRenderMode == FrameRenderMode::MenuOverWorld;
 }
 
 bool VKOpenXRDeviceMode::ShouldUseScreenLayerForCurrentFrame() const
 {
+	// Deliberately still true for MenuOverWorld: this is what keeps the menu 2D
+	// out of the eye images and routes it (and the menu pointer) to the quad.
 	return mFrameRenderMode != FrameRenderMode::GameplayEyes;
+}
+
+bool VKOpenXRDeviceMode::IsMenuOverWorldFrame() const
+{
+	return mFrameRenderMode == FrameRenderMode::MenuOverWorld;
 }
 
 static void ApplyOpenXRGameplayViewport(DFrameBuffer* screen, int width, int height)
@@ -3048,6 +3067,22 @@ VKOpenXRDeviceMode::FrameRenderMode VKOpenXRDeviceMode::DetermineFrameRenderMode
 		return FrameRenderMode::VirtualScreen;
 	}
 	const bool forceVirtualScreen = gamestate == GS_LEVEL && menuactive == MENU_Off && (cinemamode || vr_overlayscreen_always);
+	// THE MENU-STATE CHECK. IsGameplaySceneActive() is false whenever a menu is
+	// open, which is what used to collapse the headset onto the flat virtual
+	// screen. With vr_menu_keep_world on, a menu over a running level (not the
+	// pause key, not the console, not cinema/always-overlay, which are flat
+	// anyway) keeps the stereo world instead. Off: unchanged.
+	const bool menuOverWorld = vr_menu_keep_world
+		&& gamestate == GS_LEVEL
+		&& menuactive != MENU_Off
+		&& !paused
+		&& ConsoleState == c_up
+		&& !cinemamode
+		&& !vr_overlayscreen_always;
+	if (menuOverWorld)
+	{
+		return FrameRenderMode::MenuOverWorld;
+	}
 	return (IsGameplaySceneActive() && !forceVirtualScreen) ? FrameRenderMode::GameplayEyes : FrameRenderMode::VirtualScreen;
 }
 
@@ -3055,7 +3090,10 @@ void VKOpenXRDeviceMode::ApplyFrameRenderMode(FrameRenderMode mode) const
 {
 	mFrameRenderMode = mode;
 
-	if (mode == FrameRenderMode::GameplayEyes)
+	// vr_menu_keep_world: MenuOverWorld is a stereo world frame, so the QzDoom
+	// "screen layer" flag (cinema yaw/pitch, playerYaw freeze) stays off like
+	// gameplay. The menu quad is driven by ShouldUseScreenLayerForCurrentFrame().
+	if (mode == FrameRenderMode::GameplayEyes || mode == FrameRenderMode::MenuOverWorld)
 	{
 		QzDoom_setUseScreenLayer(false);
 	}
@@ -3119,8 +3157,14 @@ void VKOpenXRDeviceMode::SetUp() const
 	{
 		doomYaw = (float)player->mo->Angles.Yaw.Degrees();
 		resetDoomYaw = false;
+		// vr_menu_keep_world: doomYaw now equals the actor again, so any yaw held
+		// back during a MenuOverWorld frame is void.
+		xrMenuHeldYawDegrees = 0.0f;
 	}
-	else if (gamestate != GS_LEVEL || menuactive != MENU_Off
+	// vr_menu_keep_world: an open menu normally re-snaps doomYaw to the actor
+	// every other frame, which would jitter a live world view. Not while the
+	// frame is MenuOverWorld; updateHmdPose keeps doomYaw on the head instead.
+	else if (gamestate != GS_LEVEL || (menuactive != MENU_Off && mFrameRenderMode != FrameRenderMode::MenuOverWorld)
 		|| ConsoleState == c_down || ConsoleState == c_falling
 		|| (player && player->playerstate == PST_DEAD)
 		|| (player && player->resetDoomYaw)
@@ -3236,7 +3280,11 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 		}
 	}
 
-	if (gamestate != GS_LEVEL || menuactive != MENU_Off || r_viewpoint.camera == nullptr || r_viewpoint.ViewLevel == nullptr)
+	// vr_menu_keep_world: this early-out is what froze head tracking while a
+	// menu was open (no yaw into doomYaw, no HMD pitch/roll on the viewpoint).
+	// A MenuOverWorld frame goes on through, like gameplay.
+	const bool menuOverWorld = mFrameRenderMode == FrameRenderMode::MenuOverWorld;
+	if (gamestate != GS_LEVEL || (menuactive != MENU_Off && !menuOverWorld) || r_viewpoint.camera == nullptr || r_viewpoint.ViewLevel == nullptr)
 		return;
 
 	static float previousHmdYaw = 0;
@@ -3244,7 +3292,9 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 	static float previousCinemaSnapTurn = 0.0f;
 	static bool wasLockedToScreenLayerLastFrame = false;
 	const float currentHmdYaw = hmdorientation[1] + snapTurn;
-	const bool lockGameplayViewToScreenLayer = ShouldUseScreenLayerForCurrentFrame();
+	// MenuOverWorld reports the screen layer (for the menu quad) but its view is
+	// the free stereo head view, not the cinema lock.
+	const bool lockGameplayViewToScreenLayer = ShouldUseScreenLayerForCurrentFrame() && !menuOverWorld;
 	player_t* player = &players[consoleplayer];
 	if (!havePreviousYaw)
 	{
@@ -3273,7 +3323,14 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 	{
 		wasLockedToScreenLayerLastFrame = false;
 	}
-	if (!lockGameplayViewToScreenLayer)
+	if (menuOverWorld)
+	{
+		// vr_menu_keep_world: turn the rendered view only. A menu-paused playsim
+		// would drop this turn from the ticcmd, leaving the actor behind doomYaw;
+		// hold it and pay it in one go when the menu closes (below).
+		xrMenuHeldYawDegrees += hmdYawDeltaDegrees;
+	}
+	else if (!lockGameplayViewToScreenLayer)
 	{
 		vrApplyingHmdYaw = true;
 		G_AddViewAngle(mAngleFromRadians((float)DEG2RAD(-hmdYawDeltaDegrees)));
@@ -3285,9 +3342,20 @@ void VKOpenXRDeviceMode::updateHmdPose(FRenderViewpoint& vp) const
 		G_AddViewAngle(mAngleFromRadians((float)DEG2RAD(-cinemaTurnDeltaDegrees)));
 		vrApplyingHmdYaw = false;
 	}
+	if (!menuOverWorld && xrMenuHeldYawDegrees != 0.0f)
+	{
+		// vr_menu_keep_world: first frame out of the menu. Same single catch-up
+		// turn the old path gave (previousHmdYaw was frozen during the menu), so
+		// the actor lands on the heading the view already has. Local input only.
+		vrApplyingHmdYaw = true;
+		G_AddViewAngle(mAngleFromRadians((float)DEG2RAD(-xrMenuHeldYawDegrees)));
+		vrApplyingHmdYaw = false;
+		xrMenuHeldYawDegrees = 0.0f;
+	}
 	previousHmdYaw = currentHmdYaw;
 
-	if (gamestate == GS_LEVEL && menuactive == MENU_Off)
+	// vr_menu_keep_world: MenuOverWorld also gets the live HMD yaw/pitch/roll.
+	if (gamestate == GS_LEVEL && (menuactive == MENU_Off || menuOverWorld))
 	{
 		if (!lockGameplayViewToScreenLayer)
 		{
@@ -5730,7 +5798,10 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 
 	xrVirtualScreenImageIndex = (int)imageIndex;
 	auto& target = xrVirtualScreenTextures[imageIndex];
-	const bool useSceneBackdrop = IsLevelSceneState() && !renderNetWaitShell;
+	// vr_menu_keep_world: the flat copy of the scene behind the menu is the "2D
+	// collapse". In MenuOverWorld the real world is in the eyes, so the quad is
+	// just the menu on its plain background panel.
+	const bool useSceneBackdrop = IsLevelSceneState() && !renderNetWaitShell && mFrameRenderMode != FrameRenderMode::MenuOverWorld;
 	if (useSceneBackdrop)
 	{
 		vkfb->GetPostprocess()->BlitCurrentToImage(&target, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -6042,7 +6113,10 @@ bool VKOpenXRDeviceMode::RenderVirtualScreen() const
 
 	updateVirtualScreenLayer();
 	xrVirtualScreenVisible = true;
-	xrVirtualScreenBackdropVisible = true;
+	// vr_menu_keep_world: the backdrop is an opaque quad 6x the menu's size right
+	// behind it -- a wall over the world. Not submitted (or mirrored) in
+	// MenuOverWorld; the image above is still acquired/released as before.
+	xrVirtualScreenBackdropVisible = mFrameRenderMode != FrameRenderMode::MenuOverWorld;
 	return true;
 }
 
@@ -6652,7 +6726,8 @@ bool VKOpenXRDeviceMode::ShouldUseMultiviewThisFrame() const
 {
 	const bool shouldUse = vr_openxr_multiview &&
 		xrMultiviewSupported &&
-		mFrameRenderMode == FrameRenderMode::GameplayEyes &&
+		// vr_menu_keep_world: MenuOverWorld renders the gameplay eye path too.
+		(mFrameRenderMode == FrameRenderMode::GameplayEyes || mFrameRenderMode == FrameRenderMode::MenuOverWorld) &&
 		xrViewCount > 1;
 	return shouldUse;
 }

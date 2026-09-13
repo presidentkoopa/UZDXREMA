@@ -193,6 +193,10 @@ struct VRMode
 	virtual void DrawControllerModels(HWDrawInfo* di, FRenderState& state) const {}
 	virtual void DrawMountedHud(HWDrawInfo* di, FRenderState& state) const {}
 	virtual bool IsRenderingVirtualScreen() const { return false; }
+	// True when this frame keeps the live stereo world in the headset behind an
+	// open menu (OpenXR: vr_menu_keep_world). Scene-wide menu effects that would
+	// hide the world -- the menu blur -- check it. Default false: inert elsewhere.
+	virtual bool IsMenuOverWorldFrame() const { return false; }
 	virtual bool RenderVirtualScreen() const { return false; }
 	virtual void FinalizeEyeImage(VulkanRenderDevice* fb, int eyeIndex) const {}
 	virtual bool RenderDesktopMirror(VulkanRenderDevice* fb, VulkanImage* dstImage) const { return false; }
