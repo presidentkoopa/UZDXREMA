@@ -38,7 +38,7 @@ class HWViewpointBuffer
 
 	unsigned int mBlockSize;
 
-	void CheckSize();
+	void CheckSize(unsigned int count = 1);	// room for `count` uploads plus one (Vulkan binds two blocks)
 
 public:
 

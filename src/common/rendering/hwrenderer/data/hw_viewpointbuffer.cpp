@@ -50,16 +50,22 @@ HWViewpointBuffer::~HWViewpointBuffer()
 }
 
 
-void HWViewpointBuffer::CheckSize()
+void HWViewpointBuffer::CheckSize(unsigned int count)
 {
-	if (mUploadIndex >= mBufferSize)
+	// Room for `count` new blocks PLUS ONE. Vulkan binds two viewpoint blocks from
+	// the bind index (vk_descriptorset.cpp viewpointRange = block size x 2, for
+	// multiview), so a single-view upload landing on the last index made the bound
+	// range reach one block past the end of the buffer. Loops here, not in the
+	// callers, so a large upload can never spin on a size check that stopped growing.
+	if (mUploadIndex + count + 1 <= mBufferSize) return;
+	while (mUploadIndex + count + 1 > mBufferSize)
 	{
 		mBufferSize *= 2;
 		mByteSize *= 2;
-		for (int n = 0; n < mPipelineNbr; n++)
-		{
-			mBufferPipeline[n]->Resize(mByteSize);
-		}
+	}
+	for (int n = 0; n < mPipelineNbr; n++)
+	{
+		mBufferPipeline[n]->Resize(mByteSize);
 	}
 }
 
@@ -116,10 +122,7 @@ int HWViewpointBuffer::SetViewpoints(FRenderState &di, const HWViewpointUniforms
 	if (vp == nullptr || count <= 0)
 		return Bind(di, mUploadIndex);
 
-	while (mUploadIndex + count > mBufferSize)
-	{
-		CheckSize();
-	}
+	CheckSize((unsigned int)count);
 
 	const unsigned int firstIndex = mUploadIndex;
 	mBuffer->Map();
