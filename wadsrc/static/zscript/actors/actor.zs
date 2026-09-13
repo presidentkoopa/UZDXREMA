@@ -445,6 +445,17 @@ class Actor : Thinker native
 	native int FollowActorSlot;
 	native Vector3 FollowActorOfs;
 
+	// Read FollowActorOfs as a POINT ON THE PARENT'S MESH instead of a seat in
+	// the follow frame. Give it the same (x, y, z) you would hand the parent's
+	// ModelPointToWorld: the renderer's model space, y up, so an MD3-file point
+	// (x, y, z) goes in as (x, z, y). The renderer carries it through the
+	// parent's scale, mirror and MODELDEF orientation, so a point read off the
+	// mesh lands on the mesh, and with FollowActorSlot it rides that part.
+	// Position only: this actor still turns with the follow frame, and
+	// FollowActorOfsCVar/2 still add on top in the frame's axes and units. False,
+	// the default, is the old meaning. See actor.h.
+	native bool FollowActorOfsInModel;
+
 	// A SEAT YOU CAN TUNE WITH THE MENU OPEN. Names a placement set; the
 	// RENDERER adds <prefix>_ofs_x/_ofs_y/_ofs_z to FollowActorOfs every frame,
 	// in the follow frame's axes and units, so a slider moves this while the
@@ -1793,6 +1804,48 @@ class Actor : Thinker native
 	// and the same part in the hand agree at every value. degrees 0 turns it
 	// off. Refused on a slot that is not being driven.
 	native bool SetModelSurfaceDriveRotation(int slot, Vector3 axis, double degrees, Vector3 pivot);
+
+	// A PART THAT ONLY TURNS, DRIVEN BY YOUR HAND. The sibling of
+	// SetModelSurfaceDrive for a lever, a handle, a latch or a barrel on its
+	// hinge. At value v the part turns v * degrees about `axis` through `pivot`
+	// and does not slide. Your hand is read by its ANGLE round that line, not
+	// along a straight axis, so the part turns exactly as far as your hand
+	// swings round the pivot, however far out you hold it. |degrees| must be
+	// under 180. hand, startValue and ClearModelSurfaceDrive work as they do for
+	// SetModelSurfaceDrive. SetModelSurfaceDriveRotation is refused on a hinge
+	// drive, because the hinge IS its turn.
+	native bool SetModelSurfaceDriveHinge(int slot, int modelindex, int surface, int hand, Vector3 axis, double degrees, Vector3 pivot, double startValue);
+
+	// THEN A SECOND MOTION, IN THE SAME PULL. Call after SetModelSurfaceDrive or
+	// SetModelSurfaceDriveHinge on the same slot, which becomes stage 1. The
+	// slot's one drawn value 0..1 is then [0, split] for stage 1 and [split, 1]
+	// for stage 2. Stage 1 is held fully applied through all of stage 2: a
+	// bolt's handle stays up while it draws back.
+	//
+	// One hand drives both, each along its OWN direction of travel. Stage 2
+	// cannot move until stage 1 is complete, and stage 1 cannot move while
+	// stage 2 is under way, which is the L-shaped track a bolt runs in. Pushing
+	// back past the split returns to stage 1. The renderer does the handoff on
+	// the frame it is drawing, so nothing snaps at the corner, even on a pull
+	// fast enough to cross it inside one frame.
+	//
+	// kind: DRIVESTAGE_Slide (amount = mesh units along axis, pivot ignored) or
+	// DRIVESTAGE_Hinge (amount = degrees about axis through pivot, |amount| under
+	// 180). DRIVESTAGE_None removes the second stage. axis and pivot are in the
+	// mesh's own space where the part stands once stage 1 is complete.
+	//
+	// The drive's startValue is read as the COMBINED value, so a bolt taken
+	// hold of while open resumes open. GetModelSurfaceDrawnValue returns the
+	// combined value, and ClearModelSurfaceDrive removes the stage too. Refused
+	// on a slot that is not being driven, for split outside [0.001, 0.999], and
+	// for any NaN or infinite axis, amount or pivot.
+	enum EModelSurfaceDriveStage
+	{
+		DRIVESTAGE_None  = 0,
+		DRIVESTAGE_Slide = 1,
+		DRIVESTAGE_Hinge = 2,
+	};
+	native bool SetModelSurfaceDriveStage(int slot, int kind, Vector3 axis, double amount, Vector3 pivot, double split);
 
 	// WHAT WAS DRAWN, 0..1. Read this rather than trusting script's own estimate:
 	// script runs at 35Hz and the renderer draws at 90+, so on fast motion they

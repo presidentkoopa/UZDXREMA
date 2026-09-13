@@ -7334,6 +7334,12 @@ DEFINE_ACTION_FUNCTION(AActor, SetModelSurfaceDrive)
 	md->SurfOvDriveArmed[slot] = false;   // the renderer captures the anchor
 	md->SurfOvDriveValue[slot] = (float)clamp(startValue, 0.0, 1.0);
 	md->SurfOvDriveTurnDeg[slot] = 0.f;   // a pure slide until told otherwise
+	// Nor a stale hinge or second stage (SetModelSurfaceDriveHinge/Stage): a slot
+	// reused for a plain drive takes the plain branch, exactly as before those
+	// existed.
+	md->SurfOvDriveHinge[slot]      = false;
+	md->SurfOvDriveStage2Kind[slot] = 0;
+	md->SurfOvDriveInStage2[slot]   = false;
 	ACTION_RETURN_BOOL(true);
 }
 
@@ -7350,6 +7356,9 @@ DEFINE_ACTION_FUNCTION(AActor, SetModelSurfaceDrive)
 // Only a slot that is already driven. Turning a part nobody is holding is
 // SetModelSurfaceOffset's job; accepting it here would leave a turn armed in a
 // slot for whatever drive picks it up next.
+//
+// Not a HINGE drive (SetModelSurfaceDriveHinge): its turn fields ARE the hinge,
+// so a twist set here would silently re-aim or zero the hinge being held.
 DEFINE_ACTION_FUNCTION(AActor, SetModelSurfaceDriveRotation)
 {
 	PARAM_SELF_PROLOGUE(AActor);
@@ -7363,7 +7372,7 @@ DEFINE_ACTION_FUNCTION(AActor, SetModelSurfaceDriveRotation)
 	PARAM_FLOAT(pivotz);
 
 	if (self->modelData == nullptr || slot < 0 || slot >= DActorModelData::RS_SURF_SLOTS
-		|| !self->modelData->SurfOvDriveOn[slot])
+		|| !self->modelData->SurfOvDriveOn[slot] || self->modelData->SurfOvDriveHinge[slot])
 	{
 		ACTION_RETURN_BOOL(false);
 	}
@@ -7389,6 +7398,202 @@ DEFINE_ACTION_FUNCTION(AActor, SetModelSurfaceDriveRotation)
 	ACTION_RETURN_BOOL(true);
 }
 
+// RS FORK -- A PART THAT ONLY TURNS, DRIVEN BY THE HAND.
+//
+// SetModelSurfaceDrive is one straight stroke, and its turn only rides that
+// stroke: it refuses a zero distance, and it reads the hand along a straight
+// axis. A lever, a handle, a latch or a barrel on its hinge moves by turning
+// alone, and the hand moving it swings round a pivot. This arms the same
+// draw-rate drive with a hinge for its motion. At value v the part turns
+// v * degrees about `axis` through `pivot`, and the renderer reads the hand by
+// its ANGLE round that line (SurfaceStageMeasure in models.cpp says why an
+// angle and not a tangent).
+//
+// The hinge is kept in the drive's own turn fields, which hold the turn the
+// pose already knows how to draw, with SurfOvDriveHinge saying there is no
+// slide. That is why SetModelSurfaceDriveRotation is refused on this slot.
+//
+// |degrees| must be under 180, because a hinge's angle is read the short way
+// round (see SurfaceStageTravel). Arms, does not anchor, exactly like
+// SetModelSurfaceDrive.
+DEFINE_ACTION_FUNCTION(AActor, SetModelSurfaceDriveHinge)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_INT(slot);
+	PARAM_INT(modelindex);
+	PARAM_INT(surface);
+	PARAM_INT(hand);
+	PARAM_FLOAT(axisx);
+	PARAM_FLOAT(axisy);
+	PARAM_FLOAT(axisz);
+	PARAM_FLOAT(degrees);
+	PARAM_FLOAT(pivotx);
+	PARAM_FLOAT(pivoty);
+	PARAM_FLOAT(pivotz);
+	PARAM_FLOAT(startValue);
+
+	if (self->modelData == nullptr || slot < 0 || slot >= DActorModelData::RS_SURF_SLOTS)
+	{
+		ACTION_RETURN_BOOL(false);
+	}
+
+	// Refused, not normalised or wrapped into something arbitrary: the drive's
+	// own rule. So is anything non-finite, checked on the FLOAT values the
+	// renderer will actually use (a huge finite double is an infinite float): a
+	// NaN or infinity here reaches the draw as a NaN pose and a NaN drawn value,
+	// with nothing to say where it came from.
+	FVector3 axis((float)axisx, (float)axisy, (float)axisz);
+	const FVector3 pivot((float)pivotx, (float)pivoty, (float)pivotz);
+	const float deg = (float)degrees;
+	const float len = axis.Length();
+	auto finite3 = [](const FVector3 &v) { return std::isfinite(v.X) && std::isfinite(v.Y) && std::isfinite(v.Z); };
+	if (!finite3(axis) || !finite3(pivot) || !std::isfinite(deg) || !std::isfinite(len)
+		|| !std::isfinite(startValue)
+		|| len < 0.0001f || deg == 0.f || fabs(deg) >= 180.f)
+	{
+		ACTION_RETURN_BOOL(false);
+	}
+	axis /= len;
+
+	auto md = self->modelData;
+	const float start = (float)clamp(startValue, 0.0, 1.0);
+	md->SurfOvModel[slot]           = modelindex;
+	md->SurfOvSurface[slot]         = surface;
+	md->SurfOvDriveOn[slot]         = true;
+	md->SurfOvDriveHand[slot]       = (hand == 1) ? 1 : 0;
+	// The slide fields are not read for a hinge. They get the hinge axis and a
+	// unit distance rather than being left stale, because the projection the
+	// owner's draw shares with the plain drive is still handed an axis.
+	md->SurfOvDriveAxis[slot]       = axis;
+	md->SurfOvDriveDist[slot]       = 1.f;
+	md->SurfOvDriveTurnAxis[slot]   = axis;
+	md->SurfOvDriveTurnDeg[slot]    = (float)degrees;
+	md->SurfOvDriveTurnPivot[slot]  = FVector3((float)pivotx, (float)pivoty, (float)pivotz);
+	md->SurfOvDriveHinge[slot]      = true;
+	md->SurfOvDriveStage2Kind[slot] = 0;   // a single stage until SetModelSurfaceDriveStage says otherwise
+	md->SurfOvDriveInStage2[slot]   = false;
+	md->SurfOvDriveBase[slot]       = start;
+	md->SurfOvDriveStageBase[slot][0] = start;
+	md->SurfOvDriveStageBase[slot][1] = 0.f;
+	md->SurfOvDriveArmed[slot]      = false;   // the renderer captures the anchor
+	md->SurfOvDriveValue[slot]      = start;
+	ACTION_RETURN_BOOL(true);
+}
+
+// RS FORK -- THEN A SECOND MOTION, IN THE SAME HAND MOTION.
+//
+// A bolt is lifted, then drawn back. Two drives handed over by script at the
+// corner would put a tic-stale hand exactly on the corner, which is the seam
+// the drive exists to remove. So the renderer does the handoff. This attaches a
+// second motion to a slot that is already driven, and the slot's one drawn
+// value 0..1 becomes [0, split] for the existing drive (stage 1) and [split, 1]
+// for this one (stage 2). Stage 1 is held fully applied through all of stage
+// 2. The hand drives each stage along that stage's own direction of travel;
+// SurfaceStagedSolve in models.cpp covers the track, the corner and the fast
+// crossing.
+//
+// kind 1 slide: amount is mesh units along axis, pivot unused. kind 2 hinge:
+// amount is degrees about axis through pivot, |amount| under 180. kind 0
+// removes the stage, leaving stage 1 as a single-stage drive. axis and pivot
+// are in the mesh's own space where the part stands once stage 1 is complete.
+//
+// The value the drive holds (its startValue, or what was last drawn) is read
+// as the COMBINED value, and the drive re-arms with both measures on its next
+// drawn frame. So call this straight after SetModelSurfaceDrive or
+// SetModelSurfaceDriveHinge.
+//
+// Only a slot that is already driven, for the same reason as
+// SetModelSurfaceDriveRotation.
+DEFINE_ACTION_FUNCTION(AActor, SetModelSurfaceDriveStage)
+{
+	PARAM_SELF_PROLOGUE(AActor);
+	PARAM_INT(slot);
+	PARAM_INT(kind);
+	PARAM_FLOAT(axisx);
+	PARAM_FLOAT(axisy);
+	PARAM_FLOAT(axisz);
+	PARAM_FLOAT(amount);
+	PARAM_FLOAT(pivotx);
+	PARAM_FLOAT(pivoty);
+	PARAM_FLOAT(pivotz);
+	PARAM_FLOAT(split);
+
+	if (self->modelData == nullptr || slot < 0 || slot >= DActorModelData::RS_SURF_SLOTS
+		|| !self->modelData->SurfOvDriveOn[slot])
+	{
+		ACTION_RETURN_BOOL(false);
+	}
+
+	auto md = self->modelData;
+	const float V = (float)clamp((double)md->SurfOvDriveValue[slot], 0.0, 1.0);
+
+	if (kind == 0)
+	{
+		md->SurfOvDriveStage2Kind[slot]   = 0;
+		md->SurfOvDriveInStage2[slot]     = false;
+		md->SurfOvDriveBase[slot]         = V;
+		md->SurfOvDriveStageBase[slot][0] = V;
+		md->SurfOvDriveStageBase[slot][1] = 0.f;
+		md->SurfOvDriveArmed[slot]        = false;
+		md->SurfOvDriveValue[slot]        = V;
+		ACTION_RETURN_BOOL(true);
+	}
+
+	// Refused rather than guessed at, the drive's own rule. An unknown kind, a
+	// zero axis or amount, a hinge of half a turn or more, a split that leaves
+	// no room for one of the stages, or anything NaN or infinite is a caller's
+	// bug.
+	//
+	// CHECKED ON THE FLOAT VALUES the renderer will use, not the doubles script
+	// passed. A split of 0.99999999 is below 1 as a double and exactly 1 as a
+	// float, and the renderer divides by split and by 1 - split: that is a NaN
+	// pose and a NaN drawn value. Likewise a huge finite double is an infinite
+	// float. The split keeps a thousandth of the travel for each stage.
+	FVector3 axis((float)axisx, (float)axisy, (float)axisz);
+	const FVector3 pivot((float)pivotx, (float)pivoty, (float)pivotz);
+	const float amt = (float)amount;
+	const float S = (float)split;
+	const float len = axis.Length();
+	auto finite3 = [](const FVector3 &v) { return std::isfinite(v.X) && std::isfinite(v.Y) && std::isfinite(v.Z); };
+	if ((kind != 1 && kind != 2) || !finite3(axis) || !finite3(pivot) || !std::isfinite(amt) || !std::isfinite(len)
+		|| len < 0.0001f || amt == 0.f || (kind == 2 && fabs(amt) >= 180.f)
+		|| !(S >= 1e-3f && S <= 1.f - 1e-3f))
+	{
+		ACTION_RETURN_BOOL(false);
+	}
+
+	md->SurfOvDriveStage2Kind[slot]   = (uint8_t)kind;
+	md->SurfOvDriveStage2Axis[slot]   = axis / len;
+	md->SurfOvDriveStage2Amount[slot] = amt;
+	md->SurfOvDriveStage2Pivot[slot]  = pivot;
+	md->SurfOvDriveSplit[slot]        = S;
+
+	// Resume where the part is, read as the combined value. Exactly AT the
+	// split is stage 1 at its end: the corner, from which the hand may go
+	// either way.
+	md->SurfOvDriveInStage2[slot]     = (V > S);
+	md->SurfOvDriveStageBase[slot][0] = (V >= S) ? 1.f : V / S;
+	md->SurfOvDriveStageBase[slot][1] = (V > S) ? (V - S) / (1.f - S) : 0.f;
+	md->SurfOvDriveArmed[slot]        = false;   // re-armed with both measures on the next drawn frame
+	md->SurfOvDriveValue[slot]        = V;
+
+	// DIAGNOSTIC: the script side of the handoff, so a headset test shows the
+	// stage was asked for even if the renderer never arms it. At most once per
+	// slot per quarter second, however often a script calls this.
+	static uint64_t lastLogMs[DActorModelData::RS_SURF_SLOTS] = {};
+	const uint64_t now = I_msTime();
+	if (now - lastLogMs[slot] >= 250)
+	{
+		lastLogMs[slot] = now;
+		Printf("[DRIVESTAGE] %s slot %d: stage 2 set -- %s %.2f%s, axis (%.2f %.2f %.2f) pivot (%.2f %.2f %.2f), split %.3f; stage 1 is a %s; resuming at v=%.3f in stage %d\n",
+			self->GetClass()->TypeName.GetChars(), slot,
+			kind == 2 ? "hinge" : "slide", amount, kind == 2 ? " deg" : " units",
+			axisx / len, axisy / len, axisz / len, pivotx, pivoty, pivotz, split,
+			md->SurfOvDriveHinge[slot] ? "hinge" : "slide", (double)V, (V > S) ? 2 : 1);
+	}
+	ACTION_RETURN_BOOL(true);
+}
+
 // Hand the surface back to script. Without this there is no way to tell "the
 // drive is working" from "the drive is stuck on" -- the part tracks your hand
 // either way, and only letting go distinguishes them.
@@ -7404,6 +7609,11 @@ DEFINE_ACTION_FUNCTION(AActor, ClearModelSurfaceDrive)
 	self->modelData->SurfOvDriveOn[slot]    = false;
 	self->modelData->SurfOvDriveArmed[slot] = false;
 	self->modelData->SurfOvDriveTurnDeg[slot] = 0.f;
+	// And the hinge and second stage, so the next drive on this slot starts
+	// plain.
+	self->modelData->SurfOvDriveHinge[slot]      = false;
+	self->modelData->SurfOvDriveStage2Kind[slot] = 0;
+	self->modelData->SurfOvDriveInStage2[slot]   = false;
 	ACTION_RETURN_BOOL(true);
 }
 

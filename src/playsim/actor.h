@@ -869,6 +869,53 @@ public:
 	float    SurfOvDriveTurnDeg  [RS_SURF_SLOTS] = {};  // degrees at value 1; 0 = no turn
 	FVector3 SurfOvDriveTurnPivot[RS_SURF_SLOTS] = {};  // model space
 
+	// ---- A DRIVE THAT ONLY TURNS, AND A DRIVE IN TWO STAGES ---------------
+	//
+	// WHY. A bolt handle is lifted, then drawn back: a hinge, then a slide, as
+	// ONE motion of one hand. The drive above is a single straight stroke. Its
+	// turn only rides that stroke, so it cannot turn a part that does not also
+	// slide, and it reads the hand along one straight axis, so a hand swinging
+	// a handle round its pivot barely registers. Handing the part back to
+	// script at the corner to start a second drive is exactly the seam this
+	// system exists to remove: a tic-stale hand at the worst possible instant.
+	//
+	// SurfOvDriveHinge makes the drive itself a hinge. The part turns
+	// value * TurnDeg about TurnAxis through TurnPivot (the fields just above)
+	// with no slide, and the renderer reads the hand by its ANGLE about that
+	// line. Set by SetModelSurfaceDriveHinge.
+	//
+	// SurfOvDriveStage2* attaches a SECOND motion to the same slot. One drawn
+	// value 0..1: [0, Split] is the drive above (stage 1), [Split, 1] is this
+	// one (stage 2), and stage 1 is held fully applied for all of stage 2.
+	// Stage 2's axis and pivot are in the mesh's own space where they stand
+	// once stage 1 has finished. That is the space the hand is read in, so
+	// neither stage needs converting into the other's. Set by
+	// SetModelSurfaceDriveStage.
+	//
+	// INERT UNTIL SET, like the turn. SetModelSurfaceDrive and
+	// ClearModelSurfaceDrive reset both. A slot with neither takes the plain
+	// drive branch in models.cpp exactly as it was before these existed, not
+	// a generalised rewrite of it.
+	//
+	// NOT SERIALIZED, like every drive field above: a drive is a live hand, and
+	// a save has no hand in it to restore.
+	bool     SurfOvDriveHinge       [RS_SURF_SLOTS] = {};  // stage 1 is the turn above, with no slide
+	uint8_t  SurfOvDriveStage2Kind  [RS_SURF_SLOTS] = {};  // 0 none, 1 slide, 2 hinge
+	FVector3 SurfOvDriveStage2Axis  [RS_SURF_SLOTS] = {};  // unit, model space
+	float    SurfOvDriveStage2Amount[RS_SURF_SLOTS] = {};  // model units (slide) or degrees (hinge) at full travel
+	FVector3 SurfOvDriveStage2Pivot [RS_SURF_SLOTS] = {};  // model space, hinge only
+	float    SurfOvDriveSplit       [RS_SURF_SLOTS] = {};  // drawn value where stage 1 ends, 0 < split < 1
+
+	// The renderer's own state for those drives: armed, re-anchored and written
+	// back by the owner's draw, exactly as SurfOvDriveAnchor/Base are for a
+	// plain drive. [k] is the stage, 0 first and 1 second. Base is in that
+	// STAGE's own 0..1, not the combined value.
+	bool     SurfOvDriveInStage2   [RS_SURF_SLOTS]    = {};  // which stage the hand is working
+	float    SurfOvDriveStageAnchor[RS_SURF_SLOTS][2] = {};  // hand measure at the anchor: units along, or degrees round
+	float    SurfOvDriveStageBase  [RS_SURF_SLOTS][2] = {};  // stage travel the anchor stands for
+	FVector3 SurfOvDriveHingeRefX  [RS_SURF_SLOTS][2] = {};  // hinge: in-plane direction its angle is measured from
+	FVector3 SurfOvDriveHingeRefY  [RS_SURF_SLOTS][2] = {};  // hinge: the direction the part turns toward from RefX
+
 	bool AnySurfaceOverride() const
 	{
 		for (int i = 0; i < RS_SURF_SLOTS; i++)
@@ -1563,6 +1610,30 @@ public:
 	TObjPtr<AActor*>	FollowActor;		// GC-registered in p_mobj.cpp (IMPLEMENT_POINTER)
 	int				FollowActorSlot = -1;
 	DVector3		FollowActorOfs;
+
+	// THE SEAT AS A POINT ON THE PARENT'S MESH.
+	//
+	// FollowActorOfs is normally a seat in the follow frame, and that frame
+	// deliberately leaves out the parent's scale, any mirror a negative MODELDEF
+	// Scale puts in, and its MODELDEF base orientation. A point read off the
+	// parent's mesh -- a weapon card's grab point, a bone, a marker -- lives in
+	// the space the mesh's vertices do, which has all three, so handed over as a
+	// frame seat it lands the wrong size, turned, and on the wrong side. Found on
+	// a rifle drawn at Scale -0.82.
+	//
+	// With this set, FollowActorOfs IS that point: a position in the parent's
+	// MODEL space, in the order ModelPointToWorld takes -- the renderer's, y up,
+	// every MD3 vertex stored (x, z, y) -- and the renderer carries it into the
+	// follow frame itself (models.cpp, FollowSeatFromModelPoint):
+	// seat = frame^-1 * parentMat * P. The child is then drawn at parentMat * P;
+	// with FollowActorSlot, at parentMat * part * P, so it rides the moving part.
+	//
+	// POSITION ONLY. The child still turns with the follow frame, so its Angles
+	// and any wrist sliders mean what they meant. FollowActorOfsCVar and
+	// FollowActorOfsCVar2 still add on top, in the frame's axes and units.
+	//
+	// INERT UNTIL SET: false reads FollowActorOfs exactly as before.
+	bool			FollowActorOfsInModel = false;
 
 	// A SEAT A HUMAN CAN TUNE WHILE THE MENU IS OPEN.
 	//
