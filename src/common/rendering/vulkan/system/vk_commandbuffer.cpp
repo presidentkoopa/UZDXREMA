@@ -28,6 +28,7 @@
 #include "vulkan/renderer/vk_renderstate.h"
 #include "vulkan/renderer/vk_postprocess.h"
 #include "hw_clock.h"
+#include "hw_perflog.h"	// RS FORK -- r_perflog: UpdateGpuStats feeds it
 #include "v_video.h"
 #include "doomtype.h" // Printf
 
@@ -271,7 +272,7 @@ void VkCommandBufferManager::DeleteFrameObjects(bool uploadOnly)
 		DrawDeleteList = std::make_unique<DeleteList>();
 }
 
-void VkCommandBufferManager::PushGroup(const FString& name)
+void VkCommandBufferManager::PushGroup(const FString& name, int timestampViews)
 {
 	// RS FORK -- the checkpoint is recorded whether or not "stat gpu" is on: a
 	// device loss does not wait for anybody to be profiling.
@@ -283,11 +284,14 @@ void VkCommandBufferManager::PushGroup(const FString& name)
 	if (!gpuStatActive)
 		return;
 
-	if (mNextTimestampQuery < MaxTimestampQueries && fb->device->GraphicsTimeQueries)
+	// RS FORK -- reserve timestampViews indices (see the header); with the
+	// default of one this is the old "< MaxTimestampQueries" test and "++".
+	if (mNextTimestampQuery + timestampViews <= MaxTimestampQueries && fb->device->GraphicsTimeQueries)
 	{
 		TimestampQuery q;
 		q.name = name;
-		q.startIndex = mNextTimestampQuery++;
+		q.startIndex = mNextTimestampQuery;
+		mNextTimestampQuery += timestampViews;
 		q.endIndex = 0;
 		GetDrawCommands()->writeTimestamp(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, mTimestampQueryPool.get(), q.startIndex);
 		mGroupStack.push_back(timeElapsedQueries.size());
@@ -295,7 +299,7 @@ void VkCommandBufferManager::PushGroup(const FString& name)
 	}
 }
 
-void VkCommandBufferManager::PopGroup()
+void VkCommandBufferManager::PopGroup(int timestampViews)
 {
 	// RS FORK -- see PushGroup.
 	if (!mCheckpointStack.empty())
@@ -310,9 +314,11 @@ void VkCommandBufferManager::PopGroup()
 	TimestampQuery& q = timeElapsedQueries[mGroupStack.back()];
 	mGroupStack.pop_back();
 
-	if (mNextTimestampQuery < MaxTimestampQueries && fb->device->GraphicsTimeQueries)
+	// RS FORK -- as in PushGroup.
+	if (mNextTimestampQuery + timestampViews <= MaxTimestampQueries && fb->device->GraphicsTimeQueries)
 	{
-		q.endIndex = mNextTimestampQuery++;
+		q.endIndex = mNextTimestampQuery;
+		mNextTimestampQuery += timestampViews;
 		GetDrawCommands()->writeTimestamp(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, mTimestampQueryPool.get(), q.endIndex);
 	}
 }
@@ -337,6 +343,11 @@ void VkCommandBufferManager::UpdateGpuStats()
 		FString out;
 		out.Format("%s=%04.2f ms\n", q.name.GetChars(), timeNS / 1000000.0f);
 		gpuStatOutput += out;
+
+		// RS FORK -- r_perflog accumulates the same numbers over its window.
+		// Checked per group, so with no groups timed this costs nothing.
+		if (*r_perflog > 0)
+			PerfLog::AddGpuSample(q.name.GetChars(), timeNS / 1000000.0);
 	}
 	timeElapsedQueries.clear();
 	mGroupStack.clear();

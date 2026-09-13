@@ -522,6 +522,32 @@ void VkRenderState::EndRenderPass()
 	}
 }
 
+// RS FORK -- r_perflog: named GPU groups around the scene passes
+// (hw_drawinfo.cpp), routed to the same command-buffer timestamp groups the
+// post-process passes use, so they show in "stat gpu" and feed perflog.txt
+// (they also drop a vk_gpu_checkpoints marker, which only helps a device-lost
+// report). Unlike the post-process groups these are written INSIDE the scene
+// render pass, and a timestamp written inside a multiview pass takes one query
+// index per view (vkCmdWriteTimestamp), so the count is passed along.
+int VkRenderState::TimestampViewCount() const
+{
+	uint32_t mask = mCommandBuffer != nullptr ? mRenderTarget.ViewMask : 0;
+	int views = 0;
+	for (; mask != 0; mask &= mask - 1)
+		views++;
+	return views > 0 ? views : 1;
+}
+
+void VkRenderState::PushGroup(const FString& name)
+{
+	fb->GetCommands()->PushGroup(name, TimestampViewCount());
+}
+
+void VkRenderState::PopGroup()
+{
+	fb->GetCommands()->PopGroup(TimestampViewCount());
+}
+
 void VkRenderState::EndFrame()
 {
 	mMatrixBufferWriter.Reset();

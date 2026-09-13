@@ -37,6 +37,7 @@
 #include "hw_drawnlinebuffer.h"	// [DRAWNLINES]
 #include "i_time.h"	// [DRAWNLINES] r_beams_debug's two-second gate
 #include "hw_gpuparticlebuffer.h"	// [GPUPARTICLES]
+#include "hw_perflog.h"	// RS FORK -- r_perflog scene/effects GPU groups
 #include "hw_vrmodes.h"
 #include "hw_vrwheel.h"
 #include "hw_clipper.h"
@@ -2133,10 +2134,19 @@ void HWDrawInfo::RenderScene(FRenderState &state)
 //
 //-----------------------------------------------------------------------------
 
+// RS FORK -- r_perflog: set by DrawScene around its RenderTranslucent call to
+// (drawmode == DM_MAINVIEW && PerfLog::GroupsWanted()), the same value that
+// guards its scene.* groups. RenderTranslucent has no drawmode of its own, and
+// this keeps the fx.* groups off portal and camera-texture views.
+static bool PerfLogFxGroups = false;
+
 void HWDrawInfo::RenderTranslucent(FRenderState &state)
 {
 	if (IsVRScene) VRSceneDraw.Clock();
 	RenderAll.Clock();
+
+	// RS FORK -- r_perflog: read once, so each fx.* Push and its Pop agree.
+	const bool perfGroups = PerfLogFxGroups;
 
 	// final pass: translucent stuff
 	state.AlphaFunc(Alpha_GEqual, gl_mask_sprite_threshold);
@@ -2165,6 +2175,7 @@ void HWDrawInfo::RenderTranslucent(FRenderState &state)
 		Level->GpuParticleWritten > 0 && screen->mGpuParticles != nullptr && screen->mGpuParticles->IsDrawable())
 	{
 		auto particles = screen->mGpuParticles;
+		if (perfGroups) state.PushGroup("fx.gpuparticles");	// RS FORK -- r_perflog
 		state.SetEffect(EFF_GPUPARTICLES);
 		state.SetRenderStyle(STYLE_Add);
 		state.SetVertexBuffer(particles->GetVertexBuffer(), 0, 0);
@@ -2176,6 +2187,7 @@ void HWDrawInfo::RenderTranslucent(FRenderState &state)
 		state.SetEffect(EFF_NONE);
 		state.SetRenderStyle(STYLE_Translucent);
 		state.SetVertexBuffer(screen->mVertexData);
+		if (perfGroups) state.PopGroup();	// RS FORK -- r_perflog: fx.gpuparticles
 	}
 
 	// [DRAWNLINES] Glowing lines drawn as boxes (drawnlines.vp/.fp): SetDrawnLine
@@ -2192,6 +2204,7 @@ void HWDrawInfo::RenderTranslucent(FRenderState &state)
 		screen->mDrawnLines != nullptr && screen->mDrawnLines->IsDrawable() && screen->mDrawnLines->GetLiveCount() > 0)
 	{
 		auto lines = screen->mDrawnLines;
+		if (perfGroups) state.PushGroup("fx.drawnlines");	// RS FORK -- r_perflog; timing only, no render change
 		state.SetEffect(EFF_DRAWNLINES);
 		state.SetRenderStyle(STYLE_Add);
 		// drawnlines.vp keeps the box faces turned away from the eye itself;
@@ -2204,6 +2217,7 @@ void HWDrawInfo::RenderTranslucent(FRenderState &state)
 		state.SetEffect(EFF_NONE);
 		state.SetRenderStyle(STYLE_Translucent);
 		state.SetVertexBuffer(screen->mVertexData);
+		if (perfGroups) state.PopGroup();	// RS FORK -- r_perflog: fx.drawnlines
 	}
 
 
@@ -2667,15 +2681,27 @@ void HWDrawInfo::DrawScene(int drawmode)
 	}
 	auto& RenderState = *screen->RenderState();
 
+	// RS FORK -- r_perflog: named GPU groups around the main view's passes, so
+	// perflog.txt (and "stat gpu") time the scene and not only post-processing.
+	// Main view only: portals recurse through DrawScene and would multiply the
+	// queries. Read ONCE and used at every Push and at its Pop, so each group
+	// balances; the groups sit at these call sites, so early returns inside the
+	// wrapped functions cannot skip a Pop.
+	const bool perfGroups = drawmode == DM_MAINVIEW && PerfLog::GroupsWanted();
+
 	RenderState.SetDepthMask(true);
 	if (!gl_no_skyclear) portalState.RenderFirstSkyPortal(recursion, this, RenderState);
 
+	if (perfGroups) RenderState.PushGroup("scene.opaque");	// RS FORK -- r_perflog
 	RenderScene(RenderState);
+	if (perfGroups) RenderState.PopGroup();	// RS FORK -- r_perflog: scene.opaque
 
 	auto vrmode = VRMode::GetVRModeCached(true);
 	if (drawmode == DM_MAINVIEW && vrmode->RenderPlayerSpritesInScene())
 	{
+		if (perfGroups) RenderState.PushGroup("scene.psprites");	// RS FORK -- r_perflog
 		DrawPlayerSprites(IsHUDModelForPlayerAvailable(players[consoleplayer].camera->player), RenderState);
+		if (perfGroups) RenderState.PopGroup();	// RS FORK -- r_perflog: scene.psprites
 	}
 
 	if (applySSAO && RenderState.GetPassType() == GBUFFER_PASS)
@@ -2686,12 +2712,25 @@ void HWDrawInfo::DrawScene(int drawmode)
 
 	// Handle all portals after rendering the opaque objects but before
 	// doing all translucent stuff
+	if (perfGroups) RenderState.PushGroup("scene.portals");	// RS FORK -- r_perflog
 	recursion++;
 	portalState.EndFrame(this, RenderState);
 	recursion--;
+	if (perfGroups) RenderState.PopGroup();	// RS FORK -- r_perflog: scene.portals
+
+	// RS FORK -- r_perflog: scene.translucent, with the fx.* groups nested in it
+	// (see PerfLogFxGroups above RenderTranslucent).
+	if (perfGroups) RenderState.PushGroup("scene.translucent");
+	PerfLogFxGroups = perfGroups;
 	RenderTranslucent(RenderState);
+	PerfLogFxGroups = false;
+	if (perfGroups) RenderState.PopGroup();
+
 	if (drawmode == DM_MAINVIEW)
 	{
+		// RS FORK -- r_perflog: scene.vrextras. A timestamp at the call site only;
+		// nothing inside these draws changes.
+		if (perfGroups) RenderState.PushGroup("scene.vrextras");
 		if (vrmode->RenderPlayerSpritesInScene())
 		{
 			vrmode->DrawMountedHud(this, RenderState);
@@ -2699,6 +2738,7 @@ void HWDrawInfo::DrawScene(int drawmode)
 		DrawHitscanTracers(RenderState);
 		DrawLaserSightWorld(RenderState);
 		VRWheel_Draw(this, RenderState);
+		if (perfGroups) RenderState.PopGroup();	// RS FORK -- r_perflog: scene.vrextras
 	}
 }
 

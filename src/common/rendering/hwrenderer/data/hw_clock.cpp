@@ -29,6 +29,7 @@
 #include "hw_vrmodes.h"
 #include "a_dynlight.h"
 #include "hw_cvars.h"
+#include "hw_perflog.h"	// RS FORK -- r_perflog keeps the CPU timers active
 
 static const char* GetOpenXrSyncModeName(int syncMode)
 {
@@ -148,6 +149,20 @@ void ResetProfilingData()
 //
 //-----------------------------------------------------------------------------
 
+// RS FORK -- the VR summary buckets, shared by AppendRenderTimes and r_perflog
+// (hw_perflog.cpp) so the two can never disagree about what "Scene" means.
+void GetRenderTimeSummary(RenderTimeSummary& out)
+{
+	out.Scene = VRSceneBuild.TimeMS() + VRSceneDraw.TimeMS() + VRScenePostBSP.TimeMS() + VRPlayerSprites.TimeMS();
+	out.Post = PostProcess.TimeMS();
+	out.Finalize = VRFinalizeEye.TimeMS() + VRFinalPresent.TimeMS();
+	out.Submit = VRSubmit.TimeMS();
+	out.Composite = VREyeComposite.TimeMS();
+	out.SyncWait = VRSubmitWait.TimeMS() + VRRenderSyncWait.TimeMS();
+	out.All = All.TimeMS() + Finish.TimeMS();
+	out.Drawcalls = drawcalls.TimeMS();
+}
+
 static void AppendRenderTimes(FString &str)
 {
 	double setupwall = SetupWall.TimeMS();
@@ -164,12 +179,15 @@ static void AppendRenderTimes(FString &str)
 	double wallWorkersWallCpuSum = WallWorkersWallCpuSumCycles * PerfToMillisec;
 	const double wallWorkerParallelism = wallWorkersElapsed > 0.0 ? wallWorkersCpuSum / wallWorkersElapsed : 0.0;
 	const double wallWorkerBusyParallelism = wallWorkersElapsed > 0.0 ? wallWorkersWallCpuSum / wallWorkersElapsed : 0.0;
-	const double vrSceneBucket = VRSceneBuild.TimeMS() + VRSceneDraw.TimeMS() + VRScenePostBSP.TimeMS() + VRPlayerSprites.TimeMS();
-	const double vrPostprocessBucket = PostProcess.TimeMS();
-	const double vrFinalizeBucket = VRFinalizeEye.TimeMS() + VRFinalPresent.TimeMS();
-	const double vrSubmitBucket = VRSubmit.TimeMS();
-	const double vrCompositeBucket = VREyeComposite.TimeMS();
-	const double vrSyncWaitBucket = VRSubmitWait.TimeMS() + VRRenderSyncWait.TimeMS();
+	// RS FORK -- read through GetRenderTimeSummary, which r_perflog shares.
+	RenderTimeSummary summary;
+	GetRenderTimeSummary(summary);
+	const double vrSceneBucket = summary.Scene;
+	const double vrPostprocessBucket = summary.Post;
+	const double vrFinalizeBucket = summary.Finalize;
+	const double vrSubmitBucket = summary.Submit;
+	const double vrCompositeBucket = summary.Composite;
+	const double vrSyncWaitBucket = summary.SyncWait;
 
 	str.AppendFormat("VR Summary: Scene=%2.3f Post=%2.3f Finalize=%2.3f Submit=%2.3f Composite=%2.3f SyncWait=%2.3f\n",
 		vrSceneBucket, vrPostprocessBucket, vrFinalizeBucket, vrSubmitBucket, vrCompositeBucket, vrSyncWaitBucket);
@@ -281,7 +299,9 @@ static FString benchlabel;
 EXTERN_CVAR(Bool, vid_fps)
 EXTERN_CVAR(Int, vid_refreshrate)
 
-static void AppendBenchmarkHeader(FString& out)
+// RS FORK -- no longer static: r_perflog (hw_perflog.cpp) writes the same
+// header at the top of each perflog.txt session.
+void AppendBenchmarkHeader(FString& out)
 {
 	out.AppendFormat("Timestamp: %s", myasctime());
 	out.AppendFormat("%s version %s (%s)\n", GAMENAME, GetVersionString(), GetGitHash());
@@ -419,5 +439,6 @@ bool glcycle_t::active = false;
 void  CheckBenchActive()
 {
 	FStat *stat = FStat::FindStat("rendertimes");
-	glcycle_t::active = ((stat != NULL && stat->isActive()) || printstats);
+	// RS FORK -- r_perflog samples these CPU timers, and they only tick while active.
+	glcycle_t::active = ((stat != NULL && stat->isActive()) || printstats || *r_perflog > 0);
 }

@@ -2158,6 +2158,12 @@ OptionMenu DeveloperOptionsMenu protected
 		Slider "$DEVOPTMNU_MENU_POINTER_TIP_OFFSET", "vr_openvr_menu_pointer_tip_offset", 0.0, 0.15, 0.005, 3
 	}
 	Option "$DEVOPTMNU_HUD_DEBUG_BORDER", "vr_hud_debug_border", "OnOff"
+	// RS FORK -- r_perflog, the render performance log (hw_perflog.cpp). A
+	// slider because nobody can type a console command in a headset; the cvar
+	// is archived, so the setting survives restarts. Every N seconds a block
+	// of GPU/CPU timings and effect load is appended to perflog.txt beside
+	// benchmarks.txt; the console names the full path at map start.
+	Slider "Performance log (seconds, 0 = off)", "r_perflog", 0, 30, 1, 0
 	StaticText " "
 	StaticText "$DEVOPTMNU_OPTIONS_MARKED_WITH_RESTART", "Brown"
 	StaticText " "

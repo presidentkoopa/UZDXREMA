@@ -1071,6 +1071,14 @@ public:
 	virtual void EnableLineSmooth(bool on) = 0;					// constant setting for each 2D drawer operation
 	virtual void EnableDrawBuffers(int count, bool apply = false) = 0;	// Used by SSAO and EnableDrawBufferAttachments
 
+	// RS FORK -- r_perflog: named GPU timing groups around the scene and
+	// effects passes (hw_drawinfo.cpp), read by "stat gpu" and perflog.txt.
+	// No-op by default, so GL and GLES are untouched; VkRenderState routes them
+	// to its command-buffer timestamp groups. Every Push needs its Pop on the
+	// same path, or the timestamp indices after it are wrong.
+	virtual void PushGroup(const FString& name) {}
+	virtual void PopGroup() {}
+
 	void SetColorMask(bool on)
 	{
 		SetColorMask(on, on, on, on);

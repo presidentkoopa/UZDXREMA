@@ -61,5 +61,16 @@ void ResetProfilingData();
 void CheckBench();
 void CheckBenchActive();
 
+// RS FORK -- r_perflog (hw_perflog.cpp) samples the same numbers "stat
+// rendertimes" and "bench" show, so it reads them through these rather than a
+// second copy of the formulas.
+struct RenderTimeSummary
+{
+	double Scene, Post, Finalize, Submit, Composite, SyncWait;	// the "VR Summary" buckets
+	double All, Drawcalls;
+};
+void GetRenderTimeSummary(RenderTimeSummary& out);
+void AppendBenchmarkHeader(FString& out);
+
 
 #endif

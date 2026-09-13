@@ -65,6 +65,10 @@ public:
 	void EnableLineSmooth(bool on) override;
 	void EnableDrawBuffers(int count, bool apply) override;
 
+	// RS FORK -- r_perflog: scene GPU groups; see vk_renderstate.cpp.
+	void PushGroup(const FString& name) override;
+	void PopGroup() override;
+
 	void BeginFrame();
 	void SetRenderTarget(VkTextureImage *image, VulkanImageView *depthStencilView, int width, int height, VkFormat Format, VkSampleCountFlagBits samples, int layers = 1, uint32_t viewMask = 0, int layerIndex = 0);
 	void Bind(int bindingpoint, uint32_t offset);
@@ -87,6 +91,7 @@ protected:
 
 	void BeginRenderPass(VulkanCommandBuffer *cmdbuffer);
 	void WaitForStreamBuffers();
+	int TimestampViewCount() const;	// RS FORK -- r_perflog: query indices one timestamp takes here
 
 	VulkanRenderDevice* fb = nullptr;
 

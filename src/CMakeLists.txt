@@ -1260,6 +1260,7 @@ set (PCH_SOURCES
 	common/rendering/stb_include.cpp
 	common/rendering/hwrenderer/hw_draw2d.cpp
 	common/rendering/hwrenderer/data/hw_clock.cpp
+	common/rendering/hwrenderer/data/hw_perflog.cpp
 	common/rendering/hwrenderer/data/hw_skydome.cpp
 	common/rendering/hwrenderer/data/flatvertices.cpp
 	common/rendering/hwrenderer/data/hw_viewpointbuffer.cpp

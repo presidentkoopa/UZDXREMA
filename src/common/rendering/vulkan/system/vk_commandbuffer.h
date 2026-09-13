@@ -46,8 +46,13 @@ public:
 	void WaitForCommands(bool finish, bool uploadOnly) { WaitForCommands(finish, uploadOnly, true); }
 	void WaitForCommands(bool finish, bool uploadOnly, bool acquireImageForPresent);
 
-	void PushGroup(const FString& name);
-	void PopGroup();
+	// RS FORK -- timestampViews: vkCmdWriteTimestamp inside a multiview render
+	// pass uses one query index PER VIEW (the first holds the time, the rest
+	// zero), so a caller writing inside such a pass must reserve that many.
+	// VkRenderState passes it for the r_perflog scene groups; every existing
+	// caller writes outside a pass and keeps the default of one.
+	void PushGroup(const FString& name, int timestampViews = 1);
+	void PopGroup(int timestampViews = 1);
 
 	// RS FORK -- the label of the last pass the CPU opened, for the device-lost
 	// report. Every PushGroup/PopGroup also records a GPU checkpoint; see
@@ -113,7 +118,10 @@ private:
 		uint32_t endIndex;
 	};
 
-	enum { MaxTimestampQueries = 100 };
+	// RS FORK -- 100 -> 256 for r_perflog's scene and effects groups: two
+	// queries per group, per eye in stereo (two per view inside a multiview
+	// pass), on top of the dozen post-process groups.
+	enum { MaxTimestampQueries = 256 };
 	std::unique_ptr<VulkanQueryPool> mTimestampQueryPool;
 	int mNextTimestampQuery = 0;
 	void GpuCheckpoint(const char* label);

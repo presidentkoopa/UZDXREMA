@@ -74,6 +74,7 @@
 #include "gstrings.h"
 #include "hu_stuff.h"
 #include "hw_clock.h"
+#include "hw_perflog.h"	// RS FORK -- r_perflog, sampled in End2DAndUpdate
 #include "hwrenderer/scene/hw_drawinfo.h"
 #include "i_interface.h"
 #include "i_sound.h"
@@ -1430,11 +1431,41 @@ static void DrawHudToSurface(const FRenderViewpoint& vp)
 	mutableSurface.EndUpdate();
 }
 
+// RS FORK -- r_perflog: this frame's effect load from the level, handed to the
+// performance log (hw_perflog.cpp), which cannot see FLevelLocals. Read-only,
+// render-side bookkeeping on the local machine: no playsim state is touched.
+static void PerfLogEndFrame()
+{
+	PerfLog::SceneLoad load;
+	if (primaryLevel != nullptr)
+	{
+		FLevelLocals* level = primaryLevel;
+		load.MapName = level->MapName.GetChars();
+		load.GpuParticlesWritten = level->GpuParticleWritten;
+		for (int i = 0; i < FLevelLocals::MAX_BEAMS; i++)
+			if (level->BeamSlotLive(i)) load.BeamsLive++;
+		for (int i = 0; i < FLevelLocals::MAX_SURFACE_STAMPS; i++)
+			if (level->StampLife[i] > 0) load.StampsLive++;
+		// The liveness test hw_drawinfo.cpp uses for the fog uniforms.
+		const double now = level->maptime / (double)TICRATE;
+		for (int i = 0; i < FLevelLocals::MAX_FOG_DISTURB; i++)
+		{
+			const double life = level->FogDisturbLife[i];
+			const double age = now - level->FogDisturbBirth[i];
+			if (life > 0.0 && age >= 0.0 && age <= life) load.DisturbLive++;
+		}
+	}
+	PerfLog::EndFrame(load);
+}
+
 static void End2DAndUpdate()
 {
 	twod->End();
 	screen->Update();
 	CheckBench();
+	// RS FORK -- r_perflog: beside CheckBench, after the frame's GPU timings
+	// were read back. While it is off this integer check is the whole cost.
+	if (*r_perflog > 0) PerfLogEndFrame();
 	twod->OnFrameDone();
 }
 
