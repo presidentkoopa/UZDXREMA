@@ -5450,6 +5450,22 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetBeam, SetBeam)
 static void SetBeamCount(FLevelLocals *self, int count, double glow, double fogScatter)
 {
 	self->BeamCount = clamp(count, 0, FLevelLocals::MAX_BEAMS);
+
+	// [BEAMLINES] ClaimBeam never hands out a slot below the count, but nothing
+	// stops the count growing over one later -- then two callers write the same
+	// line. Say so once per map, naming the slot, rather than refuse the count.
+	if (!self->BeamCountOverClaimLogged)
+	{
+		for (int i = 0; i < self->BeamCount; i++)
+		{
+			if (!self->BeamClaimed[i]) continue;
+			self->BeamCountOverClaimLogged = true;
+			Printf("Beams: SetBeamCount(%d) now covers claimed slot %d -- a SetBeam caller and the claim's owner "
+				"will both write it. Further overlaps on this map are silent.\n", self->BeamCount, i);
+			break;
+		}
+	}
+
 	self->BeamGlow = glow;
 	self->BeamFogScatter = fogScatter;
 }
@@ -5496,6 +5512,199 @@ DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearBeams, ClearBeams)
 	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
 	ClearBeams(self);
 	return 0;
+}
+
+// [BEAMLINES] A line of your own, independent of BeamCount, and a look per
+// line. The policy lives on FLevelLocals (ClaimBeam and neighbours) so native
+// code can claim a line too; these add only the script entry and the log.
+// See "Engine docs/BEAM_LINES_PLAN.md".
+static int ClaimBeam(FLevelLocals *self, AActor *owner)
+{
+	const int slot = self->ClaimBeam();
+	if (slot >= 0)
+	{
+		self->BeamClaimOwner[slot] = owner;
+		self->BeamClaimOwned[slot] = owner != nullptr;
+	}
+	if (slot < 0 && !self->BeamClaimFullLogged)
+	{
+		self->BeamClaimFullLogged = true;
+		int claimed = 0;
+		for (int i = 0; i < FLevelLocals::MAX_BEAMS; i++)
+			if (self->BeamClaimed[i]) claimed++;
+		Printf("Beams: ClaimBeam found no free slot -- %d claimed, BeamCount %d, %d slots in all. "
+			"It returned -1; further refusals on this map are silent.\n",
+			claimed, self->BeamCount, FLevelLocals::MAX_BEAMS);
+	}
+	return slot;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClaimBeam, ClaimBeam)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_OBJECT(owner, AActor);
+	ACTION_RETURN_INT(ClaimBeam(self, owner));
+}
+
+static void ReleaseBeam(FLevelLocals *self, int index)
+{
+	self->ReleaseBeam(index);
+	if (index >= 0 && index < FLevelLocals::MAX_BEAMS && !self->BeamClaimed[index])
+		self->BeamClaimOwner[index] = nullptr;
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ReleaseBeam, ReleaseBeam)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(index);
+	ReleaseBeam(self, index);
+	return 0;
+}
+
+static int IsBeamClaimed(FLevelLocals *self, int index)
+{
+	return self->IsBeamClaimed(index);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, IsBeamClaimed, IsBeamClaimed)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(index);
+	ACTION_RETURN_BOOL(IsBeamClaimed(self, index));
+}
+
+static void SetBeamStyle(FLevelLocals *self, int index, double airGlow, double halo, double taper, double flare)
+{
+	self->SetBeamStyle(index, airGlow, halo, taper, flare);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetBeamStyle, SetBeamStyle)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(index);
+	PARAM_FLOAT(airGlow); PARAM_FLOAT(halo); PARAM_FLOAT(taper); PARAM_FLOAT(flare);
+	SetBeamStyle(self, index, airGlow, halo, taper, flare);
+	return 0;
+}
+
+static void ClearBeamStyle(FLevelLocals *self, int index)
+{
+	self->ClearBeamStyle(index);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearBeamStyle, ClearBeamStyle)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(index);
+	ClearBeamStyle(self, index);
+	return 0;
+}
+
+// [DRAWNLINES] Many glowing lines -- see FLevelLocals::DrawnLine. The storage
+// and its rules live on the level; these are the script entry and two log lines.
+extern int DrawnLineCapacity();   // hw_cvars.cpp, a fixed engine number
+
+static void SetDrawnLine(FLevelLocals *self, int index,
+	double ax, double ay, double az, double bx, double by, double bz,
+	double thick, double soft, int color, double intensity)
+{
+	const bool first = self->DrawnLines.Size() == 0;
+	self->SetDrawnLine(index, DVector3(ax, ay, az), DVector3(bx, by, bz), (PalEntry)color, intensity, thick, soft);
+
+	// Diagnostics: the first write of the run, and the first out-of-range index.
+	if (first && self->DrawnLines.Size() > 0)
+		Printf("DrawnLines: first SetDrawnLine this run -- %u slots on the level\n", self->DrawnLines.Size());
+	if (index < 0 || index >= DrawnLineCapacity())
+	{
+		static bool warned = false;
+		if (!warned)
+		{
+			warned = true;
+			Printf("DrawnLines: SetDrawnLine index %d is outside 0..%d and was ignored; further bad indices are silent\n", index, DrawnLineCapacity() - 1);
+		}
+	}
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetDrawnLine, SetDrawnLine)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(index);
+	PARAM_FLOAT(ax); PARAM_FLOAT(ay); PARAM_FLOAT(az);
+	PARAM_FLOAT(bx); PARAM_FLOAT(by); PARAM_FLOAT(bz);
+	PARAM_FLOAT(thick); PARAM_FLOAT(soft);
+	PARAM_COLOR(color); PARAM_FLOAT(intensity);
+	SetDrawnLine(self, index, ax, ay, az, bx, by, bz, thick, soft, color, intensity);
+	return 0;
+}
+
+static void SetDrawnLineLook(FLevelLocals *self, int index, double airGlow, double halo,
+	double taper, double flare, double scrollSpeed, double scrollDepth)
+{
+	self->SetDrawnLineLook(index, airGlow, halo, taper, flare, scrollSpeed, scrollDepth);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetDrawnLineLook, SetDrawnLineLook)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(index);
+	PARAM_FLOAT(airGlow); PARAM_FLOAT(halo); PARAM_FLOAT(taper); PARAM_FLOAT(flare);
+	PARAM_FLOAT(scrollSpeed); PARAM_FLOAT(scrollDepth);
+	SetDrawnLineLook(self, index, airGlow, halo, taper, flare, scrollSpeed, scrollDepth);
+	return 0;
+}
+
+static void SetDrawnLineAnchor(FLevelLocals *self, int index, int mode, AActor *owner)
+{
+	const int playerNum = (owner != nullptr && owner->player != nullptr) ? int(owner->player - players) : -1;
+	self->SetDrawnLineAnchor(index, mode, playerNum);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, SetDrawnLineAnchor, SetDrawnLineAnchor)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(index);
+	PARAM_INT(mode);
+	PARAM_OBJECT(owner, AActor);
+	SetDrawnLineAnchor(self, index, mode, owner);
+	return 0;
+}
+
+static void ClearDrawnLine(FLevelLocals *self, int index)
+{
+	self->ClearDrawnLine(index);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearDrawnLine, ClearDrawnLine)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	PARAM_INT(index);
+	ClearDrawnLine(self, index);
+	return 0;
+}
+
+static void ClearDrawnLines(FLevelLocals *self)
+{
+	self->ClearDrawnLines();
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, ClearDrawnLines, ClearDrawnLines)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	ClearDrawnLines(self);
+	return 0;
+}
+
+// Named Get... because the global DrawnLineCapacity() would make the function
+// pointer this macro takes ambiguous.
+static int GetDrawnLineCapacity(FLevelLocals *self)
+{
+	return DrawnLineCapacity();
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(FLevelLocals, DrawnLineCapacity, GetDrawnLineCapacity)
+{
+	PARAM_SELF_STRUCT_PROLOGUE(FLevelLocals);
+	ACTION_RETURN_INT(GetDrawnLineCapacity(self));
 }
 
 static void ClearFogSlab(FLevelLocals *self)

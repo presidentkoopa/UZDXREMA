@@ -1270,6 +1270,7 @@ set (PCH_SOURCES
 	common/rendering/hwrenderer/data/hw_lightbuffer.cpp
 	common/rendering/hwrenderer/data/hw_bonebuffer.cpp
 	common/rendering/hwrenderer/data/hw_gpuparticlebuffer.cpp
+	common/rendering/hwrenderer/data/hw_drawnlinebuffer.cpp
 	common/rendering/hwrenderer/data/hw_aabbtree.cpp
 	common/rendering/hwrenderer/data/hw_shadowmap.cpp
 	common/rendering/hwrenderer/data/hw_shaderpatcher.cpp

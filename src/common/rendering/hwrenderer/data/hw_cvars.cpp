@@ -25,6 +25,7 @@
 #include "c_dispatch.h"
 #include "v_video.h"
 #include "hw_cvars.h"
+#include "hw_drawnlinebuffer.h"	// [DRAWNLINES] DrawnLinesLogToggle
 #include "menu.h"
 #include "printf.h"
 #include "version.h"
@@ -253,4 +254,43 @@ int GpuParticleRingCapacity()
 		latched = v;
 	}
 	return latched;
+}
+
+// [DRAWNLINES] + [BEAMLINES] Glowing lines drawn as boxes rather than lit per
+// pixel -- hw_drawnlinebuffer.h, drawnlines.vp/.fp, and FLevelLocals::DrawnLine.
+//
+// r_beams_drawn is the A/B switch. OFF, the default, every SetBeam line renders
+// exactly as it always has. ON, the beam slots' glow in the air is drawn by the
+// drawn-line path instead: the same maths, run only near each line. It falls
+// back to per-pixel on its own wherever that path does not exist (GL, GLES, a
+// failed shader compile, r_drawnlines 0), and says so when toggled.
+// Not CVAR_ARCHIVE: an A/B switch lasts one session, so a stray click in the
+// laser menu cannot quietly move the grab lasers and the Lance off their look.
+CUSTOM_CVARD(Bool, r_beams_drawn, false, CVAR_GLOBALCONFIG | CVAR_NOINITCALL,"draw SetBeam lines through the drawn-line path instead of per pixel (A/B test, Vulkan only)")
+{
+	DrawnLinesLogToggle(self);
+}
+// While r_beams_drawn routes the beams, keep their SURFACE light per pixel --
+// the walls a beam passes still brighten. The drawn path cannot light surfaces;
+// 0 shows the pure drawn look, which is what SetDrawnLine lines always get.
+CVARD(Bool, r_beams_drawn_surfacelight, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "while r_beams_drawn routes beams, keep their per-pixel surface light")
+// Master switch for the drawn-line draw, like r_gpuparticles. Off also sends
+// r_beams_drawn back to per-pixel beams.
+CVARD(Bool, r_drawnlines, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "master switch for drawing drawn lines (Vulkan only)")
+// How far toward the eye a drawn line's depth is pulled, in map units, so the
+// glow around an impact is not sliced off where it meets the wall. Negative =
+// automatic: the line's own halo reach. Smaller hides the line sooner behind
+// something standing just in front of it; see drawnlines.fp. Renderer-read.
+CVARD(Float, r_drawnlines_depthbias, -1.0f, CVAR_ARCHIVE | CVAR_GLOBALCONFIG, "drawn-line depth pulled toward the eye, map units; < 0 = the line's halo reach")
+// Diagnostics: a line every two seconds with claimed / styled / uploaded / drawn
+// counts. Off by default so nothing prints per frame unless asked.
+CVARD(Bool, r_beams_debug, false, 0, "print beam slot and drawn-line counts every two seconds")
+
+// A FIXED number, not a cvar. Script reads it (DrawnLineCapacity), and a value
+// each player sets in their own ini is one gameplay code could branch on and
+// desync. The level's array and the GPU buffer both size from it. 8192 lines is
+// 655 KB of GPU records; raise the constant, not a setting, if it is ever short.
+int DrawnLineCapacity()
+{
+	return 8192;
 }

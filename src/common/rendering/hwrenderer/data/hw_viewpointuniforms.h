@@ -162,7 +162,9 @@ struct HWViewpointUniforms
 	//   mBeamA[i]    xyz start, w core thickness
 	//   mBeamB[i]    xyz end,   w softness (how far the halo reaches)
 	//   mBeamCol[i]  rgb colour, w intensity
-	//   mBeamParams  x count, y halo strength, z fog scatter, w spare
+	//   mBeamParams  x count, y halo strength, z fog scatter, w air glow --
+	//                [BEAMLINES] now the count of COMPACTED uploads and the
+	//                LARGEST uploaded air glow; per-line look is mBeamLook
 	//
 	// In the viewpoint block rather than StreamData: these are scene-global,
 	// and StreamData's size divides 64KB into MAX_STREAM_DATA draws.
@@ -509,9 +511,30 @@ struct HWViewpointUniforms
 	//
 	// APPENDED LAST, and appended last in both GLSL copies (gl_shader.cpp's
 	// ViewpointUBO, vk_shader.cpp's ViewpointData plus its #defines) in the same
-	// change. Anything added after this goes after THESE, in all three places.
+	// change. No longer the last members: mBeamLook follows, and whatever is
+	// added next goes after IT.
 	FVector4 mLevelTime = { 0.f, 0.f, 0.f, 0.f };
 	FVector4 mGpuParticleParams = { 1.f, 8.f, 1.f, 1.f };
+
+	// [BEAMLINES] THE LOOK OF EACH UPLOADED BEAM LINE. See mBeamA above and
+	// "Engine docs/BEAM_LINES_PLAN.md".
+	//
+	//   mBeamLook[u]  x air glow, y halo strength, z taper, w impact flare
+	//
+	// u is the COMPACTED upload index, the one mBeamA/B/Col use. hw_drawinfo.cpp
+	// fills it from the slot's own SetBeamStyle, or from the scene values
+	// (BeamAirGlow, BeamGlow, BeamTaper, BeamFlare) when it has none -- the very
+	// numbers main.fp used to read from mBeamParams.y/.w and mBeamFX.z/.w -- so
+	// an unstyled line is drawn exactly as before. With r_beams_drawn routing a
+	// line to the drawn path, x is 0 and the per-pixel air loop skips it.
+	//
+	// +2,048 bytes per viewpoint: 22,512 -> 24,560. See the bind-range assert
+	// at the bottom of this file for why that is checked TWICE over.
+	//
+	// APPENDED LAST, and last in both GLSL copies (gl_shader.cpp's ViewpointUBO,
+	// vk_shader.cpp's ViewpointData plus its #define) in the same change.
+	// Anything added after this goes after IT, in all three places.
+	FVector4 mBeamLook[128];
 
 	void CalcDependencies()
 	{
@@ -533,3 +556,15 @@ static_assert((sizeof(HWViewpointUniforms) % 16) == 0, "HWViewpointUniforms must
 // guaranteed minimum is only 16384, so a block this size already assumes a
 // desktop GPU -- which this fork does anyway.
 static_assert(sizeof(HWViewpointUniforms) <= 65536, "HWViewpointUniforms exceeds the uniform block range it is bound with.");
+
+// [BEAMLINES] AND TWICE OVER, because that is what Vulkan actually binds. The
+// descriptor at set 1 binding 0 covers GetBlockSize() * 2 (vk_descriptorset.cpp,
+// UpdateHWBufferSet) so a multiview pass can index viewpoints[0] and [1], and
+// GetBlockSize() is sizeof rounded UP to the device's uniform offset alignment
+// (hw_viewpointbuffer.cpp). The check above only ever guarded one copy.
+//
+// Rounded here to 256, the largest minUniformBufferOffsetAlignment the Vulkan
+// spec allows, so it holds on any device: with mBeamLook the block is 24,560
+// bytes, aligned 24,576, bound 49,152 of 65,536.
+static_assert(((sizeof(HWViewpointUniforms) + 255) / 256) * 256 * 2 <= 65536,
+	"Two aligned HWViewpointUniforms blocks exceed the 65,536-byte range Vulkan binds them with.");

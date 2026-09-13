@@ -1847,6 +1847,10 @@ OptionMenu VRLaserSightOptions protected
 	Slider "$VRLASERMNU_SOURCE_OFFSET_X",		"vr_laser_source_offset_x", -64, 64, 1, 0
 	Slider "$VRLASERMNU_SOURCE_OFFSET_Y",		"vr_laser_source_offset_y", -64, 64, 1, 0
 	Slider "$VRLASERMNU_SOURCE_OFFSET_Z",		"vr_laser_source_offset_z", -64, 64, 1, 0
+	// [DRAWNLINES] A/B switch for SetBeam lines (the grab lasers, the Lance):
+	// per-pixel as always, or the drawn-line path. See r_beams_drawn in
+	// hw_cvars.cpp. The one row added here; this menu's rework is later work.
+	Option "Beam lines: drawn path (A/B)",		"r_beams_drawn", "OnOff"
 
 	StaticText ""
 	StaticText "$VRLASERMNU_LOCK_OPTIONS", gold
@@ -2064,11 +2068,14 @@ OptionMenu VROptionsMenu protected
 	Option "$VRPREFMNU_SWITCH_THUMBSTICKS",		"vr_switch_sticks", "OnOff", vr_joy_mode
 	Option "$VRPREFMNU_VIRTUAL_MOUSE",				"vr_mouse_in_menu", "OnOff"
 	ColorPicker "$VRPREFMNU_MOUSE_POINTER",		"vr_menu_pointer_color"
+	// Menus float on a panel over the live 3D world with head tracking, so worn
+	// things can be placed with the renderer-read sliders while looking at them.
+	Option "Menus over the 3D world (head tracking)",	"vr_menu_keep_world", "OnOff"
 	Option "$VRPREFMNU_SECONDARY_BUTTON_MAPPINGS",	"vr_secondary_button_mappings", "OnOff", vr_joy_mode
 	Option "$VRPREFMNU_TWO_HANDED_WEAPONS",		"vr_two_handed_weapons", "OnOff"
 	Slider "Stabilize Distance (in)",			"vr_stabilize_distance_inches", 1.0, 24.0, 1.0, 0
 	StaticText " "
-	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_control_scheme vr_switch_sticks vr_mouse_in_menu vr_menu_pointer_color vr_secondary_button_mappings vr_two_handed_weapons vr_stabilize_distance_inches"
+	SafeCommand "$OPTMNU_DEFAULTS", "resetcvar vr_control_scheme vr_switch_sticks vr_mouse_in_menu vr_menu_keep_world vr_menu_pointer_color vr_secondary_button_mappings vr_two_handed_weapons vr_stabilize_distance_inches"
 
 	StaticText ""
 	StaticText "$VRPREFMNU_LOCOMOTION", gold

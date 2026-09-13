@@ -34,6 +34,8 @@
 #include "flatvertices.h"
 #include "hw_lightbuffer.h"
 #include "hw_bonebuffer.h"
+#include "hw_drawnlinebuffer.h"	// [DRAWNLINES]
+#include "i_time.h"	// [DRAWNLINES] r_beams_debug's two-second gate
 #include "hw_gpuparticlebuffer.h"	// [GPUPARTICLES]
 #include "hw_vrmodes.h"
 #include "hw_vrwheel.h"
@@ -101,6 +103,216 @@ CVAR(Bool, vol_beam_debug, false, 0);
 // unless a beam is doing something strange, in which case turning it off says
 // whether the interpolation or the script is at fault.
 CVAR(Bool, r_beam_interpolate, true, CVAR_ARCHIVE | CVAR_GLOBALCONFIG);
+
+static_assert(DrawnLineBuffer::ROUTED_BEAM_RESERVE == (unsigned)FLevelLocals::MAX_BEAMS,
+	"DrawnLineBuffer reserves one record per beam slot for r_beams_drawn");
+
+//==========================================================================
+//
+// [BEAMLINES] WHERE A LINE IS THIS FRAME, AND HOW IT LOOKS.
+//
+// Moved out of StartScene's beam upload unchanged, so the per-pixel upload and
+// the drawn-line path (r_beams_drawn, SyncDrawnLines) resolve a beam slot with
+// the same arithmetic and can never disagree about where it is. Game space
+// out; the callers swizzle.
+//
+//==========================================================================
+
+// The last StartScene's per-pixel upload count, for r_beams_debug.
+static int BeamLinesUploaded = 0;
+
+// RS FORK -- AN ANCHORED LINE STARTS AT THE HAND, NOW.
+//
+// Not at an interpolation between two 35Hz samples of where the hand was.
+// AttackPos and OffhandPos are rewritten every frame by hw_vrmodes.cpp from the
+// live controller transform, and this runs in that same frame -- so reading
+// them here is the hand's actual current position rather than a stale pair.
+// That is the whole fix for a laser sight that stutters while you move.
+//
+// ONLY THE START. The far end is a hit location in the world, which genuinely
+// only changes once a tic and is correctly interpolated by the caller --
+// anchoring it too would drag the far end around with your wrist.
+// See FLevelLocals::BeamAnchor.
+// playerNum -1 is the console player, the beam slots' long-standing rule; a drawn
+// line anchored with an owner names that player instead.
+static void ResolveLineAnchor(FLevelLocals *Level, int mode, DVector3 &start, int playerNum = -1)
+{
+	if (mode == 0) return;
+	const player_t *bp = (playerNum >= 0 && playerNum < MAXPLAYERS && Level->PlayerInGame(playerNum))
+		? &players[playerNum] : Level->GetConsolePlayer();
+	if (bp && bp->mo)
+		start = (mode == 2) ? bp->mo->OffhandPos : bp->mo->AttackPos;
+}
+
+static void ResolveBeamSlot(FLevelLocals *Level, int i, double ticFrac, DVector3 &a, DVector3 &b)
+{
+	// INTERPOLATE ONLY A BEAM THAT WAS ALREADY LIT AND STILL IS.
+	// Callers park a released slot at (0,0,0) rather than leaving stale
+	// endpoints behind, so both transitions have to snap: on the tic a beam
+	// lights up prev is the map origin and lerping would drag it across the
+	// level, and on the tic it goes out the same thing happens in reverse.
+	// Between those it is the same beam moving, which is exactly what wants
+	// smoothing.
+	//
+	// [BEAMLINES] PrevBeamLive[i] is the per-slot form of the old
+	// `i < PrevBeamCount`, and identical to it while nothing is claimed.
+	const bool lerpable =
+		Level->PrevBeamLive[i] &&
+		Level->PrevBeamIntensity[i] > 0.0 &&
+		Level->BeamIntensity[i] > 0.0;
+	const double f = lerpable ? ticFrac : 1.0;
+
+	a = Level->PrevBeamStart[i] +
+		(Level->BeamStart[i] - Level->PrevBeamStart[i]) * f;
+	b = Level->PrevBeamEnd[i] +
+		(Level->BeamEnd[i] - Level->PrevBeamEnd[i]) * f;
+
+	if (Level->BeamAnchor[i] != 0)
+		ResolveLineAnchor(Level, Level->BeamAnchor[i], a);
+}
+
+// x air glow, y halo, z taper, w flare: the slot's own style, or the scene look.
+// The scene branch produces exactly the floats StartScene used to put in
+// mBeamParams.y/.w and mBeamFX.z/.w.
+static FVector4 BeamSlotLook(const FLevelLocals *Level, int i)
+{
+	if (Level->BeamHasStyle[i])
+		return { (float)Level->BeamStyleAirGlow[i], (float)Level->BeamStyleHalo[i],
+			(float)Level->BeamStyleTaper[i], (float)Level->BeamStyleFlare[i] };
+	return { (float)Level->BeamAirGlow, (float)Level->BeamGlow,
+		(float)Level->BeamTaper, (float)Level->BeamFlare };
+}
+
+//==========================================================================
+//
+// [DRAWNLINES] This frame's drawn-line records, handed to the GPU.
+//
+// Everything is re-sent every scene: a line is interpolated between tics and
+// may start at a tracked hand, so its endpoints move every frame whether script
+// touched it or not. That is at most capacity x 80 bytes of plain copy. Nothing
+// in a record depends on the eye, so both eyes -- and a camera texture in the
+// same frame -- send identical bytes; each eye's box and glow are worked out in
+// the shaders from that eye's own camera.
+//
+// Beam slots go FIRST when r_beams_drawn routes them, so a full SetDrawnLine
+// array can never push the grab lasers or the Lance off the end.
+//
+//==========================================================================
+
+static void WriteDrawnLineRecord(DrawnLineRecord &r, const DVector3 &a, const DVector3 &b,
+	double thick, double soft, PalEntry col, double intensity,
+	const FVector4 &look, double scrollSpeed, double scrollDepth, float timerSec, float depthBias)
+{
+	// Swizzled like the beam uniforms: Doom's Z is the shader's Y.
+	r.a[0] = (float)a.X; r.a[1] = (float)a.Z; r.a[2] = (float)a.Y; r.a[3] = (float)thick;
+	r.b[0] = (float)b.X; r.b[1] = (float)b.Z; r.b[2] = (float)b.Y; r.b[3] = (float)soft;
+	r.c[0] = col.r / 255.f; r.c[1] = col.g / 255.f; r.c[2] = col.b / 255.f; r.c[3] = (float)intensity;
+	r.d[0] = look.X; r.d[1] = look.Y; r.d[2] = look.Z; r.d[3] = look.W;
+	r.e[0] = (float)scrollSpeed; r.e[1] = (float)scrollDepth; r.e[2] = timerSec; r.e[3] = depthBias;
+}
+
+static TArray<DrawnLineRecord> DrawnLineScratch;
+
+static void SyncDrawnLines(FLevelLocals *Level, double viewTicFrac)
+{
+	DrawnLineBuffer *lines = screen->mDrawnLines;
+	if (lines == nullptr || Level == nullptr) return;
+
+	const unsigned cap = lines->GetCapacity();
+	if (DrawnLineScratch.Size() < cap) DrawnLineScratch.Resize(cap);
+
+	const double ticFrac = r_beam_interpolate ? viewTicFrac : 1.0;
+
+	// The `timer` main.fp's scroll reads on a surface whose material runs at
+	// speed 1 (VkRenderState::ApplyStreamData), so a routed beam scrolls in step
+	// with the per-pixel beam it stands in for.
+	const float timerSec = static_cast<float>((double)(screen->FrameTime - screen->RenderState()->firstFrame) / 1000.);
+	const float depthBias = (float)r_drawnlines_depthbias;
+
+	unsigned n = 0, routed = 0, dropped = 0;
+
+	if (BeamsRouteToDrawnLines())
+	{
+		for (int i = 0; i < FLevelLocals::MAX_BEAMS; i++)
+		{
+			if (!Level->BeamSlotLive(i) || Level->BeamIntensity[i] == 0.0) continue;
+			const FVector4 look = BeamSlotLook(Level, i);
+			// No air glow, nothing in the air: the per-pixel air loop skips it too.
+			if (look.X <= 0.f) continue;
+			if (n >= cap) { dropped++; continue; }
+
+			DVector3 a, b;
+			ResolveBeamSlot(Level, i, ticFrac, a, b);
+			WriteDrawnLineRecord(DrawnLineScratch[n++], a, b,
+				Level->BeamThick[i], Level->BeamSoft[i], Level->BeamColor[i], Level->BeamIntensity[i],
+				look, Level->BeamScrollSpeed, Level->BeamScrollDepth, timerSec, depthBias);
+			routed++;
+		}
+	}
+
+	for (int i = 0; i < Level->DrawnLineHigh; i++)
+	{
+		const FLevelLocals::DrawnLine &l = Level->DrawnLines[i];
+		if (!l.Live || l.Intensity == 0.0 || l.AirGlow <= 0.0) continue;
+		if (n >= cap) { dropped++; continue; }
+
+		// The beam slots' rule, per line: lerp only a line that was lit last
+		// tic and still is.
+		const bool lerpable = l.PrevLive && l.PrevIntensity > 0.0 && l.Intensity > 0.0;
+		const double f = lerpable ? ticFrac : 1.0;
+		DVector3 a = l.PrevStart + (l.Start - l.PrevStart) * f;
+		const DVector3 b = l.PrevEnd + (l.End - l.PrevEnd) * f;
+		ResolveLineAnchor(Level, l.Anchor, a, l.AnchorPlayer);
+
+		const FVector4 look = { (float)l.AirGlow, (float)l.Halo, (float)l.Taper, (float)l.Flare };
+		WriteDrawnLineRecord(DrawnLineScratch[n++], a, b, l.Thick, l.Soft, l.Color, l.Intensity,
+			look, l.ScrollSpeed, l.ScrollDepth, timerSec, depthBias);
+	}
+
+	if (dropped > 0)
+	{
+		static bool warned = false;
+		if (!warned)
+		{
+			warned = true;
+			Printf("DrawnLines: %u lines did not fit the %u-record buffer this frame and were not drawn "
+				"(raise DrawnLineCapacity in hw_cvars.cpp); further overflows are silent\n", dropped, cap);
+		}
+	}
+
+	lines->Upload(DrawnLineScratch.Data(), n, routed);
+}
+
+// r_beams_debug: one line every two seconds. Runs on every backend -- the
+// claim and style counts mean something on GL too.
+static void ReportBeamLines(FLevelLocals *Level)
+{
+	if (!r_beams_debug || Level == nullptr) return;
+
+	static uint64_t lastMs = 0;
+	const uint64_t now = I_msTime();
+	if (lastMs != 0 && now - lastMs < 2000) return;
+	lastMs = now;
+
+	int claimed = 0, styled = 0, lit = 0;
+	for (int i = 0; i < FLevelLocals::MAX_BEAMS; i++)
+	{
+		if (Level->BeamClaimed[i]) claimed++;
+		if (Level->BeamHasStyle[i]) styled++;
+		if (Level->BeamSlotLive(i) && Level->BeamIntensity[i] != 0.0) lit++;
+	}
+	int ownLit = 0;
+	for (int i = 0; i < Level->DrawnLineHigh; i++)
+		if (Level->DrawnLines[i].Live && Level->DrawnLines[i].Intensity != 0.0) ownLit++;
+
+	DrawnLineBuffer *lines = screen->mDrawnLines;
+	Printf("Beams [debug]: BeamCount %d, claimed %d, styled %d, lit %d, per-pixel upload %d | "
+		"r_beams_drawn %d, drawn path %s, routed %u, SetDrawnLine lit %d, drawn records %u, draws %u\n",
+		Level->BeamCount, claimed, styled, lit, BeamLinesUploaded,
+		(int)*r_beams_drawn, lines == nullptr ? "absent (not Vulkan)" : lines->StateName(),
+		lines ? lines->GetRoutedCount() : 0u, ownLit,
+		lines ? lines->GetLiveCount() : 0u, lines ? lines->TakeDrawCount() : 0u);
+}
 
 sector_t * hw_FakeFlat(sector_t * sec, sector_t * dest, area_t in_area, bool back);
 
@@ -365,9 +577,21 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 		// [BB] Beams. Swizzled like everything else here: Doom's Z is the
 		// shader's Y. A beam laid along a corridor with the axes crossed
 		// becomes a beam standing in a wall, which is a memorable bug.
+		//
+		// [BEAMLINES] COMPACTED, WITH A LOOK PER LINE. Every slot is walked, and
+		// the live ones -- below BeamCount, or claimed -- with a non-zero
+		// intensity are written into consecutive uniform slots, so the shader's
+		// loops pay per live line whatever the slot numbers are. Leaving out a
+		// zero-intensity slot changes no pixel: both loops multiplied its colour
+		// by exactly 0. The survivors keep their slot order, so the shader adds
+		// the same terms in the same order it always did.
+		//
+		// Each uploaded line carries its look in mBeamLook: its own style if
+		// SetBeamStyle gave it one, otherwise the scene values -- the very
+		// numbers main.fp used to read from mBeamParams.y/.w and mBeamFX.z/.w.
+		// mBeamParams.w becomes the LARGEST uploaded air glow, so BeamAirGlow's
+		// whole-loop early-out still costs nothing when nothing glows in the air.
 		{
-			int nb = clamp(Level->BeamCount, 0, FLevelLocals::MAX_BEAMS);
-
 			// Script sets beams at 35Hz; this loop runs every frame. Without the
 			// lerp a beam holds still for a whole tic and then jumps, which at
 			// 90-120Hz reads as a beam that stutters against smoothly moving
@@ -376,69 +600,51 @@ void HWDrawInfo::StartScene(FRenderViewpoint &parentvp, HWViewpointUniforms *uni
 			// behaviour on their own and need no guard here.
 			const double ticFrac = r_beam_interpolate ? Viewpoint.TicFrac : 1.0;
 
-			for (int i = 0; i < nb; i++)
+			// [DRAWNLINES] r_beams_drawn: every beam slot's glow IN THE AIR is drawn
+			// by the drawn-line path instead (SyncDrawnLines, RenderTranslucent).
+			// The slot is still uploaded here for its SURFACE light, with its air
+			// glow zeroed so the per-pixel air loop skips it -- unless
+			// r_beams_drawn_surfacelight is off, when it is not uploaded at all.
+			// False (the default), and wherever the drawn path does not exist:
+			// this loop is the one above, untouched.
+			const bool routeDrawn = BeamsRouteToDrawnLines();
+			const bool uploadRouted = r_beams_drawn_surfacelight;
+
+			int nb = 0;
+			float maxAirGlow = 0.f;
+			for (int i = 0; i < FLevelLocals::MAX_BEAMS; i++)
 			{
-				// INTERPOLATE ONLY A BEAM THAT WAS ALREADY LIT AND STILL IS.
-				// Callers park a released slot at (0,0,0) rather than leaving
-				// stale endpoints behind, so both transitions have to snap: on
-				// the tic a beam lights up prev is the map origin and lerping
-				// would drag it across the level, and on the tic it goes out the
-				// same thing happens in reverse. Between those it is the same
-				// beam moving, which is exactly what wants smoothing.
-				const bool lerpable =
-					i < Level->PrevBeamCount &&
-					Level->PrevBeamIntensity[i] > 0.0 &&
-					Level->BeamIntensity[i] > 0.0;
-				const double f = lerpable ? ticFrac : 1.0;
+				if (!Level->BeamSlotLive(i) || Level->BeamIntensity[i] == 0.0) continue;
+				if (routeDrawn && !uploadRouted) continue;
 
-				DVector3 a = Level->PrevBeamStart[i] +
-					(Level->BeamStart[i] - Level->PrevBeamStart[i]) * f;
-				const DVector3 b = Level->PrevBeamEnd[i] +
-					(Level->BeamEnd[i] - Level->PrevBeamEnd[i]) * f;
+				DVector3 a, b;
+				ResolveBeamSlot(Level, i, ticFrac, a, b);
 
-				// RS FORK -- AN ANCHORED BEAM STARTS AT THE HAND, NOW.
-				//
-				// Not at an interpolation between two 35Hz samples of where the
-				// hand was. AttackPos and OffhandPos are rewritten every frame
-				// by hw_vrmodes.cpp from the live controller transform, and this
-				// loop runs in that same frame -- so reading them here is the
-				// hand's actual current position rather than a stale pair.
-				//
-				// That is the whole fix for a laser sight that stutters while
-				// you move: interpolating between two bad samples cannot
-				// recover the motion between them, so the origin has to be
-				// resolved at draw rate instead of smoothed after the fact.
-				//
-				// ONLY THE START. The far end is a hit location in the world,
-				// which genuinely only changes once a tic and is correctly
-				// interpolated above -- anchoring it too would drag the far end
-				// around with your wrist.
-				if (Level->BeamAnchor[i] != 0)
-				{
-					const player_t *bp = Level->GetConsolePlayer();
-					if (bp && bp->mo)
-						a = (Level->BeamAnchor[i] == 2) ? bp->mo->OffhandPos
-						                                : bp->mo->AttackPos;
-				}
-
-				VPUniforms.mBeamA[i] = {
+				VPUniforms.mBeamA[nb] = {
 					(float)a.X, (float)a.Z,
 					(float)a.Y, (float)Level->BeamThick[i] };
-				VPUniforms.mBeamB[i] = {
+				VPUniforms.mBeamB[nb] = {
 					(float)b.X, (float)b.Z,
 					(float)b.Y, (float)Level->BeamSoft[i] };
 				// Colour is NOT interpolated on purpose. A band change is a
 				// deliberate step -- see the tier bands in RS_Lance -- and
 				// crossfading it would turn a power-up into a smear.
-				VPUniforms.mBeamCol[i] = {
+				VPUniforms.mBeamCol[nb] = {
 					Level->BeamColor[i].r / 255.f, Level->BeamColor[i].g / 255.f,
 					Level->BeamColor[i].b / 255.f, (float)Level->BeamIntensity[i] };
+
+				FVector4 look = BeamSlotLook(Level, i);
+				if (routeDrawn) look.X = 0.f;
+				VPUniforms.mBeamLook[nb] = look;
+				maxAirGlow = (nb == 0) ? look.X : std::max(maxAirGlow, look.X);
+				nb++;
 			}
 			VPUniforms.mBeamParams = { (float)nb, (float)Level->BeamGlow,
-				(float)Level->BeamFogScatter, (float)Level->BeamAirGlow };
+				(float)Level->BeamFogScatter, nb > 0 ? maxAirGlow : (float)Level->BeamAirGlow };
 			VPUniforms.mBeamFX = { (float)Level->BeamScrollSpeed,
 				(float)Level->BeamScrollDepth, (float)Level->BeamTaper,
 				(float)Level->BeamFlare };
+			BeamLinesUploaded = nb;
 		}
 
 		// [STAMP] Surface stamps. Progress carries the tic fraction so a stamp
@@ -1972,6 +2178,34 @@ void HWDrawInfo::RenderTranslucent(FRenderState &state)
 		state.SetVertexBuffer(screen->mVertexData);
 	}
 
+	// [DRAWNLINES] Glowing lines drawn as boxes (drawnlines.vp/.fp): SetDrawnLine
+	// lines, plus the beam slots while r_beams_drawn routes them. One draw for all
+	// of them, beside the particles and for the same reasons: depth writing is
+	// off, depth testing on, and additive blending needs no sort. The fragment
+	// shader writes its own depth -- where the glow is, not where the box face
+	// is -- so walls clip a line close to where they clip the per-pixel glow.
+	//
+	// The particles' gates: Vulkan, main view only (portals and mirrors render
+	// through draw infos with mCurrentPortal set, and do not get these), a shader
+	// that compiled, and something uploaded by SyncDrawnLines this scene.
+	if (r_drawnlines && screen->IsVulkan() && mCurrentPortal == nullptr &&
+		screen->mDrawnLines != nullptr && screen->mDrawnLines->IsDrawable() && screen->mDrawnLines->GetLiveCount() > 0)
+	{
+		auto lines = screen->mDrawnLines;
+		state.SetEffect(EFF_DRAWNLINES);
+		state.SetRenderStyle(STYLE_Add);
+		// drawnlines.vp keeps the box faces turned away from the eye itself;
+		// culling by winding would throw away half of those.
+		state.SetCulling(Cull_None);
+		state.SetVertexBuffer(lines->GetVertexBuffer(), 0, 0);
+		state.Draw(DT_Triangles, 0, lines->GetVertexCount());
+		lines->CountDraw();
+
+		state.SetEffect(EFF_NONE);
+		state.SetRenderStyle(STYLE_Translucent);
+		state.SetVertexBuffer(screen->mVertexData);
+	}
+
 
 	state.AlphaFunc(Alpha_GEqual, 0.5f);
 	state.SetDepthMask(true);
@@ -2496,6 +2730,13 @@ void HWDrawInfo::ProcessScene(bool toscreen)
 			Level->GpuParticleSerial, Level->GpuParticleWritten);
 		screen->mGpuParticles->DebugReport(Level->GpuParticleWritten);
 	}
+
+	// [DRAWNLINES] This scene's drawn lines -- SetDrawnLine lines and any beam
+	// slots r_beams_drawn routes -- to the GPU before anything draws. Rebuilt
+	// every scene, see SyncDrawnLines. Does nothing on GL/GLES (no buffer);
+	// the r_beams_debug line prints on every backend.
+	SyncDrawnLines(Level, Viewpoint.TicFrac);
+	ReportBeamLines(Level);
 
 	DrawScene(toscreen ? DM_MAINVIEW : DM_OFFSCREEN);
 	screen->mBones->Unmap();

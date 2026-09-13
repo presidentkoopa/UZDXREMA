@@ -92,6 +92,11 @@ void VkDescriptorSetManager::UpdateHWBufferSet()
 	// real ring exists (GpuParticleBuffer::IsDrawable).
 	VkHardwareDataBuffer* gpuParticleSSO = fb->GetBufferManager()->GpuParticleSSO ? fb->GetBufferManager()->GpuParticleSSO : fb->GetBufferManager()->BoneBufferSSO;
 
+	// [DRAWNLINES] Binding 6, the same arrangement: always written, the bone
+	// buffer standing in if the line buffer is somehow absent -- only the
+	// drawnlines effect reads it, gated on DrawnLineBuffer::IsDrawable.
+	VkHardwareDataBuffer* drawnLineSSO = fb->GetBufferManager()->DrawnLineSSO ? fb->GetBufferManager()->DrawnLineSSO : fb->GetBufferManager()->BoneBufferSSO;
+
 	WriteDescriptors()
 		.AddBuffer(HWBufferSet.get(), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, fb->GetBufferManager()->ViewpointUBO->mBuffer.get(), 0, viewpointRange)
 		.AddBuffer(HWBufferSet.get(), 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, fb->GetBufferManager()->MatrixBuffer->UniformBuffer->mBuffer.get(), 0, sizeof(MatricesUBO))
@@ -99,6 +104,7 @@ void VkDescriptorSetManager::UpdateHWBufferSet()
 		.AddBuffer(HWBufferSet.get(), 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fb->GetBufferManager()->LightBufferSSO->mBuffer.get())
 		.AddBuffer(HWBufferSet.get(), 4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fb->GetBufferManager()->BoneBufferSSO->mBuffer.get())
 		.AddBuffer(HWBufferSet.get(), 5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, gpuParticleSSO->mBuffer.get())
+		.AddBuffer(HWBufferSet.get(), 6, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, drawnLineSSO->mBuffer.get())
 		.Execute(fb->device.get());
 }
 
@@ -273,6 +279,7 @@ void VkDescriptorSetManager::CreateHWBufferSetLayout()
 		.AddBinding(3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT)
 		.AddBinding(4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT)
 		.AddBinding(5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT)	// [GPUPARTICLES] GpuParticleSSO
+		.AddBinding(6, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT)	// [DRAWNLINES] DrawnLineSSO
 		.DebugName("VkDescriptorSetManager.HWBufferSetLayout")
 		.Create(fb->device.get());
 }
@@ -293,7 +300,8 @@ void VkDescriptorSetManager::CreateHWBufferPool()
 	HWBufferDescriptorPool = DescriptorPoolBuilder()
 		.AddPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 3 * maxSets)
 		// [GPUPARTICLES] 3, not 2: lights (binding 3), bones (4), particles (5).
-		.AddPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3 * maxSets)
+		// [DRAWNLINES] 4: and drawn lines (6). Too few here fails set allocation.
+		.AddPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 4 * maxSets)
 		.MaxSets(maxSets)
 		.DebugName("VkDescriptorSetManager.HWBufferDescriptorPool")
 		.Create(fb->device.get());

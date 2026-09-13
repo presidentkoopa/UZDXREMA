@@ -47,6 +47,9 @@ enum ERenderEffect
 	// [GPUPARTICLES] Stateless additive particles (gpuparticles.vp/.fp). Vulkan
 	// only: the GL and GLES effect loaders skip this index.
 	EFF_GPUPARTICLES,
+	// [DRAWNLINES] Glowing lines drawn as boxes (drawnlines.vp/.fp). Vulkan only:
+	// the GL and GLES effect loaders skip this index.
+	EFF_DRAWNLINES,
 	MAX_EFFECTS
 };
 

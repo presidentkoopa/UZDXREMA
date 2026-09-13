@@ -1,0 +1,159 @@
+/*
+** drawnlines.vp
+**
+** [DRAWNLINES] A box around each glowing line. drawnlines.fp draws the glow.
+** See hw_drawnlinebuffer.h.
+**
+** Vulkan only. The records (DrawnLineSSO, set 1 binding 6) are declared in
+** vk_shader.cpp's prolog; GL and GLES never load this effect.
+**
+** Record, shader space (y is up), 80 bytes:
+**   a  xyz start               w core thickness
+**   b  xyz end                 w softness
+**   c  rgb colour              w intensity
+**   d  x air glow  y halo  z taper  w flare
+**   e  x scroll speed  y scroll depth  z timer seconds  w depth bias
+**
+** WHY A BOX AND NOT A CAMERA-FACING QUAD. The glow reaches a fixed distance from
+** the segment in 3D -- a capsule. A flat quad facing the camera covers that
+** capsule's screen footprint only approximately: it thins to nothing when the
+** line is seen end-on, and it under-covers near the eye and toward the edges of
+** a wide VR field of view, where a sphere's silhouette is larger than its
+** cross-section. A box containing the capsule covers it exactly in every view,
+** with no special cases. Its faces turned AWAY from the eye cover the box's
+** footprint once and only once -- and when the eye is inside the box, which a
+** laser leaving a hand twenty units from the face easily puts it, those are all
+** six faces, so it still covers the whole view. Front faces collapse here.
+**
+** Nothing in the record is eye-dependent. Each eye builds its own box from its
+** own uCameraPos, so stereo is right, and both eyes run identical glow maths.
+**
+**---------------------------------------------------------------------------
+**
+** Copyright 2026 UZDXREMA
+**
+** SPDX-License-Identifier: GPL-3.0-or-later
+**
+**---------------------------------------------------------------------------
+*/
+
+// Record index low/high 16 bits, box corner 0..35, unused. Location 8 is the
+// engine's one integer attribute (VATTR_BONESELECTOR in C++), as for particles.
+layout(location = 8) in uvec4 aDrawnLine;
+
+layout(location = 0) out vec3 vLineWorld;
+layout(location = 1) flat out vec4 vLineA;
+layout(location = 2) flat out vec4 vLineB;
+layout(location = 3) flat out vec4 vLineCol;
+layout(location = 4) flat out vec4 vLineLook;
+layout(location = 5) flat out vec4 vLineFX;
+
+// The two triangles of one face, as offsets along that face's two free axes.
+const ivec2 kLineFaceCorners[6] = ivec2[6](
+	ivec2(-1, -1), ivec2( 1, -1), ivec2( 1,  1),
+	ivec2(-1, -1), ivec2( 1,  1), ivec2(-1,  1));
+
+// All six vertices of a dropped face on one point outside the clip volume:
+// zero-area triangles never rasterise.
+void CollapseLineVertex()
+{
+	gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+	vLineWorld = vec3(0.0);
+	vLineA = vec4(0.0);
+	vLineB = vec4(0.0);
+	vLineCol = vec4(0.0);
+	vLineLook = vec4(0.0);
+	vLineFX = vec4(0.0);
+}
+
+void main()
+{
+#ifdef SUPPORTS_MULTIVIEW
+	hwViewIndex = gl_ViewIndex;
+#endif
+
+	uint slot = aDrawnLine.x | (aDrawnLine.y << 16u);
+	int corner = int(aDrawnLine.z) % 36;
+	DrawnLine rec = drawnLines[slot];
+
+	// Nothing to draw: the renderer does not upload these, this is insurance.
+	if (rec.c.w == 0.0 || rec.d.x <= 0.0)
+	{
+		CollapseLineVertex();
+		return;
+	}
+
+	vec3 a = rec.a.xyz;
+	vec3 b = rec.b.xyz;
+	float thick = max(rec.a.w, 0.01);
+	float soft  = max(rec.b.w, 0.01);
+
+	// How far the glow reaches from the segment: the halo's outer edge in
+	// drawnlines.fp, thick + soft*6 + 1, scaled by the fattest the taper makes
+	// the line anywhere along it. Plus a margin, so the box never trims the last
+	// faint pixel and an eye just inside it still has faces beyond the near plane.
+	float taperScale = max(1.0, abs(1.0 - rec.d.z));
+	float R = (thick + soft * 6.0 + 1.0) * taperScale + 4.0;
+
+	vec3 eye = uCameraPos.xyz;
+	vec3 mid = (a + b) * 0.5;
+	vec3 ab = b - a;
+	float len = length(ab);
+	vec3 u = (len > 1e-4) ? ab / len : vec3(1.0, 0.0, 0.0);
+	float halfLen = 0.5 * len + R;
+
+	// n1 points across the line toward the eye, so the box shows its narrow side.
+	// Looking straight down the line, any perpendicular will do.
+	vec3 toMid = mid - eye;
+	vec3 across = toMid - u * dot(toMid, u);
+	float acrossLen = length(across);
+	vec3 n1;
+	if (acrossLen > 1e-4)
+	{
+		n1 = across / acrossLen;
+	}
+	else
+	{
+		vec3 seedAxis = (abs(u.y) < 0.9) ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+		n1 = normalize(cross(seedAxis, u));
+	}
+	vec3 n2 = cross(u, n1);
+
+	// Corner -> face (0..5) -> axis (0 along, 1 n1, 2 n2) and side (-1, +1).
+	int face = corner / 6;
+	int ax = face / 2;
+	float side = ((face & 1) == 0) ? -1.0 : 1.0;
+	ivec2 fc = kLineFaceCorners[corner % 6];
+
+	vec3 s = vec3(0.0);
+	s[ax] = side;
+	s[(ax + 1) % 3] = float(fc.x);
+	s[(ax + 2) % 3] = float(fc.y);
+
+	vec3 axes[3] = vec3[3](u, n1, n2);
+	float extent[3] = float[3](halfLen, R, R);
+
+	// Keep a face only if the eye is on its inner side, i.e. it faces away.
+	vec3 normal = axes[ax] * side;
+	vec3 faceCentre = mid + normal * extent[ax];
+	if (dot(normal, faceCentre - eye) <= 0.0)
+	{
+		CollapseLineVertex();
+		return;
+	}
+
+	vec3 world = mid + u * (s.x * halfLen) + n1 * (s.y * R) + n2 * (s.z * R);
+
+	gl_Position = ProjectionMatrix * (ViewMatrix * vec4(world, 1.0));
+
+#ifdef VULKAN_COORDINATE_SYSTEM
+	gl_Position.z = (gl_Position.z + gl_Position.w) / 2.0;
+#endif
+
+	vLineWorld = world;
+	vLineA = rec.a;
+	vLineB = rec.b;
+	vLineCol = rec.c;
+	vLineLook = rec.d;
+	vLineFX = rec.e;
+}

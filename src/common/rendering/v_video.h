@@ -51,6 +51,7 @@ class FModel;
 class FRenderState;
 class BoneBuffer;
 class GpuParticleBuffer;
+class DrawnLineBuffer;
 
 enum EHWCaps
 {
@@ -154,6 +155,10 @@ public:
 	// created beside mBones in VulkanRenderDevice::InitializeState and null on
 	// GL/GLES, so every user must null-check. See hw_gpuparticlebuffer.h.
 	GpuParticleBuffer* mGpuParticles = nullptr;
+	// [DRAWNLINES] Drawn glowing lines: records + box buffer. Vulkan only,
+	// created beside mGpuParticles and null on GL/GLES -- null-check every use.
+	// See hw_drawnlinebuffer.h.
+	DrawnLineBuffer* mDrawnLines = nullptr;
 	IShadowMap mShadowMap;
 
 	int mGameScreenWidth = 0;

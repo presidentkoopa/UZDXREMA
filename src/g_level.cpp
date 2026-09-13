@@ -2455,6 +2455,12 @@ void FLevelLocals::Mark()
 	{
 		GC::Mark(p);
 	}
+	// [BEAMLINES] Claim owners (ClaimBeam(owner)); P_Ticker releases a slot whose
+	// owner has gone.
+	for (int b = 0; b < MAX_BEAMS; b++)
+	{
+		if (BeamClaimOwned[b]) GC::Mark(BeamClaimOwner[b]);
+	}
 }
 
 //==========================================================================

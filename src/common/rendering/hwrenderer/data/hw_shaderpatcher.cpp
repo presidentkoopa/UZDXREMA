@@ -336,6 +336,10 @@ const FEffectShader effectshaders[] =
 	// by main.vp (drops attributes 3-8, the glow/gradient/split varyings and
 	// bone skinning), so with gpuparticles.vp it switches nothing off.
 	{ "gpuparticles", "shaders/glsl/gpuparticles.vp", "shaders/glsl/gpuparticles.fp", nullptr, nullptr, "#define SIMPLE\n#define NO_ALPHATEST\n" },
+	// [DRAWNLINES] Index EFF_DRAWNLINES. Same shape as gpuparticles: its own
+	// vertex shader, the main pipeline, Vulkan only (it reads DrawnLineSSO,
+	// which only the Vulkan prolog declares); GL and GLES skip this entry.
+	{ "drawnlines", "shaders/glsl/drawnlines.vp", "shaders/glsl/drawnlines.fp", nullptr, nullptr, "#define SIMPLE\n#define NO_ALPHATEST\n" },
 };
 
 int DFrameBuffer::GetShaderCount()

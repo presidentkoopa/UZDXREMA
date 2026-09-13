@@ -34,6 +34,7 @@
 #include "c_dispatch.h"
 #include "flatvertices.h"
 #include "hw_bonebuffer.h"
+#include "hw_drawnlinebuffer.h"	// [DRAWNLINES]
 #include "hw_gpuparticlebuffer.h"	// [GPUPARTICLES]
 #include "hw_clock.h"
 #include "hw_lightbuffer.h"
@@ -358,6 +359,9 @@ VulkanRenderDevice::~VulkanRenderDevice()
 	// [GPUPARTICLES] beside the bones, which it is created beside
 	delete mGpuParticles;
 	mGpuParticles = nullptr;
+	// [DRAWNLINES] beside the particles, which it is created beside
+	delete mDrawnLines;
+	mDrawnLines = nullptr;
 	mShadowMap.Reset();
 
 	if (mDescriptorSetManager)
@@ -425,6 +429,8 @@ void VulkanRenderDevice::InitializeState()
 	// unconditionally true). Must exist before mDescriptorSetManager->Init()
 	// below, which writes it to set 1 binding 5.
 	mGpuParticles = new GpuParticleBuffer();
+	// [DRAWNLINES] Beside the particles and for the same reasons; set 1 binding 6.
+	mDrawnLines = new DrawnLineBuffer();
 
 	mShaderManager.reset(new VkShaderManager(this));
 	mDescriptorSetManager->Init();

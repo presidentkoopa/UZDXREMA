@@ -130,3 +130,11 @@ EXTERN_CVAR(Float, r_gpuparticles_intensity)
 EXTERN_CVAR(Int, r_gpuparticles_ringsize)
 EXTERN_CVAR(Bool, r_gpuparticles_debug)
 int GpuParticleRingCapacity();
+
+// [DRAWNLINES] + [BEAMLINES] see hw_cvars.cpp
+EXTERN_CVAR(Bool, r_beams_drawn)
+EXTERN_CVAR(Bool, r_beams_drawn_surfacelight)
+EXTERN_CVAR(Bool, r_drawnlines)
+EXTERN_CVAR(Float, r_drawnlines_depthbias)
+EXTERN_CVAR(Bool, r_beams_debug)
+int DrawnLineCapacity();

@@ -512,29 +512,50 @@ void P_Ticker (void)
 				}
 			}
 
+			// [BEAMLINES] Every slot, not only those below BeamCount: a CLAIMED
+			// slot is live whatever the count says (FLevelLocals::ClaimBeam).
+			// With nothing claimed this is exactly the old pair of loops -- copy
+			// what is below the count; darken and unanchor what was live last
+			// tic and is not now -- with PrevBeamLive[b] standing in for the old
+			// `b < PrevBeamCount`.
 			const int wasLive = clamp(Level->BeamCount, 0, FLevelLocals::MAX_BEAMS);
-			for (int b = 0; b < wasLive; b++)
+			for (int b = 0; b < FLevelLocals::MAX_BEAMS; b++)
 			{
-				Level->PrevBeamStart[b] = Level->BeamStart[b];
-				Level->PrevBeamEnd[b] = Level->BeamEnd[b];
-				Level->PrevBeamIntensity[b] = Level->BeamIntensity[b];
-			}
-			// Slots past the live count keep no history: mark them dark so the
-			// renderer snaps rather than lerps if the count grows into them.
-			for (int b = wasLive; b < Level->PrevBeamCount; b++)
-			{
-				Level->PrevBeamIntensity[b] = 0.0;
+				// [BEAMLINES] A claim whose owner was destroyed gives its slot back
+				// here, on the same tic on every machine.
+				if (Level->BeamClaimOwned[b] && Level->BeamClaimOwner[b] == nullptr)
+				{
+					Level->ReleaseBeam(b);
+					Level->BeamClaimOwner[b] = nullptr;
+				}
+				const bool live = b < wasLive || Level->BeamClaimed[b];
+				if (live)
+				{
+					Level->PrevBeamStart[b] = Level->BeamStart[b];
+					Level->PrevBeamEnd[b] = Level->BeamEnd[b];
+					Level->PrevBeamIntensity[b] = Level->BeamIntensity[b];
+				}
+				else if (Level->PrevBeamLive[b])
+				{
+					// Slots that are no longer live keep no history: mark them dark
+					// so the renderer snaps rather than lerps if they come back.
+					Level->PrevBeamIntensity[b] = 0.0;
 
-				// RS FORK -- and a slot that has gone dark forgets its anchor.
-				//
-				// Slots are reused. Without this, a mod that anchored slot 3 to
-				// a hand and later released it would hand the next user of slot
-				// 3 an origin stuck to a controller they never asked about --
-				// and that beam would look correct right up until the player
-				// moved their arm.
-				Level->BeamAnchor[b] = 0;
+					// RS FORK -- and a slot that has gone dark forgets its anchor.
+					//
+					// Slots are reused. Without this, a mod that anchored slot 3 to
+					// a hand and later released it would hand the next user of slot
+					// 3 an origin stuck to a controller they never asked about --
+					// and that beam would look correct right up until the player
+					// moved their arm.
+					Level->BeamAnchor[b] = 0;
+				}
+				Level->PrevBeamLive[b] = live;
 			}
 			Level->PrevBeamCount = wasLive;
+
+			// [DRAWNLINES] The same snapshot for drawn lines, for the same reason.
+			Level->SnapshotDrawnLines();
 		}
 
 		for (i = 0; i < MAXPLAYERS; i++)

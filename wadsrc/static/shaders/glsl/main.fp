@@ -1757,7 +1757,9 @@ vec3 BeamLightAt(vec3 p)
 		float core = 1.0 - smoothstep(thick, thick + soft, d);
 		float halo = 1.0 - smoothstep(thick, thick + soft * 8.0 + 1.0, d);
 
-		sum += uBeamCol[i].rgb * (core + halo * uBeamParams.y) * uBeamCol[i].w;
+		// [BEAMLINES] Halo strength per line. An unstyled line carries the scene
+		// value uBeamParams.y still holds, so it lights exactly as before.
+		sum += uBeamCol[i].rgb * (core + halo * uBeamLook[i].y) * uBeamCol[i].w;
 	}
 	return sum;
 }
@@ -1805,6 +1807,13 @@ vec3 BeamAirGlow(vec3 fragPos)
 	for (int i = 0; i < 128; i++)
 	{
 		if (i >= n) break;
+
+		// [BEAMLINES] A line with no air glow of its own is skipped. uBeamParams.w
+		// is the LARGEST uploaded air glow, so the early-out above still skips
+		// the whole loop when nothing glows; this catches the rest one line at a
+		// time -- including beams r_beams_drawn hands to the drawn-line path. With
+		// every line on the scene look this never fires, as before.
+		if (uBeamLook[i].x <= 0.0) continue;
 
 		vec3 a = uBeamA[i].xyz;
 		vec3 b = uBeamB[i].xyz;
@@ -1864,7 +1873,13 @@ vec3 BeamAirGlow(vec3 fragPos)
 		//
 		// TAPER. A perfectly parallel-sided beam reads as a drawn line. Real
 		// glare is tighter at the aperture and blooms toward what it hits.
-		float bw = mix(1.0 - uBeamFX.z, 1.0, tc);
+		//
+		// [BEAMLINES] Taper, flare, halo and air glow are read PER LINE from
+		// uBeamLook[i] (x air glow, y halo, z taper, w flare). A line with no
+		// style of its own carries the scene values the old uniforms held, so
+		// the arithmetic below is unchanged for it. Scroll stays scene-wide.
+		// drawnlines.fp repeats this block for one line; change both together.
+		float bw = mix(1.0 - uBeamLook[i].z, 1.0, tc);
 		thick *= bw;
 		soft  *= bw;
 
@@ -1884,16 +1899,16 @@ vec3 BeamAirGlow(vec3 fragPos)
 		// IMPACT FLARE. A beam that simply stops looks unfinished; the far
 		// end is where the energy is actually going, so it is the brightest
 		// part of the whole thing.
-		if (uBeamFX.w > 0.0)
-			bright += uBeamFX.w * pow(clamp(tc, 0.0, 1.0), 8.0);
+		if (uBeamLook[i].w > 0.0)
+			bright += uBeamLook[i].w * pow(clamp(tc, 0.0, 1.0), 8.0);
 
 		// The same two-falloff shape the surface light uses, so the beam in
 		// the air and the light it casts agree about how thick it is.
 		float core = 1.0 - smoothstep(thick * 0.5, thick + soft, dist);
 		float halo = 1.0 - smoothstep(thick, thick + soft * 6.0 + 1.0, dist);
 
-		sum += uBeamCol[i].rgb * (core * 1.6 + halo * uBeamParams.y)
-			* uBeamCol[i].w * uBeamParams.w * bright;
+		sum += uBeamCol[i].rgb * (core * 1.6 + halo * uBeamLook[i].y)
+			* uBeamCol[i].w * uBeamLook[i].x * bright;
 	}
 	return sum;
 }

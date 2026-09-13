@@ -321,7 +321,25 @@ void FLevelLocals::ClearLevelData(bool fullgc)
 	for (int b = 0; b < MAX_BEAMS; b++)
 	{
 		PrevBeamIntensity[b] = 0.0;
+
+		// [BEAMLINES] Claims and styles go with the map. A claimed slot is also
+		// blanked and unanchored, so nothing on the new map inherits it.
+		if (BeamClaimed[b])
+		{
+			BeamIntensity[b] = 0.0;
+			BeamAnchor[b] = 0;
+		}
+		BeamClaimed[b] = false;
+		BeamClaimOwned[b] = false;
+		BeamClaimOwner[b] = nullptr;
+		BeamHasStyle[b] = false;
+		PrevBeamLive[b] = false;
 	}
+	BeamClaimFullLogged = false;
+	BeamCountOverClaimLogged = false;
+
+	// [DRAWNLINES] No drawn line survives a map change or a savegame load either.
+	ClearDrawnLines();
 
 	// [RS fork] NOR DOES THE REST OF THE LEVEL'S VISUAL STATE.
 	//

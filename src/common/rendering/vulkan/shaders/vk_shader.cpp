@@ -30,6 +30,8 @@
 #include "version.h"
 #include "cmdlib.h"
 #include "printf.h"
+#include "hw_drawnlinebuffer.h"	// [DRAWNLINES] ShaderReady / ShaderFailed
+#include "hw_cvars.h"	// [DRAWNLINES] r_beams_drawn, for the compile line
 #include "hw_gpuparticlebuffer.h"	// [GPUPARTICLES] ShaderReady / ShaderFailed
 
 ShaderIncludeResult VkShaderManager::OnInclude(FString headerName, FString includerName, size_t depth)
@@ -121,7 +123,7 @@ bool VkShaderManager::CompileNextShader()
 		// Effect shaders
 
 		VkShaderProgram prog;
-		if (i == EFF_GPUPARTICLES)
+		if (i == EFF_GPUPARTICLES || i == EFF_DRAWNLINES)
 		{
 			// [GPUPARTICLES] The one effect whose compile failure must not take
 			// Vulkan startup down with it: it is new, optional, and nothing else
@@ -129,6 +131,11 @@ bool VkShaderManager::CompileNextShader()
 			// GetEffect returns null for it), and GpuParticleBuffer::ShaderFailed
 			// below keeps the draw -- and therefore the pipeline that would
 			// dereference that null -- from ever being requested.
+			//
+			// [DRAWNLINES] Two such effects now, guarded identically for the same
+			// reasons. DrawnLineBuffer::ShaderFailed is the drawn lines' gate, and
+			// it also sends r_beams_drawn back to per-pixel beams.
+			const bool particles = (i == EFF_GPUPARTICLES);
 			try
 			{
 				prog.vert = LoadVertShader(effectshaders[i].ShaderName, effectshaders[i].vp, effectshaders[i].defines);
@@ -136,8 +143,10 @@ bool VkShaderManager::CompileNextShader()
 			}
 			catch (const std::exception &err)
 			{
-				Printf(TEXTCOLOR_RED "GpuParticles: effect shader failed to compile (%s pass) -- particles disabled:\n%s\n",
-					compilePass == GBUFFER_PASS ? "gbuffer" : "normal", err.what());
+				Printf(TEXTCOLOR_RED "%s: effect shader failed to compile (%s pass) -- %s disabled:\n%s\n",
+					particles ? "GpuParticles" : "DrawnLines",
+					compilePass == GBUFFER_PASS ? "gbuffer" : "normal",
+					particles ? "particles" : "drawn lines", err.what());
 				prog.vert.reset();
 				prog.frag.reset();
 			}
@@ -172,6 +181,24 @@ bool VkShaderManager::CompileNextShader()
 					fb->mGpuParticles->ShaderFailed = !ok;
 					fb->mGpuParticles->ShaderReady = ok;
 					Printf("GpuParticles: effect shader %s for %d passes\n", ok ? "compiled" : "NOT available", (int)MAX_PASS_TYPES);
+				}
+
+				// [DRAWNLINES] The same rule: the effect for every pass, or no draw
+				// and no r_beams_drawn routing at all.
+				if (fb->mDrawnLines != nullptr)
+				{
+					bool ok = true;
+					for (int pass = 0; pass < MAX_PASS_TYPES; pass++)
+					{
+						if ((int)mEffectShaders[pass].size() <= EFF_DRAWNLINES || !mEffectShaders[pass][EFF_DRAWNLINES].vert || !mEffectShaders[pass][EFF_DRAWNLINES].frag)
+							ok = false;
+					}
+					fb->mDrawnLines->ShaderFailed = !ok;
+					fb->mDrawnLines->ShaderReady = ok;
+					Printf("DrawnLines: effect shader %s for %d passes -- r_beams_drawn is %s%s\n",
+						ok ? "compiled" : "NOT available", (int)MAX_PASS_TYPES,
+						r_beams_drawn ? "ON" : "off",
+						(r_beams_drawn && !ok) ? ", so beams stay per-pixel" : "");
 				}
 				return true;
 			}
@@ -359,6 +386,10 @@ static const char *shaderBindings = R"(
 		// uGpuParticleParams: x size scale, y max size, z stretch, w intensity.
 		vec4 uLevelTime;
 		vec4 uGpuParticleParams;
+
+		// [BEAMLINES] APPENDED LAST, matching HWViewpointUniforms::mBeamLook by
+		// offset: per uploaded beam line, x air glow, y halo, z taper, w flare.
+		vec4 uBeamLook[128];
 	};
 
 	layout(set = 1, binding = 0, std140) uniform readonly ViewpointUBO {
@@ -444,6 +475,8 @@ static const char *shaderBindings = R"(
 	// [GPUPARTICLES] the fourth list -- every ViewpointData member needs one
 	#define uLevelTime viewpoints[HW_VIEWPOINT_INDEX].uLevelTime
 	#define uGpuParticleParams viewpoints[HW_VIEWPOINT_INDEX].uGpuParticleParams
+	// [BEAMLINES] and this one
+	#define uBeamLook viewpoints[HW_VIEWPOINT_INDEX].uBeamLook
 
 	layout(set = 1, binding = 1, std140) uniform readonly MatricesUBO {
 		mat4 ModelMatrix;
@@ -550,6 +583,16 @@ static const char *shaderBindings = R"(
 	layout(set = 1, binding = 5, std430) buffer readonly GpuParticleSSO
 	{
 	    GpuParticle gpuParticles[];
+	};
+
+	// [DRAWNLINES] Drawn glowing lines (hw_drawnlinebuffer.h). Five vec4s, 80
+	// bytes, std430 with no padding -- must match DrawnLineRecord. Declared for
+	// every shader like the particles; only drawnlines.vp reads it, so the
+	// layout entry is vertex-only.
+	struct DrawnLine { vec4 a; vec4 b; vec4 c; vec4 d; vec4 e; };
+	layout(set = 1, binding = 6, std430) buffer readonly DrawnLineSSO
+	{
+	    DrawnLine drawnLines[];
 	};
 
 	// textures

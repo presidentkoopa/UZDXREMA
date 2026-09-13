@@ -1461,6 +1461,58 @@ struct LevelLocals native
 	native clearscope void SetBeamLook(double airGlow, double scrollSpeed, double scrollDepth, double taper, double flare);
 	native clearscope void ClearBeams();
 
+	// [BEAMLINES] A beam line of your own, out of the BeamCount fight.
+	// See "Engine docs/BEAM_LINES_PLAN.md".
+	//
+	// ClaimBeam returns a free slot -- searched from 127 down, never below the
+	// current BeamCount -- or -1. A claimed slot draws whatever BeamCount says,
+	// and ClearBeams() leaves it alone. Write it with SetBeam / SetBeamAnchor as
+	// usual. ReleaseBeam gives it back and blanks it. Claims do not survive a
+	// map change or a savegame load: a caller holding one checks IsBeamClaimed
+	// and claims again.
+	//
+	// play, not clearscope: which slot a claim gets depends on every claim made
+	// before it, so a claim from UI code (which runs on one machine only) would
+	// hand gameplay callers different slots on different machines.
+	//
+	// Pass the actor the line belongs to (a weapon, its owner) and the slot is
+	// released by itself on the tic that actor is destroyed.
+	native play int ClaimBeam(Actor owner = null);
+	native play void ReleaseBeam(int index);
+	native clearscope bool IsBeamClaimed(int index);
+	// A look for ONE line, over the scene look from SetBeamCount / SetBeamLook.
+	// Any slot, claimed or not. Scroll speed/depth and fog scatter stay
+	// scene-wide. ClearBeamStyle puts the line back on the scene look.
+	native clearscope void SetBeamStyle(int index, double airGlow, double halo, double taper, double flare);
+	native clearscope void ClearBeamStyle(int index);
+
+	// [DRAWNLINES] MANY glowing lines. The same look as a beam's glow in the air
+	// -- the same maths, run only in a small box around each line -- so a
+	// thousand cost what their pixels cost, not pixels x lines. What they do NOT
+	// do is light surfaces; SetBeam lines still do. Vulkan only: on GL they are
+	// stored and never drawn. Main view only, not mirrors or portals.
+	//
+	// Index space is caller-managed, 0 .. DrawnLineCapacity()-1, like SetBeam's.
+	// A line persists until changed or cleared and is interpolated between tics.
+	// thick is the hot core and soft the halo reach, exactly as SetBeam's -- and
+	// the arguments come in SetBeam's order, so a SetBeam call renamed to
+	// SetDrawnLine means the same thing.
+	native clearscope void SetDrawnLine(int index, Vector3 start, Vector3 end, double thick, double soft, color col, double intensity);
+	// This line's look. Defaults are the beam system's own; scrollDepth 0 is a
+	// smooth line. airGlow <= 0 hides it -- a drawn line is only its glow.
+	native clearscope void SetDrawnLineLook(int index, double airGlow = 1.0, double halo = 0.35, double taper = 0.35, double flare = 1.5, double scrollSpeed = 6.0, double scrollDepth = 0.0);
+	// 0 the start given to SetDrawnLine, 1 the main hand, 2 the off hand --
+	// resolved every frame, exactly as SetBeamAnchor. owner is whose hand: a
+	// player's pawn. Without one it is the local player's hand, which in netplay
+	// is wrong for every line that belongs to someone else.
+	native clearscope void SetDrawnLineAnchor(int index, int mode, Actor owner = null);
+	// Clearing forgets the slot completely, look and anchor included.
+	native clearscope void ClearDrawnLine(int index);
+	native clearscope void ClearDrawnLines();
+	// A fixed engine number, the same on every machine, so it is safe for
+	// gameplay code to size a ring of indices by it.
+	native clearscope int DrawnLineCapacity();
+
 	native String GetChecksum() const;
 
 	native void ChangeSky(TextureID sky1, TextureID sky2 );

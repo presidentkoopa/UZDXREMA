@@ -31,7 +31,10 @@ enum
 	BONEBUF_BINDINGPOINT = 7,
 	// [GPUPARTICLES] The particle record ring (hw_gpuparticlebuffer.h). Only
 	// VkBufferManager::CreateDataBuffer keys on it; GL never creates one.
-	GPUPARTICLE_BINDINGPOINT = 8
+	GPUPARTICLE_BINDINGPOINT = 8,
+	// [DRAWNLINES] The drawn-line records (hw_drawnlinebuffer.h). Vulkan only,
+	// keyed on by VkBufferManager::CreateDataBuffer like the particle ring.
+	DRAWNLINE_BINDINGPOINT = 9
 };
 
 enum class UniformType

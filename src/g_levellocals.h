@@ -1815,6 +1815,250 @@ public:
 	double   BeamTaper = 0.35;            // thinner at the muzzle than the hit
 	double   BeamFlare = 1.5;             // brightness boost where it lands
 
+	// [BEAMLINES] CLAIMED SLOTS AND A LOOK PER LINE.
+	// See "Engine docs/BEAM_LINES_PLAN.md".
+	//
+	// BeamCount and the SetBeamLook values are single numbers for the scene, so
+	// every SetBeam caller fights over them (lance.zs and wr_constellation.zs
+	// both say so in their own comments). These let a line opt out of that
+	// fight. All of it is inert until ClaimBeam or SetBeamStyle is called:
+	//
+	//   BeamClaimed[i]   ClaimBeam handed this slot out. A claimed slot renders
+	//                    whatever BeamCount says and ClearBeams leaves it alone.
+	//                    Cleared on map change (ClearLevelData); never
+	//                    serialized, so a caller holding one across a load
+	//                    checks IsBeamClaimed and claims again.
+	//   BeamHasStyle[i]  SetBeamStyle gave the slot its own air glow / halo /
+	//                    taper / flare. Without it the renderer uploads the
+	//                    scene values, so a line that never sets a style reaches
+	//                    the shader with exactly the numbers it always did.
+	//   PrevBeamLive[i]  was the slot live -- below BeamCount, or claimed -- at
+	//                    the last tic snapshot. The per-slot form of
+	//                    PrevBeamCount, which it agrees with exactly while
+	//                    nothing is claimed. The renderer's lerp test and the
+	//                    snapshot's forget-the-anchor rule both read it.
+	//
+	// Scroll speed/depth and fog scatter stay scene-wide: one user each so far.
+	bool     BeamClaimed[MAX_BEAMS] = {};
+	// The actor a claim belongs to, if the claimer named one (ClaimBeam(owner)).
+	// P_Ticker releases the slot on the tic that actor is destroyed -- the same
+	// tic on every machine -- so a caller that never calls ReleaseBeam cannot
+	// leak slots. BeamClaimOwned says an owner was given; the pointer is only
+	// read while it is set, and FLevelLocals::Mark keeps it GC-safe.
+	TObjPtr<AActor*> BeamClaimOwner[MAX_BEAMS];
+	bool     BeamClaimOwned[MAX_BEAMS] = {};
+	bool     BeamHasStyle[MAX_BEAMS] = {};
+	double   BeamStyleAirGlow[MAX_BEAMS] = {};
+	double   BeamStyleHalo[MAX_BEAMS] = {};
+	double   BeamStyleTaper[MAX_BEAMS] = {};
+	double   BeamStyleFlare[MAX_BEAMS] = {};
+	bool     PrevBeamLive[MAX_BEAMS] = {};
+	bool     BeamClaimFullLogged = false;   // ClaimBeam's "no free slot" line: once per map
+	bool     BeamCountOverClaimLogged = false;   // SetBeamCount grew over a claim: once per map
+
+	// A slot draws if it is below BeamCount (the legacy rule) or claimed.
+	bool BeamSlotLive(int i) const
+	{
+		return i < BeamCount || BeamClaimed[i];
+	}
+
+	// Searches from the TOP down, and never below BeamCount: legacy callers use
+	// low fixed indices, so a claim stays out of their way. The slot is handed
+	// over blank -- dark, unanchored, unstyled, and with no history, so the
+	// first SetBeam snaps instead of lerping from whatever the slot last held.
+	//
+	// It cannot protect against a legacy caller RAISING BeamCount over a claimed
+	// slot later. Both would then write the same slot.
+	int ClaimBeam()
+	{
+		for (int i = MAX_BEAMS - 1; i >= 0 && i >= BeamCount; i--)
+		{
+			if (BeamClaimed[i]) continue;
+			BeamClaimed[i] = true;
+			BeamIntensity[i] = 0.0;
+			PrevBeamIntensity[i] = 0.0;
+			BeamAnchor[i] = 0;
+			BeamHasStyle[i] = false;
+			return i;
+		}
+		return -1;
+	}
+
+	// Only a CLAIMED slot is released, so a stray call cannot blank a legacy
+	// caller's line. Intensity 0 means the next claimer snaps rather than lerps.
+	void ReleaseBeam(int index)
+	{
+		if (index < 0 || index >= MAX_BEAMS || !BeamClaimed[index]) return;
+		BeamClaimed[index] = false;
+		BeamClaimOwned[index] = false;
+		BeamIntensity[index] = 0.0;
+		BeamAnchor[index] = 0;
+		BeamHasStyle[index] = false;
+	}
+
+	bool IsBeamClaimed(int index) const
+	{
+		return index >= 0 && index < MAX_BEAMS && BeamClaimed[index];
+	}
+
+	// Any slot, claimed or not.
+	void SetBeamStyle(int index, double airGlow, double halo, double taper, double flare)
+	{
+		if (index < 0 || index >= MAX_BEAMS) return;
+		BeamHasStyle[index] = true;
+		BeamStyleAirGlow[index] = airGlow;
+		BeamStyleHalo[index] = halo;
+		BeamStyleTaper[index] = taper;
+		BeamStyleFlare[index] = flare;
+	}
+
+	void ClearBeamStyle(int index)
+	{
+		if (index < 0 || index >= MAX_BEAMS) return;
+		BeamHasStyle[index] = false;
+	}
+
+	// [DRAWNLINES] MANY GLOWING LINES -- the renderer-agnostic half.
+	//
+	// The beam slots above are lit PER PIXEL: every fragment of every surface
+	// runs the closest-approach solve for every live slot. That is what lets
+	// them light walls, and it is why they cap at 128 and cost pixels x lines.
+	// A tracer storm or a laser grid needs thousands.
+	//
+	// A drawn line has the same look -- main.fp's air-glow maths, run in the
+	// fragment shader of a box around the line -- so it costs only the pixels
+	// near it. What it gives up is lighting surfaces; drawnlines.fp lists every
+	// place the two cannot match.
+	//
+	// This array and the calls below are what a renderer rebuild keeps;
+	// DrawnLineBuffer (hw_drawnlinebuffer.h), drawnlines.vp/.fp and the draw in
+	// HWDrawInfo::RenderTranslucent are what it replaces. r_beams_drawn routes
+	// the beam slots above through the same draw, for A/B comparison.
+	//
+	// The index space is CALLER-MANAGED, 0 .. DrawnLineCapacity()-1, like
+	// SetBeam's. Game space in; the renderer swizzles to shader space.
+	struct DrawnLine
+	{
+		DVector3 Start{ 0., 0., 0. };
+		DVector3 End{ 0., 0., 0. };
+		DVector3 PrevStart{ 0., 0., 0. };
+		DVector3 PrevEnd{ 0., 0., 0. };
+		double   Thick = 0.;             // the hot core, as SetBeam's thick
+		double   Soft = 0.;              // how far the halo reaches, as SetBeam's soft
+		PalEntry Color = {};
+		double   Intensity = 0.;
+		double   PrevIntensity = 0.;
+		// The look. Defaults are the beam system's own declared defaults
+		// (BeamAirGlow, BeamGlow, BeamTaper, BeamFlare, BeamScrollSpeed) except
+		// scroll depth: 0, a smooth line -- the scroll is the beading RS_Lance
+		// switched off.
+		double   AirGlow = 1.0;
+		double   Halo = 0.35;
+		double   Taper = 0.35;
+		double   Flare = 1.5;
+		double   ScrollSpeed = 6.0;
+		double   ScrollDepth = 0.0;
+		int      Anchor = 0;             // as BeamAnchor: 0 world, 1 main hand, 2 off hand
+		// Whose hand. -1 is the console player -- BeamAnchor's rule, which in
+		// netplay puts everyone's line at each viewer's own hand. A player number
+		// rather than an actor pointer, so nothing can dangle.
+		int      AnchorPlayer = -1;
+		bool     Live = false;           // written by SetDrawnLine since the last clear
+		bool     PrevLive = false;       // ...as of the last tic snapshot
+	};
+
+	TArray<DrawnLine> DrawnLines;        // empty until the first write this process
+	int DrawnLineHigh = 0;               // one past the highest slot written; loops stop here
+
+	// Sized on first use from the latched capacity, kept allocated across maps.
+	void EnsureDrawnLines()
+	{
+		if (DrawnLines.Size() > 0) return;
+		extern int DrawnLineCapacity();   // hw_cvars.cpp, a fixed engine number
+		DrawnLines.Resize((unsigned)DrawnLineCapacity());
+		for (auto &l : DrawnLines) l = DrawnLine();
+	}
+
+	DrawnLine *DrawnLineForWrite(int index)
+	{
+		if (index < 0) return nullptr;
+		EnsureDrawnLines();
+		if ((unsigned)index >= DrawnLines.Size()) return nullptr;
+		if (index >= DrawnLineHigh) DrawnLineHigh = index + 1;
+		return &DrawnLines[index];
+	}
+
+	void SetDrawnLine(int index, const DVector3 &start, const DVector3 &end, PalEntry col, double intensity, double thick, double soft)
+	{
+		DrawnLine *l = DrawnLineForWrite(index);
+		if (l == nullptr) return;
+		if (!l->Live) l->PrevIntensity = 0.0;   // a line coming on has no history to lerp from
+		l->Start = start;
+		l->End = end;
+		l->Color = col;
+		l->Intensity = intensity;
+		l->Thick = thick;
+		l->Soft = soft;
+		l->Live = true;
+	}
+
+	void SetDrawnLineLook(int index, double airGlow, double halo, double taper, double flare, double scrollSpeed, double scrollDepth)
+	{
+		DrawnLine *l = DrawnLineForWrite(index);
+		if (l == nullptr) return;
+		l->AirGlow = airGlow;
+		l->Halo = halo;
+		l->Taper = taper;
+		l->Flare = flare;
+		l->ScrollSpeed = scrollSpeed;
+		l->ScrollDepth = scrollDepth;
+	}
+
+	void SetDrawnLineAnchor(int index, int mode, int playerNum = -1)
+	{
+		DrawnLine *l = DrawnLineForWrite(index);
+		if (l == nullptr) return;
+		l->Anchor = (mode < 0 || mode > 2) ? 0 : mode;
+		l->AnchorPlayer = (playerNum >= 0 && playerNum < MAXPLAYERS) ? playerNum : -1;
+	}
+
+	// Clearing FORGETS the slot, look and anchor included, for the reason a dark
+	// beam slot forgets its anchor: slots are reused, and the next writer should
+	// not inherit a hand or a look it never asked for.
+	void ClearDrawnLine(int index)
+	{
+		if (index < 0 || (unsigned)index >= DrawnLines.Size()) return;
+		DrawnLines[index] = DrawnLine();
+	}
+
+	// Also the map-change and savegame-load reset (ClearLevelData).
+	void ClearDrawnLines()
+	{
+		for (int i = 0; i < DrawnLineHigh; i++) DrawnLines[i] = DrawnLine();
+		DrawnLineHigh = 0;
+	}
+
+	// P_Ticker, beside the beam snapshot and for the same reason: script writes
+	// at 35Hz, the renderer interpolates between this and the next write.
+	void SnapshotDrawnLines()
+	{
+		for (int i = 0; i < DrawnLineHigh; i++)
+		{
+			DrawnLine &l = DrawnLines[i];
+			if (l.Live)
+			{
+				l.PrevStart = l.Start;
+				l.PrevEnd = l.End;
+				l.PrevIntensity = l.Intensity;
+			}
+			else
+			{
+				l.PrevIntensity = 0.0;
+			}
+			l.PrevLive = l.Live;
+		}
+	}
+
 	// [BB] GLOW WAVE -- the missing axis.
 	//
 	// A glow already varies per pixel VERTICALLY: the fragment's distance

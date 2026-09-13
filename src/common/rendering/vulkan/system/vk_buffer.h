@@ -57,6 +57,8 @@ public:
 	VkHardwareDataBuffer* BoneBufferSSO = nullptr;
 	// [GPUPARTICLES] set 1 binding 5 -- see hw_gpuparticlebuffer.h
 	VkHardwareDataBuffer* GpuParticleSSO = nullptr;
+	// [DRAWNLINES] set 1 binding 6 -- see hw_drawnlinebuffer.h
+	VkHardwareDataBuffer* DrawnLineSSO = nullptr;
 
 	std::unique_ptr<VkStreamBuffer> MatrixBuffer;
 	std::unique_ptr<VkStreamBuffer> StreamBuffer;

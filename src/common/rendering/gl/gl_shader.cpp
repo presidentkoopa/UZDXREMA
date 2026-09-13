@@ -427,6 +427,11 @@ bool FShader::Load(const char * name, const char * vert_prog_lump, const char * 
 			// agree with the C++ struct it is uploaded from.
 			vec4 uLevelTime;
 			vec4 uGpuParticleParams;
+
+			// [BEAMLINES] APPENDED LAST, matching HWViewpointUniforms::mBeamLook
+			// by offset: per uploaded beam line, x air glow, y halo, z taper,
+			// w flare. main.fp reads it on GL too.
+			vec4 uBeamLook[128];
 		};
 
 		uniform int uTextureMode;
@@ -1194,7 +1199,8 @@ bool FShaderCollection::CompileNextShader()
 		// returns null, and FGLRenderState::ApplyShader would take that null as
 		// its active shader. Skipping keeps mEffectShaders[i] null and that path
 		// unreachable; nothing on GL ever selects EFF_GPUPARTICLES.
-		FShader *eff = (i == EFF_GPUPARTICLES) ? nullptr : new FShader(effectshaders[i].ShaderName);
+		// [DRAWNLINES] drawnlines likewise: it reads DrawnLineSSO, Vulkan's alone.
+		FShader *eff = (i == EFF_GPUPARTICLES || i == EFF_DRAWNLINES) ? nullptr : new FShader(effectshaders[i].ShaderName);
 		if (eff == nullptr)
 		{
 		}

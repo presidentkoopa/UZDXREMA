@@ -852,7 +852,8 @@ void FShaderCollection::CompileShaders(EPassType passType)
 		// [GPUPARTICLES] Never configured on GLES: it reads a storage block
 		// only the Vulkan prolog declares. Leaving mEffectShaders[i] null keeps
 		// the failed-effect-becomes-null-active-shader path unreachable.
-		if (i == EFF_GPUPARTICLES) continue;
+		// [DRAWNLINES] Nor drawnlines, for the same reason (DrawnLineSSO).
+		if (i == EFF_GPUPARTICLES || i == EFF_DRAWNLINES) continue;
 
 		FShader *eff = new FShader(effectshaders[i].ShaderName);
 		if (!eff->Configure(effectshaders[i].ShaderName, effectshaders[i].vp, effectshaders[i].fp1,
